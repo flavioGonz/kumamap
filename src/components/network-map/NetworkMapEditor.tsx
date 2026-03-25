@@ -340,9 +340,9 @@ function CanvasInner({
     setLinkModalData({
       edgeId,
       initial: {
-        sourceInterface: edge?.data?.sourceInterface || "",
-        targetInterface: edge?.data?.targetInterface || "",
-        label: edge?.data?.label || "",
+        sourceInterface: (edge?.data as any)?.sourceInterface || "",
+        targetInterface: (edge?.data as any)?.targetInterface || "",
+        label: (edge?.data as any)?.label || "",
       },
       srcName: srcNode?.data.label as string,
       tgtName: tgtNode?.data.label as string,
@@ -418,11 +418,11 @@ function CanvasInner({
       }));
       const saveEdges = edges.map((e) => ({
         id: e.id, source_node_id: e.source, target_node_id: e.target,
-        label: e.data?.label || null,
+        label: (e.data as any)?.label || null,
         style: (e.style as any)?.strokeDasharray ? "dashed" : "solid",
         color: (e.style as any)?.stroke || "#4b5563",
         animated: e.animated ? 1 : 0,
-        custom_data: JSON.stringify({ sourceInterface: e.data?.sourceInterface || "", targetInterface: e.data?.targetInterface || "" }),
+        custom_data: JSON.stringify({ sourceInterface: (e.data as any)?.sourceInterface || "", targetInterface: (e.data as any)?.targetInterface || "" }),
       }));
       await fetch(apiUrl(`/api/maps/${mapId}/state`), {
         method: "PUT", headers: { "Content-Type": "application/json" },

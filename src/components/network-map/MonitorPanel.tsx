@@ -39,7 +39,7 @@ interface MonitorPanelProps {
   onAutoImport?: () => void;
 }
 
-const typeIcons: Record<string, React.ComponentType<{ className?: string }>> = {
+const typeIcons: Record<string, React.ComponentType<{ className?: string; style?: React.CSSProperties }>> = {
   http: Globe,
   keyword: Globe,
   ping: Wifi,

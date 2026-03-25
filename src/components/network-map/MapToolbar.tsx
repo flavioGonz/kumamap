@@ -11,10 +11,11 @@ import {
   Trash2,
   Link2,
   LayoutGrid,
-  ArrowLeft,
   Search,
   X,
   Globe,
+  ChevronLeft,
+  Pencil,
 } from "lucide-react";
 import { useState } from "react";
 
@@ -42,6 +43,7 @@ interface MapToolbarProps {
   isImageBg?: boolean;
   bgScale?: number;
   onScaleBg?: (delta: number) => void;
+  onEditName?: () => void;
 }
 
 function ToolButton({
@@ -50,41 +52,52 @@ function ToolButton({
   active,
   danger,
   children,
+  label,
 }: {
   onClick: () => void;
   title: string;
   active?: boolean;
   danger?: boolean;
   children: React.ReactNode;
+  label?: string;
 }) {
   return (
     <button
       onClick={onClick}
       title={title}
-      className="flex h-8 w-8 items-center justify-center rounded-lg transition-all"
+      className="group flex items-center gap-1.5 rounded-xl px-2 py-1.5 transition-all duration-150"
       style={{
         background: active
-          ? "rgba(59,130,246,0.2)"
-          : "rgba(255,255,255,0.04)",
+          ? "rgba(59,130,246,0.15)"
+          : "transparent",
         border: `1px solid ${
-          active ? "rgba(59,130,246,0.4)" : "rgba(255,255,255,0.06)"
+          active ? "rgba(59,130,246,0.35)" : "transparent"
         }`,
-        color: danger ? "#ef4444" : active ? "#60a5fa" : "#a0a0a0",
+        color: danger ? "#f87171" : active ? "#60a5fa" : "#888",
       }}
       onMouseEnter={(e) => {
-        if (!active)
-          (e.currentTarget as HTMLElement).style.background =
-            "rgba(255,255,255,0.08)";
+        if (!active) {
+          (e.currentTarget as HTMLElement).style.background = danger
+            ? "rgba(239,68,68,0.08)"
+            : "rgba(255,255,255,0.06)";
+          (e.currentTarget as HTMLElement).style.color = danger ? "#f87171" : "#ededed";
+        }
       }}
       onMouseLeave={(e) => {
-        if (!active)
-          (e.currentTarget as HTMLElement).style.background =
-            "rgba(255,255,255,0.04)";
+        if (!active) {
+          (e.currentTarget as HTMLElement).style.background = "transparent";
+          (e.currentTarget as HTMLElement).style.color = danger ? "#f87171" : "#888";
+        }
       }}
     >
       {children}
+      {label && <span className="text-[10px] font-semibold hidden xl:inline">{label}</span>}
     </button>
   );
+}
+
+function Separator() {
+  return <div className="h-5 w-px mx-0.5" style={{ background: "rgba(255,255,255,0.06)" }} />;
 }
 
 export default function MapToolbar({
@@ -111,47 +124,59 @@ export default function MapToolbar({
   isImageBg,
   bgScale,
   onScaleBg,
+  onEditName,
 }: MapToolbarProps) {
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
 
   return (
     <div
-      className="absolute top-0 left-0 right-80 z-10 flex items-center gap-2 px-3 py-2"
+      className="absolute top-3 left-3 z-10 flex items-center gap-1 rounded-2xl px-2 py-1.5"
       style={{
-        background: "rgba(10,10,10,0.9)",
-        borderBottom: "1px solid rgba(255,255,255,0.06)",
-        backdropFilter: "blur(20px)",
+        right: "340px",
+        background: "rgba(10,10,10,0.82)",
+        border: "1px solid rgba(255,255,255,0.06)",
+        backdropFilter: "blur(24px)",
+        boxShadow: "0 8px 32px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.03)",
       }}
     >
       {/* Back */}
       <button
         onClick={onBack}
-        className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium text-[#a0a0a0] hover:text-[#ededed] hover:bg-white/5 transition-all"
+        className="flex items-center gap-1 rounded-xl px-2 py-1.5 text-[11px] font-medium transition-all"
+        style={{ color: "#888" }}
+        onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.06)"; (e.currentTarget as HTMLElement).style.color = "#ededed"; }}
+        onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; (e.currentTarget as HTMLElement).style.color = "#888"; }}
       >
-        <ArrowLeft className="h-3.5 w-3.5" />
+        <ChevronLeft className="h-3.5 w-3.5" />
         Mapas
       </button>
 
-      <div
-        className="h-5 w-px"
-        style={{ background: "rgba(255,255,255,0.08)" }}
-      />
+      <Separator />
 
-      <span className="text-sm font-bold text-[#ededed] truncate max-w-[180px]">
-        {mapName}
-      </span>
+      {/* Map name */}
+      <div className="flex items-center gap-1.5 px-1">
+        <span className="text-[12px] font-bold text-[#ededed] truncate max-w-[160px]">
+          {mapName}
+        </span>
+        {onEditName && (
+          <button
+            onClick={onEditName}
+            className="rounded-md p-0.5 text-[#555] hover:text-[#ededed] hover:bg-white/5 transition-all"
+            title="Renombrar mapa"
+          >
+            <Pencil className="h-3 w-3" />
+          </button>
+        )}
+      </div>
 
-      <div
-        className="h-5 w-px"
-        style={{ background: "rgba(255,255,255,0.08)" }}
-      />
+      <Separator />
 
       {/* Search */}
       {searchOpen ? (
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1">
           <div className="relative">
-            <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-[#737373]" />
+            <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-[#555]" />
             <input
               autoFocus
               type="text"
@@ -168,40 +193,30 @@ export default function MapToolbar({
                   onSearch("");
                 }
               }}
-              className="h-8 w-48 rounded-lg pl-7 pr-2 text-xs text-[#ededed] placeholder:text-[#737373] focus:outline-none focus:ring-1 focus:ring-blue-500/50"
+              className="h-7 w-44 rounded-lg pl-7 pr-2 text-[11px] text-[#ededed] placeholder:text-[#555] focus:outline-none"
               style={{
-                background: "rgba(255,255,255,0.04)",
-                border: "1px solid rgba(255,255,255,0.1)",
+                background: "rgba(255,255,255,0.05)",
+                border: "1px solid rgba(255,255,255,0.08)",
               }}
             />
           </div>
           <button
-            onClick={() => {
-              setSearchOpen(false);
-              setSearchQuery("");
-              onSearch("");
-            }}
-            className="text-[#737373] hover:text-[#ededed]"
+            onClick={() => { setSearchOpen(false); setSearchQuery(""); onSearch(""); }}
+            className="text-[#555] hover:text-[#ededed] p-1"
           >
-            <X className="h-3.5 w-3.5" />
+            <X className="h-3 w-3" />
           </button>
         </div>
       ) : (
-        <ToolButton
-          onClick={() => setSearchOpen(true)}
-          title="Buscar nodo (Ctrl+F)"
-        >
+        <ToolButton onClick={() => setSearchOpen(true)} title="Buscar nodo (Ctrl+F)">
           <Search className="h-3.5 w-3.5" />
         </ToolButton>
       )}
 
-      <div
-        className="h-5 w-px"
-        style={{ background: "rgba(255,255,255,0.08)" }}
-      />
+      <Separator />
 
-      {/* Canvas controls */}
-      <div className="flex items-center gap-1">
+      {/* Zoom */}
+      <div className="flex items-center gap-0.5">
         <ToolButton onClick={onZoomIn} title="Zoom In">
           <ZoomIn className="h-3.5 w-3.5" />
         </ToolButton>
@@ -213,38 +228,28 @@ export default function MapToolbar({
         </ToolButton>
       </div>
 
-      <div
-        className="h-5 w-px"
-        style={{ background: "rgba(255,255,255,0.08)" }}
-      />
+      <Separator />
 
-      {/* Node/Edge controls */}
-      <div className="flex items-center gap-1">
-        <ToolButton onClick={onAddNode} title="Agregar nodo">
+      {/* Node/Edge */}
+      <div className="flex items-center gap-0.5">
+        <ToolButton onClick={onAddNode} title="Agregar nodo" label="Nodo">
           <Plus className="h-3.5 w-3.5" />
         </ToolButton>
-        <ToolButton
-          onClick={onToggleConnectMode}
-          title="Modo conexion"
-          active={connectMode}
-        >
+        <ToolButton onClick={onToggleConnectMode} title="Modo conexion" active={connectMode} label="Link">
           <Link2 className="h-3.5 w-3.5" />
         </ToolButton>
         {hasSelection && (
-          <ToolButton onClick={onDeleteSelected} title="Eliminar" danger>
+          <ToolButton onClick={onDeleteSelected} title="Eliminar seleccion" danger>
             <Trash2 className="h-3.5 w-3.5" />
           </ToolButton>
         )}
       </div>
 
-      <div
-        className="h-5 w-px"
-        style={{ background: "rgba(255,255,255,0.08)" }}
-      />
+      <Separator />
 
       {/* Background */}
-      <div className="flex items-center gap-1">
-        <ToolButton onClick={onUploadBackground} title="Subir fondo">
+      <div className="flex items-center gap-0.5">
+        <ToolButton onClick={onUploadBackground} title="Subir imagen de fondo">
           <Image className="h-3.5 w-3.5" />
         </ToolButton>
         <ToolButton onClick={onSetGrid} title="Fondo grilla">
@@ -258,17 +263,17 @@ export default function MapToolbar({
         </ToolButton>
       </div>
 
-      {/* Image scale controls */}
+      {/* Image scale */}
       {isImageBg && onScaleBg && (
         <>
-          <div className="h-5 w-px" style={{ background: "rgba(255,255,255,0.08)" }} />
-          <div className="flex items-center gap-1">
+          <Separator />
+          <div className="flex items-center gap-0.5">
             <ToolButton onClick={() => onScaleBg(-0.1)} title="Reducir fondo">
-              <span className="text-[10px] font-bold">-</span>
+              <span className="text-[10px] font-bold leading-none">−</span>
             </ToolButton>
-            <span className="text-[9px] text-[#737373] min-w-[32px] text-center">{Math.round((bgScale || 1) * 100)}%</span>
+            <span className="text-[9px] text-[#666] font-mono min-w-[30px] text-center">{Math.round((bgScale || 1) * 100)}%</span>
             <ToolButton onClick={() => onScaleBg(0.1)} title="Ampliar fondo">
-              <span className="text-[10px] font-bold">+</span>
+              <span className="text-[10px] font-bold leading-none">+</span>
             </ToolButton>
           </div>
         </>
@@ -276,20 +281,19 @@ export default function MapToolbar({
 
       <div className="flex-1" />
 
-      {/* Navigate Map toggle (only for livemap) */}
+      {/* Navigate Map toggle (livemap) */}
       {isLiveMap && onToggleMapNav && (
         <button
           onClick={onToggleMapNav}
-          className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-all"
+          className="flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-[10px] font-bold uppercase tracking-wide transition-all"
           style={{
-            background: mapNavMode ? "rgba(34,197,94,0.15)" : "rgba(255,255,255,0.04)",
-            border: `1px solid ${mapNavMode ? "rgba(34,197,94,0.4)" : "rgba(255,255,255,0.08)"}`,
-            color: mapNavMode ? "#4ade80" : "#a0a0a0",
+            background: mapNavMode ? "rgba(34,197,94,0.12)" : "rgba(255,255,255,0.03)",
+            border: `1px solid ${mapNavMode ? "rgba(34,197,94,0.35)" : "rgba(255,255,255,0.06)"}`,
+            color: mapNavMode ? "#4ade80" : "#888",
           }}
-          title={mapNavMode ? "Volver a editar nodos" : "Navegar y hacer zoom en el mapa de fondo"}
         >
           <Globe className="h-3.5 w-3.5" />
-          {mapNavMode ? "Editando Mapa" : "Navegar Mapa"}
+          {mapNavMode ? "Editando" : "Navegar"}
         </button>
       )}
 
@@ -297,13 +301,20 @@ export default function MapToolbar({
       <button
         onClick={onSave}
         disabled={saving}
-        className="flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-xs font-semibold transition-all"
+        className="flex items-center gap-1.5 rounded-xl px-4 py-1.5 text-[11px] font-bold transition-all"
         style={{
-          background: saving
-            ? "rgba(59,130,246,0.1)"
-            : "rgba(59,130,246,0.15)",
+          background: "linear-gradient(135deg, rgba(59,130,246,0.2), rgba(99,102,241,0.15))",
           border: "1px solid rgba(59,130,246,0.3)",
           color: "#60a5fa",
+          boxShadow: "0 2px 12px rgba(59,130,246,0.1)",
+        }}
+        onMouseEnter={(e) => {
+          (e.currentTarget as HTMLElement).style.background = "linear-gradient(135deg, rgba(59,130,246,0.3), rgba(99,102,241,0.25))";
+          (e.currentTarget as HTMLElement).style.boxShadow = "0 4px 20px rgba(59,130,246,0.2)";
+        }}
+        onMouseLeave={(e) => {
+          (e.currentTarget as HTMLElement).style.background = "linear-gradient(135deg, rgba(59,130,246,0.2), rgba(99,102,241,0.15))";
+          (e.currentTarget as HTMLElement).style.boxShadow = "0 2px 12px rgba(59,130,246,0.1)";
         }}
       >
         <Save className="h-3.5 w-3.5" />

@@ -187,10 +187,55 @@ function CanvasInner({
     setCtxMenu({ x: (event as MouseEvent).clientX, y: (event as MouseEvent).clientY });
   }, []);
 
+  // Link creation via context menu
+  const [linkSource, setLinkSource] = useState<string | null>(null);
+
+  const startLinkCreation = (nodeId: string) => {
+    setLinkSource(nodeId);
+    const node = nodes.find((n) => n.id === nodeId);
+    toast.info("Selecciona el nodo destino", {
+      description: `Origen: ${node?.data.label || nodeId}. Haz clic en otro nodo.`,
+      duration: 6000,
+    });
+  };
+
+  // Click handler — if in link mode, treat click as target selection
+  const onNodeClick = useCallback((_e: React.MouseEvent, node: Node) => {
+    if (linkSource && linkSource !== node.id) {
+      // Check duplicate edge
+      const exists = edges.some(
+        (e) =>
+          (e.source === linkSource && e.target === node.id) ||
+          (e.source === node.id && e.target === linkSource)
+      );
+      if (exists) {
+        toast.error("Conexion ya existe entre estos nodos");
+        setLinkSource(null);
+        return;
+      }
+      const srcNode = nodes.find((n) => n.id === linkSource);
+      setLinkModalData({
+        connection: { source: linkSource, target: node.id, sourceHandle: null, targetHandle: null },
+        srcName: srcNode?.data.label as string,
+        tgtName: node.data.label as string,
+      });
+      setLinkModalOpen(true);
+      setLinkSource(null);
+    }
+  }, [linkSource, edges, nodes]);
+
   const getNodeCtxItems = (nodeId: string) => {
     const node = nodes.find((n) => n.id === nodeId);
     if (!node) return [];
     return [
+      {
+        label: linkSource ? "Cancelar enlace" : "Nuevo link",
+        icon: menuIcons.Link2,
+        onClick: () => {
+          if (linkSource) setLinkSource(null);
+          else startLinkCreation(nodeId);
+        },
+      },
       { label: "Editar nombre", icon: menuIcons.Pencil, onClick: () => editNodeLabel(nodeId) },
       { label: "Redimensionar", icon: menuIcons.Maximize2, onClick: () => resizeNode(nodeId) },
       { label: "Cambiar icono", icon: menuIcons.Palette, onClick: () => changeNodeIcon(nodeId) },
@@ -525,6 +570,23 @@ function CanvasInner({
     <div className="h-screen w-screen relative">
       <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleFileChange} />
 
+      {/* Link mode indicator */}
+      {linkSource && bgType !== "livemap" && (
+        <div
+          className="absolute top-14 left-4 z-10 flex items-center gap-2 rounded-xl px-3 py-1.5"
+          style={{
+            background: "rgba(59,130,246,0.12)",
+            border: "1px solid rgba(59,130,246,0.3)",
+            color: "#60a5fa",
+            backdropFilter: "blur(12px)",
+          }}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+          <span className="text-[11px] font-bold">Enlazando — haz clic en el nodo destino</span>
+          <button onClick={() => setLinkSource(null)} className="ml-1 text-[#888] hover:text-white text-xs">✕</button>
+        </div>
+      )}
+
       {bgType !== "livemap" ? (
         <MapToolbar
           mapName={mapData?.name || "Cargando..."}
@@ -558,7 +620,7 @@ function CanvasInner({
         />
       ) : null}
 
-      <div className={`h-full ${bgType !== "livemap" ? "pt-[49px]" : ""}`}>
+      <div className="h-full">
         {bgType === "livemap" ? (
           <LeafletMapView
             mapId={mapId}
@@ -604,6 +666,7 @@ function CanvasInner({
             onConnect={onConnect}
             onDrop={onDrop}
             onDragOver={onDragOver}
+            onNodeClick={onNodeClick}
             onNodeDoubleClick={onNodeDoubleClick}
             onEdgeDoubleClick={onEdgeDoubleClick}
             onNodeContextMenu={onNodeContextMenu}

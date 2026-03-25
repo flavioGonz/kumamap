@@ -667,67 +667,67 @@ export default function LeafletMapView({
         onDragOver={handleDragOver}
       />
 
-      {/* ── Premium Top Bar — right:340px avoids panel overlap ── */}
+      {/* ── Floating Top Bar ── */}
       <div
-        className="absolute top-3 left-3 z-[1000] flex items-center gap-2 rounded-2xl px-3 py-2"
+        className="absolute top-3 left-3 z-[1000] flex items-center gap-1.5 rounded-2xl px-2.5 py-1.5"
         style={{
           right: "340px",
-          background: "rgba(10,10,10,0.8)",
+          background: "rgba(10,10,10,0.82)",
           border: "1px solid rgba(255,255,255,0.06)",
           backdropFilter: "blur(24px)",
-          boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
+          boxShadow: "0 8px 32px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.03)",
         }}
       >
         {/* Back */}
         <button
           onClick={onBack}
-          className="flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-medium transition-all"
-          style={{ color: "#a0a0a0" }}
+          className="flex items-center gap-1 rounded-xl px-2 py-1.5 text-[11px] font-medium transition-all"
+          style={{ color: "#888" }}
           onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.06)"; (e.currentTarget as HTMLElement).style.color = "#ededed"; }}
-          onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; (e.currentTarget as HTMLElement).style.color = "#a0a0a0"; }}
+          onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; (e.currentTarget as HTMLElement).style.color = "#888"; }}
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6"/></svg>
           Mapas
         </button>
 
-        <div className="h-5 w-px" style={{ background: "rgba(255,255,255,0.08)" }} />
+        <div className="h-5 w-px mx-0.5" style={{ background: "rgba(255,255,255,0.06)" }} />
 
-        {/* Map name */}
-        {mapName && (
-          <span className="text-sm font-bold text-[#ededed] truncate max-w-[200px]">
-            {mapName}
-          </span>
-        )}
-
-        {/* Connection status */}
-        <div className="flex items-center gap-1.5 ml-1">
-          <span
-            className="h-1.5 w-1.5 rounded-full"
-            style={{
-              backgroundColor: kumaConnected ? "#22c55e" : "#ef4444",
-              boxShadow: kumaConnected ? "0 0 6px #22c55e" : "0 0 6px #ef4444",
-            }}
-          />
-          <span className="text-[10px] text-[#737373]">
-            {kumaConnected ? "Live" : "Offline"}
-          </span>
+        {/* Map name + live status */}
+        <div className="flex items-center gap-2 px-1">
+          {mapName && (
+            <span className="text-[12px] font-bold text-[#ededed] truncate max-w-[160px]">
+              {mapName}
+            </span>
+          )}
+          <div className="flex items-center gap-1">
+            <span
+              className="h-1.5 w-1.5 rounded-full"
+              style={{
+                backgroundColor: kumaConnected ? "#22c55e" : "#ef4444",
+                boxShadow: kumaConnected ? "0 0 6px #22c55e" : "0 0 6px #ef4444",
+              }}
+            />
+            <span className="text-[9px] font-semibold" style={{ color: kumaConnected ? "#22c55e" : "#ef4444" }}>
+              {kumaConnected ? "LIVE" : "OFF"}
+            </span>
+          </div>
         </div>
 
         <div className="flex-1" />
 
         {/* Link mode indicator */}
         {linkSource && (
-          <div className="flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[10px] font-bold"
-            style={{ background: "rgba(59,130,246,0.15)", border: "1px solid rgba(59,130,246,0.3)", color: "#60a5fa" }}>
+          <div className="flex items-center gap-1.5 rounded-xl px-2.5 py-1 text-[10px] font-bold"
+            style={{ background: "rgba(59,130,246,0.12)", border: "1px solid rgba(59,130,246,0.3)", color: "#60a5fa" }}>
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
             Enlazando...
-            <button onClick={cancelLinkCreation} className="ml-1 text-[#888] hover:text-white">✕</button>
+            <button onClick={cancelLinkCreation} className="ml-0.5 text-[#888] hover:text-white">✕</button>
           </div>
         )}
 
-        {/* Search toggle */}
+        {/* Search */}
         {searchVisible ? (
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1">
             <input
               autoFocus
               type="text"
@@ -738,41 +738,42 @@ export default function LeafletMapView({
                 if (e.key === "Enter") handleSearch();
                 if (e.key === "Escape") { setSearchVisible(false); setSearchQuery(""); }
               }}
-              className="rounded-lg px-3 py-1.5 text-xs text-[#ededed] placeholder:text-[#737373] focus:outline-none focus:ring-1 focus:ring-blue-500/50 w-56"
-              style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }}
+              className="h-7 w-48 rounded-lg px-3 py-1 text-[11px] text-[#ededed] placeholder:text-[#555] focus:outline-none"
+              style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)" }}
             />
             <button
               onClick={handleSearch}
-              className="rounded-lg p-1.5 transition-all"
-              style={{ color: "#60a5fa" }}
-              onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "rgba(59,130,246,0.15)"; }}
+              className="rounded-lg p-1 transition-all text-[#60a5fa]"
+              onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "rgba(59,130,246,0.12)"; }}
               onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
             </button>
             <button
               onClick={() => { setSearchVisible(false); setSearchQuery(""); }}
-              className="rounded-lg p-1.5 text-[#737373] hover:text-[#ededed] transition-all"
+              className="rounded-lg p-1 text-[#555] hover:text-[#ededed] transition-all"
             >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
             </button>
           </div>
         ) : (
           <button
             onClick={() => setSearchVisible(true)}
             className="rounded-xl p-1.5 transition-all"
-            style={{ color: "#a0a0a0" }}
+            style={{ color: "#888" }}
             onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.06)"; (e.currentTarget as HTMLElement).style.color = "#ededed"; }}
-            onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; (e.currentTarget as HTMLElement).style.color = "#a0a0a0"; }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; (e.currentTarget as HTMLElement).style.color = "#888"; }}
             title="Buscar direccion"
           >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
           </button>
         )}
 
-        {/* Map style selector */}
-        <div className="flex items-center gap-1 rounded-xl p-0.5"
-          style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)" }}>
+        <div className="h-5 w-px mx-0.5" style={{ background: "rgba(255,255,255,0.06)" }} />
+
+        {/* Map style pills */}
+        <div className="flex items-center gap-0.5 rounded-xl p-0.5"
+          style={{ background: "rgba(255,255,255,0.02)" }}>
           {([
             { key: "dark", label: "Oscuro" },
             { key: "satellite", label: "Satelite" },
@@ -784,7 +785,7 @@ export default function LeafletMapView({
               className="rounded-lg px-2.5 py-1 text-[10px] font-semibold transition-all"
               style={{
                 background: mapStyle === key ? "rgba(59,130,246,0.15)" : "transparent",
-                color: mapStyle === key ? "#60a5fa" : "#666",
+                color: mapStyle === key ? "#60a5fa" : "#555",
                 border: mapStyle === key ? "1px solid rgba(59,130,246,0.3)" : "1px solid transparent",
               }}
             >
@@ -793,20 +794,27 @@ export default function LeafletMapView({
           ))}
         </div>
 
-        <div className="h-5 w-px" style={{ background: "rgba(255,255,255,0.08)" }} />
+        <div className="h-5 w-px mx-0.5" style={{ background: "rgba(255,255,255,0.06)" }} />
 
         {/* Save */}
         <button
           onClick={handleSave}
           disabled={saving}
-          className="flex items-center gap-1.5 rounded-xl px-4 py-1.5 text-xs font-semibold transition-all"
+          className="flex items-center gap-1.5 rounded-xl px-4 py-1.5 text-[11px] font-bold transition-all"
           style={{
             background: "linear-gradient(135deg, rgba(59,130,246,0.2), rgba(99,102,241,0.15))",
             border: "1px solid rgba(59,130,246,0.3)",
             color: "#60a5fa",
+            boxShadow: "0 2px 12px rgba(59,130,246,0.1)",
           }}
-          onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "linear-gradient(135deg, rgba(59,130,246,0.3), rgba(99,102,241,0.25))"; }}
-          onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "linear-gradient(135deg, rgba(59,130,246,0.2), rgba(99,102,241,0.15))"; }}
+          onMouseEnter={(e) => {
+            (e.currentTarget as HTMLElement).style.background = "linear-gradient(135deg, rgba(59,130,246,0.3), rgba(99,102,241,0.25))";
+            (e.currentTarget as HTMLElement).style.boxShadow = "0 4px 20px rgba(59,130,246,0.2)";
+          }}
+          onMouseLeave={(e) => {
+            (e.currentTarget as HTMLElement).style.background = "linear-gradient(135deg, rgba(59,130,246,0.2), rgba(99,102,241,0.15))";
+            (e.currentTarget as HTMLElement).style.boxShadow = "0 2px 12px rgba(59,130,246,0.1)";
+          }}
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15.2 3a2 2 0 0 1 1.4.6l3.8 3.8a2 2 0 0 1 .6 1.4V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/><path d="M17 21v-7a1 1 0 0 0-1-1H8a1 1 0 0 0-1 1v7"/><path d="M7 3v4a1 1 0 0 0 1 1h7"/></svg>
           {saving ? "Guardando..." : "Guardar"}

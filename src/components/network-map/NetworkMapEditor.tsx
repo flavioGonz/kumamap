@@ -101,8 +101,8 @@ function CanvasInner({
   const reactFlow = useReactFlow();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const [nodes, setNodes, onNodesChange] = useNodesState([]);
-  const [edges, setEdges, onEdgesChange] = useEdgesState([]);
+  const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
+  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [connectMode, setConnectMode] = useState(false);
   const [saving, setSaving] = useState(false);
   const [panelCollapsed, setPanelCollapsed] = useState(false);

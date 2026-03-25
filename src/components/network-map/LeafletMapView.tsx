@@ -4,6 +4,9 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { toast } from "sonner";
 import type { KumaMonitor } from "./MonitorPanel";
 import ContextMenu, { menuIcons } from "./ContextMenu";
+import LinkModal, { type LinkFormData } from "./LinkModal";
+import InputModal from "./InputModal";
+import { Pencil, MapPin } from "lucide-react";
 
 interface SavedNode {
   id: string;
@@ -72,6 +75,24 @@ export default function LeafletMapView({
 
   // Link creation state
   const [linkSource, setLinkSource] = useState<string | null>(null);
+  const [pendingLinkTarget, setPendingLinkTarget] = useState<string | null>(null);
+
+  // Modal states
+  const [linkModalOpen, setLinkModalOpen] = useState(false);
+  const [linkModalData, setLinkModalData] = useState<{ sourceId: string; targetId: string; edgeId?: string; initial?: Partial<LinkFormData> }>({ sourceId: "", targetId: "" });
+  const [inputModalOpen, setInputModalOpen] = useState(false);
+  const [inputModalConfig, setInputModalConfig] = useState<{ nodeId: string; initial: string }>({ nodeId: "", initial: "" });
+
+  // Map style
+  const [mapStyle, setMapStyle] = useState<"dark" | "satellite" | "streets">("dark");
+  const tileLayerRef = useRef<any>(null);
+  const labelMarkersRef = useRef<Map<string, any>>(new Map());
+
+  const tileUrls: Record<string, { url: string; maxZoom: number }> = {
+    dark: { url: "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", maxZoom: 19 },
+    satellite: { url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", maxZoom: 18 },
+    streets: { url: "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", maxZoom: 19 },
+  };
 
   // Initialize Leaflet map
   useEffect(() => {
@@ -97,11 +118,10 @@ export default function LeafletMapView({
         attributionControl: false,
       });
 
-      L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
-        maxZoom: 19,
+      tileLayerRef.current = L.tileLayer(tileUrls.dark.url, {
+        maxZoom: tileUrls.dark.maxZoom,
       }).addTo(map);
 
-      // Add zoom control top-right
       L.control.zoom({ position: "bottomleft" }).addTo(map);
 
       mapRef.current = map;
@@ -124,6 +144,14 @@ export default function LeafletMapView({
       }
     };
   }, []);
+
+  // Switch tile layer
+  useEffect(() => {
+    if (!mapRef.current || !LRef.current || !tileLayerRef.current) return;
+    const tile = tileUrls[mapStyle];
+    mapRef.current.removeLayer(tileLayerRef.current);
+    tileLayerRef.current = LRef.current.tileLayer(tile.url, { maxZoom: tile.maxZoom }).addTo(mapRef.current);
+  }, [mapStyle]);
 
   // Update markers when kuma data changes
   useEffect(() => {
@@ -207,18 +235,31 @@ export default function LeafletMapView({
         className: "leaflet-label-dark",
       });
 
-      // Popup on click
+      // Popup — don't auto-open, manage manually
       marker.bindPopup(createPopupContent(node), {
         className: "leaflet-popup-dark",
         maxWidth: 280,
+        autoClose: true,
+      });
+
+      // Click handler
+      marker.on("click", (e: any) => {
+        // In link mode: select as target, don't show popup
+        if (linkSource && linkSource !== node.id) {
+          e.originalEvent?.stopPropagation?.();
+          marker.closePopup();
+          completeLinkCreation(node.id);
+          return;
+        }
+        // Normal mode: popup opens naturally via bindPopup
       });
 
       // Right-click context menu
       marker.on("contextmenu", (e: any) => {
         e.originalEvent.preventDefault();
         e.originalEvent.stopPropagation();
+        marker.closePopup();
 
-        // If we're in link mode, complete the link
         if (linkSource && linkSource !== node.id) {
           completeLinkCreation(node.id);
           return;
@@ -229,13 +270,6 @@ export default function LeafletMapView({
           y: e.originalEvent.clientY,
           nodeId: node.id,
         });
-      });
-
-      // If in link mode, click to select target
-      marker.on("click", () => {
-        if (linkSource && linkSource !== node.id) {
-          completeLinkCreation(node.id);
-        }
       });
 
       // Drag to reposition
@@ -258,6 +292,9 @@ export default function LeafletMapView({
     if (!map || !map.getContainer()) return;
     polylinesRef.current.forEach((p) => { try { map.removeLayer(p); } catch {} });
     polylinesRef.current.clear();
+    // Clear interface label markers
+    labelMarkersRef.current.forEach((m) => { try { map.removeLayer(m); } catch {} });
+    labelMarkersRef.current.clear();
 
     edgesRef.current.forEach((edge) => {
       const srcNode = nodesRef.current.find((n) => n.id === edge.source_node_id);
@@ -271,14 +308,45 @@ export default function LeafletMapView({
         { color: srcColor, weight: 2, opacity: 0.6, dashArray: "6,8" }
       );
 
-      // Build tooltip with interface info
       const cd = edge.custom_data ? JSON.parse(edge.custom_data) : {};
-      const parts: string[] = [];
-      if (cd.sourceInterface) parts.push(cd.sourceInterface);
-      if (edge.label) parts.push(edge.label);
-      if (cd.targetInterface) parts.push(cd.targetInterface);
-      if (parts.length > 0) {
-        line.bindTooltip(parts.join(" → "), { sticky: true, className: "leaflet-label-dark" });
+
+      // Tooltip for cable label on hover
+      if (edge.label) {
+        line.bindTooltip(edge.label, { sticky: true, className: "leaflet-label-dark" });
+      }
+
+      // Source interface label — positioned 15% along the line from source
+      if (cd.sourceInterface) {
+        const lat = srcNode.x + (tgtNode.x - srcNode.x) * 0.12;
+        const lng = srcNode.y + (tgtNode.y - srcNode.y) * 0.12;
+        const srcLabel = L.marker([lat, lng], {
+          icon: L.divIcon({
+            className: "interface-label",
+            html: `<div style="background:rgba(37,99,235,0.25);border:1px solid rgba(59,130,246,0.5);color:#93c5fd;font-size:9px;font-weight:700;font-family:ui-monospace,monospace;padding:1px 5px;border-radius:4px;white-space:nowrap;box-shadow:0 2px 8px rgba(0,0,0,0.4);pointer-events:none;">${cd.sourceInterface}</div>`,
+            iconSize: [0, 0],
+            iconAnchor: [0, 8],
+          }),
+          interactive: false,
+        });
+        srcLabel.addTo(map);
+        labelMarkersRef.current.set(`${edge.id}-src`, srcLabel);
+      }
+
+      // Target interface label — positioned 85% along the line (near target)
+      if (cd.targetInterface) {
+        const lat = srcNode.x + (tgtNode.x - srcNode.x) * 0.88;
+        const lng = srcNode.y + (tgtNode.y - srcNode.y) * 0.88;
+        const tgtLabel = L.marker([lat, lng], {
+          icon: L.divIcon({
+            className: "interface-label",
+            html: `<div style="background:rgba(109,40,217,0.25);border:1px solid rgba(139,92,246,0.5);color:#c4b5fd;font-size:9px;font-weight:700;font-family:ui-monospace,monospace;padding:1px 5px;border-radius:4px;white-space:nowrap;box-shadow:0 2px 8px rgba(0,0,0,0.4);pointer-events:none;">${cd.targetInterface}</div>`,
+            iconSize: [0, 0],
+            iconAnchor: [0, 8],
+          }),
+          interactive: false,
+        });
+        tgtLabel.addTo(map);
+        labelMarkersRef.current.set(`${edge.id}-tgt`, tgtLabel);
       }
 
       // Right-click on edge
@@ -350,28 +418,45 @@ export default function LeafletMapView({
       return;
     }
 
-    const srcIf = prompt("Interfaz origen (ej: eth0, Gi0/1, puerto 24):", "") || "";
-    const tgtIf = prompt("Interfaz destino (ej: eth1, Gi0/2, puerto 1):", "") || "";
-    const label = prompt("Etiqueta del cable (opcional, ej: fibra, cat6):", "") || "";
+    // Open modal to fill interface details
+    setLinkModalData({ sourceId: linkSource, targetId });
+    setLinkModalOpen(true);
+  }
 
-    const newEdge: SavedEdge = {
-      id: `edge-${Date.now()}`,
-      source_node_id: linkSource,
-      target_node_id: targetId,
-      label: label || null,
-      color: getStatusColor(nodesRef.current.find((n) => n.id === linkSource)?.kuma_monitor_id ?? null),
-      custom_data: JSON.stringify({ sourceInterface: srcIf, targetInterface: tgtIf }),
-    };
+  function handleLinkModalSubmit(data: LinkFormData) {
+    const { sourceId, targetId, edgeId } = linkModalData;
 
-    edgesRef.current = [...edgesRef.current, newEdge];
+    if (edgeId) {
+      // Editing existing edge
+      const idx = edgesRef.current.findIndex((e) => e.id === edgeId);
+      if (idx >= 0) {
+        edgesRef.current[idx] = {
+          ...edgesRef.current[idx],
+          label: data.label || null,
+          custom_data: JSON.stringify({ sourceInterface: data.sourceInterface, targetInterface: data.targetInterface }),
+        };
+      }
+      toast.success("Conexion actualizada");
+    } else {
+      // Creating new edge
+      const newEdge: SavedEdge = {
+        id: `edge-${Date.now()}`,
+        source_node_id: sourceId,
+        target_node_id: targetId,
+        label: data.label || null,
+        color: getStatusColor(nodesRef.current.find((n) => n.id === sourceId)?.kuma_monitor_id ?? null),
+        custom_data: JSON.stringify({ sourceInterface: data.sourceInterface, targetInterface: data.targetInterface }),
+      };
+      edgesRef.current = [...edgesRef.current, newEdge];
 
-    const srcName = nodesRef.current.find((n) => n.id === linkSource)?.label;
-    const tgtName = nodesRef.current.find((n) => n.id === targetId)?.label;
-    toast.success("Conexion creada", { description: `${srcName} → ${tgtName}` });
+      const srcName = nodesRef.current.find((n) => n.id === sourceId)?.label;
+      const tgtName = nodesRef.current.find((n) => n.id === targetId)?.label;
+      toast.success("Conexion creada", { description: `${srcName} → ${tgtName}` });
+    }
 
+    setLinkModalOpen(false);
     setLinkSource(null);
 
-    // Re-render
     if (LRef.current && mapRef.current) {
       renderNodes(LRef.current, mapRef.current);
       renderEdges(LRef.current, mapRef.current);
@@ -393,25 +478,16 @@ export default function LeafletMapView({
         label: linkSource ? "Cancelar enlace" : "Nuevo link",
         icon: menuIcons.Link2,
         onClick: () => {
-          if (linkSource) {
-            cancelLinkCreation();
-          } else {
-            startLinkCreation(nodeId);
-          }
+          if (linkSource) cancelLinkCreation();
+          else startLinkCreation(nodeId);
         },
       },
       {
         label: "Editar nombre",
         icon: menuIcons.Pencil,
         onClick: () => {
-          const newLabel = prompt("Nombre:", node?.label || "");
-          if (newLabel !== null && newLabel.trim()) {
-            const idx = nodesRef.current.findIndex((n) => n.id === nodeId);
-            if (idx >= 0) {
-              nodesRef.current[idx] = { ...nodesRef.current[idx], label: newLabel.trim() };
-              if (LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current);
-            }
-          }
+          setInputModalConfig({ nodeId, initial: node?.label || "" });
+          setInputModalOpen(true);
         },
       },
       {
@@ -435,37 +511,22 @@ export default function LeafletMapView({
   }
 
   function getEdgeCtxItems(edgeId: string) {
+    const edge = edgesRef.current.find((e) => e.id === edgeId);
+    const cd = edge?.custom_data ? JSON.parse(edge.custom_data) : {};
+    const srcNode = nodesRef.current.find((n) => n.id === edge?.source_node_id);
+    const tgtNode = nodesRef.current.find((n) => n.id === edge?.target_node_id);
     return [
       {
         label: "Editar interfaces",
         icon: menuIcons.Link2,
         onClick: () => {
-          const edge = edgesRef.current.find((e) => e.id === edgeId);
-          if (!edge) return;
-          const cd = edge.custom_data ? JSON.parse(edge.custom_data) : {};
-          const srcIf = prompt("Interfaz origen:", cd.sourceInterface || "") || "";
-          const tgtIf = prompt("Interfaz destino:", cd.targetInterface || "") || "";
-          const idx = edgesRef.current.findIndex((e) => e.id === edgeId);
-          if (idx >= 0) {
-            edgesRef.current[idx] = {
-              ...edgesRef.current[idx],
-              custom_data: JSON.stringify({ sourceInterface: srcIf, targetInterface: tgtIf }),
-            };
-            if (LRef.current && mapRef.current) renderEdges(LRef.current, mapRef.current);
-          }
-        },
-      },
-      {
-        label: "Editar etiqueta",
-        icon: menuIcons.Pencil,
-        onClick: () => {
-          const edge = edgesRef.current.find((e) => e.id === edgeId);
-          const label = prompt("Etiqueta:", edge?.label || "") || "";
-          const idx = edgesRef.current.findIndex((e) => e.id === edgeId);
-          if (idx >= 0) {
-            edgesRef.current[idx] = { ...edgesRef.current[idx], label: label || null };
-            if (LRef.current && mapRef.current) renderEdges(LRef.current, mapRef.current);
-          }
+          setLinkModalData({
+            sourceId: edge?.source_node_id || "",
+            targetId: edge?.target_node_id || "",
+            edgeId,
+            initial: { sourceInterface: cd.sourceInterface || "", targetInterface: cd.targetInterface || "", label: edge?.label || "" },
+          });
+          setLinkModalOpen(true);
         },
       },
       {
@@ -560,10 +621,11 @@ export default function LeafletMapView({
         onDragOver={handleDragOver}
       />
 
-      {/* ── Premium Top Bar ─────────────────────── */}
+      {/* ── Premium Top Bar — right:340px avoids panel overlap ── */}
       <div
-        className="absolute top-3 left-3 right-3 z-[1000] flex items-center gap-2 rounded-2xl px-3 py-2"
+        className="absolute top-3 left-3 z-[1000] flex items-center gap-2 rounded-2xl px-3 py-2"
         style={{
+          right: "340px",
           background: "rgba(10,10,10,0.8)",
           border: "1px solid rgba(255,255,255,0.06)",
           backdropFilter: "blur(24px)",
@@ -662,6 +724,29 @@ export default function LeafletMapView({
           </button>
         )}
 
+        {/* Map style selector */}
+        <div className="flex items-center gap-1 rounded-xl p-0.5"
+          style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)" }}>
+          {([
+            { key: "dark", label: "Oscuro" },
+            { key: "satellite", label: "Satelite" },
+            { key: "streets", label: "Calles" },
+          ] as const).map(({ key, label }) => (
+            <button
+              key={key}
+              onClick={() => setMapStyle(key)}
+              className="rounded-lg px-2.5 py-1 text-[10px] font-semibold transition-all"
+              style={{
+                background: mapStyle === key ? "rgba(59,130,246,0.15)" : "transparent",
+                color: mapStyle === key ? "#60a5fa" : "#666",
+                border: mapStyle === key ? "1px solid rgba(59,130,246,0.3)" : "1px solid transparent",
+              }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
         <div className="h-5 w-px" style={{ background: "rgba(255,255,255,0.08)" }} />
 
         {/* Save */}
@@ -697,6 +782,40 @@ export default function LeafletMapView({
           onClose={() => setCtxMenu(null)}
         />
       )}
+
+      {/* Link Modal */}
+      <LinkModal
+        open={linkModalOpen}
+        onClose={() => { setLinkModalOpen(false); cancelLinkCreation(); }}
+        onSubmit={handleLinkModalSubmit}
+        sourceName={nodesRef.current.find((n) => n.id === linkModalData.sourceId)?.label}
+        targetName={nodesRef.current.find((n) => n.id === linkModalData.targetId)?.label}
+        initial={linkModalData.initial}
+        title={linkModalData.edgeId ? "Editar conexion" : "Nueva conexion"}
+      />
+
+      {/* Input Modal (node rename) */}
+      <InputModal
+        open={inputModalOpen}
+        onClose={() => setInputModalOpen(false)}
+        onSubmit={(value) => {
+          if (value.trim()) {
+            const idx = nodesRef.current.findIndex((n) => n.id === inputModalConfig.nodeId);
+            if (idx >= 0) {
+              nodesRef.current[idx] = { ...nodesRef.current[idx], label: value.trim() };
+              if (LRef.current && mapRef.current) {
+                renderNodes(LRef.current, mapRef.current);
+                renderEdges(LRef.current, mapRef.current);
+              }
+            }
+          }
+          setInputModalOpen(false);
+        }}
+        title="Editar nombre"
+        placeholder="Nombre del nodo..."
+        initial={inputModalConfig.initial}
+        icon={<Pencil className="h-4 w-4 text-blue-400" />}
+      />
 
       {/* Custom CSS */}
       <style>{`

@@ -27,7 +27,10 @@ import KumaMonitorNode, { type KumaNodeData } from "./KumaMonitorNode";
 import MonitorPanel, { type KumaMonitor } from "./MonitorPanel";
 import MapToolbar from "./MapToolbar";
 import ContextMenu, { menuIcons } from "./ContextMenu";
+import LinkModal, { type LinkFormData } from "./LinkModal";
+import InputModal from "./InputModal";
 import LeafletMapView from "./LeafletMapView";
+import { Pencil } from "lucide-react";
 
 // ─── Custom Edge with interface labels ──────────
 function InterfaceEdge({ id, sourceX, sourceY, targetX, targetY, data, style }: any) {
@@ -111,6 +114,12 @@ function CanvasInner({
     nodeId?: string; edgeId?: string;
   } | null>(null);
 
+  // Modal states
+  const [linkModalOpen, setLinkModalOpen] = useState(false);
+  const [linkModalData, setLinkModalData] = useState<{ connection?: Connection; edgeId?: string; initial?: Partial<LinkFormData>; srcName?: string; tgtName?: string }>({});
+  const [inputModalOpen, setInputModalOpen] = useState(false);
+  const [inputModalConfig, setInputModalConfig] = useState<{ nodeId: string; initial: string; type: "name" | "label" }>({ nodeId: "", initial: "", type: "name" });
+
   // Load map
   useEffect(() => {
     fetch(`/api/maps/${mapId}`)
@@ -191,9 +200,35 @@ function CanvasInner({
 
   const getEdgeCtxItems = (edgeId: string) => [
     { label: "Editar interfaces", icon: menuIcons.Link2, onClick: () => editEdgeInterfaces(edgeId) },
-    { label: "Editar etiqueta", icon: menuIcons.Pencil, onClick: () => editEdgeLabel(edgeId) },
     { label: "Eliminar conexion", icon: menuIcons.Trash2, onClick: () => setEdges((eds) => eds.filter((e) => e.id !== edgeId)), danger: true, divider: true },
   ];
+
+  // ─── Modal handlers ────────────────────────
+  const handleLinkModalSubmit = (data: LinkFormData) => {
+    if (linkModalData.edgeId) {
+      // Edit existing edge
+      setEdges((eds) => eds.map((e) => e.id === linkModalData.edgeId
+        ? { ...e, data: { ...e.data, sourceInterface: data.sourceInterface, targetInterface: data.targetInterface, label: data.label } }
+        : e));
+    } else if (linkModalData.connection) {
+      // New connection
+      setEdges((eds) => addEdge({
+        ...linkModalData.connection!, type: "interface",
+        data: { sourceInterface: data.sourceInterface, targetInterface: data.targetInterface, label: data.label },
+        style: { stroke: "#4b5563", strokeWidth: 2 }, animated: false,
+      }, eds));
+    }
+    setLinkModalOpen(false);
+  };
+
+  const handleInputModalSubmit = (value: string) => {
+    if (value.trim() && inputModalConfig.nodeId) {
+      setNodes((nds) => nds.map((n) => n.id === inputModalConfig.nodeId
+        ? { ...n, data: { ...n.data, label: value.trim() } }
+        : n));
+    }
+    setInputModalOpen(false);
+  };
 
   const getPaneCtxItems = () => [
     { label: "Agregar nodo", icon: menuIcons.Plus, onClick: handleAddNodeAtPos },
@@ -203,10 +238,8 @@ function CanvasInner({
   // ─── Node edit helpers ────────────────────────
   const editNodeLabel = (nodeId: string) => {
     const node = nodes.find((n) => n.id === nodeId);
-    const newLabel = prompt("Nombre:", (node?.data.label as string) || "");
-    if (newLabel !== null) {
-      setNodes((nds) => nds.map((n) => n.id === nodeId ? { ...n, data: { ...n.data, label: newLabel || n.data.label } } : n));
-    }
+    setInputModalConfig({ nodeId, initial: (node?.data.label as string) || "", type: "name" });
+    setInputModalOpen(true);
   };
 
   const resizeNode = (nodeId: string) => {
@@ -256,28 +289,32 @@ function CanvasInner({
   // ─── Edge edit helpers ────────────────────────
   const editEdgeInterfaces = (edgeId: string) => {
     const edge = edges.find((e) => e.id === edgeId);
-    const srcIf = prompt("Interfaz origen:", edge?.data?.sourceInterface || "");
-    const tgtIf = prompt("Interfaz destino:", edge?.data?.targetInterface || "");
-    setEdges((eds) => eds.map((e) => e.id === edgeId ? { ...e, data: { ...e.data, sourceInterface: srcIf || "", targetInterface: tgtIf || "" } } : e));
-  };
-
-  const editEdgeLabel = (edgeId: string) => {
-    const edge = edges.find((e) => e.id === edgeId);
-    const label = prompt("Etiqueta cable:", edge?.data?.label || "");
-    setEdges((eds) => eds.map((e) => e.id === edgeId ? { ...e, data: { ...e.data, label: label || "" } } : e));
+    const srcNode = nodes.find((n) => n.id === edge?.source);
+    const tgtNode = nodes.find((n) => n.id === edge?.target);
+    setLinkModalData({
+      edgeId,
+      initial: {
+        sourceInterface: edge?.data?.sourceInterface || "",
+        targetInterface: edge?.data?.targetInterface || "",
+        label: edge?.data?.label || "",
+      },
+      srcName: srcNode?.data.label as string,
+      tgtName: tgtNode?.data.label as string,
+    });
+    setLinkModalOpen(true);
   };
 
   // ─── Connection & Drop handlers ───────────────
   const onConnect = useCallback((params: Connection) => {
-    const srcIf = prompt("Interfaz origen (ej: eth0, Gi0/1, puerto 24):", "") || "";
-    const tgtIf = prompt("Interfaz destino (ej: eth1, Gi0/2, puerto 1):", "") || "";
-    const label = prompt("Etiqueta del cable (opcional, ej: fibra, cat6):", "") || "";
-    setEdges((eds) => addEdge({
-      ...params, type: "interface",
-      data: { sourceInterface: srcIf, targetInterface: tgtIf, label },
-      style: { stroke: "#4b5563", strokeWidth: 2 }, animated: false,
-    }, eds));
-  }, [setEdges]);
+    const srcNode = nodes.find((n) => n.id === params.source);
+    const tgtNode = nodes.find((n) => n.id === params.target);
+    setLinkModalData({
+      connection: params,
+      srcName: srcNode?.data.label as string,
+      tgtName: tgtNode?.data.label as string,
+    });
+    setLinkModalOpen(true);
+  }, [nodes]);
 
   const onDrop = useCallback((event: React.DragEvent) => {
     event.preventDefault();
@@ -623,6 +660,28 @@ function CanvasInner({
           onClose={() => setCtxMenu(null)}
         />
       )}
+
+      {/* Link Modal */}
+      <LinkModal
+        open={linkModalOpen}
+        onClose={() => setLinkModalOpen(false)}
+        onSubmit={handleLinkModalSubmit}
+        sourceName={linkModalData.srcName}
+        targetName={linkModalData.tgtName}
+        initial={linkModalData.initial}
+        title={linkModalData.edgeId ? "Editar conexion" : "Nueva conexion"}
+      />
+
+      {/* Input Modal */}
+      <InputModal
+        open={inputModalOpen}
+        onClose={() => setInputModalOpen(false)}
+        onSubmit={handleInputModalSubmit}
+        title="Editar nombre"
+        placeholder="Nombre del nodo..."
+        initial={inputModalConfig.initial}
+        icon={<Pencil className="h-4 w-4 text-blue-400" />}
+      />
     </div>
   );
 }

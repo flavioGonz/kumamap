@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import type { KumaMonitor } from "@/components/network-map/MonitorPanel";
 import NetworkMapEditor from "@/components/network-map/NetworkMapEditor";
+import { apiUrl } from "@/lib/api";
 
 interface MapSummary {
   id: string;
@@ -35,7 +36,7 @@ function useKumaMonitors() {
 
     const fetchKuma = async () => {
       try {
-        const res = await fetch("/api/kuma");
+        const res = await fetch(apiUrl("/api/kuma"));
         if (!res.ok || !mounted) return;
         const data = await res.json();
 
@@ -91,14 +92,14 @@ function MapListView({
   );
 
   const fetchMaps = useCallback(async () => {
-    const res = await fetch("/api/maps");
+    const res = await fetch(apiUrl("/api/maps"));
     setMaps(await res.json());
   }, []);
 
   useEffect(() => { fetchMaps(); }, [fetchMaps]);
 
   const createMap = async (name: string) => {
-    const res = await fetch("/api/maps", {
+    const res = await fetch(apiUrl("/api/maps"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -114,13 +115,13 @@ function MapListView({
   };
 
   const deleteMap = async (id: string, name: string) => {
-    await fetch(`/api/maps/${id}`, { method: "DELETE" });
+    await fetch(apiUrl(`/api/maps/${id}`), { method: "DELETE" });
     toast.success("Mapa eliminado", { description: name });
     fetchMaps();
   };
 
   const renameMap = async (id: string, name: string) => {
-    await fetch(`/api/maps/${id}`, {
+    await fetch(apiUrl(`/api/maps/${id}`), {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name }),

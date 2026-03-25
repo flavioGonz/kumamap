@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useRef } from "react";
+import { apiUrl } from "@/lib/api";
 
 interface MiniChartProps {
   monitorId: number;
@@ -23,7 +24,7 @@ export default function MiniChart({ monitorId, width = 180, height = 50 }: MiniC
 
     const fetchHistory = async () => {
       try {
-        const res = await fetch(`/api/kuma/history/${monitorId}`);
+        const res = await fetch(apiUrl(`/api/kuma/history/${monitorId}`));
         if (!res.ok || !mounted) return;
         setPoints(await res.json());
       } catch {}

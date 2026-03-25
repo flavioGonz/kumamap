@@ -30,6 +30,7 @@ import ContextMenu, { menuIcons } from "./ContextMenu";
 import LinkModal, { type LinkFormData } from "./LinkModal";
 import InputModal from "./InputModal";
 import LeafletMapView from "./LeafletMapView";
+import { apiUrl } from "@/lib/api";
 import { Pencil } from "lucide-react";
 
 // ─── Custom Edge with interface labels ──────────
@@ -122,7 +123,7 @@ function CanvasInner({
 
   // Load map
   useEffect(() => {
-    fetch(`/api/maps/${mapId}`)
+    fetch(apiUrl(`/api/maps/${mapId}`))
       .then((r) => r.json())
       .then((data: MapData) => {
         setMapData(data);
@@ -378,7 +379,7 @@ function CanvasInner({
         animated: e.animated ? 1 : 0,
         custom_data: JSON.stringify({ sourceInterface: e.data?.sourceInterface || "", targetInterface: e.data?.targetInterface || "" }),
       }));
-      await fetch(`/api/maps/${mapId}/state`, {
+      await fetch(apiUrl(`/api/maps/${mapId}/state`), {
         method: "PUT", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ nodes: saveNodes, edges: saveEdges }),
       });
@@ -395,29 +396,29 @@ function CanvasInner({
     if (!file) return;
     const fd = new FormData();
     fd.append("background", file);
-    await fetch(`/api/maps/${mapId}/background`, { method: "POST", body: fd });
-    const res = await fetch(`/api/maps/${mapId}`);
+    await fetch(apiUrl(`/api/maps/${mapId}/background`), { method: "POST", body: fd });
+    const res = await fetch(apiUrl(`/api/maps/${mapId}`));
     setMapData(await res.json());
     toast.success("Fondo actualizado");
     e.target.value = "";
   }, [mapId]);
 
   const handleSetGrid = useCallback(async () => {
-    await fetch(`/api/maps/${mapId}`, {
+    await fetch(apiUrl(`/api/maps/${mapId}`), {
       method: "PUT", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ background_type: "grid", background_image: null }),
     });
-    const res = await fetch(`/api/maps/${mapId}`);
+    const res = await fetch(apiUrl(`/api/maps/${mapId}`));
     setMapData(await res.json());
     toast.success("Fondo: grilla");
   }, [mapId]);
 
   const handleSetLiveMap = useCallback(async () => {
-    await fetch(`/api/maps/${mapId}`, {
+    await fetch(apiUrl(`/api/maps/${mapId}`), {
       method: "PUT", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ background_type: "livemap", background_image: null }),
     });
-    const res = await fetch(`/api/maps/${mapId}`);
+    const res = await fetch(apiUrl(`/api/maps/${mapId}`));
     setMapData(await res.json());
     toast.success("Fondo: mapa real OpenStreetMap");
   }, [mapId]);
@@ -457,7 +458,7 @@ function CanvasInner({
 
   const bgType = mapData?.background_type || "grid";
   const bgImage = bgType === "image" && mapData?.background_image
-    ? `/api/uploads/network-maps/${mapData.background_image}` : null;
+    ? apiUrl(`/api/uploads/network-maps/${mapData.background_image}`) : null;
   const bgScale = mapData?.background_scale || 1.0;
 
   // Filter monitors by group if map has a kuma_group_id
@@ -548,7 +549,7 @@ function CanvasInner({
           onScaleBg={(delta) => {
             const newScale = Math.max(0.1, Math.min(5, bgScale + delta));
             setMapData((prev) => prev ? { ...prev, background_scale: newScale } : prev);
-            fetch(`/api/maps/${mapId}`, {
+            fetch(apiUrl(`/api/maps/${mapId}`), {
               method: "PUT",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ background_scale: newScale }),
@@ -584,7 +585,7 @@ function CanvasInner({
             onSave={async (savedNodes, savedEdges) => {
               setSaving(true);
               try {
-                await fetch(`/api/maps/${mapId}/state`, {
+                await fetch(apiUrl(`/api/maps/${mapId}/state`), {
                   method: "PUT",
                   headers: { "Content-Type": "application/json" },
                   body: JSON.stringify({ nodes: savedNodes, edges: savedEdges }),

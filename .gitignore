@@ -4,6 +4,7 @@ out/
 dist/
 .env.local
 .env*.local
+.env.production
 data/
 *.db
 *.db-shm

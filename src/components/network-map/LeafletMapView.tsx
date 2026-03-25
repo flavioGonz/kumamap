@@ -75,6 +75,7 @@ export default function LeafletMapView({
 
   // Link creation state
   const [linkSource, setLinkSource] = useState<string | null>(null);
+  const linkSourceRef = useRef<string | null>(null);
   const [pendingLinkTarget, setPendingLinkTarget] = useState<string | null>(null);
 
   // Modal states
@@ -82,6 +83,9 @@ export default function LeafletMapView({
   const [linkModalData, setLinkModalData] = useState<{ sourceId: string; targetId: string; edgeId?: string; initial?: Partial<LinkFormData> }>({ sourceId: "", targetId: "" });
   const [inputModalOpen, setInputModalOpen] = useState(false);
   const [inputModalConfig, setInputModalConfig] = useState<{ nodeId: string; initial: string }>({ nodeId: "", initial: "" });
+
+  // Keep ref in sync with state for closures
+  useEffect(() => { linkSourceRef.current = linkSource; }, [linkSource]);
 
   // Map style
   const [mapStyle, setMapStyle] = useState<"dark" | "satellite" | "streets">("dark");
@@ -235,32 +239,28 @@ export default function LeafletMapView({
         className: "leaflet-label-dark",
       });
 
-      // Popup — don't auto-open, manage manually
-      marker.bindPopup(createPopupContent(node), {
-        className: "leaflet-popup-dark",
-        maxWidth: 280,
-        autoClose: true,
-      });
-
-      // Click handler
+      // Click handler — manual popup management to avoid conflict with link mode
       marker.on("click", (e: any) => {
-        // In link mode: select as target, don't show popup
-        if (linkSource && linkSource !== node.id) {
+        // In link mode: select as target, NO popup
+        if (linkSourceRef.current && linkSourceRef.current !== node.id) {
           e.originalEvent?.stopPropagation?.();
-          marker.closePopup();
           completeLinkCreation(node.id);
           return;
         }
-        // Normal mode: popup opens naturally via bindPopup
+        // Normal mode: open popup manually
+        const popup = L.popup({ className: "leaflet-popup-dark", maxWidth: 280 })
+          .setLatLng(marker.getLatLng())
+          .setContent(createPopupContent(node));
+        popup.openOn(map);
       });
 
       // Right-click context menu
       marker.on("contextmenu", (e: any) => {
         e.originalEvent.preventDefault();
         e.originalEvent.stopPropagation();
-        marker.closePopup();
+        map.closePopup();
 
-        if (linkSource && linkSource !== node.id) {
+        if (linkSourceRef.current && linkSourceRef.current !== node.id) {
           completeLinkCreation(node.id);
           return;
         }

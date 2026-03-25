@@ -2,13 +2,21 @@
 
 import { useState, useEffect, useRef } from "react";
 import {
-  Link2, Cable, ArrowRight, X, Plug, Tag, Network, Check,
+  Link2, Cable, ArrowRight, X, Plug, Tag, Network, Check, Activity,
 } from "lucide-react";
 
 export interface LinkFormData {
   sourceInterface: string;
   targetInterface: string;
   label: string;
+  snmpMonitorId?: number | null;
+}
+
+interface SnmpMonitorOption {
+  id: number;
+  name: string;
+  type: string;
+  ping?: number | null;
 }
 
 interface LinkModalProps {
@@ -19,6 +27,7 @@ interface LinkModalProps {
   targetName?: string;
   initial?: Partial<LinkFormData>;
   title?: string;
+  snmpMonitors?: SnmpMonitorOption[];
 }
 
 export default function LinkModal({
@@ -29,10 +38,12 @@ export default function LinkModal({
   targetName,
   initial,
   title = "Nueva conexion",
+  snmpMonitors = [],
 }: LinkModalProps) {
   const [srcIf, setSrcIf] = useState(initial?.sourceInterface || "");
   const [tgtIf, setTgtIf] = useState(initial?.targetInterface || "");
   const [label, setLabel] = useState(initial?.label || "");
+  const [snmpId, setSnmpId] = useState<number | null>(initial?.snmpMonitorId ?? null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -40,6 +51,7 @@ export default function LinkModal({
       setSrcIf(initial?.sourceInterface || "");
       setTgtIf(initial?.targetInterface || "");
       setLabel(initial?.label || "");
+      setSnmpId(initial?.snmpMonitorId ?? null);
       setTimeout(() => inputRef.current?.focus(), 100);
     }
   }, [open, initial]);
@@ -48,7 +60,7 @@ export default function LinkModal({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    onSubmit({ sourceInterface: srcIf, targetInterface: tgtIf, label });
+    onSubmit({ sourceInterface: srcIf, targetInterface: tgtIf, label, snmpMonitorId: snmpId });
   };
 
   const presets = [
@@ -223,6 +235,33 @@ export default function LinkModal({
                 ))}
               </div>
             </div>
+
+            {/* SNMP Monitor for traffic */}
+            {snmpMonitors.length > 0 && (
+              <div className="space-y-1.5">
+                <label className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-emerald-400">
+                  <Activity className="h-3 w-3" />
+                  Monitor SNMP de trafico
+                  <span className="normal-case tracking-normal text-[#555] font-normal">(opcional)</span>
+                </label>
+                <select
+                  value={snmpId ?? ""}
+                  onChange={(e) => setSnmpId(e.target.value ? parseInt(e.target.value) : null)}
+                  className="w-full rounded-xl px-3.5 py-2.5 text-sm text-[#ededed] focus:outline-none focus:ring-2 focus:ring-emerald-500/40 transition-all"
+                  style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(16,185,129,0.2)" }}
+                >
+                  <option value="">Sin monitor de trafico</option>
+                  {snmpMonitors.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.name} ({m.type.toUpperCase()}{m.ping != null ? ` · ${m.ping}ms` : ""})
+                    </option>
+                  ))}
+                </select>
+                <p className="text-[9px] text-[#555]">
+                  Asocia un monitor SNMP/Push de Kuma para ver trafico en este link
+                </p>
+              </div>
+            )}
 
             {/* Preview */}
             <div

@@ -37,6 +37,13 @@ interface LeafletMapViewProps {
   initialEdges: SavedEdge[];
 }
 
+function formatTraffic(bytes: number): string {
+  if (bytes >= 1_000_000_000) return `${(bytes / 1_000_000_000).toFixed(1)} Gbps`;
+  if (bytes >= 1_000_000) return `${(bytes / 1_000_000).toFixed(1)} Mbps`;
+  if (bytes >= 1_000) return `${(bytes / 1_000).toFixed(1)} Kbps`;
+  return `${bytes} bps`;
+}
+
 const statusColors: Record<number, string> = {
   0: "#ef4444",
   1: "#22c55e",
@@ -349,6 +356,42 @@ export default function LeafletMapView({
         labelMarkersRef.current.set(`${edge.id}-tgt`, tgtLabel);
       }
 
+      // SNMP traffic label at center of edge
+      if (cd.snmpMonitorId) {
+        const snmpMon = kumaMonitors.find((m) => m.id === cd.snmpMonitorId);
+        if (snmpMon) {
+          const midLat = (srcNode.x + tgtNode.x) / 2;
+          const midLng = (srcNode.y + tgtNode.y) / 2;
+          const value = snmpMon.ping;
+          const statusColor = snmpMon.status === 1 ? "#22c55e" : snmpMon.status === 0 ? "#ef4444" : "#f59e0b";
+          const formattedValue = value != null ? formatTraffic(value) : "N/A";
+
+          const trafficLabel = L.marker([midLat, midLng], {
+            icon: L.divIcon({
+              className: "traffic-label",
+              html: `<div style="
+                background:rgba(0,0,0,0.85);
+                border:1px solid ${statusColor}55;
+                color:${statusColor};
+                font-size:10px;font-weight:800;
+                font-family:ui-monospace,monospace;
+                padding:2px 8px;border-radius:6px;
+                white-space:nowrap;
+                box-shadow:0 2px 12px rgba(0,0,0,0.5), 0 0 8px ${statusColor}22;
+                display:flex;align-items:center;gap:4px;
+              ">
+                <span style="font-size:8px;">▲▼</span> ${formattedValue}
+              </div>`,
+              iconSize: [0, 0],
+              iconAnchor: [0, 10],
+            }),
+            interactive: false,
+          });
+          trafficLabel.addTo(map);
+          labelMarkersRef.current.set(`${edge.id}-traffic`, trafficLabel);
+        }
+      }
+
       // Right-click on edge
       line.on("contextmenu", (e: any) => {
         e.originalEvent.preventDefault();
@@ -425,27 +468,30 @@ export default function LeafletMapView({
 
   function handleLinkModalSubmit(data: LinkFormData) {
     const { sourceId, targetId, edgeId } = linkModalData;
+    const customData = {
+      sourceInterface: data.sourceInterface,
+      targetInterface: data.targetInterface,
+      snmpMonitorId: data.snmpMonitorId ?? null,
+    };
 
     if (edgeId) {
-      // Editing existing edge
       const idx = edgesRef.current.findIndex((e) => e.id === edgeId);
       if (idx >= 0) {
         edgesRef.current[idx] = {
           ...edgesRef.current[idx],
           label: data.label || null,
-          custom_data: JSON.stringify({ sourceInterface: data.sourceInterface, targetInterface: data.targetInterface }),
+          custom_data: JSON.stringify(customData),
         };
       }
       toast.success("Conexion actualizada");
     } else {
-      // Creating new edge
       const newEdge: SavedEdge = {
         id: `edge-${Date.now()}`,
         source_node_id: sourceId,
         target_node_id: targetId,
         label: data.label || null,
         color: getStatusColor(nodesRef.current.find((n) => n.id === sourceId)?.kuma_monitor_id ?? null),
-        custom_data: JSON.stringify({ sourceInterface: data.sourceInterface, targetInterface: data.targetInterface }),
+        custom_data: JSON.stringify(customData),
       };
       edgesRef.current = [...edgesRef.current, newEdge];
 
@@ -524,7 +570,7 @@ export default function LeafletMapView({
             sourceId: edge?.source_node_id || "",
             targetId: edge?.target_node_id || "",
             edgeId,
-            initial: { sourceInterface: cd.sourceInterface || "", targetInterface: cd.targetInterface || "", label: edge?.label || "" },
+            initial: { sourceInterface: cd.sourceInterface || "", targetInterface: cd.targetInterface || "", label: edge?.label || "", snmpMonitorId: cd.snmpMonitorId ?? null },
           });
           setLinkModalOpen(true);
         },
@@ -792,6 +838,7 @@ export default function LeafletMapView({
         targetName={nodesRef.current.find((n) => n.id === linkModalData.targetId)?.label}
         initial={linkModalData.initial}
         title={linkModalData.edgeId ? "Editar conexion" : "Nueva conexion"}
+        snmpMonitors={kumaMonitors.filter((m) => m.type === "snmp" || m.type === "push" || m.type === "port")}
       />
 
       {/* Input Modal (node rename) */}

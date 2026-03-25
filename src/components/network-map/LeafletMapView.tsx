@@ -73,11 +73,14 @@ export default function LeafletMapView({
       import("leaflet/dist/leaflet.css");
       LRef.current = L;
 
+      if (!containerRef.current) return;
+
       if (mapRef.current) {
         mapRef.current.remove();
+        mapRef.current = null;
       }
 
-      map = L.map(containerRef.current!, {
+      map = L.map(containerRef.current, {
         center: [-34.85, -56.05],
         zoom: 12,
         zoomControl: true,
@@ -90,15 +93,15 @@ export default function LeafletMapView({
 
       mapRef.current = map;
 
-      // Render initial nodes
-      setTimeout(() => {
+      // Render initial nodes after map is ready
+      map.whenReady(() => {
         renderNodes(L, map);
         renderEdges(L, map);
         if (initialNodes.length > 0) {
           const bounds = initialNodes.map((n) => [n.x, n.y] as [number, number]);
           if (bounds.length > 0) map.fitBounds(bounds, { padding: [50, 50] });
         }
-      }, 200);
+      });
     });
 
     return () => {
@@ -167,8 +170,9 @@ export default function LeafletMapView({
   }
 
   function renderNodes(L: any, map: any) {
+    if (!map || !map.getContainer()) return;
     // Clear old markers
-    markersRef.current.forEach((m) => map.removeLayer(m));
+    markersRef.current.forEach((m) => { try { map.removeLayer(m); } catch {} });
     markersRef.current.clear();
 
     nodesRef.current.forEach((node) => {
@@ -210,7 +214,8 @@ export default function LeafletMapView({
   }
 
   function renderEdges(L: any, map: any) {
-    polylinesRef.current.forEach((p) => map.removeLayer(p));
+    if (!map || !map.getContainer()) return;
+    polylinesRef.current.forEach((p) => { try { map.removeLayer(p); } catch {} });
     polylinesRef.current.clear();
 
     edgesRef.current.forEach((edge) => {

@@ -1,0 +1,55 @@
+@import "tailwindcss";
+
+:root {
+  --background: #0a0a0a;
+  --foreground: #ededed;
+  --card: #141414;
+  --card-foreground: #ededed;
+  --primary: #3b82f6;
+  --primary-foreground: #ffffff;
+  --secondary: #1e1e1e;
+  --secondary-foreground: #a0a0a0;
+  --muted: #1a1a1a;
+  --muted-foreground: #737373;
+  --accent: #1e293b;
+  --accent-foreground: #e2e8f0;
+  --border: #262626;
+  --ring: #3b82f6;
+  --destructive: #ef4444;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+/* React Flow overrides */
+.react-flow__node {
+  cursor: grab;
+}
+.react-flow__node:active {
+  cursor: grabbing;
+}
+.react-flow__edge-path {
+  stroke-width: 2;
+}
+.react-flow__controls {
+  background: var(--card) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 0.75rem !important;
+  overflow: hidden;
+}
+.react-flow__controls button {
+  background: var(--card) !important;
+  color: var(--foreground) !important;
+  border-bottom-color: var(--border) !important;
+}
+.react-flow__controls button:hover {
+  background: var(--accent) !important;
+}
+.react-flow__minimap {
+  border-radius: 0.75rem !important;
+  border: 1px solid var(--border) !important;
+  overflow: hidden;
+}

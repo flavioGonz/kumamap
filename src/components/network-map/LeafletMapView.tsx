@@ -3,8 +3,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { toast } from "sonner";
 import type { KumaMonitor } from "./MonitorPanel";
-import type { KumaNodeData } from "./KumaMonitorNode";
-import MiniChart from "./MiniChart";
+import ContextMenu, { menuIcons } from "./ContextMenu";
 
 interface SavedNode {
   id: string;
@@ -63,6 +62,17 @@ export default function LeafletMapView({
   const [searchQuery, setSearchQuery] = useState("");
   const [saving, setSaving] = useState(false);
 
+  // Context menu state
+  const [ctxMenu, setCtxMenu] = useState<{
+    x: number;
+    y: number;
+    nodeId?: string;
+    edgeId?: string;
+  } | null>(null);
+
+  // Link creation state
+  const [linkSource, setLinkSource] = useState<string | null>(null);
+
   // Initialize Leaflet map
   useEffect(() => {
     if (!containerRef.current) return;
@@ -83,13 +93,16 @@ export default function LeafletMapView({
       map = L.map(containerRef.current, {
         center: [-34.85, -56.05],
         zoom: 12,
-        zoomControl: true,
+        zoomControl: false,
         attributionControl: false,
       });
 
       L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
         maxZoom: 19,
       }).addTo(map);
+
+      // Add zoom control top-right
+      L.control.zoom({ position: "bottomleft" }).addTo(map);
 
       mapRef.current = map;
 
@@ -129,13 +142,14 @@ export default function LeafletMapView({
     return kumaMonitors.find((mon) => mon.id === monitorId);
   }
 
-  function createMarkerIcon(L: any, color: string, pulse: boolean) {
+  function createMarkerIcon(L: any, color: string, pulse: boolean, isLinkSource: boolean = false) {
+    const ring = isLinkSource ? `border:3px solid #60a5fa;` : `border:2px solid ${color};`;
     return L.divIcon({
       className: "custom-marker",
       html: `
         <div style="position:relative;display:flex;align-items:center;justify-content:center;">
           ${pulse ? `<div style="position:absolute;width:28px;height:28px;border-radius:50%;background:${color}30;animation:ping 1.5s cubic-bezier(0,0,0.2,1) infinite;"></div>` : ""}
-          <div style="width:18px;height:18px;border-radius:50%;background:radial-gradient(circle,${color}66,${color}22);border:2px solid ${color};box-shadow:0 0 12px ${color}55;"></div>
+          <div style="width:18px;height:18px;border-radius:50%;background:radial-gradient(circle,${color}66,${color}22);${ring}box-shadow:0 0 12px ${color}55;cursor:pointer;"></div>
         </div>
       `,
       iconSize: [28, 28],
@@ -171,7 +185,6 @@ export default function LeafletMapView({
 
   function renderNodes(L: any, map: any) {
     if (!map || !map.getContainer()) return;
-    // Clear old markers
     markersRef.current.forEach((m) => { try { map.removeLayer(m); } catch {} });
     markersRef.current.clear();
 
@@ -179,9 +192,10 @@ export default function LeafletMapView({
       const color = getStatusColor(node.kuma_monitor_id);
       const m = getMonitorData(node.kuma_monitor_id);
       const pulse = m?.status === 0 || m?.status === 2;
+      const isSource = linkSource === node.id;
 
       const marker = L.marker([node.x, node.y], {
-        icon: createMarkerIcon(L, color, pulse),
+        icon: createMarkerIcon(L, color, pulse, isSource),
         draggable: true,
       });
 
@@ -199,6 +213,31 @@ export default function LeafletMapView({
         maxWidth: 280,
       });
 
+      // Right-click context menu
+      marker.on("contextmenu", (e: any) => {
+        e.originalEvent.preventDefault();
+        e.originalEvent.stopPropagation();
+
+        // If we're in link mode, complete the link
+        if (linkSource && linkSource !== node.id) {
+          completeLinkCreation(node.id);
+          return;
+        }
+
+        setCtxMenu({
+          x: e.originalEvent.clientX,
+          y: e.originalEvent.clientY,
+          nodeId: node.id,
+        });
+      });
+
+      // If in link mode, click to select target
+      marker.on("click", () => {
+        if (linkSource && linkSource !== node.id) {
+          completeLinkCreation(node.id);
+        }
+      });
+
       // Drag to reposition
       marker.on("dragend", () => {
         const pos = marker.getLatLng();
@@ -206,6 +245,8 @@ export default function LeafletMapView({
         if (idx >= 0) {
           nodesRef.current[idx] = { ...nodesRef.current[idx], x: pos.lat, y: pos.lng };
         }
+        // Re-render edges to update positions
+        renderEdges(L, map);
       });
 
       marker.addTo(map);
@@ -223,18 +264,32 @@ export default function LeafletMapView({
       const tgtNode = nodesRef.current.find((n) => n.id === edge.target_node_id);
       if (!srcNode || !tgtNode) return;
 
+      const srcColor = getStatusColor(srcNode.kuma_monitor_id);
+
       const line = L.polyline(
         [[srcNode.x, srcNode.y], [tgtNode.x, tgtNode.y]],
-        { color: edge.color || "#4b5563", weight: 2, opacity: 0.7, dashArray: "5,8" }
+        { color: srcColor, weight: 2, opacity: 0.6, dashArray: "6,8" }
       );
 
-      if (edge.label || edge.custom_data) {
-        const cd = edge.custom_data ? JSON.parse(edge.custom_data) : {};
-        const parts = [cd.sourceInterface, edge.label, cd.targetInterface].filter(Boolean);
-        if (parts.length > 0) {
-          line.bindTooltip(parts.join(" → "), { sticky: true, className: "leaflet-label-dark" });
-        }
+      // Build tooltip with interface info
+      const cd = edge.custom_data ? JSON.parse(edge.custom_data) : {};
+      const parts: string[] = [];
+      if (cd.sourceInterface) parts.push(cd.sourceInterface);
+      if (edge.label) parts.push(edge.label);
+      if (cd.targetInterface) parts.push(cd.targetInterface);
+      if (parts.length > 0) {
+        line.bindTooltip(parts.join(" → "), { sticky: true, className: "leaflet-label-dark" });
       }
+
+      // Right-click on edge
+      line.on("contextmenu", (e: any) => {
+        e.originalEvent.preventDefault();
+        setCtxMenu({
+          x: e.originalEvent.clientX,
+          y: e.originalEvent.clientY,
+          edgeId: edge.id,
+        });
+      });
 
       line.addTo(map);
       polylinesRef.current.set(edge.id, line);
@@ -244,7 +299,6 @@ export default function LeafletMapView({
   function updateMarkerStatus() {
     if (!LRef.current || !mapRef.current) return;
     const L = LRef.current;
-    const map = mapRef.current;
 
     nodesRef.current.forEach((node) => {
       const marker = markersRef.current.get(node.id);
@@ -254,9 +308,178 @@ export default function LeafletMapView({
       const m = getMonitorData(node.kuma_monitor_id);
       const pulse = m?.status === 0 || m?.status === 2;
 
-      marker.setIcon(createMarkerIcon(L, color, pulse));
+      marker.setIcon(createMarkerIcon(L, color, pulse, linkSource === node.id));
       marker.setPopupContent(createPopupContent(node));
     });
+
+    // Also update edge colors
+    renderEdges(LRef.current, mapRef.current);
+  }
+
+  // ─── Link creation flow ─────────────────────
+  function startLinkCreation(nodeId: string) {
+    setLinkSource(nodeId);
+    const node = nodesRef.current.find((n) => n.id === nodeId);
+    toast.info(`Selecciona el nodo destino`, {
+      description: `Origen: ${node?.label || nodeId}. Haz click o clic derecho en otro nodo.`,
+      duration: 6000,
+    });
+
+    // Highlight source marker
+    if (LRef.current && mapRef.current) {
+      const marker = markersRef.current.get(nodeId);
+      if (marker) {
+        const color = getStatusColor(node?.kuma_monitor_id ?? null);
+        marker.setIcon(createMarkerIcon(LRef.current, color, false, true));
+      }
+    }
+  }
+
+  function completeLinkCreation(targetId: string) {
+    if (!linkSource) return;
+
+    // Check if edge already exists
+    const exists = edgesRef.current.some(
+      (e) =>
+        (e.source_node_id === linkSource && e.target_node_id === targetId) ||
+        (e.source_node_id === targetId && e.target_node_id === linkSource)
+    );
+    if (exists) {
+      toast.error("Conexion ya existe entre estos nodos");
+      cancelLinkCreation();
+      return;
+    }
+
+    const srcIf = prompt("Interfaz origen (ej: eth0, Gi0/1, puerto 24):", "") || "";
+    const tgtIf = prompt("Interfaz destino (ej: eth1, Gi0/2, puerto 1):", "") || "";
+    const label = prompt("Etiqueta del cable (opcional, ej: fibra, cat6):", "") || "";
+
+    const newEdge: SavedEdge = {
+      id: `edge-${Date.now()}`,
+      source_node_id: linkSource,
+      target_node_id: targetId,
+      label: label || null,
+      color: getStatusColor(nodesRef.current.find((n) => n.id === linkSource)?.kuma_monitor_id ?? null),
+      custom_data: JSON.stringify({ sourceInterface: srcIf, targetInterface: tgtIf }),
+    };
+
+    edgesRef.current = [...edgesRef.current, newEdge];
+
+    const srcName = nodesRef.current.find((n) => n.id === linkSource)?.label;
+    const tgtName = nodesRef.current.find((n) => n.id === targetId)?.label;
+    toast.success("Conexion creada", { description: `${srcName} → ${tgtName}` });
+
+    setLinkSource(null);
+
+    // Re-render
+    if (LRef.current && mapRef.current) {
+      renderNodes(LRef.current, mapRef.current);
+      renderEdges(LRef.current, mapRef.current);
+    }
+  }
+
+  function cancelLinkCreation() {
+    setLinkSource(null);
+    if (LRef.current && mapRef.current) {
+      renderNodes(LRef.current, mapRef.current);
+    }
+  }
+
+  // ─── Context menu items ─────────────────────
+  function getNodeCtxItems(nodeId: string) {
+    const node = nodesRef.current.find((n) => n.id === nodeId);
+    return [
+      {
+        label: linkSource ? "Cancelar enlace" : "Nuevo link",
+        icon: menuIcons.Link2,
+        onClick: () => {
+          if (linkSource) {
+            cancelLinkCreation();
+          } else {
+            startLinkCreation(nodeId);
+          }
+        },
+      },
+      {
+        label: "Editar nombre",
+        icon: menuIcons.Pencil,
+        onClick: () => {
+          const newLabel = prompt("Nombre:", node?.label || "");
+          if (newLabel !== null && newLabel.trim()) {
+            const idx = nodesRef.current.findIndex((n) => n.id === nodeId);
+            if (idx >= 0) {
+              nodesRef.current[idx] = { ...nodesRef.current[idx], label: newLabel.trim() };
+              if (LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current);
+            }
+          }
+        },
+      },
+      {
+        label: "Eliminar nodo",
+        icon: menuIcons.Trash2,
+        danger: true,
+        divider: true,
+        onClick: () => {
+          nodesRef.current = nodesRef.current.filter((n) => n.id !== nodeId);
+          edgesRef.current = edgesRef.current.filter(
+            (e) => e.source_node_id !== nodeId && e.target_node_id !== nodeId
+          );
+          if (LRef.current && mapRef.current) {
+            renderNodes(LRef.current, mapRef.current);
+            renderEdges(LRef.current, mapRef.current);
+          }
+          toast.success("Nodo eliminado");
+        },
+      },
+    ];
+  }
+
+  function getEdgeCtxItems(edgeId: string) {
+    return [
+      {
+        label: "Editar interfaces",
+        icon: menuIcons.Link2,
+        onClick: () => {
+          const edge = edgesRef.current.find((e) => e.id === edgeId);
+          if (!edge) return;
+          const cd = edge.custom_data ? JSON.parse(edge.custom_data) : {};
+          const srcIf = prompt("Interfaz origen:", cd.sourceInterface || "") || "";
+          const tgtIf = prompt("Interfaz destino:", cd.targetInterface || "") || "";
+          const idx = edgesRef.current.findIndex((e) => e.id === edgeId);
+          if (idx >= 0) {
+            edgesRef.current[idx] = {
+              ...edgesRef.current[idx],
+              custom_data: JSON.stringify({ sourceInterface: srcIf, targetInterface: tgtIf }),
+            };
+            if (LRef.current && mapRef.current) renderEdges(LRef.current, mapRef.current);
+          }
+        },
+      },
+      {
+        label: "Editar etiqueta",
+        icon: menuIcons.Pencil,
+        onClick: () => {
+          const edge = edgesRef.current.find((e) => e.id === edgeId);
+          const label = prompt("Etiqueta:", edge?.label || "") || "";
+          const idx = edgesRef.current.findIndex((e) => e.id === edgeId);
+          if (idx >= 0) {
+            edgesRef.current[idx] = { ...edgesRef.current[idx], label: label || null };
+            if (LRef.current && mapRef.current) renderEdges(LRef.current, mapRef.current);
+          }
+        },
+      },
+      {
+        label: "Eliminar conexion",
+        icon: menuIcons.Trash2,
+        danger: true,
+        divider: true,
+        onClick: () => {
+          edgesRef.current = edgesRef.current.filter((e) => e.id !== edgeId);
+          if (LRef.current && mapRef.current) renderEdges(LRef.current, mapRef.current);
+          toast.success("Conexion eliminada");
+        },
+      },
+    ];
   }
 
   // Handle drop from monitor panel
@@ -273,9 +496,6 @@ export default function LeafletMapView({
       return;
     }
 
-    // Get map center as drop position
-    const center = mapRef.current.getCenter();
-    // Offset slightly based on mouse position relative to container
     const rect = containerRef.current!.getBoundingClientRect();
     const point = mapRef.current.containerPointToLatLng([
       event.clientX - rect.left,
@@ -340,78 +560,145 @@ export default function LeafletMapView({
         onDragOver={handleDragOver}
       />
 
-      {/* Search bar (toggleable) */}
-      {searchVisible && (
-        <div className="absolute top-2 left-14 z-[1000] flex gap-1.5">
-          <input
-            autoFocus
-            type="text"
-            placeholder="Buscar direccion..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") handleSearch();
-              if (e.key === "Escape") { setSearchVisible(false); setSearchQuery(""); }
-            }}
-            className="rounded-lg px-3 py-1.5 text-xs text-[#ededed] placeholder:text-[#737373] focus:outline-none focus:ring-1 focus:ring-blue-500/50 w-64"
-            style={{ background: "rgba(10,10,10,0.9)", border: "1px solid rgba(255,255,255,0.1)" }}
-          />
-          <button
-            onClick={handleSearch}
-            className="rounded-lg px-3 py-1.5 text-xs font-semibold"
-            style={{ background: "rgba(59,130,246,0.15)", border: "1px solid rgba(59,130,246,0.3)", color: "#60a5fa" }}
-          >
-            Buscar
-          </button>
-          <button
-            onClick={() => { setSearchVisible(false); setSearchQuery(""); }}
-            className="rounded-lg px-2 py-1.5 text-xs text-[#737373]"
-            style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}
-          >
-            ✕
-          </button>
-        </div>
-      )}
-
-      {/* Toggle search button */}
-      {!searchVisible && (
-        <button
-          onClick={() => setSearchVisible(true)}
-          className="absolute top-2 left-14 z-[1000] rounded-lg px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider"
-          style={{ background: "rgba(10,10,10,0.85)", border: "1px solid rgba(255,255,255,0.08)", color: "#a0a0a0" }}
-        >
-          🔍 Buscar direccion
-        </button>
-      )}
-
-      {/* Top bar */}
-      <div className="absolute top-2 left-2 z-[1000] flex items-center gap-2">
+      {/* ── Premium Top Bar ─────────────────────── */}
+      <div
+        className="absolute top-3 left-3 right-3 z-[1000] flex items-center gap-2 rounded-2xl px-3 py-2"
+        style={{
+          background: "rgba(10,10,10,0.8)",
+          border: "1px solid rgba(255,255,255,0.06)",
+          backdropFilter: "blur(24px)",
+          boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
+        }}
+      >
+        {/* Back */}
         <button
           onClick={onBack}
-          className="rounded-lg px-3 py-1.5 text-xs font-medium"
-          style={{ background: "rgba(10,10,10,0.85)", border: "1px solid rgba(255,255,255,0.08)", color: "#a0a0a0" }}
+          className="flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-medium transition-all"
+          style={{ color: "#a0a0a0" }}
+          onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.06)"; (e.currentTarget as HTMLElement).style.color = "#ededed"; }}
+          onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; (e.currentTarget as HTMLElement).style.color = "#a0a0a0"; }}
         >
-          ← Mapas
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+          Mapas
         </button>
+
+        <div className="h-5 w-px" style={{ background: "rgba(255,255,255,0.08)" }} />
+
+        {/* Map name */}
         {mapName && (
-          <span className="rounded-lg px-3 py-1.5 text-xs font-bold text-[#ededed]"
-            style={{ background: "rgba(10,10,10,0.85)", border: "1px solid rgba(255,255,255,0.08)" }}>
+          <span className="text-sm font-bold text-[#ededed] truncate max-w-[200px]">
             {mapName}
           </span>
         )}
+
+        {/* Connection status */}
+        <div className="flex items-center gap-1.5 ml-1">
+          <span
+            className="h-1.5 w-1.5 rounded-full"
+            style={{
+              backgroundColor: kumaConnected ? "#22c55e" : "#ef4444",
+              boxShadow: kumaConnected ? "0 0 6px #22c55e" : "0 0 6px #ef4444",
+            }}
+          />
+          <span className="text-[10px] text-[#737373]">
+            {kumaConnected ? "Live" : "Offline"}
+          </span>
+        </div>
+
+        <div className="flex-1" />
+
+        {/* Link mode indicator */}
+        {linkSource && (
+          <div className="flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[10px] font-bold"
+            style={{ background: "rgba(59,130,246,0.15)", border: "1px solid rgba(59,130,246,0.3)", color: "#60a5fa" }}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+            Enlazando...
+            <button onClick={cancelLinkCreation} className="ml-1 text-[#888] hover:text-white">✕</button>
+          </div>
+        )}
+
+        {/* Search toggle */}
+        {searchVisible ? (
+          <div className="flex items-center gap-1.5">
+            <input
+              autoFocus
+              type="text"
+              placeholder="Buscar direccion..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") handleSearch();
+                if (e.key === "Escape") { setSearchVisible(false); setSearchQuery(""); }
+              }}
+              className="rounded-lg px-3 py-1.5 text-xs text-[#ededed] placeholder:text-[#737373] focus:outline-none focus:ring-1 focus:ring-blue-500/50 w-56"
+              style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }}
+            />
+            <button
+              onClick={handleSearch}
+              className="rounded-lg p-1.5 transition-all"
+              style={{ color: "#60a5fa" }}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "rgba(59,130,246,0.15)"; }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+            </button>
+            <button
+              onClick={() => { setSearchVisible(false); setSearchQuery(""); }}
+              className="rounded-lg p-1.5 text-[#737373] hover:text-[#ededed] transition-all"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={() => setSearchVisible(true)}
+            className="rounded-xl p-1.5 transition-all"
+            style={{ color: "#a0a0a0" }}
+            onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.06)"; (e.currentTarget as HTMLElement).style.color = "#ededed"; }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; (e.currentTarget as HTMLElement).style.color = "#a0a0a0"; }}
+            title="Buscar direccion"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+          </button>
+        )}
+
+        <div className="h-5 w-px" style={{ background: "rgba(255,255,255,0.08)" }} />
+
+        {/* Save */}
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          className="flex items-center gap-1.5 rounded-xl px-4 py-1.5 text-xs font-semibold transition-all"
+          style={{
+            background: "linear-gradient(135deg, rgba(59,130,246,0.2), rgba(99,102,241,0.15))",
+            border: "1px solid rgba(59,130,246,0.3)",
+            color: "#60a5fa",
+          }}
+          onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "linear-gradient(135deg, rgba(59,130,246,0.3), rgba(99,102,241,0.25))"; }}
+          onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "linear-gradient(135deg, rgba(59,130,246,0.2), rgba(99,102,241,0.15))"; }}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15.2 3a2 2 0 0 1 1.4.6l3.8 3.8a2 2 0 0 1 .6 1.4V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/><path d="M17 21v-7a1 1 0 0 0-1-1H8a1 1 0 0 0-1 1v7"/><path d="M7 3v4a1 1 0 0 0 1 1h7"/></svg>
+          {saving ? "Guardando..." : "Guardar"}
+        </button>
       </div>
 
-      {/* Save button */}
-      <button
-        onClick={handleSave}
-        disabled={saving}
-        className="absolute top-2 right-4 z-[1000] flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-xs font-semibold"
-        style={{ background: "rgba(59,130,246,0.15)", border: "1px solid rgba(59,130,246,0.3)", color: "#60a5fa" }}
-      >
-        {saving ? "Guardando..." : "Guardar"}
-      </button>
+      {/* Context Menu */}
+      {ctxMenu && (
+        <ContextMenu
+          x={ctxMenu.x}
+          y={ctxMenu.y}
+          items={
+            ctxMenu.nodeId
+              ? getNodeCtxItems(ctxMenu.nodeId)
+              : ctxMenu.edgeId
+              ? getEdgeCtxItems(ctxMenu.edgeId)
+              : []
+          }
+          onClose={() => setCtxMenu(null)}
+        />
+      )}
 
-      {/* Custom CSS for dark leaflet popups/tooltips */}
+      {/* Custom CSS */}
       <style>{`
         .leaflet-label-dark {
           background: rgba(10,10,10,0.9) !important;
@@ -439,6 +726,22 @@ export default function LeafletMapView({
         }
         .leaflet-popup-close-button {
           color: #888 !important;
+        }
+        .leaflet-control-zoom a {
+          background: rgba(10,10,10,0.85) !important;
+          color: #a0a0a0 !important;
+          border-color: rgba(255,255,255,0.08) !important;
+          border-radius: 8px !important;
+        }
+        .leaflet-control-zoom a:hover {
+          background: rgba(30,30,30,0.95) !important;
+          color: #ededed !important;
+        }
+        .leaflet-control-zoom {
+          border: none !important;
+          border-radius: 12px !important;
+          overflow: hidden;
+          box-shadow: 0 4px 16px rgba(0,0,0,0.4) !important;
         }
         @keyframes ping {
           75%, 100% { transform: scale(2); opacity: 0; }

@@ -39,6 +39,9 @@ interface MapToolbarProps {
   mapNavMode?: boolean;
   onToggleMapNav?: () => void;
   isLiveMap?: boolean;
+  isImageBg?: boolean;
+  bgScale?: number;
+  onScaleBg?: (delta: number) => void;
 }
 
 function ToolButton({
@@ -105,6 +108,9 @@ export default function MapToolbar({
   mapNavMode,
   onToggleMapNav,
   isLiveMap,
+  isImageBg,
+  bgScale,
+  onScaleBg,
 }: MapToolbarProps) {
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -251,6 +257,22 @@ export default function MapToolbar({
           <LayoutGrid className="h-3.5 w-3.5" />
         </ToolButton>
       </div>
+
+      {/* Image scale controls */}
+      {isImageBg && onScaleBg && (
+        <>
+          <div className="h-5 w-px" style={{ background: "rgba(255,255,255,0.08)" }} />
+          <div className="flex items-center gap-1">
+            <ToolButton onClick={() => onScaleBg(-0.1)} title="Reducir fondo">
+              <span className="text-[10px] font-bold">-</span>
+            </ToolButton>
+            <span className="text-[9px] text-[#737373] min-w-[32px] text-center">{Math.round((bgScale || 1) * 100)}%</span>
+            <ToolButton onClick={() => onScaleBg(0.1)} title="Ampliar fondo">
+              <span className="text-[10px] font-bold">+</span>
+            </ToolButton>
+          </div>
+        </>
+      )}
 
       <div className="flex-1" />
 

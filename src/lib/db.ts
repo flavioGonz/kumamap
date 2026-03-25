@@ -21,6 +21,10 @@ db.exec(`
     name TEXT NOT NULL,
     background_type TEXT DEFAULT 'grid',
     background_image TEXT,
+    background_scale REAL DEFAULT 1.0,
+    background_offset_x REAL DEFAULT 0,
+    background_offset_y REAL DEFAULT 0,
+    kuma_group_id INTEGER,
     width INTEGER DEFAULT 1920,
     height INTEGER DEFAULT 1080,
     created_at TEXT DEFAULT (datetime('now')),
@@ -66,8 +70,12 @@ function genId() {
 export interface NetworkMap {
   id: string;
   name: string;
-  background_type: "grid" | "image";
+  background_type: "grid" | "image" | "livemap";
   background_image: string | null;
+  background_scale: number;
+  background_offset_x: number;
+  background_offset_y: number;
+  kuma_group_id: number | null;
   width: number;
   height: number;
   created_at: string;
@@ -115,16 +123,18 @@ export const mapsDb = {
   create(data: {
     name: string;
     background_type?: string;
+    kuma_group_id?: number | null;
     width?: number;
     height?: number;
   }): NetworkMap {
     const id = genId();
     db.prepare(
-      `INSERT INTO network_maps (id, name, background_type, width, height) VALUES (?, ?, ?, ?, ?)`
+      `INSERT INTO network_maps (id, name, background_type, kuma_group_id, width, height) VALUES (?, ?, ?, ?, ?, ?)`
     ).run(
       id,
       data.name,
       data.background_type || "grid",
+      data.kuma_group_id ?? null,
       data.width || 1920,
       data.height || 1080
     );

@@ -35,6 +35,8 @@ interface MonitorPanelProps {
   connected: boolean;
   collapsed: boolean;
   onToggleCollapse: () => void;
+  groupName?: string;
+  onAutoImport?: () => void;
 }
 
 const typeIcons: Record<string, React.ComponentType<{ className?: string }>> = {
@@ -59,6 +61,8 @@ export default function MonitorPanel({
   connected,
   collapsed,
   onToggleCollapse,
+  groupName,
+  onAutoImport,
 }: MonitorPanelProps) {
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState<number | null>(null);
@@ -143,7 +147,9 @@ export default function MonitorPanel({
             <Signal className="h-4 w-4 text-blue-400" />
           </div>
           <div>
-            <h3 className="text-sm font-bold text-[#ededed]">Monitores</h3>
+            <h3 className="text-sm font-bold text-[#ededed]">
+              {groupName ? groupName : "Monitores"}
+            </h3>
             <div className="flex items-center gap-1.5 text-[10px] text-[#737373]">
               <span
                 className="h-1.5 w-1.5 rounded-full"
@@ -155,6 +161,7 @@ export default function MonitorPanel({
                 }}
               />
               {connected ? "Conectado" : "Desconectado"}
+              {groupName && <span className="text-indigo-400 ml-1">grupo</span>}
             </div>
           </div>
         </div>
@@ -292,11 +299,27 @@ export default function MonitorPanel({
       </div>
 
       {/* Footer */}
+      {/* Footer */}
       <div
-        className="px-4 py-2.5 text-[10px] text-[#737373] text-center"
+        className="px-3 py-2.5 space-y-2"
         style={{ borderTop: "1px solid rgba(255,255,255,0.06)" }}
       >
-        Arrastra un monitor al canvas para agregarlo al mapa
+        {onAutoImport && (
+          <button
+            onClick={onAutoImport}
+            className="w-full flex items-center justify-center gap-1.5 rounded-lg px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider transition-all"
+            style={{
+              background: "rgba(99,102,241,0.12)",
+              border: "1px solid rgba(99,102,241,0.3)",
+              color: "#818cf8",
+            }}
+          >
+            Importar todo el grupo al mapa
+          </button>
+        )}
+        <div className="text-[10px] text-[#737373] text-center">
+          Arrastra un monitor al canvas para agregarlo
+        </div>
       </div>
     </div>
   );

@@ -25,10 +25,13 @@ export interface KumaHeartbeat {
   duration: number;
 }
 
+const MAX_HISTORY = 60; // Keep last 60 heartbeats per monitor (~1h at 60s intervals)
+
 class KumaClient {
   private socket: Socket | null = null;
   private monitors: Map<number, KumaMonitor> = new Map();
   private heartbeats: Map<number, KumaHeartbeat> = new Map();
+  private heartbeatHistory: Map<number, KumaHeartbeat[]> = new Map();
   private connected = false;
   private authenticated = false;
   private initPromise: Promise<void> | null = null;
@@ -106,6 +109,11 @@ class KumaClient {
           monitor.ping = data.ping;
           monitor.msg = data.msg;
         }
+        // Store history
+        const history = this.heartbeatHistory.get(data.monitorID) || [];
+        history.push(data);
+        if (history.length > MAX_HISTORY) history.shift();
+        this.heartbeatHistory.set(data.monitorID, history);
       });
 
       this.socket.on(
@@ -144,6 +152,10 @@ class KumaClient {
 
   getMonitor(id: number): KumaMonitor | undefined {
     return this.monitors.get(id);
+  }
+
+  getHistory(monitorId: number): KumaHeartbeat[] {
+    return this.heartbeatHistory.get(monitorId) || [];
   }
 }
 

@@ -13,6 +13,7 @@ export async function POST(req: NextRequest) {
   const map = mapsDb.create({
     name: body.name,
     background_type: body.background_type,
+    kuma_group_id: body.kuma_group_id,
     width: body.width,
     height: body.height,
   });

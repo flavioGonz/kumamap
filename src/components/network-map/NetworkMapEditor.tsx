@@ -1,11 +1,10 @@
 "use client";
 
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import {
   ReactFlow,
   Background,
   Controls,
-  MiniMap,
   addEdge,
   useNodesState,
   useEdgesState,
@@ -28,6 +27,7 @@ import KumaMonitorNode, { type KumaNodeData } from "./KumaMonitorNode";
 import MonitorPanel, { type KumaMonitor } from "./MonitorPanel";
 import MapToolbar from "./MapToolbar";
 import ContextMenu, { menuIcons } from "./ContextMenu";
+import LeafletMapView from "./LeafletMapView";
 
 // ─── Custom Edge with interface labels ──────────
 function InterfaceEdge({ id, sourceX, sourceY, targetX, targetY, data, style }: any) {
@@ -68,6 +68,8 @@ interface MapData {
   name: string;
   background_type: "grid" | "image" | "livemap";
   background_image: string | null;
+  background_scale: number;
+  kuma_group_id: number | null;
   nodes: any[];
   edges: any[];
 }
@@ -81,65 +83,6 @@ function getIconForType(type: string): string {
     case "docker": return "cloud";
     default: return "activity";
   }
-}
-
-// ─── Leaflet Map Background Component ───────────
-function LeafletBackground({ mapMode }: { mapMode: boolean }) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<any>(null);
-  const initRef = useRef(false);
-
-  useEffect(() => {
-    if (!containerRef.current || initRef.current) return;
-    initRef.current = true;
-
-    import("leaflet").then((L) => {
-      import("leaflet/dist/leaflet.css");
-
-      if (mapRef.current) {
-        mapRef.current.remove();
-        mapRef.current = null;
-      }
-      if (!containerRef.current) return;
-
-      const map = L.map(containerRef.current, {
-        center: [-34.85, -56.05],
-        zoom: 12,
-        zoomControl: true,
-        attributionControl: false,
-        dragging: true,
-        scrollWheelZoom: true,
-      });
-
-      L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
-        maxZoom: 19,
-      }).addTo(map);
-
-      mapRef.current = map;
-      setTimeout(() => map.invalidateSize(), 100);
-    });
-
-    return () => {
-      if (mapRef.current) {
-        mapRef.current.remove();
-        mapRef.current = null;
-      }
-      initRef.current = false;
-    };
-  }, []);
-
-  return (
-    <div
-      ref={containerRef}
-      className="absolute inset-0"
-      style={{
-        opacity: mapMode ? 0.6 : 0.35,
-        zIndex: mapMode ? 10 : 0,
-        pointerEvents: mapMode ? "auto" : "none",
-        transition: "opacity 0.3s",
-      }}
-    />
-  );
 }
 
 // ─── Inner Canvas ───────────────────────────────
@@ -478,98 +421,193 @@ function CanvasInner({
   const bgType = mapData?.background_type || "grid";
   const bgImage = bgType === "image" && mapData?.background_image
     ? `/api/uploads/network-maps/${mapData.background_image}` : null;
+  const bgScale = mapData?.background_scale || 1.0;
+
+  // Filter monitors by group if map has a kuma_group_id
+  const filteredMonitors = useMemo(() => {
+    if (!mapData?.kuma_group_id) return kumaMonitors;
+    // Find children: monitors that are NOT groups, or have parent group
+    // Kuma groups contain child monitors - we show all non-group monitors
+    // since Kuma doesn't expose parent-child in the API directly.
+    // Best approach: show monitors that share tags with the group, or all non-group if unclear
+    const group = kumaMonitors.find(m => m.id === mapData.kuma_group_id);
+    if (!group) return kumaMonitors;
+
+    // Filter: show the group itself + monitors that share the same name prefix or tags
+    const groupName = group.name.toLowerCase();
+    return kumaMonitors.filter(m => {
+      if (m.type === "group" && m.id !== mapData.kuma_group_id) return false;
+      if (m.id === mapData.kuma_group_id) return true;
+      // Heuristic: child monitors often have the group name as prefix
+      if (m.name.toLowerCase().startsWith(groupName)) return true;
+      // Or share tags with the group
+      if (group.tags && group.tags.length > 0) {
+        const groupTagNames = new Set(group.tags.map(t => t.name));
+        if (m.tags?.some(t => groupTagNames.has(t.name))) return true;
+      }
+      return false;
+    });
+  }, [kumaMonitors, mapData?.kuma_group_id]);
+
+  // Auto-import all group monitors to canvas
+  const handleAutoImport = useCallback(() => {
+    const nonGroupMonitors = filteredMonitors.filter(m => m.type !== "group");
+    const existingIds = new Set(nodes.map(n => n.data.kumaMonitorId));
+    const toImport = nonGroupMonitors.filter(m => !existingIds.has(m.id));
+
+    if (toImport.length === 0) {
+      toast.info("Todos los monitores del grupo ya estan en el mapa");
+      return;
+    }
+
+    const cols = Math.ceil(Math.sqrt(toImport.length)) || 1;
+    const newNodes: Node[] = toImport.map((monitor, i) => ({
+      id: `node-${Date.now()}-${monitor.id}`,
+      type: "kumaMonitor",
+      position: { x: (i % cols) * 220 + 50, y: Math.floor(i / cols) * 180 + 50 },
+      data: {
+        label: monitor.name,
+        kumaMonitorId: monitor.id,
+        icon: getIconForType(monitor.type),
+        status: monitor.status,
+        ping: monitor.ping,
+        msg: monitor.msg,
+        type: monitor.type,
+        url: monitor.url,
+        uptime24: monitor.uptime24,
+      } satisfies KumaNodeData,
+    }));
+
+    setNodes((nds) => [...nds, ...newNodes]);
+    toast.success(`${toImport.length} monitores importados`);
+    setTimeout(() => reactFlow.fitView({ padding: 0.2 }), 100);
+  }, [filteredMonitors, nodes, setNodes, reactFlow]);
 
   return (
     <div className="h-screen w-screen relative">
       <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleFileChange} />
 
-      <MapToolbar
-        mapName={mapData?.name || "Cargando..."}
-        onSave={handleSave}
-        onUploadBackground={handleUploadBg}
-        onSetGrid={handleSetGrid}
-        onSetLiveMap={handleSetLiveMap}
-        onZoomIn={() => reactFlow.zoomIn()}
-        onZoomOut={() => reactFlow.zoomOut()}
-        onFitView={() => reactFlow.fitView({ padding: 0.2 })}
-        onAutoLayout={handleAutoLayout}
-        onAddNode={handleAddNode}
-        onDeleteSelected={handleDeleteSelected}
-        onToggleConnectMode={() => setConnectMode((v) => !v)}
-        onBack={onBack}
-        onSearch={handleSearch}
-        connectMode={connectMode}
-        saving={saving}
-        hasSelection={hasSelection}
-        isLiveMap={bgType === "livemap"}
-        mapNavMode={mapNavMode}
-        onToggleMapNav={() => setMapNavMode((v) => !v)}
-      />
-
-      <div className="h-full pt-[49px]">
-        <ReactFlow
-          nodes={nodes}
-          edges={edges}
-          onNodesChange={onNodesChange}
-          onEdgesChange={onEdgesChange}
-          onConnect={onConnect}
-          onDrop={onDrop}
-          onDragOver={onDragOver}
-          onNodeDoubleClick={onNodeDoubleClick}
-          onEdgeDoubleClick={onEdgeDoubleClick}
-          onNodeContextMenu={onNodeContextMenu}
-          onEdgeContextMenu={onEdgeContextMenu}
-          onPaneContextMenu={onPaneContextMenu}
-          nodeTypes={nodeTypes}
-          edgeTypes={edgeTypes}
-          fitView
-          snapToGrid
-          snapGrid={[20, 20]}
-          deleteKeyCode="Delete"
-          defaultEdgeOptions={{
-            type: "interface",
-            style: { stroke: "#4b5563", strokeWidth: 2 },
-            animated: false,
+      {bgType !== "livemap" ? (
+        <MapToolbar
+          mapName={mapData?.name || "Cargando..."}
+          onSave={handleSave}
+          onUploadBackground={handleUploadBg}
+          onSetGrid={handleSetGrid}
+          onSetLiveMap={handleSetLiveMap}
+          onZoomIn={() => reactFlow.zoomIn()}
+          onZoomOut={() => reactFlow.zoomOut()}
+          onFitView={() => reactFlow.fitView({ padding: 0.2 })}
+          onAutoLayout={handleAutoLayout}
+          onAddNode={handleAddNode}
+          onDeleteSelected={handleDeleteSelected}
+          onToggleConnectMode={() => setConnectMode((v) => !v)}
+          onBack={onBack}
+          onSearch={handleSearch}
+          connectMode={connectMode}
+          saving={saving}
+          hasSelection={hasSelection}
+          isImageBg={bgType === "image"}
+          bgScale={bgScale}
+          onScaleBg={(delta) => {
+            const newScale = Math.max(0.1, Math.min(5, bgScale + delta));
+            setMapData((prev) => prev ? { ...prev, background_scale: newScale } : prev);
+            fetch(`/api/maps/${mapId}`, {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ background_scale: newScale }),
+            });
           }}
-          style={{ background: "#0a0a0a" }}
-        >
-          {/* Background layer */}
-          {bgType === "livemap" && <LeafletBackground mapMode={mapNavMode} />}
-          {bgImage && (
-            <div className="absolute inset-0 pointer-events-none" style={{
-              backgroundImage: `url(${bgImage})`,
-              backgroundSize: "contain",
-              backgroundRepeat: "no-repeat",
-              backgroundPosition: "center",
-              opacity: 0.3,
-            }} />
-          )}
-          {bgType === "grid" && (
-            <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="#1a1a1a" />
-          )}
+        />
+      ) : null}
 
-          <Controls className="!bottom-4 !left-4" />
-          <MiniMap
-            className="!bottom-4 !right-[340px]"
-            nodeStrokeColor="#333"
-            nodeColor={(n) => {
-              const s = n.data?.status;
-              if (s === 1) return "#22c55e";
-              if (s === 0) return "#ef4444";
-              if (s === 3) return "#8b5cf6";
-              return "#f59e0b";
+      <div className={`h-full ${bgType !== "livemap" ? "pt-[49px]" : ""}`}>
+        {bgType === "livemap" ? (
+          <LeafletMapView
+            mapId={mapId}
+            mapName={mapData?.name}
+            kumaMonitors={kumaMonitors}
+            kumaConnected={kumaConnected}
+            onBack={onBack}
+            initialNodes={(mapData?.nodes || []).map((n: any) => ({
+              id: n.id,
+              kuma_monitor_id: n.kuma_monitor_id,
+              label: n.label || "Node",
+              x: n.x,
+              y: n.y,
+              icon: n.icon || "server",
+            }))}
+            initialEdges={(mapData?.edges || []).map((e: any) => ({
+              id: e.id,
+              source_node_id: e.source_node_id,
+              target_node_id: e.target_node_id,
+              label: e.label,
+              color: e.color || "#4b5563",
+              custom_data: e.custom_data,
+            }))}
+            onSave={async (savedNodes, savedEdges) => {
+              setSaving(true);
+              try {
+                await fetch(`/api/maps/${mapId}/state`, {
+                  method: "PUT",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ nodes: savedNodes, edges: savedEdges }),
+                });
+                toast.success("Mapa guardado");
+              } catch { toast.error("Error al guardar"); }
+              finally { setSaving(false); }
             }}
-            maskColor="rgba(0,0,0,0.2)"
-            style={{ background: "#111", borderRadius: "0.75rem", border: "1px solid rgba(255,255,255,0.06)" }}
           />
-        </ReactFlow>
+        ) : (
+          <ReactFlow
+            nodes={nodes}
+            edges={edges}
+            onNodesChange={onNodesChange}
+            onEdgesChange={onEdgesChange}
+            onConnect={onConnect}
+            onDrop={onDrop}
+            onDragOver={onDragOver}
+            onNodeDoubleClick={onNodeDoubleClick}
+            onEdgeDoubleClick={onEdgeDoubleClick}
+            onNodeContextMenu={onNodeContextMenu}
+            onEdgeContextMenu={onEdgeContextMenu}
+            onPaneContextMenu={onPaneContextMenu}
+            nodeTypes={nodeTypes}
+            edgeTypes={edgeTypes}
+            fitView
+            snapToGrid
+            snapGrid={[20, 20]}
+            deleteKeyCode="Delete"
+            defaultEdgeOptions={{
+              type: "interface",
+              style: { stroke: "#4b5563", strokeWidth: 2 },
+              animated: false,
+            }}
+            style={{ background: "#0a0a0a" }}
+          >
+            {bgImage && (
+              <div className="absolute inset-0 pointer-events-none" style={{
+                backgroundImage: `url(${bgImage})`,
+                backgroundSize: `${bgScale * 100}%`,
+                backgroundRepeat: "no-repeat",
+                backgroundPosition: "center",
+                opacity: 0.4,
+              }} />
+            )}
+            {bgType === "grid" && (
+              <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="#1a1a1a" />
+            )}
+            <Controls className="!bottom-4 !left-4" />
+          </ReactFlow>
+        )}
       </div>
 
       <MonitorPanel
-        monitors={kumaMonitors}
+        monitors={filteredMonitors}
         connected={kumaConnected}
         collapsed={panelCollapsed}
         onToggleCollapse={() => setPanelCollapsed((v) => !v)}
+        groupName={mapData?.kuma_group_id ? kumaMonitors.find(m => m.id === mapData.kuma_group_id)?.name : undefined}
+        onAutoImport={mapData?.kuma_group_id ? handleAutoImport : undefined}
       />
 
       {/* Context Menu */}

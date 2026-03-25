@@ -2,6 +2,7 @@
 
 import { memo, useState } from "react";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
+import MiniChart from "./MiniChart";
 import {
   Globe,
   Server,
@@ -187,6 +188,14 @@ function KumaMonitorNode({ data, selected }: NodeProps & { data: KumaNodeData })
                   </span>
                 </div>
               )}
+            </div>
+          )}
+
+          {/* Live ping chart */}
+          {data.kumaMonitorId != null && (
+            <div className="mt-2 pt-2" style={{ borderTop: "1px solid rgba(255,255,255,0.06)" }}>
+              <div className="text-[9px] text-[#666] mb-1 font-semibold uppercase tracking-wider">Latencia en vivo</div>
+              <MiniChart monitorId={data.kumaMonitorId as number} width={190} height={45} />
             </div>
           )}
 

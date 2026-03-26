@@ -75,6 +75,7 @@ export default function LeafletMapView({
   const markersRef = useRef<Map<string, any>>(new Map());
   const polylinesRef = useRef<Map<string, any>>(new Map());
   const fovLayersRef = useRef<Map<string, any>>(new Map());
+  const camHandlesRef = useRef<Map<string, any>>(new Map());
   const nodesRef = useRef<SavedNode[]>(initialNodes);
   const edgesRef = useRef<SavedEdge[]>(initialEdges);
   const LRef = useRef<any>(null);
@@ -103,6 +104,8 @@ export default function LeafletMapView({
   const [assignModalOpen, setAssignModalOpen] = useState(false);
   const [assignNodeId, setAssignNodeId] = useState<string>("");
   const [assignSearch, setAssignSearch] = useState("");
+  const [colorPickerOpen, setColorPickerOpen] = useState(false);
+  const [colorPickerNodeId, setColorPickerNodeId] = useState<string>("");
 
   // Keep ref in sync with state for closures
   useEffect(() => { linkSourceRef.current = linkSource; }, [linkSource]);
@@ -244,6 +247,8 @@ export default function LeafletMapView({
     markersRef.current.clear();
     fovLayersRef.current.forEach((l) => { try { map.removeLayer(l); } catch {} });
     fovLayersRef.current.clear();
+    camHandlesRef.current.forEach((h) => { try { map.removeLayer(h); } catch {} });
+    camHandlesRef.current.clear();
 
     nodesRef.current.forEach((node) => {
       const isLabel = node.icon === "_textLabel";
@@ -286,81 +291,89 @@ export default function LeafletMapView({
         draggable: true,
       });
 
-      // Camera FOV cone
+      // Camera FOV cone + interactive handles
       if (isCamera) {
         const fovColor = cd.fovColor || color;
         const fovOpacity = cd.fovOpacity ?? 0.18;
-        const rad = (Math.PI / 180);
-        const startAngle = rotation - fov / 2;
-        const endAngle = rotation + fov / 2;
-        const points: [number, number][] = [[node.x, node.y]];
-        for (let a = startAngle; a <= endAngle; a += 2) {
-          points.push([
-            node.x + fovRange * Math.cos(a * rad),
-            node.y + fovRange * Math.sin(a * rad),
-          ]);
+        const radConst = (Math.PI / 180);
+
+        function buildFovPoints(cx: number, cy: number, rot: number, range: number, fovAngle: number): [number, number][] {
+          const pts: [number, number][] = [[cx, cy]];
+          const s = rot - fovAngle / 2;
+          const e = rot + fovAngle / 2;
+          for (let a = s; a <= e; a += 2) pts.push([cx + range * Math.cos(a * radConst), cy + range * Math.sin(a * radConst)]);
+          pts.push([cx, cy]);
+          return pts;
         }
-        points.push([node.x, node.y]);
-        const fovPoly = L.polygon(points, {
-          color: fovColor,
-          fillColor: fovColor,
-          fillOpacity: fovOpacity,
-          weight: 1,
-          opacity: fovOpacity + 0.2,
-          interactive: false,
+
+        const fovPoly = L.polygon(buildFovPoints(node.x, node.y, rotation, fovRange, fov), {
+          color: fovColor, fillColor: fovColor, fillOpacity: fovOpacity,
+          weight: 1, opacity: Math.min(1, fovOpacity + 0.2), interactive: false,
         });
         fovPoly.addTo(map);
         fovLayersRef.current.set(node.id, fovPoly);
 
-        // Mouse rotation: hold Shift + drag on map near camera to rotate
-        let rotating = false;
-        marker.on("mousedown", (e: any) => {
-          if (e.originalEvent.shiftKey) {
-            rotating = true;
-            map.dragging.disable();
-            e.originalEvent.preventDefault();
-          }
+        // ── Rotation handle (◎ at the edge of the cone center direction) ──
+        const rotHandleLat = node.x + fovRange * 0.7 * Math.cos(rotation * radConst);
+        const rotHandleLng = node.y + fovRange * 0.7 * Math.sin(rotation * radConst);
+        const rotHandle = L.marker([rotHandleLat, rotHandleLng], {
+          icon: L.divIcon({
+            className: "cam-handle",
+            html: `<div style="width:14px;height:14px;border-radius:50%;background:rgba(59,130,246,0.8);border:2px solid #60a5fa;box-shadow:0 0 8px rgba(59,130,246,0.6);cursor:grab;"></div>`,
+            iconSize: [14, 14], iconAnchor: [7, 7],
+          }),
+          draggable: true,
         });
-        const onMouseMove = (e: any) => {
-          if (!rotating) return;
-          const markerPos = marker.getLatLng();
-          const mousePos = e.latlng;
-          const angle = Math.atan2(mousePos.lng - markerPos.lng, mousePos.lat - markerPos.lat) * (180 / Math.PI);
+        rotHandle.bindTooltip("Rotar", { direction: "top", offset: [0, -10], className: "leaflet-label-dark" });
+        rotHandle.on("drag", () => {
+          const hp = rotHandle.getLatLng();
+          const mp = marker.getLatLng();
+          const angle = Math.atan2(hp.lng - mp.lng, hp.lat - mp.lat) * (180 / Math.PI);
           const idx = nodesRef.current.findIndex((n) => n.id === node.id);
           if (idx >= 0) {
             const ncd = nodesRef.current[idx].custom_data ? JSON.parse(nodesRef.current[idx].custom_data!) : {};
             ncd.rotation = Math.round(angle);
             nodesRef.current[idx] = { ...nodesRef.current[idx], custom_data: JSON.stringify(ncd) };
-            // Update FOV polygon live
-            const newStart = Math.round(angle) - fov / 2;
-            const newEnd = Math.round(angle) + fov / 2;
-            const newPoints: [number, number][] = [[node.x, node.y]];
-            for (let a = newStart; a <= newEnd; a += 2) {
-              newPoints.push([node.x + fovRange * Math.cos(a * rad), node.y + fovRange * Math.sin(a * rad)]);
-            }
-            newPoints.push([node.x, node.y]);
-            fovPoly.setLatLngs(newPoints);
-            // Update marker icon rotation
-            marker.setIcon(L.divIcon({
-              className: "camera-marker",
-              html: `<div style="position:relative;display:flex;align-items:center;justify-content:center;transform:rotate(${Math.round(angle)}deg);">
-                <div style="width:22px;height:22px;border-radius:4px;background:${color};border:2px solid ${color};box-shadow:0 0 12px ${color}88;cursor:pointer;display:flex;align-items:center;justify-content:center;">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m16.24 7.76-1.804 5.412a2 2 0 0 1-1.265 1.265L7.76 16.24l1.804-5.412a2 2 0 0 1 1.265-1.265z"/><circle cx="12" cy="12" r="10"/></svg>
-                </div>
-              </div>`,
-              iconSize: [22, 22],
-              iconAnchor: [11, 11],
-            }));
+            fovPoly.setLatLngs(buildFovPoints(mp.lat, mp.lng, Math.round(angle), ncd.fovRange || fovRange, ncd.fov || fov));
+            // Move range handle too
+            const rh = camHandlesRef.current.get(node.id + "-range");
+            if (rh) rh.setLatLng([mp.lat + (ncd.fovRange || fovRange) * Math.cos(Math.round(angle) * radConst), mp.lng + (ncd.fovRange || fovRange) * Math.sin(Math.round(angle) * radConst)]);
           }
-        };
-        const onMouseUp = () => {
-          if (rotating) {
-            rotating = false;
-            map.dragging.enable();
+        });
+        rotHandle.addTo(map);
+        camHandlesRef.current.set(node.id + "-rot", rotHandle);
+
+        // ── Range handle (▸ at the tip of the cone) ──
+        const rangeHandleLat = node.x + fovRange * Math.cos(rotation * radConst);
+        const rangeHandleLng = node.y + fovRange * Math.sin(rotation * radConst);
+        const rangeHandle = L.marker([rangeHandleLat, rangeHandleLng], {
+          icon: L.divIcon({
+            className: "cam-handle",
+            html: `<div style="width:12px;height:12px;border-radius:2px;background:rgba(34,197,94,0.8);border:2px solid #4ade80;box-shadow:0 0 8px rgba(34,197,94,0.5);cursor:ns-resize;transform:rotate(45deg);"></div>`,
+            iconSize: [12, 12], iconAnchor: [6, 6],
+          }),
+          draggable: true,
+        });
+        rangeHandle.bindTooltip("Alcance", { direction: "top", offset: [0, -10], className: "leaflet-label-dark" });
+        rangeHandle.on("drag", () => {
+          const rp = rangeHandle.getLatLng();
+          const mp = marker.getLatLng();
+          const dist = Math.sqrt(Math.pow(rp.lat - mp.lat, 2) + Math.pow(rp.lng - mp.lng, 2));
+          const newRange = Math.max(0.0005, dist);
+          const idx = nodesRef.current.findIndex((n) => n.id === node.id);
+          if (idx >= 0) {
+            const ncd = nodesRef.current[idx].custom_data ? JSON.parse(nodesRef.current[idx].custom_data!) : {};
+            ncd.fovRange = parseFloat(newRange.toFixed(6));
+            nodesRef.current[idx] = { ...nodesRef.current[idx], custom_data: JSON.stringify(ncd) };
+            const rot = ncd.rotation || rotation;
+            fovPoly.setLatLngs(buildFovPoints(mp.lat, mp.lng, rot, newRange, ncd.fov || fov));
+            // Move rotation handle proportionally
+            const roh = camHandlesRef.current.get(node.id + "-rot");
+            if (roh) roh.setLatLng([mp.lat + newRange * 0.7 * Math.cos(rot * radConst), mp.lng + newRange * 0.7 * Math.sin(rot * radConst)]);
           }
-        };
-        map.on("mousemove", onMouseMove);
-        map.on("mouseup", onMouseUp);
+        });
+        rangeHandle.addTo(map);
+        camHandlesRef.current.set(node.id + "-range", rangeHandle);
       }
 
       // Label tooltip (always visible) — only for non-label/camera nodes
@@ -712,22 +725,13 @@ export default function LeafletMapView({
       // Camera-specific: rotate and FOV
       ...(node?.icon === "_camera" ? [
         {
-          label: "Rotar (Shift+arrastrar)",
-          icon: menuIcons.RotateCcw,
-          onClick: () => {
-            toast.info("Manten Shift y arrastra desde la camara para rotar", { duration: 5000 });
-          },
-        },
-        {
-          label: "Campo de vision",
+          label: "Angulo de vision (FOV)",
           icon: menuIcons.Maximize2,
           onClick: () => {
             const cd = node.custom_data ? JSON.parse(node.custom_data) : {};
-            const fov = prompt("Angulo FOV (grados, ej: 60, 90, 120):", String(cd.fov || 60));
-            const range = prompt("Alcance (0.001=~100m, 0.005=~500m):", String(cd.fovRange || 0.002));
-            if (fov !== null && range !== null) {
-              cd.fov = parseInt(fov) || 60;
-              cd.fovRange = parseFloat(range) || 0.002;
+            const fov = prompt("Angulo FOV (grados, ej: 60, 90, 120, 180):", String(cd.fov || 60));
+            if (fov !== null) {
+              cd.fov = Math.max(5, Math.min(360, parseInt(fov) || 60));
               const idx = nodesRef.current.findIndex((n) => n.id === nodeId);
               if (idx >= 0) {
                 nodesRef.current[idx] = { ...nodesRef.current[idx], custom_data: JSON.stringify(cd) };
@@ -737,36 +741,11 @@ export default function LeafletMapView({
           },
         },
         {
-          label: "Color del area",
+          label: "Color y estilo",
           icon: menuIcons.Palette,
           onClick: () => {
-            const cd = node.custom_data ? JSON.parse(node.custom_data) : {};
-            const colors = ["#22c55e", "#3b82f6", "#ef4444", "#f59e0b", "#8b5cf6", "#ec4899", "#06b6d4", "#ffffff"];
-            const choice = prompt(`Color (${colors.join(", ")})\no hex (#ff0000):`, cd.fovColor || "#22c55e");
-            if (choice) {
-              cd.fovColor = choice;
-              const idx = nodesRef.current.findIndex((n) => n.id === nodeId);
-              if (idx >= 0) {
-                nodesRef.current[idx] = { ...nodesRef.current[idx], custom_data: JSON.stringify(cd) };
-                if (LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current);
-              }
-            }
-          },
-        },
-        {
-          label: "Transparencia",
-          icon: menuIcons.Maximize2,
-          onClick: () => {
-            const cd = node.custom_data ? JSON.parse(node.custom_data) : {};
-            const val = prompt("Opacidad (0.05 = casi invisible, 0.5 = medio, 1 = solido):", String(cd.fovOpacity ?? 0.18));
-            if (val !== null) {
-              cd.fovOpacity = Math.max(0.01, Math.min(1, parseFloat(val) || 0.18));
-              const idx = nodesRef.current.findIndex((n) => n.id === nodeId);
-              if (idx >= 0) {
-                nodesRef.current[idx] = { ...nodesRef.current[idx], custom_data: JSON.stringify(cd) };
-                if (LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current);
-              }
-            }
+            setColorPickerNodeId(nodeId);
+            setColorPickerOpen(true);
           },
         },
       ] : []),
@@ -1267,6 +1246,99 @@ export default function LeafletMapView({
         </div>
       )}
 
+      {/* Color Picker Modal */}
+      {colorPickerOpen && (() => {
+        const cpNode = nodesRef.current.find((n) => n.id === colorPickerNodeId);
+        const cpCd = cpNode?.custom_data ? JSON.parse(cpNode.custom_data) : {};
+        const currentColor = cpCd.fovColor || "#22c55e";
+        const currentOpacity = cpCd.fovOpacity ?? 0.18;
+
+        const colorOptions = [
+          { color: "#22c55e", name: "Verde" },
+          { color: "#3b82f6", name: "Azul" },
+          { color: "#ef4444", name: "Rojo" },
+          { color: "#f59e0b", name: "Naranja" },
+          { color: "#8b5cf6", name: "Violeta" },
+          { color: "#ec4899", name: "Rosa" },
+          { color: "#06b6d4", name: "Cyan" },
+          { color: "#f97316", name: "Naranja fuerte" },
+          { color: "#14b8a6", name: "Teal" },
+          { color: "#a855f7", name: "Purpura" },
+          { color: "#ffffff", name: "Blanco" },
+          { color: "#facc15", name: "Amarillo" },
+        ];
+
+        const opacityOptions = [
+          { value: 0.08, name: "Sutil" },
+          { value: 0.15, name: "Suave" },
+          { value: 0.25, name: "Medio" },
+          { value: 0.40, name: "Visible" },
+          { value: 0.60, name: "Fuerte" },
+          { value: 0.80, name: "Intenso" },
+        ];
+
+        const applyChange = (fovColor?: string, fovOpacity?: number) => {
+          const idx = nodesRef.current.findIndex((n) => n.id === colorPickerNodeId);
+          if (idx >= 0) {
+            const ncd = nodesRef.current[idx].custom_data ? JSON.parse(nodesRef.current[idx].custom_data!) : {};
+            if (fovColor !== undefined) ncd.fovColor = fovColor;
+            if (fovOpacity !== undefined) ncd.fovOpacity = fovOpacity;
+            nodesRef.current[idx] = { ...nodesRef.current[idx], custom_data: JSON.stringify(ncd) };
+            if (LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current);
+          }
+        };
+
+        return (
+          <div className="fixed inset-0 z-[99999] flex items-center justify-center" style={{ background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }}
+            onClick={() => setColorPickerOpen(false)}>
+            <div className="rounded-2xl w-[340px] overflow-hidden" onClick={(e) => e.stopPropagation()}
+              style={{ background: "rgba(16,16,16,0.98)", border: "1px solid rgba(255,255,255,0.08)", boxShadow: "0 20px 60px rgba(0,0,0,0.7)" }}>
+              <div className="px-4 py-3 flex items-center gap-2" style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+                <div className="h-4 w-4 rounded" style={{ background: currentColor, opacity: currentOpacity + 0.3 }} />
+                <span className="text-sm font-bold text-[#ededed]">Color y Transparencia</span>
+                <button onClick={() => setColorPickerOpen(false)} className="ml-auto text-[#555] hover:text-[#ededed] text-lg leading-none">&times;</button>
+              </div>
+
+              {/* Colors */}
+              <div className="px-4 py-3" style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+                <div className="text-[10px] text-[#666] font-bold uppercase tracking-wider mb-2">Color del area</div>
+                <div className="grid grid-cols-6 gap-2">
+                  {colorOptions.map((c) => (
+                    <button key={c.color} onClick={() => applyChange(c.color)} title={c.name}
+                      className="w-10 h-10 rounded-xl transition-all hover:scale-110"
+                      style={{
+                        background: c.color,
+                        border: currentColor === c.color ? "3px solid #fff" : "2px solid rgba(255,255,255,0.1)",
+                        boxShadow: currentColor === c.color ? `0 0 12px ${c.color}88` : "none",
+                      }}
+                    />
+                  ))}
+                </div>
+              </div>
+
+              {/* Opacity */}
+              <div className="px-4 py-3">
+                <div className="text-[10px] text-[#666] font-bold uppercase tracking-wider mb-2">Transparencia</div>
+                <div className="grid grid-cols-3 gap-2">
+                  {opacityOptions.map((o) => (
+                    <button key={o.value} onClick={() => applyChange(undefined, o.value)}
+                      className="rounded-xl px-3 py-2 text-xs font-semibold transition-all"
+                      style={{
+                        background: currentOpacity === o.value ? `${currentColor}33` : "rgba(255,255,255,0.03)",
+                        border: `1px solid ${currentOpacity === o.value ? currentColor + "66" : "rgba(255,255,255,0.06)"}`,
+                        color: currentOpacity === o.value ? currentColor : "#888",
+                      }}>
+                      <div className="h-3 rounded mb-1" style={{ background: currentColor, opacity: o.value }} />
+                      {o.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Custom CSS */}
       <style>{`
         .leaflet-label-dark {
@@ -1315,6 +1387,7 @@ export default function LeafletMapView({
         .custom-marker,
         .text-label-marker,
         .camera-marker,
+        .cam-handle,
         .interface-label,
         .traffic-label {
           background: none !important;

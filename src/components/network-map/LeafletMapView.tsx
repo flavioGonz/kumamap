@@ -111,8 +111,48 @@ export default function LeafletMapView({
   const [lensPickerOpen, setLensPickerOpen] = useState(false);
   const [lensPickerNodeId, setLensPickerNodeId] = useState<string>("");
 
+  // Undo history
+  const undoStackRef = useRef<Array<{ nodes: SavedNode[]; edges: SavedEdge[] }>>([]);
+  const MAX_UNDO = 30;
+
+  function pushUndo() {
+    undoStackRef.current.push({
+      nodes: JSON.parse(JSON.stringify(nodesRef.current)),
+      edges: JSON.parse(JSON.stringify(edgesRef.current)),
+    });
+    if (undoStackRef.current.length > MAX_UNDO) undoStackRef.current.shift();
+  }
+
+  function performUndo() {
+    const prev = undoStackRef.current.pop();
+    if (!prev) { toast.info("Nada que deshacer"); return; }
+    nodesRef.current = prev.nodes;
+    edgesRef.current = prev.edges;
+    if (LRef.current && mapRef.current) {
+      renderNodes(LRef.current, mapRef.current);
+      renderEdges(LRef.current, mapRef.current);
+    }
+    toast.success("Deshecho");
+  }
+
   // Keep ref in sync with state for closures
   useEffect(() => { linkSourceRef.current = linkSource; }, [linkSource]);
+
+  // Keyboard shortcuts: Escape = cancel link, Ctrl+Z = undo
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        if (linkSourceRef.current) { cancelLinkCreation(); e.preventDefault(); }
+        setCtxMenu(null);
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === "z") {
+        e.preventDefault();
+        performUndo();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
 
   // Map style
   const [mapStyle, setMapStyle] = useState<"dark" | "satellite" | "streets">(initialViewState?.mapStyle || "dark");
@@ -504,6 +544,7 @@ export default function LeafletMapView({
 
       // ── Drag: live update FOV cone, handles, edges, shadow ──
       marker.on("dragstart", () => {
+        pushUndo();
         const el = marker.getElement();
         if (el) {
           el.style.filter = "drop-shadow(0 0 12px rgba(59,130,246,0.7))";
@@ -884,6 +925,7 @@ export default function LeafletMapView({
       }
       toast.success("Conexion actualizada");
     } else {
+      pushUndo();
       const newEdge: SavedEdge = {
         id: `edge-${Date.now()}`,
         source_node_id: sourceId,
@@ -943,6 +985,7 @@ export default function LeafletMapView({
           danger: true,
           divider: true,
           onClick: () => {
+            pushUndo();
             nodesRef.current = nodesRef.current.filter((n) => n.id !== nodeId);
             edgesRef.current = edgesRef.current.filter((e) => e.source_node_id !== nodeId && e.target_node_id !== nodeId);
             if (LRef.current && mapRef.current) { renderNodes(LRef.current, mapRef.current); renderEdges(LRef.current, mapRef.current); }
@@ -975,6 +1018,7 @@ export default function LeafletMapView({
           danger: true,
           divider: true,
           onClick: () => {
+            pushUndo();
             nodesRef.current = nodesRef.current.filter((n) => n.id !== nodeId);
             if (LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current);
             toast.success("Etiqueta eliminada");
@@ -1073,6 +1117,7 @@ export default function LeafletMapView({
         danger: true,
         divider: true,
         onClick: () => {
+          pushUndo();
           nodesRef.current = nodesRef.current.filter((n) => n.id !== nodeId);
           edgesRef.current = edgesRef.current.filter(
             (e) => e.source_node_id !== nodeId && e.target_node_id !== nodeId
@@ -1126,6 +1171,7 @@ export default function LeafletMapView({
         danger: true,
         divider: true,
         onClick: () => {
+          pushUndo();
           edgesRef.current = edgesRef.current.filter((e) => e.id !== edgeId);
           if (LRef.current && mapRef.current) renderEdges(LRef.current, mapRef.current);
           toast.success("Conexion eliminada");

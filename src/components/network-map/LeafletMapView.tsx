@@ -1016,10 +1016,10 @@ export default function LeafletMapView({
         onDragOver={handleDragOver}
       />
 
-      {/* ── Dark Overlay for Satellite ── */}
-      {overlayOpacity > 0 && (
-        <div className="absolute inset-0 pointer-events-none" style={{ zIndex: 401, background: `rgba(0,0,0,${overlayOpacity})` }} />
-      )}
+      {/* ── Dark Overlay: CSS filter on tile pane only ── */}
+      <style>{`
+        .leaflet-tile-pane { filter: brightness(${1 - overlayOpacity}); transition: filter 0.3s; }
+      `}</style>
 
       {/* ── Floating Top Bar ── */}
       <div

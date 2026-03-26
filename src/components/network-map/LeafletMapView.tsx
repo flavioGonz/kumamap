@@ -802,6 +802,11 @@ export default function LeafletMapView({
         marker.setIcon(createMarkerIcon(L, color, false, true));
       }
 
+      // Disable dragging on all markers except source (so click works on targets)
+      markersRef.current.forEach((m, id) => {
+        if (id !== nodeId) m.dragging?.disable();
+      });
+
       // Create rubber-band line from source to cursor
       if (node) {
         const srcLatLng = [node.x, node.y] as [number, number];
@@ -922,6 +927,9 @@ export default function LeafletMapView({
       dragLineRef.current = null;
     }
 
+    // Re-enable dragging on all markers
+    markersRef.current.forEach((m) => m.dragging?.enable());
+
     // Prevent self-link
     if (linkSource === targetId) {
       toast.error("No se puede conectar un nodo consigo mismo");
@@ -986,6 +994,8 @@ export default function LeafletMapView({
       try { mapRef.current.removeLayer(dragLineRef.current); } catch {}
       dragLineRef.current = null;
     }
+    // Re-enable dragging on all markers
+    markersRef.current.forEach((m) => m.dragging?.enable());
     linkSourceRef.current = null;
     setLinkSource(null);
     if (LRef.current && mapRef.current) {

@@ -21,6 +21,8 @@ import {
   Filter,
   ExternalLink,
   Copy,
+  Download,
+  Upload,
 } from "lucide-react";
 import type { KumaMonitor } from "@/components/network-map/MonitorPanel";
 import NetworkMapEditor from "@/components/network-map/NetworkMapEditor";
@@ -194,13 +196,46 @@ function MapListView({
             </div>
           </div>
         </div>
-        <button
-          onClick={() => setShowCreate((v) => !v)}
-          className="flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition-all"
-          style={{ background: "rgba(59,130,246,0.15)", border: "1px solid rgba(59,130,246,0.3)", color: "#60a5fa" }}
-        >
-          <Plus className="h-4 w-4" /> Nuevo Mapa
-        </button>
+        <div className="flex items-center gap-2">
+          {/* Import */}
+          <label
+            className="flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition-all cursor-pointer"
+            style={{ background: "rgba(34,197,94,0.1)", border: "1px solid rgba(34,197,94,0.25)", color: "#4ade80" }}
+          >
+            <Upload className="h-4 w-4" /> Importar
+            <input type="file" accept=".json" className="hidden" onChange={async (e) => {
+              const file = e.target.files?.[0];
+              if (!file) return;
+              try {
+                const text = await file.text();
+                const data = JSON.parse(text);
+                const res = await fetch(apiUrl("/api/maps/import"), {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify(data),
+                });
+                const result = await res.json();
+                if (res.ok) {
+                  toast.success("Mapa importado", { description: `${result.name}: ${result.nodesCount} nodos, ${result.edgesCount} links` });
+                  fetchMaps();
+                } else {
+                  toast.error("Error al importar", { description: result.error });
+                }
+              } catch {
+                toast.error("Archivo invalido");
+              }
+              e.target.value = "";
+            }} />
+          </label>
+          {/* Create */}
+          <button
+            onClick={() => setShowCreate((v) => !v)}
+            className="flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition-all"
+            style={{ background: "rgba(59,130,246,0.15)", border: "1px solid rgba(59,130,246,0.3)", color: "#60a5fa" }}
+          >
+            <Plus className="h-4 w-4" /> Nuevo Mapa
+          </button>
+        </div>
       </div>
 
       {/* Create form (collapsible) */}
@@ -354,6 +389,10 @@ function MapListView({
                 <button onClick={(e) => { e.stopPropagation(); setEditingId(map.id); setEditValue(map.name); }} title="Renombrar"
                   className="rounded-lg p-1.5 text-[#888] hover:text-[#ededed] hover:bg-white/5 transition-all opacity-0 group-hover/row:opacity-100">
                   <Pencil className="h-3.5 w-3.5" />
+                </button>
+                <button onClick={(e) => { e.stopPropagation(); window.open(apiUrl(`/api/maps/${map.id}/export`), "_blank"); }} title="Exportar JSON"
+                  className="rounded-lg p-1.5 text-[#888] hover:text-emerald-400 hover:bg-emerald-500/10 transition-all opacity-0 group-hover/row:opacity-100">
+                  <Download className="h-3.5 w-3.5" />
                 </button>
                 <button onClick={(e) => { e.stopPropagation(); confirm(`Eliminar "${map.name}"?`) && deleteMap(map.id, map.name); }} title="Eliminar"
                   className="rounded-lg p-1.5 text-[#888] hover:text-red-400 hover:bg-red-500/10 transition-all opacity-0 group-hover/row:opacity-100">

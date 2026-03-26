@@ -879,6 +879,7 @@ function CanvasInner({
               x: n.x,
               y: n.y,
               icon: n.icon || "server",
+              custom_data: n.custom_data || null,
             }))}
             initialEdges={(mapData?.edges || []).map((e: any) => ({
               id: e.id,

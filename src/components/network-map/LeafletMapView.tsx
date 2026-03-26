@@ -15,6 +15,7 @@ interface SavedNode {
   x: number; // latitude
   y: number; // longitude
   icon: string;
+  custom_data?: string | null;
 }
 
 interface SavedEdge {
@@ -73,6 +74,7 @@ export default function LeafletMapView({
   const mapRef = useRef<any>(null);
   const markersRef = useRef<Map<string, any>>(new Map());
   const polylinesRef = useRef<Map<string, any>>(new Map());
+  const fovLayersRef = useRef<Map<string, any>>(new Map());
   const nodesRef = useRef<SavedNode[]>(initialNodes);
   const edgesRef = useRef<SavedEdge[]>(initialEdges);
   const LRef = useRef<any>(null);
@@ -240,27 +242,76 @@ export default function LeafletMapView({
     if (!map || !map.getContainer()) return;
     markersRef.current.forEach((m) => { try { map.removeLayer(m); } catch {} });
     markersRef.current.clear();
+    fovLayersRef.current.forEach((l) => { try { map.removeLayer(l); } catch {} });
+    fovLayersRef.current.clear();
 
     nodesRef.current.forEach((node) => {
       const isLabel = node.icon === "_textLabel";
+      const isCamera = node.icon === "_camera";
+      const cd = node.custom_data ? JSON.parse(node.custom_data) : {};
       const color = getStatusColor(node.kuma_monitor_id);
       const m = getMonitorData(node.kuma_monitor_id);
       const pulse = !isLabel && (m?.status === 0 || m?.status === 2);
       const isSource = linkSource === node.id;
 
+      const rotation = cd.rotation || 0;
+      const fov = cd.fov || 60;
+      const fovRange = cd.fovRange || 0.002; // ~200m at this lat
+
+      let nodeIcon;
+      if (isLabel) {
+        nodeIcon = L.divIcon({
+          className: "text-label-marker",
+          html: `<div style="background:rgba(0,0,0,0.6);border:1px solid rgba(255,255,255,0.15);backdrop-filter:blur(8px);color:#ededed;font-size:13px;font-weight:700;padding:4px 12px;border-radius:8px;white-space:nowrap;text-shadow:0 1px 4px rgba(0,0,0,0.8);cursor:move;">${node.label}</div>`,
+          iconSize: [0, 0],
+          iconAnchor: [0, 12],
+        });
+      } else if (isCamera) {
+        nodeIcon = L.divIcon({
+          className: "camera-marker",
+          html: `<div style="position:relative;display:flex;align-items:center;justify-content:center;transform:rotate(${rotation}deg);">
+            <div style="width:22px;height:22px;border-radius:4px;background:${color};border:2px solid ${isSource ? "#60a5fa" : color};box-shadow:0 0 12px ${color}88;cursor:pointer;display:flex;align-items:center;justify-content:center;">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m16.24 7.76-1.804 5.412a2 2 0 0 1-1.265 1.265L7.76 16.24l1.804-5.412a2 2 0 0 1 1.265-1.265z"/><circle cx="12" cy="12" r="10"/></svg>
+            </div>
+          </div>`,
+          iconSize: [22, 22],
+          iconAnchor: [11, 11],
+        });
+      } else {
+        nodeIcon = createMarkerIcon(L, color, pulse, isSource);
+      }
+
       const marker = L.marker([node.x, node.y], {
-        icon: isLabel
-          ? L.divIcon({
-              className: "text-label-marker",
-              html: `<div style="background:rgba(0,0,0,0.6);border:1px solid rgba(255,255,255,0.15);backdrop-filter:blur(8px);color:#ededed;font-size:13px;font-weight:700;padding:4px 12px;border-radius:8px;white-space:nowrap;text-shadow:0 1px 4px rgba(0,0,0,0.8);cursor:move;">${node.label}</div>`,
-              iconSize: [0, 0],
-              iconAnchor: [0, 12],
-            })
-          : createMarkerIcon(L, color, pulse, isSource),
+        icon: nodeIcon,
         draggable: true,
       });
 
-      // Label tooltip (always visible) — only for non-label nodes
+      // Camera FOV cone
+      if (isCamera) {
+        const rad = (Math.PI / 180);
+        const startAngle = rotation - fov / 2;
+        const endAngle = rotation + fov / 2;
+        const points: [number, number][] = [[node.x, node.y]];
+        for (let a = startAngle; a <= endAngle; a += 2) {
+          points.push([
+            node.x + fovRange * Math.cos(a * rad),
+            node.y + fovRange * Math.sin(a * rad),
+          ]);
+        }
+        points.push([node.x, node.y]);
+        const fovPoly = L.polygon(points, {
+          color: color,
+          fillColor: color,
+          fillOpacity: 0.15,
+          weight: 1,
+          opacity: 0.4,
+          interactive: false,
+        });
+        fovPoly.addTo(map);
+        fovLayersRef.current.set(node.id, fovPoly);
+      }
+
+      // Label tooltip (always visible) — only for non-label/camera nodes
       if (!isLabel) {
         marker.bindTooltip(node.label, {
           permanent: true,
@@ -324,8 +375,9 @@ export default function LeafletMapView({
         if (idx >= 0) {
           nodesRef.current[idx] = { ...nodesRef.current[idx], x: pos.lat, y: pos.lng };
         }
-        // Re-render edges to update positions
+        // Re-render edges and FOVs
         renderEdges(L, map);
+        if (isCamera) renderNodes(L, map);
       });
 
       marker.addTo(map);
@@ -472,6 +524,7 @@ export default function LeafletMapView({
 
   // ─── Link creation flow ─────────────────────
   function startLinkCreation(nodeId: string) {
+    linkSourceRef.current = nodeId;
     setLinkSource(nodeId);
     const node = nodesRef.current.find((n) => n.id === nodeId);
     toast.info(`Selecciona el nodo destino`, {
@@ -551,6 +604,7 @@ export default function LeafletMapView({
     }
 
     setLinkModalOpen(false);
+    linkSourceRef.current = null;
     setLinkSource(null);
 
     if (LRef.current && mapRef.current) {
@@ -560,6 +614,7 @@ export default function LeafletMapView({
   }
 
   function cancelLinkCreation() {
+    linkSourceRef.current = null;
     setLinkSource(null);
     if (LRef.current && mapRef.current) {
       renderNodes(LRef.current, mapRef.current);
@@ -612,6 +667,43 @@ export default function LeafletMapView({
           }
         },
       }] : []),
+      // Camera-specific: rotate and FOV
+      ...(node?.icon === "_camera" ? [
+        {
+          label: "Rotar camara",
+          icon: menuIcons.RotateCcw,
+          onClick: () => {
+            const cd = node.custom_data ? JSON.parse(node.custom_data) : {};
+            const angle = prompt("Angulo de rotacion (0-360):", String(cd.rotation || 0));
+            if (angle !== null) {
+              cd.rotation = parseInt(angle) || 0;
+              const idx = nodesRef.current.findIndex((n) => n.id === nodeId);
+              if (idx >= 0) {
+                nodesRef.current[idx] = { ...nodesRef.current[idx], custom_data: JSON.stringify(cd) };
+                if (LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current);
+              }
+            }
+          },
+        },
+        {
+          label: "Campo de vision",
+          icon: menuIcons.Maximize2,
+          onClick: () => {
+            const cd = node.custom_data ? JSON.parse(node.custom_data) : {};
+            const fov = prompt("Angulo FOV (grados, ej: 60, 90, 120):", String(cd.fov || 60));
+            const range = prompt("Alcance (0.001 = ~100m, 0.005 = ~500m):", String(cd.fovRange || 0.002));
+            if (fov !== null && range !== null) {
+              cd.fov = parseInt(fov) || 60;
+              cd.fovRange = parseFloat(range) || 0.002;
+              const idx = nodesRef.current.findIndex((n) => n.id === nodeId);
+              if (idx >= 0) {
+                nodesRef.current[idx] = { ...nodesRef.current[idx], custom_data: JSON.stringify(cd) };
+                if (LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current);
+              }
+            }
+          },
+        },
+      ] : []),
       {
         label: "Eliminar nodo",
         icon: menuIcons.Trash2,
@@ -861,6 +953,18 @@ export default function LeafletMapView({
             className="group flex items-center gap-1 rounded-xl px-2 py-1.5 text-[#888] hover:text-[#ededed] hover:bg-white/[0.06] transition-all">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" x2="15" y1="20" y2="20"/><line x1="12" x2="12" y1="4" y2="20"/></svg>
             <span className="text-[10px] font-semibold hidden xl:inline">Etiqueta</span>
+          </button>
+          <button onClick={() => {
+            if (!mapRef.current) return;
+            const center = mapRef.current.getCenter();
+            const id = `cam-${Date.now()}`;
+            nodesRef.current = [...nodesRef.current, { id, kuma_monitor_id: null, label: "Camara", x: center.lat, y: center.lng, icon: "_camera", custom_data: JSON.stringify({ type: "camera", rotation: 0, fov: 60, fovRange: 0.002 }) }];
+            if (LRef.current) renderNodes(LRef.current, mapRef.current);
+            toast.success("Camara agregada — clic derecho para rotar");
+          }} title="Agregar camara con campo de vision"
+            className="group flex items-center gap-1 rounded-xl px-2 py-1.5 text-[#888] hover:text-[#ededed] hover:bg-white/[0.06] transition-all">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m16.24 7.76-1.804 5.412a2 2 0 0 1-1.265 1.265L7.76 16.24l1.804-5.412a2 2 0 0 1 1.265-1.265z"/><circle cx="12" cy="12" r="10"/></svg>
+            <span className="text-[10px] font-semibold hidden xl:inline">Camara</span>
           </button>
           <button onClick={() => {
             if (linkSource) { cancelLinkCreation(); return; }

@@ -190,7 +190,7 @@ export default function LeafletMapView({
       html: `
         <div style="position:relative;display:flex;align-items:center;justify-content:center;">
           ${pulse ? `<div style="position:absolute;width:28px;height:28px;border-radius:50%;background:${color}30;animation:ping 1.5s cubic-bezier(0,0,0.2,1) infinite;"></div>` : ""}
-          <div style="width:18px;height:18px;border-radius:50%;background:radial-gradient(circle,${color}66,${color}22);${ring}box-shadow:0 0 12px ${color}55;cursor:pointer;"></div>
+          <div style="width:18px;height:18px;border-radius:50%;background:${color};${ring}box-shadow:0 0 14px ${color}88, 0 0 4px ${color};cursor:pointer;"></div>
         </div>
       `,
       iconSize: [28, 28],

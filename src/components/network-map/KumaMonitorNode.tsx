@@ -57,15 +57,35 @@ function KumaMonitorNode({ data, selected }: NodeProps & { data: KumaNodeData })
 
   return (
     <div
-      className="relative flex flex-col items-center"
+      className="relative flex flex-col items-center group/node"
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
-      {/* Handles (invisible, around the pulse icon) */}
-      <Handle type="target" position={Position.Top} className="!w-2 !h-2 !bg-transparent !border-0" style={{ top: -2 }} />
-      <Handle type="source" position={Position.Bottom} className="!w-2 !h-2 !bg-transparent !border-0" style={{ bottom: -2 }} />
-      <Handle type="target" position={Position.Left} id="left" className="!w-2 !h-2 !bg-transparent !border-0" style={{ left: -2 }} />
-      <Handle type="source" position={Position.Right} id="right" className="!w-2 !h-2 !bg-transparent !border-0" style={{ right: -2 }} />
+      {/* Connection handles — visible on hover with glow */}
+      {([
+        { type: "target" as const, pos: Position.Top, id: "top", css: { top: -5 } },
+        { type: "source" as const, pos: Position.Bottom, id: "bottom", css: { bottom: -5 } },
+        { type: "target" as const, pos: Position.Left, id: "left", css: { left: -5 } },
+        { type: "source" as const, pos: Position.Right, id: "right", css: { right: -5 } },
+      ]).map((h) => (
+        <Handle
+          key={h.id}
+          type={h.type}
+          position={h.pos}
+          id={h.id === "top" || h.id === "bottom" ? undefined : h.id}
+          className="!rounded-full !transition-all !duration-200"
+          style={{
+            ...h.css,
+            width: 10,
+            height: 10,
+            background: hovered ? status.color : "transparent",
+            border: hovered ? `2px solid ${status.color}` : "2px solid transparent",
+            boxShadow: hovered ? `0 0 8px ${status.color}88` : "none",
+            opacity: hovered ? 1 : 0,
+            cursor: "crosshair",
+          }}
+        />
+      ))}
 
       {/* Label above */}
       <div

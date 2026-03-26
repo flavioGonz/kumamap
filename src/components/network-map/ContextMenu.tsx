@@ -37,31 +37,40 @@ export default function ContextMenu({ x, y, items, onClose }: ContextMenuProps) 
           backdropFilter: "blur(20px)",
         }}
       >
-        {items.map((item, i) => (
-          <div key={i}>
-            {item.divider && (
-              <div className="my-1 mx-2" style={{ borderTop: "1px solid rgba(255,255,255,0.06)" }} />
-            )}
-            <button
-              onClick={() => { item.onClick(); onClose(); }}
-              className="flex w-full items-center gap-2.5 px-3 py-1.5 text-xs transition-all"
-              style={{ color: item.danger ? "#ef4444" : "#a0a0a0" }}
-              onMouseEnter={(e) => {
-                (e.currentTarget as HTMLElement).style.background = item.danger
-                  ? "rgba(239,68,68,0.1)"
-                  : "rgba(255,255,255,0.05)";
-                (e.currentTarget as HTMLElement).style.color = item.danger ? "#f87171" : "#ededed";
-              }}
-              onMouseLeave={(e) => {
-                (e.currentTarget as HTMLElement).style.background = "transparent";
-                (e.currentTarget as HTMLElement).style.color = item.danger ? "#ef4444" : "#a0a0a0";
-              }}
-            >
-              <item.icon className="h-3.5 w-3.5" />
-              {item.label}
-            </button>
-          </div>
-        ))}
+        {items.map((item, i) => {
+          // Divider-only separator
+          if (item.divider && !item.label) {
+            return <div key={i} className="my-1 mx-2" style={{ borderTop: "1px solid rgba(255,255,255,0.06)" }} />;
+          }
+          const isLink = item.label.startsWith("Link →");
+          return (
+            <div key={i}>
+              {item.divider && (
+                <div className="my-1 mx-2" style={{ borderTop: "1px solid rgba(255,255,255,0.06)" }} />
+              )}
+              <button
+                onClick={() => { item.onClick(); onClose(); }}
+                className="flex w-full items-center gap-2.5 px-3 py-1.5 text-xs transition-all rounded-md mx-0"
+                style={{ color: item.danger ? "#ef4444" : isLink ? "#60a5fa" : "#a0a0a0" }}
+                onMouseEnter={(e) => {
+                  (e.currentTarget as HTMLElement).style.background = item.danger
+                    ? "rgba(239,68,68,0.1)"
+                    : isLink
+                    ? "rgba(59,130,246,0.1)"
+                    : "rgba(255,255,255,0.05)";
+                  (e.currentTarget as HTMLElement).style.color = item.danger ? "#f87171" : "#ededed";
+                }}
+                onMouseLeave={(e) => {
+                  (e.currentTarget as HTMLElement).style.background = "transparent";
+                  (e.currentTarget as HTMLElement).style.color = item.danger ? "#ef4444" : isLink ? "#60a5fa" : "#a0a0a0";
+                }}
+              >
+                <item.icon className="h-3.5 w-3.5" />
+                <span className="truncate max-w-[180px]">{item.label}</span>
+              </button>
+            </div>
+          );
+        })}
       </div>
     </>
   );

@@ -34,30 +34,82 @@ import { apiUrl } from "@/lib/api";
 import { Pencil } from "lucide-react";
 
 // ─── Custom Edge with interface labels ──────────
-function InterfaceEdge({ id, sourceX, sourceY, targetX, targetY, data, style }: any) {
+function InterfaceEdge({ id, sourceX, sourceY, targetX, targetY, data, style, selected }: any) {
   const [edgePath, labelX, labelY] = getBezierPath({ sourceX, sourceY, targetX, targetY });
+
+  // Position interface labels near source/target
+  const srcLabelX = sourceX + (targetX - sourceX) * 0.18;
+  const srcLabelY = sourceY + (targetY - sourceY) * 0.18;
+  const tgtLabelX = sourceX + (targetX - sourceX) * 0.82;
+  const tgtLabelY = sourceY + (targetY - sourceY) * 0.82;
 
   return (
     <>
-      <BaseEdge id={id} path={edgePath} style={style} />
+      <BaseEdge
+        id={id}
+        path={edgePath}
+        style={{
+          ...style,
+          strokeWidth: selected ? 3 : 2,
+          filter: selected ? `drop-shadow(0 0 5px ${style?.stroke || "#4b5563"}88)` : undefined,
+        }}
+      />
       <EdgeLabelRenderer>
+        {/* Source interface badge */}
         {data?.sourceInterface && (
-          <div className="nodrag nopan absolute text-[9px] font-bold rounded px-1 py-0.5" style={{
-            transform: `translate(-50%, -50%) translate(${sourceX + (targetX - sourceX) * 0.15}px, ${sourceY + (targetY - sourceY) * 0.15}px)`,
-            background: "rgba(59,130,246,0.2)", border: "1px solid rgba(59,130,246,0.4)", color: "#60a5fa", pointerEvents: "all",
-          }}>{data.sourceInterface}</div>
+          <div
+            className="nodrag nopan absolute text-[8px] font-bold rounded-md px-1.5 py-[2px] cursor-pointer"
+            style={{
+              transform: `translate(-50%, -50%) translate(${srcLabelX}px, ${srcLabelY}px)`,
+              background: "rgba(59,130,246,0.15)",
+              border: "1px solid rgba(59,130,246,0.35)",
+              color: "#60a5fa",
+              pointerEvents: "all",
+              letterSpacing: "0.02em",
+              backdropFilter: "blur(8px)",
+              boxShadow: "0 2px 8px rgba(0,0,0,0.3)",
+            }}
+            title={`Interfaz origen: ${data.sourceInterface}`}
+          >
+            {data.sourceInterface}
+          </div>
         )}
+        {/* Target interface badge */}
         {data?.targetInterface && (
-          <div className="nodrag nopan absolute text-[9px] font-bold rounded px-1 py-0.5" style={{
-            transform: `translate(-50%, -50%) translate(${sourceX + (targetX - sourceX) * 0.85}px, ${sourceY + (targetY - sourceY) * 0.85}px)`,
-            background: "rgba(139,92,246,0.2)", border: "1px solid rgba(139,92,246,0.4)", color: "#a78bfa", pointerEvents: "all",
-          }}>{data.targetInterface}</div>
+          <div
+            className="nodrag nopan absolute text-[8px] font-bold rounded-md px-1.5 py-[2px] cursor-pointer"
+            style={{
+              transform: `translate(-50%, -50%) translate(${tgtLabelX}px, ${tgtLabelY}px)`,
+              background: "rgba(139,92,246,0.15)",
+              border: "1px solid rgba(139,92,246,0.35)",
+              color: "#a78bfa",
+              pointerEvents: "all",
+              letterSpacing: "0.02em",
+              backdropFilter: "blur(8px)",
+              boxShadow: "0 2px 8px rgba(0,0,0,0.3)",
+            }}
+            title={`Interfaz destino: ${data.targetInterface}`}
+          >
+            {data.targetInterface}
+          </div>
         )}
+        {/* Center cable label */}
         {data?.label && (
-          <div className="nodrag nopan absolute text-[8px] font-medium rounded px-1.5 py-0.5" style={{
-            transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
-            background: "rgba(0,0,0,0.7)", border: "1px solid rgba(255,255,255,0.1)", color: "#a0a0a0", pointerEvents: "all",
-          }}>{data.label}</div>
+          <div
+            className="nodrag nopan absolute text-[7px] font-semibold rounded-md px-1.5 py-[2px] uppercase tracking-wider cursor-pointer"
+            style={{
+              transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY - 10}px)`,
+              background: "rgba(10,10,10,0.85)",
+              border: "1px solid rgba(255,255,255,0.08)",
+              color: "#888",
+              pointerEvents: "all",
+              backdropFilter: "blur(8px)",
+              boxShadow: "0 2px 8px rgba(0,0,0,0.3)",
+            }}
+            title={`Cable: ${data.label}`}
+          >
+            {data.label}
+          </div>
         )}
       </EdgeLabelRenderer>
     </>
@@ -187,61 +239,116 @@ function CanvasInner({
     setCtxMenu({ x: (event as MouseEvent).clientX, y: (event as MouseEvent).clientY });
   }, []);
 
-  // Link creation via context menu
+  // Link creation via context menu — simplified two-click flow
   const [linkSource, setLinkSource] = useState<string | null>(null);
 
   const startLinkCreation = (nodeId: string) => {
     setLinkSource(nodeId);
     const node = nodes.find((n) => n.id === nodeId);
-    toast.info("Selecciona el nodo destino", {
-      description: `Origen: ${node?.data.label || nodeId}. Haz clic en otro nodo.`,
-      duration: 6000,
+    toast.info(`Enlazando desde "${node?.data.label || nodeId}"`, {
+      description: "Haz clic en el nodo destino, o ESC para cancelar",
+      duration: 8000,
+      id: "link-mode",
     });
   };
 
+  // ESC to cancel link mode
+  useEffect(() => {
+    if (!linkSource) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setLinkSource(null);
+        toast.dismiss("link-mode");
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [linkSource]);
+
   // Click handler — if in link mode, treat click as target selection
   const onNodeClick = useCallback((_e: React.MouseEvent, node: Node) => {
-    if (linkSource && linkSource !== node.id) {
-      // Check duplicate edge
-      const exists = edges.some(
-        (e) =>
-          (e.source === linkSource && e.target === node.id) ||
-          (e.source === node.id && e.target === linkSource)
-      );
-      if (exists) {
-        toast.error("Conexion ya existe entre estos nodos");
-        setLinkSource(null);
-        return;
-      }
-      const srcNode = nodes.find((n) => n.id === linkSource);
-      setLinkModalData({
-        connection: { source: linkSource, target: node.id, sourceHandle: null, targetHandle: null },
-        srcName: srcNode?.data.label as string,
-        tgtName: node.data.label as string,
-      });
-      setLinkModalOpen(true);
-      setLinkSource(null);
+    if (!linkSource) return;
+    if (linkSource === node.id) {
+      toast.error("No puedes enlazar un nodo consigo mismo");
+      return;
     }
+    // Check duplicate
+    const exists = edges.some(
+      (e) =>
+        (e.source === linkSource && e.target === node.id) ||
+        (e.source === node.id && e.target === linkSource)
+    );
+    if (exists) {
+      toast.error("Ya existe una conexion entre estos nodos");
+      setLinkSource(null);
+      toast.dismiss("link-mode");
+      return;
+    }
+    const srcNode = nodes.find((n) => n.id === linkSource);
+    setLinkModalData({
+      connection: { source: linkSource, target: node.id, sourceHandle: null, targetHandle: null },
+      srcName: srcNode?.data.label as string,
+      tgtName: node.data.label as string,
+    });
+    setLinkModalOpen(true);
+    setLinkSource(null);
+    toast.dismiss("link-mode");
   }, [linkSource, edges, nodes]);
+
+  // Find nearby unconnected nodes for quick link submenu
+  const getNearbyUnlinked = (nodeId: string) => {
+    return nodes
+      .filter((n) => n.id !== nodeId)
+      .filter((n) => !edges.some(
+        (e) => (e.source === nodeId && e.target === n.id) || (e.source === n.id && e.target === nodeId)
+      ))
+      .slice(0, 5); // max 5 suggestions
+  };
 
   const getNodeCtxItems = (nodeId: string) => {
     const node = nodes.find((n) => n.id === nodeId);
     if (!node) return [];
-    return [
-      {
-        label: linkSource ? "Cancelar enlace" : "Nuevo link",
-        icon: menuIcons.Link2,
-        onClick: () => {
-          if (linkSource) setLinkSource(null);
-          else startLinkCreation(nodeId);
-        },
+    const nearby = getNearbyUnlinked(nodeId);
+
+    const items: any[] = [];
+
+    // Quick link to specific nearby nodes
+    if (nearby.length > 0) {
+      nearby.forEach((target) => {
+        items.push({
+          label: `Link → ${target.data.label}`,
+          icon: menuIcons.Link2,
+          onClick: () => {
+            setLinkModalData({
+              connection: { source: nodeId, target: target.id, sourceHandle: null, targetHandle: null },
+              srcName: node.data.label as string,
+              tgtName: target.data.label as string,
+            });
+            setLinkModalOpen(true);
+          },
+        });
+      });
+      items.push({ divider: true, label: "", icon: menuIcons.Link2, onClick: () => {} });
+    }
+
+    // General link (click on target)
+    items.push({
+      label: linkSource ? "Cancelar enlace" : "Nuevo link...",
+      icon: menuIcons.Link2,
+      onClick: () => {
+        if (linkSource) { setLinkSource(null); toast.dismiss("link-mode"); }
+        else startLinkCreation(nodeId);
       },
+    });
+
+    items.push(
       { label: "Editar nombre", icon: menuIcons.Pencil, onClick: () => editNodeLabel(nodeId) },
-      { label: "Redimensionar", icon: menuIcons.Maximize2, onClick: () => resizeNode(nodeId) },
       { label: "Cambiar icono", icon: menuIcons.Palette, onClick: () => changeNodeIcon(nodeId) },
       { label: "Duplicar", icon: menuIcons.Copy, onClick: () => duplicateNode(nodeId) },
       { label: "Eliminar", icon: menuIcons.Trash2, onClick: () => deleteNode(nodeId), danger: true, divider: true },
-    ];
+    );
+
+    return items;
   };
 
   const getEdgeCtxItems = (edgeId: string) => [
@@ -352,6 +459,16 @@ function CanvasInner({
 
   // ─── Connection & Drop handlers ───────────────
   const onConnect = useCallback((params: Connection) => {
+    // Check duplicate
+    const exists = edges.some(
+      (e) =>
+        (e.source === params.source && e.target === params.target) ||
+        (e.source === params.target && e.target === params.source)
+    );
+    if (exists) {
+      toast.error("Ya existe una conexion entre estos nodos");
+      return;
+    }
     const srcNode = nodes.find((n) => n.id === params.source);
     const tgtNode = nodes.find((n) => n.id === params.target);
     setLinkModalData({
@@ -360,7 +477,7 @@ function CanvasInner({
       tgtName: tgtNode?.data.label as string,
     });
     setLinkModalOpen(true);
-  }, [nodes]);
+  }, [nodes, edges]);
 
   const onDrop = useCallback((event: React.DragEvent) => {
     event.preventDefault();
@@ -570,20 +687,38 @@ function CanvasInner({
     <div className="h-screen w-screen relative">
       <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleFileChange} />
 
-      {/* Link mode indicator */}
+      {/* Link mode indicator — floating bottom center */}
       {linkSource && bgType !== "livemap" && (
         <div
-          className="absolute top-14 left-4 z-10 flex items-center gap-2 rounded-xl px-3 py-1.5"
+          className="absolute bottom-6 left-1/2 -translate-x-1/2 z-30 flex items-center gap-3 rounded-2xl px-5 py-3"
           style={{
             background: "rgba(59,130,246,0.12)",
             border: "1px solid rgba(59,130,246,0.3)",
-            color: "#60a5fa",
-            backdropFilter: "blur(12px)",
+            backdropFilter: "blur(20px)",
+            boxShadow: "0 8px 32px rgba(59,130,246,0.15), 0 0 0 1px rgba(59,130,246,0.1)",
+            animation: "pulse-border 2s ease-in-out infinite",
           }}
         >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
-          <span className="text-[11px] font-bold">Enlazando — haz clic en el nodo destino</span>
-          <button onClick={() => setLinkSource(null)} className="ml-1 text-[#888] hover:text-white text-xs">✕</button>
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg"
+            style={{ background: "rgba(59,130,246,0.2)", border: "1px solid rgba(59,130,246,0.3)" }}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#60a5fa" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+              <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+            </svg>
+          </div>
+          <div>
+            <div className="text-[11px] font-bold text-blue-300">
+              Enlazando desde &quot;{nodes.find(n => n.id === linkSource)?.data.label}&quot;
+            </div>
+            <div className="text-[10px] text-blue-400/60">Haz clic en el nodo destino &middot; ESC para cancelar</div>
+          </div>
+          <button
+            onClick={() => { setLinkSource(null); toast.dismiss("link-mode"); }}
+            className="ml-2 rounded-lg px-2.5 py-1 text-[10px] font-semibold transition-all"
+            style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", color: "#888" }}
+          >
+            Cancelar
+          </button>
         </div>
       )}
 

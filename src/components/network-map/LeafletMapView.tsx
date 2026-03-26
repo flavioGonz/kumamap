@@ -480,7 +480,14 @@ export default function LeafletMapView({
       }
 
       // Double-click to edit label or node name
-      marker.on("dblclick", () => {
+      marker.on("dblclick", (e: any) => {
+        // In link mode: complete link instead of editing
+        if (linkSourceRef.current) {
+          e.originalEvent?.stopPropagation?.();
+          if (linkSourceRef.current !== node.id) completeLinkCreation(node.id);
+          else cancelLinkCreation();
+          return;
+        }
         const newText = prompt(isLabel ? "Texto de la etiqueta:" : "Nombre del nodo:", node.label);
         if (newText?.trim()) {
           const idx = nodesRef.current.findIndex((n) => n.id === node.id);

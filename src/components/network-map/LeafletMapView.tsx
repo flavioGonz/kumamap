@@ -740,15 +740,68 @@ export default function LeafletMapView({
           interactive: false,
         }).addTo(map);
 
+        let lastSnappedId: string | null = null;
+        const SNAP_RADIUS = 30; // pixels
+
         const onMouseMove = (e: any) => {
-          if (dragLineRef.current) {
-            dragLineRef.current.setLatLngs([srcLatLng, [e.latlng.lat, e.latlng.lng]]);
+          if (!dragLineRef.current) return;
+          const mouseLatLng = e.latlng;
+          const mousePoint = map.latLngToContainerPoint(mouseLatLng);
+
+          // Find nearest node within snap radius
+          let snapped = false;
+          let snapTarget: [number, number] = [mouseLatLng.lat, mouseLatLng.lng];
+
+          for (const n of nodesRef.current) {
+            if (n.id === nodeId || n.icon === "_textLabel") continue;
+            const nPoint = map.latLngToContainerPoint([n.x, n.y]);
+            const dist = Math.sqrt(Math.pow(mousePoint.x - nPoint.x, 2) + Math.pow(mousePoint.y - nPoint.y, 2));
+            if (dist < SNAP_RADIUS) {
+              snapTarget = [n.x, n.y];
+              snapped = true;
+
+              // Highlight target marker with glow
+              if (lastSnappedId !== n.id) {
+                // Reset previous
+                if (lastSnappedId) {
+                  const prevMarker = markersRef.current.get(lastSnappedId);
+                  if (prevMarker?.getElement()) prevMarker.getElement().style.filter = "";
+                }
+                const targetMarker = markersRef.current.get(n.id);
+                if (targetMarker?.getElement()) {
+                  targetMarker.getElement().style.filter = "drop-shadow(0 0 12px #60a5fa) brightness(1.3)";
+                  targetMarker.getElement().style.transition = "filter 0.15s";
+                }
+                lastSnappedId = n.id;
+              }
+              // Snap line: make it solid and brighter
+              dragLineRef.current.setStyle({ dashArray: null, opacity: 1, weight: 3, color: "#60a5fa" });
+              break;
+            }
           }
+
+          if (!snapped) {
+            // Reset glow on previous snap target
+            if (lastSnappedId) {
+              const prevMarker = markersRef.current.get(lastSnappedId);
+              if (prevMarker?.getElement()) prevMarker.getElement().style.filter = "";
+              lastSnappedId = null;
+            }
+            dragLineRef.current.setStyle({ dashArray: "8,5", opacity: 0.8, weight: 2.5, color: "#60a5fa" });
+          }
+
+          dragLineRef.current.setLatLngs([srcLatLng, snapTarget]);
         };
+
         map.on("mousemove", onMouseMove);
         // Store cleanup function
         (dragLineRef.current as any)._cleanup = () => {
           map.off("mousemove", onMouseMove);
+          // Reset any lingering glow
+          if (lastSnappedId) {
+            const m = markersRef.current.get(lastSnappedId);
+            if (m?.getElement()) m.getElement().style.filter = "";
+          }
         };
       }
     }

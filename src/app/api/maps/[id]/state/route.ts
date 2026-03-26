@@ -9,7 +9,7 @@ export async function PUT(
   const map = mapsDb.getById(id);
   if (!map) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  const { nodes, edges } = await req.json();
+  const { nodes, edges, view_state } = await req.json();
   if (!Array.isArray(nodes) || !Array.isArray(edges)) {
     return NextResponse.json(
       { error: "nodes and edges arrays required" },
@@ -18,5 +18,8 @@ export async function PUT(
   }
 
   mapsDb.saveState(id, nodes, edges);
+  if (view_state !== undefined) {
+    mapsDb.update(id, { view_state: typeof view_state === "string" ? view_state : JSON.stringify(view_state) } as any);
+  }
   return NextResponse.json({ success: true });
 }

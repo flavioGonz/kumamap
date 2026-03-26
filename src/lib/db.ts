@@ -63,6 +63,11 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_edges_map ON network_map_edges(map_id);
 `);
 
+// Migration: add view_state column if it doesn't exist
+try {
+  db.exec(`ALTER TABLE network_maps ADD COLUMN view_state TEXT`);
+} catch { /* column already exists */ }
+
 function genId() {
   return crypto.randomUUID();
 }

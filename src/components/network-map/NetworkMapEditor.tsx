@@ -135,6 +135,7 @@ interface MapData {
   background_image: string | null;
   background_scale: number;
   kuma_group_id: number | null;
+  view_state: string | null;
   nodes: any[];
   edges: any[];
 }
@@ -882,13 +883,14 @@ function CanvasInner({
               color: e.color || "#4b5563",
               custom_data: e.custom_data,
             }))}
-            onSave={async (savedNodes, savedEdges) => {
+            initialViewState={mapData?.view_state ? JSON.parse(mapData.view_state) : undefined}
+            onSave={async (savedNodes, savedEdges, viewState) => {
               setSaving(true);
               try {
                 await fetch(apiUrl(`/api/maps/${mapId}/state`), {
                   method: "PUT",
                   headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ nodes: savedNodes, edges: savedEdges }),
+                  body: JSON.stringify({ nodes: savedNodes, edges: savedEdges, view_state: viewState ? JSON.stringify(viewState) : null }),
                 });
                 toast.success("Mapa guardado");
               } catch { toast.error("Error al guardar"); }

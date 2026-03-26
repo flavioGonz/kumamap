@@ -26,15 +26,22 @@ interface SavedEdge {
   custom_data: string | null;
 }
 
+interface MapViewState {
+  zoom: number;
+  center: [number, number];
+  mapStyle: "dark" | "satellite" | "streets";
+}
+
 interface LeafletMapViewProps {
   mapId: string;
   mapName?: string;
   kumaMonitors: KumaMonitor[];
   kumaConnected: boolean;
-  onSave: (nodes: SavedNode[], edges: SavedEdge[]) => void;
+  onSave: (nodes: SavedNode[], edges: SavedEdge[], viewState?: MapViewState) => void;
   onBack: () => void;
   initialNodes: SavedNode[];
   initialEdges: SavedEdge[];
+  initialViewState?: MapViewState;
 }
 
 function formatTraffic(bytes: number): string {
@@ -60,6 +67,7 @@ export default function LeafletMapView({
   onBack,
   initialNodes,
   initialEdges,
+  initialViewState,
 }: LeafletMapViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<any>(null);
@@ -95,7 +103,7 @@ export default function LeafletMapView({
   useEffect(() => { linkSourceRef.current = linkSource; }, [linkSource]);
 
   // Map style
-  const [mapStyle, setMapStyle] = useState<"dark" | "satellite" | "streets">("dark");
+  const [mapStyle, setMapStyle] = useState<"dark" | "satellite" | "streets">(initialViewState?.mapStyle || "dark");
   const tileLayerRef = useRef<any>(null);
   const labelMarkersRef = useRef<Map<string, any>>(new Map());
 
@@ -123,16 +131,17 @@ export default function LeafletMapView({
       }
 
       map = L.map(containerRef.current, {
-        center: [-34.85, -56.05],
-        zoom: 12,
+        center: initialViewState?.center || [-34.85, -56.05],
+        zoom: initialViewState?.zoom || 12,
         maxZoom: 22,
         zoomControl: false,
         attributionControl: false,
       });
 
-      tileLayerRef.current = L.tileLayer(tileUrls.dark.url, {
-        maxZoom: tileUrls.dark.maxZoom,
-        maxNativeZoom: tileUrls.dark.maxNativeZoom,
+      const initStyle = initialViewState?.mapStyle || "dark";
+      tileLayerRef.current = L.tileLayer(tileUrls[initStyle].url, {
+        maxZoom: tileUrls[initStyle].maxZoom,
+        maxNativeZoom: tileUrls[initStyle].maxNativeZoom,
       }).addTo(map);
 
       L.control.zoom({ position: "bottomleft" }).addTo(map);
@@ -658,9 +667,14 @@ export default function LeafletMapView({
   // Save
   const handleSave = useCallback(async () => {
     setSaving(true);
-    onSave(nodesRef.current, edgesRef.current);
+    const viewState: MapViewState = {
+      zoom: mapRef.current?.getZoom() || 12,
+      center: mapRef.current ? [mapRef.current.getCenter().lat, mapRef.current.getCenter().lng] : [-34.85, -56.05],
+      mapStyle,
+    };
+    onSave(nodesRef.current, edgesRef.current, viewState);
     setSaving(false);
-  }, [onSave]);
+  }, [onSave, mapStyle]);
 
   // Search address (geocoding via Nominatim)
   const handleSearch = useCallback(async () => {
@@ -792,6 +806,17 @@ export default function LeafletMapView({
             className="group flex items-center gap-1 rounded-xl px-2 py-1.5 text-[#888] hover:text-[#ededed] hover:bg-white/[0.06] transition-all">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" x2="15" y1="20" y2="20"/><line x1="12" x2="12" y1="4" y2="20"/></svg>
             <span className="text-[10px] font-semibold hidden xl:inline">Etiqueta</span>
+          </button>
+          <button onClick={() => {
+            if (linkSource) { cancelLinkCreation(); return; }
+            // Pick a random node as source — user clicks another to link
+            if (nodesRef.current.length === 0) { toast.error("Agrega nodos primero"); return; }
+            toast.info("Haz clic derecho en un nodo y selecciona 'Nuevo link'", { duration: 4000 });
+          }} title={linkSource ? "Cancelar link" : "Crear link entre nodos"}
+            className={`group flex items-center gap-1 rounded-xl px-2 py-1.5 transition-all ${linkSource ? "text-[#60a5fa]" : "text-[#888] hover:text-[#ededed] hover:bg-white/[0.06]"}`}
+            style={linkSource ? { background: "rgba(59,130,246,0.15)", border: "1px solid rgba(59,130,246,0.35)" } : {}}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+            <span className="text-[10px] font-semibold hidden xl:inline">Link</span>
           </button>
         </div>
 

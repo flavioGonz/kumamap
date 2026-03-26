@@ -288,6 +288,8 @@ export default function LeafletMapView({
 
       // Camera FOV cone
       if (isCamera) {
+        const fovColor = cd.fovColor || color;
+        const fovOpacity = cd.fovOpacity ?? 0.18;
         const rad = (Math.PI / 180);
         const startAngle = rotation - fov / 2;
         const endAngle = rotation + fov / 2;
@@ -300,15 +302,65 @@ export default function LeafletMapView({
         }
         points.push([node.x, node.y]);
         const fovPoly = L.polygon(points, {
-          color: color,
-          fillColor: color,
-          fillOpacity: 0.15,
+          color: fovColor,
+          fillColor: fovColor,
+          fillOpacity: fovOpacity,
           weight: 1,
-          opacity: 0.4,
+          opacity: fovOpacity + 0.2,
           interactive: false,
         });
         fovPoly.addTo(map);
         fovLayersRef.current.set(node.id, fovPoly);
+
+        // Mouse rotation: hold Shift + drag on map near camera to rotate
+        let rotating = false;
+        marker.on("mousedown", (e: any) => {
+          if (e.originalEvent.shiftKey) {
+            rotating = true;
+            map.dragging.disable();
+            e.originalEvent.preventDefault();
+          }
+        });
+        const onMouseMove = (e: any) => {
+          if (!rotating) return;
+          const markerPos = marker.getLatLng();
+          const mousePos = e.latlng;
+          const angle = Math.atan2(mousePos.lng - markerPos.lng, mousePos.lat - markerPos.lat) * (180 / Math.PI);
+          const idx = nodesRef.current.findIndex((n) => n.id === node.id);
+          if (idx >= 0) {
+            const ncd = nodesRef.current[idx].custom_data ? JSON.parse(nodesRef.current[idx].custom_data!) : {};
+            ncd.rotation = Math.round(angle);
+            nodesRef.current[idx] = { ...nodesRef.current[idx], custom_data: JSON.stringify(ncd) };
+            // Update FOV polygon live
+            const newStart = Math.round(angle) - fov / 2;
+            const newEnd = Math.round(angle) + fov / 2;
+            const newPoints: [number, number][] = [[node.x, node.y]];
+            for (let a = newStart; a <= newEnd; a += 2) {
+              newPoints.push([node.x + fovRange * Math.cos(a * rad), node.y + fovRange * Math.sin(a * rad)]);
+            }
+            newPoints.push([node.x, node.y]);
+            fovPoly.setLatLngs(newPoints);
+            // Update marker icon rotation
+            marker.setIcon(L.divIcon({
+              className: "camera-marker",
+              html: `<div style="position:relative;display:flex;align-items:center;justify-content:center;transform:rotate(${Math.round(angle)}deg);">
+                <div style="width:22px;height:22px;border-radius:4px;background:${color};border:2px solid ${color};box-shadow:0 0 12px ${color}88;cursor:pointer;display:flex;align-items:center;justify-content:center;">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m16.24 7.76-1.804 5.412a2 2 0 0 1-1.265 1.265L7.76 16.24l1.804-5.412a2 2 0 0 1 1.265-1.265z"/><circle cx="12" cy="12" r="10"/></svg>
+                </div>
+              </div>`,
+              iconSize: [22, 22],
+              iconAnchor: [11, 11],
+            }));
+          }
+        };
+        const onMouseUp = () => {
+          if (rotating) {
+            rotating = false;
+            map.dragging.enable();
+          }
+        };
+        map.on("mousemove", onMouseMove);
+        map.on("mouseup", onMouseUp);
       }
 
       // Label tooltip (always visible) — only for non-label/camera nodes
@@ -670,13 +722,22 @@ export default function LeafletMapView({
       // Camera-specific: rotate and FOV
       ...(node?.icon === "_camera" ? [
         {
-          label: "Rotar camara",
+          label: "Rotar (Shift+arrastrar)",
           icon: menuIcons.RotateCcw,
           onClick: () => {
+            toast.info("Manten Shift y arrastra desde la camara para rotar", { duration: 5000 });
+          },
+        },
+        {
+          label: "Campo de vision",
+          icon: menuIcons.Maximize2,
+          onClick: () => {
             const cd = node.custom_data ? JSON.parse(node.custom_data) : {};
-            const angle = prompt("Angulo de rotacion (0-360):", String(cd.rotation || 0));
-            if (angle !== null) {
-              cd.rotation = parseInt(angle) || 0;
+            const fov = prompt("Angulo FOV (grados, ej: 60, 90, 120):", String(cd.fov || 60));
+            const range = prompt("Alcance (0.001=~100m, 0.005=~500m):", String(cd.fovRange || 0.002));
+            if (fov !== null && range !== null) {
+              cd.fov = parseInt(fov) || 60;
+              cd.fovRange = parseFloat(range) || 0.002;
               const idx = nodesRef.current.findIndex((n) => n.id === nodeId);
               if (idx >= 0) {
                 nodesRef.current[idx] = { ...nodesRef.current[idx], custom_data: JSON.stringify(cd) };
@@ -686,15 +747,30 @@ export default function LeafletMapView({
           },
         },
         {
-          label: "Campo de vision",
+          label: "Color del area",
+          icon: menuIcons.Palette,
+          onClick: () => {
+            const cd = node.custom_data ? JSON.parse(node.custom_data) : {};
+            const colors = ["#22c55e", "#3b82f6", "#ef4444", "#f59e0b", "#8b5cf6", "#ec4899", "#06b6d4", "#ffffff"];
+            const choice = prompt(`Color (${colors.join(", ")})\no hex (#ff0000):`, cd.fovColor || "#22c55e");
+            if (choice) {
+              cd.fovColor = choice;
+              const idx = nodesRef.current.findIndex((n) => n.id === nodeId);
+              if (idx >= 0) {
+                nodesRef.current[idx] = { ...nodesRef.current[idx], custom_data: JSON.stringify(cd) };
+                if (LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current);
+              }
+            }
+          },
+        },
+        {
+          label: "Transparencia",
           icon: menuIcons.Maximize2,
           onClick: () => {
             const cd = node.custom_data ? JSON.parse(node.custom_data) : {};
-            const fov = prompt("Angulo FOV (grados, ej: 60, 90, 120):", String(cd.fov || 60));
-            const range = prompt("Alcance (0.001 = ~100m, 0.005 = ~500m):", String(cd.fovRange || 0.002));
-            if (fov !== null && range !== null) {
-              cd.fov = parseInt(fov) || 60;
-              cd.fovRange = parseFloat(range) || 0.002;
+            const val = prompt("Opacidad (0.05 = casi invisible, 0.5 = medio, 1 = solido):", String(cd.fovOpacity ?? 0.18));
+            if (val !== null) {
+              cd.fovOpacity = Math.max(0.01, Math.min(1, parseFloat(val) || 0.18));
               const idx = nodesRef.current.findIndex((n) => n.id === nodeId);
               if (idx >= 0) {
                 nodesRef.current[idx] = { ...nodesRef.current[idx], custom_data: JSON.stringify(cd) };

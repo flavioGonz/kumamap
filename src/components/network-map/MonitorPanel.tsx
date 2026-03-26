@@ -23,6 +23,7 @@ export interface KumaMonitor {
   url: string;
   hostname: string;
   active: boolean;
+  parent?: number | null;
   status?: number;
   ping?: number | null;
   msg?: string;

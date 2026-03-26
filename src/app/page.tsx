@@ -34,24 +34,22 @@ interface MapSummary {
   updated_at: string;
 }
 
-// ─── Hook: Poll Kuma monitors ───────────────────
+// ─── Hook: Real-time Kuma monitors via Socket.IO ──
 function useKumaMonitors() {
   const [monitors, setMonitors] = useState<KumaMonitor[]>([]);
   const [connected, setConnected] = useState(false);
   const prevStatusRef = useRef<Map<number, number>>(new Map());
 
   useEffect(() => {
-    let mounted = true;
+    // Dynamic import to avoid SSR issues
+    import("@/lib/socket").then(({ getSocket }) => {
+      const socket = getSocket();
 
-    const fetchKuma = async () => {
-      try {
-        const res = await fetch(apiUrl("/api/kuma"));
-        if (!res.ok || !mounted) return;
-        const data = await res.json();
+      const handleMonitors = (data: { connected: boolean; monitors: KumaMonitor[] }) => {
+        setConnected(data.connected);
+        const newMonitors = data.monitors || [];
 
-        const newMonitors: KumaMonitor[] = data.monitors || [];
-        setConnected(data.connected || false);
-
+        // Toast notifications on status change
         newMonitors.forEach((m) => {
           const prev = prevStatusRef.current.get(m.id);
           if (prev !== undefined && prev !== m.status) {
@@ -65,14 +63,15 @@ function useKumaMonitors() {
         });
 
         setMonitors(newMonitors);
-      } catch {
-        if (mounted) setConnected(false);
-      }
-    };
+      };
 
-    fetchKuma();
-    const interval = setInterval(fetchKuma, 5000);
-    return () => { mounted = false; clearInterval(interval); };
+      socket.on("kuma:monitors", handleMonitors);
+      socket.on("disconnect", () => setConnected(false));
+
+      return () => {
+        socket.off("kuma:monitors", handleMonitors);
+      };
+    });
   }, []);
 
   return { monitors, connected };

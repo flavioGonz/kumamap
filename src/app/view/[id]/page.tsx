@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useParams } from "next/navigation";
 import { apiUrl } from "@/lib/api";
+import { Network, MapIcon } from "lucide-react";
 import type { KumaMonitor } from "@/components/network-map/MonitorPanel";
 
 interface SavedNode {

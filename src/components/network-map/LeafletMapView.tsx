@@ -265,6 +265,7 @@ export default function LeafletMapView({
     nodesRef.current.forEach((node) => {
       const isLabel = node.icon === "_textLabel";
       const isCamera = node.icon === "_camera";
+      const isWaypoint = node.icon === "_waypoint";
       const cd = node.custom_data ? JSON.parse(node.custom_data) : {};
       const color = getStatusColor(node.kuma_monitor_id);
       const m = getMonitorData(node.kuma_monitor_id);
@@ -282,6 +283,13 @@ export default function LeafletMapView({
           html: `<div style="background:rgba(0,0,0,0.6);border:1px solid rgba(255,255,255,0.15);backdrop-filter:blur(8px);color:#ededed;font-size:13px;font-weight:700;padding:4px 12px;border-radius:8px;white-space:nowrap;text-shadow:0 1px 4px rgba(0,0,0,0.8);cursor:move;">${node.label}</div>`,
           iconSize: [0, 0],
           iconAnchor: [0, 12],
+        });
+      } else if (isWaypoint) {
+        nodeIcon = L.divIcon({
+          className: "waypoint-marker",
+          html: `<div style="width:10px;height:10px;border-radius:50%;background:${isSource ? "#60a5fa" : "rgba(255,255,255,0.25)"};border:2px solid ${isSource ? "#60a5fa" : "rgba(255,255,255,0.4)"};cursor:move;box-shadow:0 0 6px ${isSource ? "#60a5fa88" : "rgba(255,255,255,0.15)"};transition:all 0.15s;"></div>`,
+          iconSize: [10, 10],
+          iconAnchor: [5, 5],
         });
       } else if (isCamera) {
         nodeIcon = L.divIcon({
@@ -422,7 +430,7 @@ export default function LeafletMapView({
       }
 
       // Label tooltip (always visible) — only for non-label/camera nodes
-      if (!isLabel) {
+      if (!isLabel && !isWaypoint) {
         marker.bindTooltip(node.label, {
           permanent: true,
           direction: "top",
@@ -479,7 +487,7 @@ export default function LeafletMapView({
           cancelLinkCreation();
           return;
         }
-        if (isLabel || isCamera) return;
+        if (isLabel || isCamera || isWaypoint) return;
         const popup = L.popup({ className: "leaflet-popup-dark", maxWidth: 280 })
           .setLatLng(marker.getLatLng())
           .setContent(createPopupContent(node));
@@ -887,6 +895,30 @@ export default function LeafletMapView({
   function getNodeCtxItems(nodeId: string) {
     const node = nodesRef.current.find((n) => n.id === nodeId);
     const isLabel = node?.icon === "_textLabel";
+    const isWaypoint = node?.icon === "_waypoint";
+
+    // Waypoints: link + delete only
+    if (isWaypoint) {
+      return [
+        {
+          label: linkSource ? "Cancelar enlace" : "Nuevo link",
+          icon: menuIcons.Link2,
+          onClick: () => { if (linkSource) cancelLinkCreation(); else startLinkCreation(nodeId); },
+        },
+        {
+          label: "Eliminar punto",
+          icon: menuIcons.Trash2,
+          danger: true,
+          divider: true,
+          onClick: () => {
+            nodesRef.current = nodesRef.current.filter((n) => n.id !== nodeId);
+            edgesRef.current = edgesRef.current.filter((e) => e.source_node_id !== nodeId && e.target_node_id !== nodeId);
+            if (LRef.current && mapRef.current) { renderNodes(LRef.current, mapRef.current); renderEdges(LRef.current, mapRef.current); }
+            toast.success("Punto eliminado");
+          },
+        },
+      ];
+    }
 
     // Labels only get edit text + delete
     if (isLabel) {
@@ -1272,6 +1304,18 @@ export default function LeafletMapView({
             className="group flex items-center gap-1 rounded-xl px-2 py-1.5 text-[#888] hover:text-[#ededed] hover:bg-white/[0.06] transition-all">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m16.24 7.76-1.804 5.412a2 2 0 0 1-1.265 1.265L7.76 16.24l1.804-5.412a2 2 0 0 1 1.265-1.265z"/><circle cx="12" cy="12" r="10"/></svg>
             <span className="text-[10px] font-semibold hidden xl:inline">Camara</span>
+          </button>
+          <button onClick={() => {
+            if (!mapRef.current) return;
+            const center = mapRef.current.getCenter();
+            const id = `wp-${Date.now()}`;
+            nodesRef.current = [...nodesRef.current, { id, kuma_monitor_id: null, label: "", x: center.lat, y: center.lng, icon: "_waypoint" }];
+            if (LRef.current) renderNodes(LRef.current, mapRef.current);
+            toast.success("Punto de ruta agregado");
+          }} title="Nodo ciego / waypoint para curvar links"
+            className="group flex items-center gap-1 rounded-xl px-2 py-1.5 text-[#888] hover:text-[#ededed] hover:bg-white/[0.06] transition-all">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/></svg>
+            <span className="text-[10px] font-semibold hidden xl:inline">Punto</span>
           </button>
           <button onClick={() => {
             if (linkSource) { cancelLinkCreation(); return; }

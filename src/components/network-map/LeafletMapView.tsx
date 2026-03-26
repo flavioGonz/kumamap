@@ -718,6 +718,59 @@ export default function LeafletMapView({
           </div>
         </div>
 
+        <div className="h-5 w-px mx-0.5" style={{ background: "rgba(255,255,255,0.06)" }} />
+
+        {/* Zoom controls */}
+        <div className="flex items-center gap-0.5">
+          <button onClick={() => mapRef.current?.zoomIn()} title="Zoom In"
+            className="rounded-xl p-1.5 text-[#888] hover:text-[#ededed] hover:bg-white/[0.06] transition-all">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.3-4.3"/><path d="M8 11h6"/><path d="M11 8v6"/></svg>
+          </button>
+          <button onClick={() => mapRef.current?.zoomOut()} title="Zoom Out"
+            className="rounded-xl p-1.5 text-[#888] hover:text-[#ededed] hover:bg-white/[0.06] transition-all">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.3-4.3"/><path d="M8 11h6"/></svg>
+          </button>
+          <button onClick={() => {
+            if (mapRef.current && nodesRef.current.length > 0) {
+              const LLocal = LRef.current;
+              if (!LLocal) return;
+              const bounds = nodesRef.current.map((n) => [n.x, n.y] as [number, number]);
+              mapRef.current.fitBounds(LLocal.latLngBounds(bounds), { padding: [50, 50] });
+            }
+          }} title="Ajustar vista"
+            className="rounded-xl p-1.5 text-[#888] hover:text-[#ededed] hover:bg-white/[0.06] transition-all">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 3h6v6"/><path d="M9 21H3v-6"/><path d="m21 3-7 7"/><path d="m3 21 7-7"/></svg>
+          </button>
+        </div>
+
+        <div className="h-5 w-px mx-0.5" style={{ background: "rgba(255,255,255,0.06)" }} />
+
+        {/* Node/Edge controls */}
+        <div className="flex items-center gap-0.5">
+          <button onClick={() => {
+            if (!mapRef.current) return;
+            const center = mapRef.current.getCenter();
+            const id = `node-${Date.now()}`;
+            nodesRef.current = [...nodesRef.current, { id, map_id: mapId, kuma_monitor_id: null, label: "Nuevo equipo", x: center.lat, y: center.lng, width: 120, height: 80, icon: "server", color: null, custom_data: null }];
+            if (LRef.current) renderNodes(LRef.current, mapRef.current);
+          }} title="Agregar nodo"
+            className="group flex items-center gap-1 rounded-xl px-2 py-1.5 text-[#888] hover:text-[#ededed] hover:bg-white/[0.06] transition-all">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
+            <span className="text-[10px] font-semibold hidden xl:inline">Nodo</span>
+          </button>
+          <button onClick={() => {
+            if (!mapRef.current) return;
+            const center = mapRef.current.getCenter();
+            const id = `label-${Date.now()}`;
+            nodesRef.current = [...nodesRef.current, { id, map_id: mapId, kuma_monitor_id: null, label: "Etiqueta", x: center.lat, y: center.lng, width: 120, height: 80, icon: "_textLabel", color: "#ededed", custom_data: JSON.stringify({ type: "textLabel", fontSize: 14, bgEnabled: true }) }];
+            if (LRef.current) renderNodes(LRef.current, mapRef.current);
+          }} title="Agregar etiqueta"
+            className="group flex items-center gap-1 rounded-xl px-2 py-1.5 text-[#888] hover:text-[#ededed] hover:bg-white/[0.06] transition-all">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" x2="15" y1="20" y2="20"/><line x1="12" x2="12" y1="4" y2="20"/></svg>
+            <span className="text-[10px] font-semibold hidden xl:inline">Etiqueta</span>
+          </button>
+        </div>
+
         <div className="flex-1" />
 
         {/* Link mode indicator */}

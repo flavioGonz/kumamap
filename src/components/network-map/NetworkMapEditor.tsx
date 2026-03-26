@@ -714,27 +714,21 @@ function CanvasInner({
   // Filter monitors by group if map has a kuma_group_id
   const filteredMonitors = useMemo(() => {
     if (!mapData?.kuma_group_id) return kumaMonitors;
-    // Find children: monitors that are NOT groups, or have parent group
-    // Kuma groups contain child monitors - we show all non-group monitors
-    // since Kuma doesn't expose parent-child in the API directly.
-    // Best approach: show monitors that share tags with the group, or all non-group if unclear
-    const group = kumaMonitors.find(m => m.id === mapData.kuma_group_id);
-    if (!group) return kumaMonitors;
+    const gid = mapData.kuma_group_id;
 
-    // Filter: show the group itself + monitors that share the same name prefix or tags
-    const groupName = group.name.toLowerCase();
-    return kumaMonitors.filter(m => {
-      if (m.type === "group" && m.id !== mapData.kuma_group_id) return false;
-      if (m.id === mapData.kuma_group_id) return true;
-      // Heuristic: child monitors often have the group name as prefix
-      if (m.name.toLowerCase().startsWith(groupName)) return true;
-      // Or share tags with the group
-      if (group.tags && group.tags.length > 0) {
-        const groupTagNames = new Set(group.tags.map(t => t.name));
-        if (m.tags?.some(t => groupTagNames.has(t.name))) return true;
+    // Collect all children recursively (parent field)
+    const childIds = new Set<number>();
+    function collectChildren(parentId: number) {
+      for (const m of kumaMonitors) {
+        if (m.parent === parentId && !childIds.has(m.id)) {
+          childIds.add(m.id);
+          if (m.type === "group") collectChildren(m.id);
+        }
       }
-      return false;
-    });
+    }
+    collectChildren(gid);
+
+    return kumaMonitors.filter(m => m.id === gid || childIds.has(m.id));
   }, [kumaMonitors, mapData?.kuma_group_id]);
 
   // Auto-import all group monitors to canvas

@@ -9,6 +9,7 @@ export interface KumaMonitor {
   port: number;
   interval: number;
   active: boolean;
+  parent: number | null; // parent group monitor ID
   tags: { name: string; color: string }[];
   status?: number; // 0=down, 1=up, 2=pending, 3=maintenance
   ping?: number | null;
@@ -104,6 +105,7 @@ class KumaClient {
               port: monitor.port || 0,
               interval: monitor.interval || 60,
               active: monitor.active !== false,
+              parent: monitor.parent ?? null,
               tags: (monitor.tags || []).map((t: any) => ({
                 name: t.name,
                 color: t.color,

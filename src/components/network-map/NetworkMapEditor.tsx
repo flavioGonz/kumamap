@@ -859,7 +859,7 @@ function CanvasInner({
         />
       ) : null}
 
-      <div className="h-full">
+      <div className="h-full" style={{ isolation: "isolate" }}>
         {bgType === "livemap" ? (
           <LeafletMapView
             mapId={mapId}

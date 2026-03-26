@@ -134,13 +134,14 @@ export default function MapToolbar({
 
   return (
     <div
-      className="absolute top-3 left-3 z-10 flex items-center gap-1 rounded-2xl px-2 py-1.5"
+      className="absolute top-3 left-3 z-[10000] flex items-center gap-1 rounded-2xl px-2 py-1.5"
       style={{
         right: "340px",
         background: "rgba(10,10,10,0.82)",
         border: "1px solid rgba(255,255,255,0.06)",
         backdropFilter: "blur(24px)",
         boxShadow: "0 8px 32px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.03)",
+        pointerEvents: "auto",
       }}
     >
       {/* Back */}

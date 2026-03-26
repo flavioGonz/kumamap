@@ -436,16 +436,66 @@ export default function LeafletMapView({
         popup.openOn(map);
       });
 
-      // Drag to reposition
-      marker.on("dragend", () => {
+      // ── Drag: live update FOV cone, handles, edges, shadow ──
+      marker.on("dragstart", () => {
+        const el = marker.getElement();
+        if (el) {
+          el.style.filter = "drop-shadow(0 0 12px rgba(59,130,246,0.7))";
+          el.style.opacity = "0.85";
+          el.style.transition = "filter 0.15s, opacity 0.15s";
+        }
+      });
+
+      marker.on("drag", () => {
         const pos = marker.getLatLng();
         const idx = nodesRef.current.findIndex((n) => n.id === node.id);
         if (idx >= 0) {
           nodesRef.current[idx] = { ...nodesRef.current[idx], x: pos.lat, y: pos.lng };
         }
-        // Re-render edges and FOVs
+
+        if (isCamera) {
+          const cd2 = nodesRef.current[idx]?.custom_data ? JSON.parse(nodesRef.current[idx].custom_data!) : {};
+          const rot = cd2.rotation ?? 0;
+          const range = cd2.fovRange ?? 0.003;
+          const fovAngle = cd2.fov ?? 60;
+          const radConst = Math.PI / 180;
+
+          // Live update FOV polygon
+          const fovPoly = fovLayersRef.current.get(node.id);
+          if (fovPoly) {
+            const pts: [number, number][] = [[pos.lat, pos.lng]];
+            const s = rot - fovAngle / 2;
+            const e = rot + fovAngle / 2;
+            for (let a = s; a <= e; a += 2) pts.push([pos.lat + range * Math.cos(a * radConst), pos.lng + range * Math.sin(a * radConst)]);
+            pts.push([pos.lat, pos.lng]);
+            fovPoly.setLatLngs(pts);
+          }
+
+          // Live update rotation handle
+          const rh = camHandlesRef.current.get(node.id + "-rot");
+          if (rh) rh.setLatLng([pos.lat + range * 0.7 * Math.cos(rot * radConst), pos.lng + range * 0.7 * Math.sin(rot * radConst)]);
+
+          // Live update range handle
+          const rng = camHandlesRef.current.get(node.id + "-range");
+          if (rng) rng.setLatLng([pos.lat + range * Math.cos(rot * radConst), pos.lng + range * Math.sin(rot * radConst)]);
+        }
+
+        // Live update edges
         renderEdges(L, map);
-        if (isCamera) renderNodes(L, map);
+      });
+
+      marker.on("dragend", () => {
+        const el = marker.getElement();
+        if (el) {
+          el.style.filter = "";
+          el.style.opacity = "1";
+        }
+        const pos = marker.getLatLng();
+        const idx = nodesRef.current.findIndex((n) => n.id === node.id);
+        if (idx >= 0) {
+          nodesRef.current[idx] = { ...nodesRef.current[idx], x: pos.lat, y: pos.lng };
+        }
+        renderEdges(L, map);
       });
 
       marker.addTo(map);

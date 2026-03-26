@@ -708,7 +708,7 @@ function CanvasInner({
           </div>
           <div>
             <div className="text-[11px] font-bold text-blue-300">
-              Enlazando desde &quot;{nodes.find(n => n.id === linkSource)?.data.label}&quot;
+              Enlazando desde &quot;{String(nodes.find(n => n.id === linkSource)?.data.label || "")}&quot;
             </div>
             <div className="text-[10px] text-blue-400/60">Haz clic en el nodo destino &middot; ESC para cancelar</div>
           </div>

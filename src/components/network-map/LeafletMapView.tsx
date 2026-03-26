@@ -386,23 +386,6 @@ export default function LeafletMapView({
         });
       }
 
-      // Click handler — manual popup management to avoid conflict with link mode
-      marker.on("click", (e: any) => {
-        // In link mode: select as target, NO popup
-        if (linkSourceRef.current && linkSourceRef.current !== node.id) {
-          e.originalEvent?.stopPropagation?.();
-          completeLinkCreation(node.id);
-          return;
-        }
-        // Labels: do nothing on single click (use dblclick to edit)
-        if (isLabel) return;
-        // Normal mode: open popup manually
-        const popup = L.popup({ className: "leaflet-popup-dark", maxWidth: 280 })
-          .setLatLng(marker.getLatLng())
-          .setContent(createPopupContent(node));
-        popup.openOn(map);
-      });
-
       // Double-click to edit label or node name
       marker.on("dblclick", () => {
         const newText = prompt(isLabel ? "Texto de la etiqueta:" : "Nombre del nodo:", node.label);
@@ -421,8 +404,14 @@ export default function LeafletMapView({
         e.originalEvent.stopPropagation();
         map.closePopup();
 
+        // In link mode: complete on right-click too
         if (linkSourceRef.current && linkSourceRef.current !== node.id) {
           completeLinkCreation(node.id);
+          return;
+        }
+        // If we clicked on the same source node, cancel
+        if (linkSourceRef.current && linkSourceRef.current === node.id) {
+          cancelLinkCreation();
           return;
         }
 
@@ -431,6 +420,20 @@ export default function LeafletMapView({
           y: e.originalEvent.clientY,
           nodeId: node.id,
         });
+      });
+
+      // Also listen for click in link mode (left click works too)
+      marker.on("click", (e: any) => {
+        if (linkSourceRef.current && linkSourceRef.current !== node.id) {
+          e.originalEvent?.stopPropagation?.();
+          completeLinkCreation(node.id);
+          return;
+        }
+        if (isLabel || isCamera) return;
+        const popup = L.popup({ className: "leaflet-popup-dark", maxWidth: 280 })
+          .setLatLng(marker.getLatLng())
+          .setContent(createPopupContent(node));
+        popup.openOn(map);
       });
 
       // Drag to reposition

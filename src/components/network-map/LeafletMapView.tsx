@@ -100,7 +100,8 @@ export default function LeafletMapView({
   const [linkModalOpen, setLinkModalOpen] = useState(false);
   const [linkModalData, setLinkModalData] = useState<{ sourceId: string; targetId: string; edgeId?: string; initial?: Partial<LinkFormData> }>({ sourceId: "", targetId: "" });
   const [inputModalOpen, setInputModalOpen] = useState(false);
-  const [inputModalConfig, setInputModalConfig] = useState<{ nodeId: string; initial: string }>({ nodeId: "", initial: "" });
+  const [inputModalConfig, setInputModalConfig] = useState<{ nodeId: string; initial: string; mac?: string; ip?: string }>({ nodeId: "", initial: "" });
+  const [overlayOpacity, setOverlayOpacity] = useState(0);
   const [assignModalOpen, setAssignModalOpen] = useState(false);
   const [assignNodeId, setAssignNodeId] = useState<string>("");
   const [assignSearch, setAssignSearch] = useState("");
@@ -221,14 +222,21 @@ export default function LeafletMapView({
     const m = getMonitorData(node.kuma_monitor_id);
     const color = getStatusColor(node.kuma_monitor_id);
     const statusText = m ? (m.status === 1 ? "UP" : m.status === 0 ? "DOWN" : "PENDING") : "N/A";
+    const cd = node.custom_data ? JSON.parse(node.custom_data) : {};
 
     return `
-      <div style="background:#111;color:#eee;padding:10px 14px;border-radius:12px;min-width:200px;font-family:system-ui;border:1px solid ${color}44;">
+      <div style="background:#111;color:#eee;padding:10px 14px;border-radius:12px;min-width:220px;font-family:system-ui;border:1px solid ${color}44;">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
           <div style="width:10px;height:10px;border-radius:50%;background:${color};box-shadow:0 0 8px ${color};"></div>
           <strong style="font-size:13px;">${node.label}</strong>
           <span style="color:${color};font-size:10px;font-weight:700;margin-left:auto;">${statusText}</span>
         </div>
+        ${cd.ip || cd.mac ? `
+          <div style="font-size:10px;color:#999;margin-bottom:6px;display:flex;gap:8px;flex-wrap:wrap;">
+            ${cd.ip ? `<span style="background:rgba(59,130,246,0.12);border:1px solid rgba(59,130,246,0.25);color:#60a5fa;padding:1px 6px;border-radius:6px;font-family:monospace;font-size:10px;">${cd.ip}</span>` : ""}
+            ${cd.mac ? `<span style="background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.08);color:#888;padding:1px 6px;border-radius:6px;font-family:monospace;font-size:9px;">${cd.mac}</span>` : ""}
+          </div>
+        ` : ""}
         ${m ? `
           <div style="font-size:10px;color:#888;space-y:4px;">
             ${m.type ? `<div style="display:flex;justify-content:space-between;"><span>Tipo</span><span style="color:#bbb;text-transform:uppercase;">${m.type}</span></div>` : ""}
@@ -784,10 +792,11 @@ export default function LeafletMapView({
         },
       },
       {
-        label: "Editar nombre",
+        label: "Editar nodo",
         icon: menuIcons.Pencil,
         onClick: () => {
-          setInputModalConfig({ nodeId, initial: node?.label || "" });
+          const cd = node?.custom_data ? JSON.parse(node.custom_data) : {};
+          setInputModalConfig({ nodeId, initial: node?.label || "", mac: cd.mac || "", ip: cd.ip || "" });
           setInputModalOpen(true);
         },
       },
@@ -1007,6 +1016,11 @@ export default function LeafletMapView({
         onDragOver={handleDragOver}
       />
 
+      {/* ── Dark Overlay for Satellite ── */}
+      {overlayOpacity > 0 && (
+        <div className="absolute inset-0 pointer-events-none" style={{ zIndex: 401, background: `rgba(0,0,0,${overlayOpacity})` }} />
+      )}
+
       {/* ── Floating Top Bar ── */}
       <div
         className="absolute top-3 left-3 flex items-center gap-1.5 rounded-2xl px-2.5 py-1.5"
@@ -1056,7 +1070,9 @@ export default function LeafletMapView({
           </div>
         </div>
 
-        <div className="h-5 w-px mx-0.5" style={{ background: "rgba(255,255,255,0.06)" }} />
+        <div className="flex-1" />
+
+        {/* ═══ CENTERED TOOLS ═══ */}
 
         {/* Zoom controls */}
         <div className="flex items-center gap-0.5">
@@ -1132,8 +1148,6 @@ export default function LeafletMapView({
           </button>
         </div>
 
-        <div className="flex-1" />
-
         {/* Link mode indicator */}
         {linkSource && (
           <div className="flex items-center gap-1.5 rounded-xl px-2.5 py-1 text-[10px] font-bold"
@@ -1143,6 +1157,10 @@ export default function LeafletMapView({
             <button onClick={cancelLinkCreation} className="ml-0.5 text-[#888] hover:text-white">✕</button>
           </div>
         )}
+
+        <div className="flex-1" />
+
+        {/* ═══ RIGHT SIDE ═══ */}
 
         {/* Search */}
         {searchVisible ? (
@@ -1213,6 +1231,18 @@ export default function LeafletMapView({
           ))}
         </div>
 
+        {/* Dark overlay slider */}
+        <div className="flex items-center gap-1.5 rounded-xl px-2 py-1" style={{ background: "rgba(255,255,255,0.02)" }}>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={overlayOpacity > 0 ? "#60a5fa" : "#555"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>
+          <input
+            type="range" min="0" max="0.7" step="0.05" value={overlayOpacity}
+            onChange={(e) => setOverlayOpacity(parseFloat(e.target.value))}
+            className="w-14 h-1 rounded-full appearance-none cursor-pointer"
+            style={{ background: `linear-gradient(to right, #3b82f6 ${(overlayOpacity / 0.7) * 100}%, #333 0%)` }}
+            title={`Oscuridad: ${Math.round(overlayOpacity * 100)}%`}
+          />
+        </div>
+
         <div className="h-5 w-px mx-0.5" style={{ background: "rgba(255,255,255,0.06)" }} />
 
         {/* Save */}
@@ -1268,15 +1298,20 @@ export default function LeafletMapView({
         snmpMonitors={kumaMonitors.filter((m) => m.type === "snmp" || m.type === "push" || m.type === "port")}
       />
 
-      {/* Input Modal (node rename) */}
-      <InputModal
-        open={inputModalOpen}
-        onClose={() => setInputModalOpen(false)}
-        onSubmit={(value) => {
-          if (value.trim()) {
+      {/* Node Edit Modal (name + MAC + IP) */}
+      {inputModalOpen && (() => {
+        const [editName, setEditName] = [inputModalConfig.initial, (v: string) => setInputModalConfig(c => ({ ...c, initial: v }))];
+        const [editMac, setEditMac] = [inputModalConfig.mac || "", (v: string) => setInputModalConfig(c => ({ ...c, mac: v }))];
+        const [editIp, setEditIp] = [inputModalConfig.ip || "", (v: string) => setInputModalConfig(c => ({ ...c, ip: v }))];
+
+        const handleSubmit = () => {
+          if (editName.trim()) {
             const idx = nodesRef.current.findIndex((n) => n.id === inputModalConfig.nodeId);
             if (idx >= 0) {
-              nodesRef.current[idx] = { ...nodesRef.current[idx], label: value.trim() };
+              const ncd = nodesRef.current[idx].custom_data ? JSON.parse(nodesRef.current[idx].custom_data!) : {};
+              ncd.mac = editMac.trim() || undefined;
+              ncd.ip = editIp.trim() || undefined;
+              nodesRef.current[idx] = { ...nodesRef.current[idx], label: editName.trim(), custom_data: JSON.stringify(ncd) };
               if (LRef.current && mapRef.current) {
                 renderNodes(LRef.current, mapRef.current);
                 renderEdges(LRef.current, mapRef.current);
@@ -1284,12 +1319,54 @@ export default function LeafletMapView({
             }
           }
           setInputModalOpen(false);
-        }}
-        title="Editar nombre"
-        placeholder="Nombre del nodo..."
-        initial={inputModalConfig.initial}
-        icon={<Pencil className="h-4 w-4 text-blue-400" />}
-      />
+        };
+
+        return (
+          <div className="fixed inset-0 z-[99999] flex items-center justify-center" style={{ background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }}
+            onClick={() => setInputModalOpen(false)}>
+            <div className="w-full max-w-sm rounded-2xl shadow-2xl" onClick={(e) => e.stopPropagation()}
+              style={{ background: "linear-gradient(180deg, rgba(22,22,22,0.98), rgba(14,14,14,0.99))", border: "1px solid rgba(255,255,255,0.08)" }}>
+              <div className="flex items-center gap-3 px-5 py-3.5" style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+                <div className="flex h-8 w-8 items-center justify-center rounded-xl" style={{ background: "rgba(59,130,246,0.12)", border: "1px solid rgba(59,130,246,0.25)" }}>
+                  <Pencil className="h-4 w-4 text-blue-400" />
+                </div>
+                <h3 className="text-sm font-bold text-[#ededed] flex-1">Editar Nodo</h3>
+                <button onClick={() => setInputModalOpen(false)} className="text-[#555] hover:text-[#ededed] text-lg">&times;</button>
+              </div>
+              <form onSubmit={(e) => { e.preventDefault(); handleSubmit(); }} className="px-5 py-4 space-y-3">
+                <div>
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-[#666] block mb-1">Nombre</label>
+                  <input type="text" value={editName} onChange={(e) => setEditName(e.target.value)} placeholder="Nombre del nodo..." autoFocus
+                    className="w-full rounded-xl px-3.5 py-2 text-sm text-[#ededed] placeholder:text-[#555] focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+                    style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.1)" }} />
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-[10px] font-bold uppercase tracking-wider text-[#666] block mb-1">MAC Address</label>
+                    <input type="text" value={editMac} onChange={(e) => setEditMac(e.target.value)} placeholder="AA:BB:CC:DD:EE:FF"
+                      className="w-full rounded-xl px-3 py-2 text-xs text-[#ededed] font-mono placeholder:text-[#444] focus:outline-none focus:ring-1 focus:ring-blue-500/30"
+                      style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }} />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold uppercase tracking-wider text-[#666] block mb-1">IP Address</label>
+                    <input type="text" value={editIp} onChange={(e) => setEditIp(e.target.value)} placeholder="192.168.1.100"
+                      className="w-full rounded-xl px-3 py-2 text-xs text-[#ededed] font-mono placeholder:text-[#444] focus:outline-none focus:ring-1 focus:ring-blue-500/30"
+                      style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }} />
+                  </div>
+                </div>
+                <div className="flex gap-2 pt-1">
+                  <button type="button" onClick={() => setInputModalOpen(false)}
+                    className="flex-1 rounded-xl py-2 text-xs font-semibold"
+                    style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", color: "#888" }}>Cancelar</button>
+                  <button type="submit"
+                    className="flex-1 rounded-xl py-2 text-xs font-bold"
+                    style={{ background: "rgba(59,130,246,0.15)", border: "1px solid rgba(59,130,246,0.3)", color: "#60a5fa" }}>Guardar</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Assign Monitor Modal */}
       {assignModalOpen && (

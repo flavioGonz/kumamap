@@ -541,6 +541,11 @@ function CanvasInner({
 
   // ─── Connection & Drop handlers ───────────────
   const onConnect = useCallback((params: Connection) => {
+    // Prevent self-link
+    if (params.source === params.target) {
+      toast.error("No se puede conectar un nodo consigo mismo");
+      return;
+    }
     // Check duplicate
     const exists = edges.some(
       (e) =>

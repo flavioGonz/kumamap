@@ -492,6 +492,13 @@ export default function LeafletMapView({
   function completeLinkCreation(targetId: string) {
     if (!linkSource) return;
 
+    // Prevent self-link
+    if (linkSource === targetId) {
+      toast.error("No se puede conectar un nodo consigo mismo");
+      cancelLinkCreation();
+      return;
+    }
+
     // Check if edge already exists
     const exists = edgesRef.current.some(
       (e) =>

@@ -158,21 +158,7 @@ export default function LeafletMapView({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
-  // Auto-save every 60s
-  useEffect(() => {
-    const interval = setInterval(() => {
-      if (nodesRef.current.length > 0) handleSave();
-    }, 60000);
-    return () => clearInterval(interval);
-  }, [handleSave]);
-
   // Alert sound on monitor DOWN
-  const alertAudioRef = useRef<HTMLAudioElement | null>(null);
-  useEffect(() => {
-    // Create a simple beep using Web Audio API
-    alertAudioRef.current = null; // will use AudioContext
-  }, []);
-
   const playAlertSound = useCallback(() => {
     try {
       const ctx = new AudioContext();
@@ -1294,7 +1280,15 @@ export default function LeafletMapView({
     };
     onSave(nodesRef.current, edgesRef.current, viewState);
     setSaving(false);
-  }, [onSave, mapStyle]);
+  }, [onSave, mapStyle, overlayOpacity]);
+
+  // Auto-save every 60s
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (nodesRef.current.length > 0) handleSave();
+    }, 60000);
+    return () => clearInterval(interval);
+  }, [handleSave]);
 
   // Search address (geocoding via Nominatim)
   const handleSearch = useCallback(async () => {

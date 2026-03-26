@@ -915,8 +915,8 @@ function CanvasInner({
             fitView
             snapToGrid
             snapGrid={[20, 20]}
-            minZoom={0.1}
-            maxZoom={6}
+            minZoom={0.05}
+            maxZoom={12}
             deleteKeyCode="Delete"
             defaultEdgeOptions={{
               type: "interface",

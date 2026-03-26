@@ -467,11 +467,16 @@ export default function LeafletMapView({
         });
       });
 
-      // Also listen for click in link mode (left click works too)
+      // Click — complete link or open popup
       marker.on("click", (e: any) => {
+        e.originalEvent?.preventDefault?.();
+        e.originalEvent?.stopPropagation?.();
         if (linkSourceRef.current && linkSourceRef.current !== node.id) {
-          e.originalEvent?.stopPropagation?.();
           completeLinkCreation(node.id);
+          return;
+        }
+        if (linkSourceRef.current && linkSourceRef.current === node.id) {
+          cancelLinkCreation();
           return;
         }
         if (isLabel || isCamera) return;
@@ -479,6 +484,18 @@ export default function LeafletMapView({
           .setLatLng(marker.getLatLng())
           .setContent(createPopupContent(node));
         popup.openOn(map);
+      });
+
+      // Mousedown fallback for link completion (in case click is eaten by drag)
+      marker.on("mousedown", (e: any) => {
+        if (linkSourceRef.current && linkSourceRef.current !== node.id) {
+          // Delay slightly so it doesn't conflict with drag
+          setTimeout(() => {
+            if (linkSourceRef.current && linkSourceRef.current !== node.id) {
+              completeLinkCreation(node.id);
+            }
+          }, 150);
+        }
       });
 
       // ── Drag: live update FOV cone, handles, edges, shadow ──

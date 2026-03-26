@@ -811,47 +811,125 @@ function CanvasInner({
       )}
 
       {bgType !== "livemap" ? (
-        <MapToolbar
-          mapName={mapData?.name || "Cargando..."}
-          onSave={handleSave}
-          onUploadBackground={handleUploadBg}
-          onSetGrid={handleSetGrid}
-          onSetLiveMap={handleSetLiveMap}
-          onZoomIn={() => reactFlow.zoomIn()}
-          onZoomOut={() => reactFlow.zoomOut()}
-          onFitView={() => reactFlow.fitView({ padding: 0.2 })}
-          onAutoLayout={handleAutoLayout}
-          onAddNode={handleAddNode}
-          onAddLabel={() => {
-            const text = prompt("Texto de la etiqueta:", "Etiqueta");
-            if (!text?.trim()) return;
-            const vp = reactFlow.getViewport();
-            setNodes((nds) => [...nds, {
-              id: `label-${Date.now()}`,
-              type: "textLabel",
-              position: { x: -vp.x / vp.zoom + 400, y: -vp.y / vp.zoom + 300 },
-              data: { text: text.trim(), fontSize: 14, color: "#ededed", bgEnabled: true } satisfies TextLabelData,
-            }]);
+        <div
+          className="absolute top-3 left-3 flex items-center gap-1.5 rounded-2xl px-2.5 py-1.5"
+          style={{
+            right: "340px", zIndex: 10000,
+            background: "rgba(10,10,10,0.82)", border: "1px solid rgba(255,255,255,0.06)",
+            backdropFilter: "blur(24px)", boxShadow: "0 8px 32px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.03)",
+            pointerEvents: "auto",
           }}
-          onDeleteSelected={handleDeleteSelected}
-          onToggleConnectMode={() => setConnectMode((v) => !v)}
-          onBack={onBack}
-          onSearch={handleSearch}
-          connectMode={connectMode}
-          saving={saving}
-          hasSelection={hasSelection}
-          isImageBg={bgType === "image"}
-          bgScale={bgScale}
-          onScaleBg={(delta) => {
-            const newScale = Math.max(0.1, Math.min(5, bgScale + delta));
-            setMapData((prev) => prev ? { ...prev, background_scale: newScale } : prev);
-            fetch(apiUrl(`/api/maps/${mapId}`), {
-              method: "PUT",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ background_scale: newScale }),
-            });
-          }}
-        />
+        >
+          {/* Back */}
+          <button onClick={onBack}
+            className="flex items-center gap-1 rounded-xl px-2 py-1.5 text-[11px] font-medium text-[#888] hover:text-[#ededed] hover:bg-white/[0.06] transition-all">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+            Mapas
+          </button>
+          <div className="h-5 w-px mx-0.5" style={{ background: "rgba(255,255,255,0.06)" }} />
+
+          {/* Name + status */}
+          <div className="flex items-center gap-2 px-1">
+            <span className="text-[12px] font-bold text-[#ededed] truncate max-w-[160px]">{mapData?.name || "..."}</span>
+            <div className="flex items-center gap-1">
+              <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: kumaConnected ? "#22c55e" : "#ef4444", boxShadow: kumaConnected ? "0 0 6px #22c55e" : "0 0 6px #ef4444" }} />
+              <span className="text-[9px] font-semibold" style={{ color: kumaConnected ? "#22c55e" : "#ef4444" }}>{kumaConnected ? "LIVE" : "OFF"}</span>
+            </div>
+          </div>
+
+          <div className="flex-1" />
+
+          {/* ═══ CENTERED TOOLS ═══ */}
+          <div className="flex items-center gap-0.5">
+            <button onClick={() => reactFlow.zoomIn()} title="Zoom In" className="rounded-xl p-1.5 text-[#888] hover:text-[#ededed] hover:bg-white/[0.06] transition-all">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.3-4.3"/><path d="M8 11h6"/><path d="M11 8v6"/></svg>
+            </button>
+            <button onClick={() => reactFlow.zoomOut()} title="Zoom Out" className="rounded-xl p-1.5 text-[#888] hover:text-[#ededed] hover:bg-white/[0.06] transition-all">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.3-4.3"/><path d="M8 11h6"/></svg>
+            </button>
+            <button onClick={() => reactFlow.fitView({ padding: 0.2 })} title="Ajustar vista" className="rounded-xl p-1.5 text-[#888] hover:text-[#ededed] hover:bg-white/[0.06] transition-all">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 3h6v6"/><path d="M9 21H3v-6"/><path d="M21 3l-7 7"/><path d="M3 21l7-7"/></svg>
+            </button>
+          </div>
+          <div className="h-5 w-px mx-0.5" style={{ background: "rgba(255,255,255,0.06)" }} />
+          <div className="flex items-center gap-0.5">
+            <button onClick={handleAddNode} title="Agregar nodo" className="group flex items-center gap-1 rounded-xl px-2 py-1.5 text-[#888] hover:text-[#ededed] hover:bg-white/[0.06] transition-all">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
+              <span className="text-[10px] font-semibold hidden xl:inline">Nodo</span>
+            </button>
+            <button onClick={() => {
+              const text = prompt("Texto de la etiqueta:", "Etiqueta");
+              if (!text?.trim()) return;
+              const vp = reactFlow.getViewport();
+              setNodes((nds) => [...nds, {
+                id: `label-${Date.now()}`, type: "textLabel",
+                position: { x: -vp.x / vp.zoom + 400, y: -vp.y / vp.zoom + 300 },
+                data: { text: text.trim(), fontSize: 14, color: "#ededed", bgEnabled: true } satisfies TextLabelData,
+              }]);
+            }} title="Agregar etiqueta" className="group flex items-center gap-1 rounded-xl px-2 py-1.5 text-[#888] hover:text-[#ededed] hover:bg-white/[0.06] transition-all">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" x2="15" y1="20" y2="20"/><line x1="12" x2="12" y1="4" y2="20"/></svg>
+              <span className="text-[10px] font-semibold hidden xl:inline">Etiqueta</span>
+            </button>
+            <button onClick={() => setConnectMode((v) => !v)} title={connectMode ? "Cancelar link" : "Crear link"}
+              className={`group flex items-center gap-1 rounded-xl px-2 py-1.5 transition-all ${connectMode ? "text-[#60a5fa]" : "text-[#888] hover:text-[#ededed] hover:bg-white/[0.06]"}`}
+              style={connectMode ? { background: "rgba(59,130,246,0.15)", border: "1px solid rgba(59,130,246,0.35)" } : {}}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+              <span className="text-[10px] font-semibold hidden xl:inline">Link</span>
+            </button>
+            {hasSelection && (
+              <button onClick={handleDeleteSelected} title="Eliminar" className="rounded-xl p-1.5 text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-all">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+              </button>
+            )}
+          </div>
+          <div className="h-5 w-px mx-0.5" style={{ background: "rgba(255,255,255,0.06)" }} />
+
+          {/* Background controls */}
+          <div className="flex items-center gap-0.5">
+            <button onClick={handleUploadBg} title="Subir imagen" className="rounded-xl p-1.5 text-[#888] hover:text-[#ededed] hover:bg-white/[0.06] transition-all">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>
+            </button>
+            <button onClick={handleSetGrid} title="Fondo grilla" className="rounded-xl p-1.5 text-[#888] hover:text-[#ededed] hover:bg-white/[0.06] transition-all">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 9h18"/><path d="M3 15h18"/><path d="M9 3v18"/><path d="M15 3v18"/></svg>
+            </button>
+            <button onClick={handleSetLiveMap} title="Mapa real" className="rounded-xl p-1.5 text-[#888] hover:text-[#ededed] hover:bg-white/[0.06] transition-all">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>
+            </button>
+            <button onClick={handleAutoLayout} title="Auto layout" className="rounded-xl p-1.5 text-[#888] hover:text-[#ededed] hover:bg-white/[0.06] transition-all">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/></svg>
+            </button>
+          </div>
+
+          {/* Image scale */}
+          {bgType === "image" && (
+            <>
+              <div className="h-5 w-px mx-0.5" style={{ background: "rgba(255,255,255,0.06)" }} />
+              <div className="flex items-center gap-0.5">
+                <button onClick={() => {
+                  const ns = Math.max(0.1, bgScale - 0.1);
+                  setMapData((prev) => prev ? { ...prev, background_scale: ns } : prev);
+                  fetch(apiUrl(`/api/maps/${mapId}`), { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ background_scale: ns }) });
+                }} title="Reducir fondo" className="rounded-xl px-1.5 py-1 text-[#888] hover:text-[#ededed] hover:bg-white/[0.06] transition-all text-[11px] font-bold">−</button>
+                <span className="text-[9px] text-[#666] font-mono min-w-[30px] text-center">{Math.round(bgScale * 100)}%</span>
+                <button onClick={() => {
+                  const ns = Math.min(5, bgScale + 0.1);
+                  setMapData((prev) => prev ? { ...prev, background_scale: ns } : prev);
+                  fetch(apiUrl(`/api/maps/${mapId}`), { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ background_scale: ns }) });
+                }} title="Ampliar fondo" className="rounded-xl px-1.5 py-1 text-[#888] hover:text-[#ededed] hover:bg-white/[0.06] transition-all text-[11px] font-bold">+</button>
+              </div>
+            </>
+          )}
+
+          <div className="flex-1" />
+
+          {/* Save */}
+          <button onClick={handleSave} disabled={saving}
+            className="flex items-center gap-1.5 rounded-xl px-4 py-1.5 text-[11px] font-bold transition-all"
+            style={{ background: "linear-gradient(135deg, rgba(59,130,246,0.2), rgba(99,102,241,0.15))", border: "1px solid rgba(59,130,246,0.3)", color: "#60a5fa", boxShadow: "0 2px 12px rgba(59,130,246,0.1)" }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15.2 3a2 2 0 0 1 1.4.6l3.8 3.8a2 2 0 0 1 .6 1.4V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/><path d="M17 21v-7a1 1 0 0 0-1-1H8a1 1 0 0 0-1 1v7"/><path d="M7 3v4a1 1 0 0 0 1 1h7"/></svg>
+            {saving ? "Guardando..." : "Guardar"}
+          </button>
+        </div>
       ) : null}
 
       <div className="h-full" style={{ isolation: "isolate" }}>

@@ -138,7 +138,7 @@ export default function LeafletMapView({
   // Keep ref in sync with state for closures
   useEffect(() => { linkSourceRef.current = linkSource; }, [linkSource]);
 
-  // Keyboard shortcuts: Escape = cancel link, Ctrl+Z = undo
+  // Keyboard shortcuts: Escape = cancel link, Ctrl+Z = undo, Ctrl+S = save
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
@@ -149,9 +149,44 @@ export default function LeafletMapView({
         e.preventDefault();
         performUndo();
       }
+      if ((e.ctrlKey || e.metaKey) && e.key === "s") {
+        e.preventDefault();
+        handleSave();
+      }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
+  // Auto-save every 60s
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (nodesRef.current.length > 0) handleSave();
+    }, 60000);
+    return () => clearInterval(interval);
+  }, [handleSave]);
+
+  // Alert sound on monitor DOWN
+  const alertAudioRef = useRef<HTMLAudioElement | null>(null);
+  useEffect(() => {
+    // Create a simple beep using Web Audio API
+    alertAudioRef.current = null; // will use AudioContext
+  }, []);
+
+  const playAlertSound = useCallback(() => {
+    try {
+      const ctx = new AudioContext();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.frequency.value = 800;
+      osc.type = "sine";
+      gain.gain.value = 0.15;
+      osc.start();
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.5);
+      osc.stop(ctx.currentTime + 0.5);
+    } catch {}
   }, []);
 
   // Map style
@@ -1118,6 +1153,27 @@ export default function LeafletMapView({
           },
         },
       ] : []),
+      // Duplicate node (non-cameras — cameras have their own duplicate)
+      ...(node?.icon !== "_camera" ? [{
+        label: "Duplicar nodo",
+        icon: menuIcons.Plus,
+        onClick: () => {
+          pushUndo();
+          const cd = node?.custom_data ? JSON.parse(node.custom_data) : {};
+          const newId = `node-${Date.now()}`;
+          nodesRef.current = [...nodesRef.current, {
+            id: newId,
+            kuma_monitor_id: null,
+            label: (node?.label || "Nodo") + " (copia)",
+            x: (node?.x || 0) + 0.0003,
+            y: (node?.y || 0) + 0.0003,
+            icon: node?.icon || "server",
+            custom_data: node?.custom_data || null,
+          }];
+          if (LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current);
+          toast.success("Nodo duplicado");
+        },
+      }] : []),
       {
         label: "Eliminar nodo",
         icon: menuIcons.Trash2,
@@ -1903,6 +1959,28 @@ export default function LeafletMapView({
                 })}
               </div>
             </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Status bar bottom ── */}
+      {(() => {
+        const total = nodesRef.current.filter(n => n.kuma_monitor_id && n.icon !== "_textLabel" && n.icon !== "_waypoint").length;
+        const up = nodesRef.current.filter(n => { const m = getMonitorData(n.kuma_monitor_id); return m?.status === 1; }).length;
+        const down = nodesRef.current.filter(n => { const m = getMonitorData(n.kuma_monitor_id); return m?.status === 0; }).length;
+        const pending = total - up - down;
+        return (
+          <div className="absolute bottom-3 left-3 z-[10000] flex items-center gap-3 rounded-xl px-3 py-1.5"
+            style={{ background: "rgba(10,10,10,0.8)", border: "1px solid rgba(255,255,255,0.06)", backdropFilter: "blur(16px)" }}>
+            <span className="text-[10px] font-bold text-[#888]">{nodesRef.current.filter(n => n.icon !== "_textLabel" && n.icon !== "_waypoint").length} nodos</span>
+            <span className="text-[10px] text-[#555]">|</span>
+            <span className="flex items-center gap-1 text-[10px] font-bold"><span className="h-2 w-2 rounded-full bg-emerald-500" />{up} UP</span>
+            {down > 0 && <span className="flex items-center gap-1 text-[10px] font-bold text-red-400"><span className="h-2 w-2 rounded-full bg-red-500 animate-pulse" />{down} DOWN</span>}
+            {pending > 0 && <span className="flex items-center gap-1 text-[10px] font-bold text-amber-400"><span className="h-2 w-2 rounded-full bg-amber-500" />{pending}</span>}
+            <span className="text-[10px] text-[#555]">|</span>
+            <span className="text-[10px] text-[#888]">{edgesRef.current.length} links</span>
+            <span className="text-[10px] text-[#555]">|</span>
+            <span className="text-[10px] text-[#555]">Ctrl+Z deshacer &middot; Ctrl+S guardar</span>
           </div>
         );
       })()}

@@ -53,10 +53,7 @@ class KumaClient {
         transports: ["websocket"],
       });
 
-      this.socket.on("connect", () => {
-        console.log("[Kuma] Socket connected, authenticating...");
-        this.connected = true;
-
+      const doLogin = (cb?: () => void) => {
         this.socket!.emit(
           "login",
           { username, password, token: "" },
@@ -64,19 +61,37 @@ class KumaClient {
             if (res.ok) {
               console.log("[Kuma] Authenticated successfully");
               this.authenticated = true;
-              resolve();
             } else {
               console.error("[Kuma] Auth failed:", res.msg);
               this.authenticated = false;
-              resolve();
             }
+            cb?.();
           }
         );
+      };
+
+      this.socket.on("connect", () => {
+        console.log("[Kuma] Socket connected, authenticating...");
+        this.connected = true;
+        doLogin(() => resolve());
+      });
+
+      // Re-authenticate on reconnect (Kuma requires login after each connect)
+      this.socket.on("reconnect", () => {
+        console.log("[Kuma] Reconnected, re-authenticating...");
+        this.connected = true;
+        doLogin();
       });
 
       this.socket.on(
         "monitorList",
         (data: Record<string, any>) => {
+          // Rebuild full list (handles additions AND deletions)
+          const newIds = new Set(Object.keys(data).map((k) => parseInt(k)));
+          // Remove monitors that no longer exist
+          for (const existingId of this.monitors.keys()) {
+            if (!newIds.has(existingId)) this.monitors.delete(existingId);
+          }
           for (const [id, monitor] of Object.entries(data)) {
             const mid = parseInt(id);
             const hb = this.heartbeats.get(mid);

@@ -101,3 +101,11 @@ body {
   0%, 100% { border-color: rgba(59, 130, 246, 0.3); }
   50% { border-color: rgba(59, 130, 246, 0.6); }
 }
+
+/* Ensure Leaflet toolbar stays above map layers */
+#leaflet-toolbar {
+  z-index: 10000 !important;
+}
+.leaflet-container {
+  z-index: 0 !important;
+}

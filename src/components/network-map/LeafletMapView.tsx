@@ -662,20 +662,23 @@ export default function LeafletMapView({
       <div
         ref={containerRef}
         className="absolute inset-0"
-        style={{ zIndex: 1 }}
+        style={{ zIndex: 0 }}
         onDrop={handleDrop}
         onDragOver={handleDragOver}
       />
 
       {/* ── Floating Top Bar ── */}
       <div
-        className="absolute top-3 left-3 z-[1000] flex items-center gap-1.5 rounded-2xl px-2.5 py-1.5"
+        className="absolute top-3 left-3 flex items-center gap-1.5 rounded-2xl px-2.5 py-1.5"
+        id="leaflet-toolbar"
         style={{
           right: "340px",
+          zIndex: 10000,
           background: "rgba(10,10,10,0.82)",
           border: "1px solid rgba(255,255,255,0.06)",
           backdropFilter: "blur(24px)",
           boxShadow: "0 8px 32px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.03)",
+          pointerEvents: "auto",
         }}
       >
         {/* Back */}

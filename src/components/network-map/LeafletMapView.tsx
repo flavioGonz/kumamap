@@ -604,17 +604,7 @@ export default function LeafletMapView({
       return;
     }
 
-    // Check if edge already exists
-    const exists = edgesRef.current.some(
-      (e) =>
-        (e.source_node_id === linkSource && e.target_node_id === targetId) ||
-        (e.source_node_id === targetId && e.target_node_id === linkSource)
-    );
-    if (exists) {
-      toast.error("Conexion ya existe entre estos nodos");
-      cancelLinkCreation();
-      return;
-    }
+
 
     // Open modal to fill interface details
     setLinkModalData({ sourceId: linkSource, targetId });
@@ -1321,6 +1311,18 @@ export default function LeafletMapView({
           border-radius: 12px !important;
           overflow: hidden;
           box-shadow: 0 4px 16px rgba(0,0,0,0.4) !important;
+        }
+        .custom-marker,
+        .text-label-marker,
+        .camera-marker,
+        .interface-label,
+        .traffic-label {
+          background: none !important;
+          border: none !important;
+          box-shadow: none !important;
+        }
+        .text-label-marker {
+          z-index: 500 !important;
         }
         @keyframes ping {
           75%, 100% { transform: scale(2); opacity: 0; }

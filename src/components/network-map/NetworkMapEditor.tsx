@@ -546,16 +546,6 @@ function CanvasInner({
       toast.error("No se puede conectar un nodo consigo mismo");
       return;
     }
-    // Check duplicate
-    const exists = edges.some(
-      (e) =>
-        (e.source === params.source && e.target === params.target) ||
-        (e.source === params.target && e.target === params.source)
-    );
-    if (exists) {
-      toast.error("Ya existe una conexion entre estos nodos");
-      return;
-    }
     const srcNode = nodes.find((n) => n.id === params.source);
     const tgtNode = nodes.find((n) => n.id === params.target);
     setLinkModalData({

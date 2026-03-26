@@ -797,10 +797,42 @@ export default function LeafletMapView({
           dragLineRef.current.setLatLngs([srcLatLng, snapTarget]);
         };
 
+        // Map-level click to complete link (bypasses marker event issues)
+        const onMapClick = (e: any) => {
+          if (!linkSourceRef.current) return;
+          const clickPoint = map.latLngToContainerPoint(e.latlng);
+          for (const n of nodesRef.current) {
+            if (n.id === nodeId || n.icon === "_textLabel") continue;
+            const nPoint = map.latLngToContainerPoint([n.x, n.y]);
+            const dist = Math.sqrt(Math.pow(clickPoint.x - nPoint.x, 2) + Math.pow(clickPoint.y - nPoint.y, 2));
+            if (dist < SNAP_RADIUS) {
+              completeLinkCreation(n.id);
+              return;
+            }
+          }
+        };
+
         map.on("mousemove", onMouseMove);
+        map.on("click", onMapClick);
+        map.on("contextmenu", (e: any) => {
+          if (!linkSourceRef.current) return;
+          e.originalEvent.preventDefault();
+          const clickPoint = map.latLngToContainerPoint(e.latlng);
+          for (const n of nodesRef.current) {
+            if (n.id === nodeId || n.icon === "_textLabel") continue;
+            const nPoint = map.latLngToContainerPoint([n.x, n.y]);
+            const dist = Math.sqrt(Math.pow(clickPoint.x - nPoint.x, 2) + Math.pow(clickPoint.y - nPoint.y, 2));
+            if (dist < SNAP_RADIUS) {
+              completeLinkCreation(n.id);
+              return;
+            }
+          }
+        });
+
         // Store cleanup function
         (dragLineRef.current as any)._cleanup = () => {
           map.off("mousemove", onMouseMove);
+          map.off("click", onMapClick);
           // Reset any lingering glow
           if (lastSnappedId) {
             const m = markersRef.current.get(lastSnappedId);

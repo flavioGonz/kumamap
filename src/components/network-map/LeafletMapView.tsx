@@ -486,15 +486,11 @@ export default function LeafletMapView({
         popup.openOn(map);
       });
 
-      // Mousedown fallback for link completion (in case click is eaten by drag)
-      marker.on("mousedown", (e: any) => {
+      // Mouseup fallback for link completion (more reliable than mousedown)
+      marker.on("mouseup", (e: any) => {
         if (linkSourceRef.current && linkSourceRef.current !== node.id) {
-          // Delay slightly so it doesn't conflict with drag
-          setTimeout(() => {
-            if (linkSourceRef.current && linkSourceRef.current !== node.id) {
-              completeLinkCreation(node.id);
-            }
-          }, 150);
+          e.originalEvent?.stopPropagation?.();
+          completeLinkCreation(node.id);
         }
       });
 

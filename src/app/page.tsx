@@ -19,6 +19,8 @@ import {
   ArrowUpDown,
   Clock,
   Filter,
+  ExternalLink,
+  Copy,
 } from "lucide-react";
 import type { KumaMonitor } from "@/components/network-map/MonitorPanel";
 import NetworkMapEditor from "@/components/network-map/NetworkMapEditor";
@@ -257,7 +259,7 @@ function MapListView({
       {/* Table */}
       <div className="rounded-2xl overflow-hidden" style={{ background: "rgba(255,255,255,0.015)", border: "1px solid rgba(255,255,255,0.06)" }}>
         {/* Table header */}
-        <div className="grid grid-cols-[1fr_120px_140px_140px_100px] gap-2 px-5 py-3 text-[10px] font-bold uppercase tracking-wider text-[#555]"
+        <div className="grid grid-cols-[1fr_100px_120px_130px_80px_100px] gap-2 px-5 py-3 text-[10px] font-bold uppercase tracking-wider text-[#555]"
           style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
           <button className="flex items-center gap-1 text-left hover:text-[#ededed] transition-colors" onClick={() => toggleSort("name")}>
             Nombre <SortIcon col="name" />
@@ -269,6 +271,7 @@ function MapListView({
           <button className="flex items-center gap-1 hover:text-[#ededed] transition-colors" onClick={() => toggleSort("updated")}>
             Actualizado <SortIcon col="updated" />
           </button>
+          <span>Vista</span>
           <span className="text-right">Acciones</span>
         </div>
 
@@ -277,7 +280,7 @@ function MapListView({
           const groupName = getGroupName(map.kuma_group_id);
           return (
             <div key={map.id}
-              className="grid grid-cols-[1fr_120px_140px_140px_100px] gap-2 items-center px-5 py-3 transition-all cursor-pointer group/row"
+              className="grid grid-cols-[1fr_100px_120px_130px_80px_100px] gap-2 items-center px-5 py-3 transition-all cursor-pointer group/row"
               style={{ borderBottom: "1px solid rgba(255,255,255,0.03)" }}
               onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "rgba(59,130,246,0.04)"; }}
               onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}
@@ -322,6 +325,25 @@ function MapListView({
               <div className="flex items-center gap-1.5 text-[11px] text-[#777]">
                 <Clock className="h-3 w-3 text-[#555]" />
                 {new Date(map.updated_at).toLocaleDateString()} {new Date(map.updated_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+              </div>
+
+              {/* View URL */}
+              <div className="flex items-center gap-1">
+                <a href={`/maps/view/${map.id}`} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}
+                  className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[10px] font-semibold transition-all hover:bg-blue-500/10"
+                  style={{ color: "#60a5fa", border: "1px solid rgba(59,130,246,0.15)" }}
+                  title="Abrir vista fullscreen">
+                  <ExternalLink className="h-3 w-3" />
+                </a>
+                <button onClick={(e) => {
+                  e.stopPropagation();
+                  const url = `${window.location.origin}/maps/view/${map.id}`;
+                  navigator.clipboard.writeText(url);
+                  toast.success("URL copiada", { description: url });
+                }} title="Copiar URL"
+                  className="rounded-lg p-1 text-[#666] hover:text-[#ededed] hover:bg-white/5 transition-all">
+                  <Copy className="h-3 w-3" />
+                </button>
               </div>
 
               {/* Actions */}

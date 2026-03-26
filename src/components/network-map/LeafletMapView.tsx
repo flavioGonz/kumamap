@@ -107,6 +107,11 @@ export default function LeafletMapView({
   const [assignNodeId, setAssignNodeId] = useState<string>("");
   const [assignSearch, setAssignSearch] = useState("");
   const [colorPickerOpen, setColorPickerOpen] = useState(false);
+  const [autoSaveEnabled, setAutoSaveEnabled] = useState(true);
+  const [polygonMode, setPolygonMode] = useState(false);
+  const polygonPointsRef = useRef<[number, number][]>([]);
+  const polygonPreviewRef = useRef<any>(null);
+  const polygonLayersRef = useRef<Map<string, any>>(new Map());
   const [colorPickerNodeId, setColorPickerNodeId] = useState<string>("");
   const [lensPickerOpen, setLensPickerOpen] = useState(false);
   const [lensPickerNodeId, setLensPickerNodeId] = useState<string>("");
@@ -143,6 +148,8 @@ export default function LeafletMapView({
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         if (linkSourceRef.current) { cancelLinkCreation(); e.preventDefault(); }
+        if (polygonPointsRef.current.length > 0) { cancelPolygon(); e.preventDefault(); }
+        setPolygonMode(false);
         setCtxMenu(null);
       }
       if ((e.ctrlKey || e.metaKey) && e.key === "z") {
@@ -221,6 +228,19 @@ export default function LeafletMapView({
       L.control.zoom({ position: "bottomleft" }).addTo(map);
 
       mapRef.current = map;
+
+      // General map click handler (for polygon drawing)
+      map.on("click", (e: any) => {
+        if (polygonPointsRef.current !== undefined && document.querySelector("[data-polygon-active]")) {
+          handlePolygonClick(e.latlng);
+        }
+      });
+      map.on("dblclick", (e: any) => {
+        if (polygonPointsRef.current.length >= 3 && document.querySelector("[data-polygon-active]")) {
+          e.originalEvent?.preventDefault?.();
+          finishPolygon();
+        }
+      });
 
       // Render initial nodes after map is ready
       map.whenReady(() => {
@@ -323,14 +343,48 @@ export default function LeafletMapView({
     camHandlesRef.current.forEach((h) => { try { map.removeLayer(h); } catch {} });
     camHandlesRef.current.clear();
 
+    // Clear polygon layers
+    polygonLayersRef.current.forEach((l) => { try { map.removeLayer(l); } catch {} });
+    polygonLayersRef.current.clear();
+
     nodesRef.current.forEach((node) => {
       const isLabel = node.icon === "_textLabel";
       const isCamera = node.icon === "_camera";
       const isWaypoint = node.icon === "_waypoint";
+      const isPolygon = node.icon === "_polygon";
       const cd = node.custom_data ? JSON.parse(node.custom_data) : {};
       const color = getStatusColor(node.kuma_monitor_id);
       const m = getMonitorData(node.kuma_monitor_id);
       const pulse = !isLabel && (m?.status === 0 || m?.status === 2);
+
+      // Render polygon zone
+      if (isPolygon && cd.points?.length >= 3) {
+        const polyColor = cd.color || "#3b82f6";
+        const polyOpacity = cd.fillOpacity ?? 0.15;
+        const poly = L.polygon(cd.points, {
+          color: polyColor, fillColor: polyColor, fillOpacity: polyOpacity,
+          weight: 2, opacity: 0.6,
+        });
+        poly.bindTooltip(node.label || "Zona", { sticky: true, className: "leaflet-label-dark" });
+        poly.on("dblclick", () => {
+          const newName = prompt("Nombre de la zona:", node.label || "Zona");
+          if (newName?.trim()) {
+            const idx = nodesRef.current.findIndex((n) => n.id === node.id);
+            if (idx >= 0) {
+              nodesRef.current[idx] = { ...nodesRef.current[idx], label: newName.trim() };
+              renderNodes(L, map);
+            }
+          }
+        });
+        poly.on("contextmenu", (e: any) => {
+          e.originalEvent.preventDefault();
+          e.originalEvent.stopPropagation();
+          setCtxMenu({ x: e.originalEvent.clientX, y: e.originalEvent.clientY, nodeId: node.id });
+        });
+        poly.addTo(map);
+        polygonLayersRef.current.set(node.id, poly);
+        return; // Don't render a marker for polygons
+      }
       const isSource = linkSource === node.id;
 
       const rotation = cd.rotation || 0;
@@ -1003,11 +1057,118 @@ export default function LeafletMapView({
     }
   }
 
+  // ─── Polygon drawing ────────────────────────
+  function handlePolygonClick(latlng: any) {
+    if (!LRef.current || !mapRef.current) return;
+    const L = LRef.current;
+    const map = mapRef.current;
+    const point: [number, number] = [latlng.lat, latlng.lng];
+    polygonPointsRef.current.push(point);
+
+    // Update preview polygon
+    if (polygonPreviewRef.current) map.removeLayer(polygonPreviewRef.current);
+    if (polygonPointsRef.current.length >= 2) {
+      polygonPreviewRef.current = L.polygon(polygonPointsRef.current, {
+        color: "#3b82f6", fillColor: "#3b82f6", fillOpacity: 0.15,
+        weight: 2, dashArray: "6,4", interactive: false,
+      }).addTo(map);
+    } else {
+      // Show dot for first point
+      polygonPreviewRef.current = L.circleMarker(point, {
+        radius: 5, color: "#3b82f6", fillColor: "#3b82f6", fillOpacity: 1,
+      }).addTo(map);
+    }
+  }
+
+  function finishPolygon() {
+    if (polygonPointsRef.current.length < 3) {
+      toast.error("Se necesitan al menos 3 puntos");
+      cancelPolygon();
+      return;
+    }
+    pushUndo();
+    const pts = [...polygonPointsRef.current];
+    const centroid: [number, number] = [
+      pts.reduce((s, p) => s + p[0], 0) / pts.length,
+      pts.reduce((s, p) => s + p[1], 0) / pts.length,
+    ];
+    const id = `poly-${Date.now()}`;
+    nodesRef.current = [...nodesRef.current, {
+      id,
+      kuma_monitor_id: null,
+      label: "Zona",
+      x: centroid[0],
+      y: centroid[1],
+      icon: "_polygon",
+      custom_data: JSON.stringify({
+        points: pts,
+        color: "#3b82f6",
+        fillOpacity: 0.15,
+      }),
+    }];
+    cancelPolygon();
+    setPolygonMode(false);
+    if (LRef.current && mapRef.current) {
+      renderNodes(LRef.current, mapRef.current);
+      renderEdges(LRef.current, mapRef.current);
+    }
+    toast.success("Zona creada — doble clic para renombrar");
+  }
+
+  function cancelPolygon() {
+    polygonPointsRef.current = [];
+    if (polygonPreviewRef.current && mapRef.current) {
+      try { mapRef.current.removeLayer(polygonPreviewRef.current); } catch {}
+      polygonPreviewRef.current = null;
+    }
+  }
+
   // ─── Context menu items ─────────────────────
   function getNodeCtxItems(nodeId: string) {
     const node = nodesRef.current.find((n) => n.id === nodeId);
     const isLabel = node?.icon === "_textLabel";
     const isWaypoint = node?.icon === "_waypoint";
+
+    // Polygons: rename, color, delete
+    const isPolygon = node?.icon === "_polygon";
+    if (isPolygon) {
+      return [
+        {
+          label: "Editar nombre",
+          icon: menuIcons.Pencil,
+          onClick: () => {
+            const newName = prompt("Nombre de la zona:", node?.label || "Zona");
+            if (newName?.trim()) {
+              const idx = nodesRef.current.findIndex((n) => n.id === nodeId);
+              if (idx >= 0) {
+                nodesRef.current[idx] = { ...nodesRef.current[idx], label: newName.trim() };
+                if (LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current);
+              }
+            }
+          },
+        },
+        {
+          label: "Color zona",
+          icon: menuIcons.Palette,
+          onClick: () => {
+            setColorPickerNodeId(nodeId);
+            setColorPickerOpen(true);
+          },
+        },
+        {
+          label: "Eliminar zona",
+          icon: menuIcons.Trash2,
+          danger: true,
+          divider: true,
+          onClick: () => {
+            pushUndo();
+            nodesRef.current = nodesRef.current.filter((n) => n.id !== nodeId);
+            if (LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current);
+            toast.success("Zona eliminada");
+          },
+        },
+      ];
+    }
 
     // Waypoints: link + delete only
     if (isWaypoint) {
@@ -1292,13 +1453,14 @@ export default function LeafletMapView({
     setSaving(false);
   }, [onSave, mapStyle, overlayOpacity]);
 
-  // Auto-save every 60s
+  // Auto-save every 60s (if enabled)
   useEffect(() => {
+    if (!autoSaveEnabled) return;
     const interval = setInterval(() => {
       if (nodesRef.current.length > 0) handleSave();
     }, 60000);
     return () => clearInterval(interval);
-  }, [handleSave]);
+  }, [handleSave, autoSaveEnabled]);
 
   // Search address (geocoding via Nominatim)
   const handleSearch = useCallback(async () => {
@@ -1450,6 +1612,11 @@ export default function LeafletMapView({
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m16.24 7.76-1.804 5.412a2 2 0 0 1-1.265 1.265L7.76 16.24l1.804-5.412a2 2 0 0 1 1.265-1.265z"/><circle cx="12" cy="12" r="10"/></svg>
             <span className="text-[10px] font-semibold hidden xl:inline">Camara</span>
           </button>
+        </div>
+
+        {/* ─── Drawing tools separator ─── */}
+        <div className="h-5 w-px mx-0.5" style={{ background: "rgba(255,255,255,0.06)" }} />
+        <div className="flex items-center gap-0.5" style={{ background: "rgba(255,255,255,0.02)", borderRadius: "12px", padding: "2px" }}>
           <button onClick={() => {
             if (!mapRef.current) return;
             const center = mapRef.current.getCenter();
@@ -1457,21 +1624,38 @@ export default function LeafletMapView({
             nodesRef.current = [...nodesRef.current, { id, kuma_monitor_id: null, label: "", x: center.lat, y: center.lng, icon: "_waypoint" }];
             if (LRef.current) renderNodes(LRef.current, mapRef.current);
             toast.success("Punto de ruta agregado");
-          }} title="Nodo ciego / waypoint para curvar links"
+          }} title="Waypoint para curvar links"
             className="group flex items-center gap-1 rounded-xl px-2 py-1.5 text-[#888] hover:text-[#ededed] hover:bg-white/[0.06] transition-all">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/></svg>
             <span className="text-[10px] font-semibold hidden xl:inline">Punto</span>
           </button>
           <button onClick={() => {
             if (linkSource) { cancelLinkCreation(); return; }
-            // Pick a random node as source — user clicks another to link
             if (nodesRef.current.length === 0) { toast.error("Agrega nodos primero"); return; }
-            toast.info("Haz clic derecho en un nodo y selecciona 'Nuevo link'", { duration: 4000 });
+            toast.info("Clic derecho en un nodo → Nuevo link", { duration: 4000 });
           }} title={linkSource ? "Cancelar link" : "Crear link entre nodos"}
             className={`group flex items-center gap-1 rounded-xl px-2 py-1.5 transition-all ${linkSource ? "text-[#60a5fa]" : "text-[#888] hover:text-[#ededed] hover:bg-white/[0.06]"}`}
             style={linkSource ? { background: "rgba(59,130,246,0.15)", border: "1px solid rgba(59,130,246,0.35)" } : {}}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
             <span className="text-[10px] font-semibold hidden xl:inline">Link</span>
+          </button>
+          <button
+            data-polygon-active={polygonMode || undefined}
+            onClick={() => {
+              if (polygonMode) {
+                if (polygonPointsRef.current.length >= 3) finishPolygon();
+                else { cancelPolygon(); setPolygonMode(false); }
+              } else {
+                setPolygonMode(true);
+                toast.info("Clic en el mapa para agregar puntos. Doble clic para terminar.", { duration: 5000 });
+              }
+            }}
+            title={polygonMode ? "Terminar poligono (doble clic)" : "Dibujar zona/poligono"}
+            className={`group flex items-center gap-1 rounded-xl px-2 py-1.5 transition-all ${polygonMode ? "text-[#4ade80]" : "text-[#888] hover:text-[#ededed] hover:bg-white/[0.06]"}`}
+            style={polygonMode ? { background: "rgba(34,197,94,0.15)", border: "1px solid rgba(34,197,94,0.35)" } : {}}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3h18v18H3z"/></svg>
+            <span className="text-[10px] font-semibold hidden xl:inline">{polygonMode ? "Listo" : "Zona"}</span>
           </button>
         </div>
 
@@ -1571,6 +1755,15 @@ export default function LeafletMapView({
         </div>
 
         <div className="h-5 w-px mx-0.5" style={{ background: "rgba(255,255,255,0.06)" }} />
+
+        {/* Auto-save toggle */}
+        <button onClick={() => setAutoSaveEnabled(v => !v)} title={autoSaveEnabled ? "Auto-save ON (clic para desactivar)" : "Auto-save OFF (clic para activar)"}
+          className="rounded-lg p-1.5 transition-all"
+          style={{ color: autoSaveEnabled ? "#4ade80" : "#555" }}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            {autoSaveEnabled ? <><path d="M12 2v4"/><path d="m16.2 7.8 2.9-2.9"/><path d="M18 12h4"/><path d="m16.2 16.2 2.9 2.9"/><path d="M12 18v4"/><path d="m4.9 19.1 2.9-2.9"/><path d="M2 12h4"/><path d="m4.9 4.9 2.9 2.9"/></> : <><circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/></>}
+          </svg>
+        </button>
 
         {/* Save */}
         <button

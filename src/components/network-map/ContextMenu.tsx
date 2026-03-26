@@ -2,7 +2,7 @@
 
 import {
   Pencil, Trash2, Copy, Link2, Maximize2,
-  Palette, Plus, Server, RotateCcw,
+  Palette, Plus, Server, RotateCcw, Type,
 } from "lucide-react";
 
 interface MenuItem {
@@ -77,4 +77,4 @@ export default function ContextMenu({ x, y, items, onClose }: ContextMenuProps) 
 }
 
 // Helper to build common menu items
-export const menuIcons = { Pencil, Trash2, Copy, Link2, Maximize2, Palette, Plus, Server, RotateCcw };
+export const menuIcons = { Pencil, Trash2, Copy, Link2, Maximize2, Palette, Plus, Server, RotateCcw, Type };

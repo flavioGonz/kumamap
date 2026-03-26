@@ -16,6 +16,7 @@ import {
   Globe,
   ChevronLeft,
   Pencil,
+  Type,
 } from "lucide-react";
 import { useState } from "react";
 
@@ -30,6 +31,7 @@ interface MapToolbarProps {
   onFitView: () => void;
   onAutoLayout: () => void;
   onAddNode: () => void;
+  onAddLabel?: () => void;
   onDeleteSelected: () => void;
   onToggleConnectMode: () => void;
   onBack: () => void;
@@ -111,6 +113,7 @@ export default function MapToolbar({
   onFitView,
   onAutoLayout,
   onAddNode,
+  onAddLabel,
   onDeleteSelected,
   onToggleConnectMode,
   onBack,
@@ -235,6 +238,11 @@ export default function MapToolbar({
         <ToolButton onClick={onAddNode} title="Agregar nodo" label="Nodo">
           <Plus className="h-3.5 w-3.5" />
         </ToolButton>
+        {onAddLabel && (
+          <ToolButton onClick={onAddLabel} title="Agregar etiqueta de texto" label="Etiqueta">
+            <Type className="h-3.5 w-3.5" />
+          </ToolButton>
+        )}
         <ToolButton onClick={onToggleConnectMode} title="Modo conexion" active={connectMode} label="Link">
           <Link2 className="h-3.5 w-3.5" />
         </ToolButton>

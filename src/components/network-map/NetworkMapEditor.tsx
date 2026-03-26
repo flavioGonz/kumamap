@@ -24,6 +24,7 @@ import "@xyflow/react/dist/style.css";
 import { toast } from "sonner";
 
 import KumaMonitorNode, { type KumaNodeData } from "./KumaMonitorNode";
+import TextLabelNode, { type TextLabelData } from "./TextLabelNode";
 import MonitorPanel, { type KumaMonitor } from "./MonitorPanel";
 import MapToolbar from "./MapToolbar";
 import ContextMenu, { menuIcons } from "./ContextMenu";
@@ -31,7 +32,7 @@ import LinkModal, { type LinkFormData } from "./LinkModal";
 import InputModal from "./InputModal";
 import LeafletMapView from "./LeafletMapView";
 import { apiUrl } from "@/lib/api";
-import { Pencil } from "lucide-react";
+import { Pencil, Type } from "lucide-react";
 
 // ─── Custom Edge with interface labels ──────────
 function InterfaceEdge({ id, sourceX, sourceY, targetX, targetY, data, style, selected, markerEnd }: any) {
@@ -121,7 +122,10 @@ function InterfaceEdge({ id, sourceX, sourceY, targetX, targetY, data, style, se
   );
 }
 
-const nodeTypes: NodeTypes = { kumaMonitor: KumaMonitorNode as any };
+const nodeTypes: NodeTypes = {
+  kumaMonitor: KumaMonitorNode as any,
+  textLabel: TextLabelNode as any,
+};
 const edgeTypes: EdgeTypes = { interface: InterfaceEdge as any };
 
 interface MapData {
@@ -184,13 +188,30 @@ function CanvasInner({
       .then((r) => r.json())
       .then((data: MapData) => {
         setMapData(data);
-        const rfNodes: Node[] = (data.nodes || []).map((n: any) => ({
-          id: n.id,
-          type: "kumaMonitor",
-          position: { x: n.x, y: n.y },
-          style: n.width && n.width !== 120 ? { width: n.width, height: n.height } : undefined,
-          data: { label: n.label || "Node", kumaMonitorId: n.kuma_monitor_id, icon: n.icon || "server" } satisfies KumaNodeData,
-        }));
+        const rfNodes: Node[] = (data.nodes || []).map((n: any) => {
+          // Check if it's a text label node
+          const cd = n.custom_data ? JSON.parse(n.custom_data) : {};
+          if (n.icon === "_textLabel" || cd.type === "textLabel") {
+            return {
+              id: n.id,
+              type: "textLabel",
+              position: { x: n.x, y: n.y },
+              data: {
+                text: n.label || "Etiqueta",
+                fontSize: cd.fontSize || 14,
+                color: n.color || "#ededed",
+                bgEnabled: cd.bgEnabled !== false,
+              } satisfies TextLabelData,
+            };
+          }
+          return {
+            id: n.id,
+            type: "kumaMonitor",
+            position: { x: n.x, y: n.y },
+            style: n.width && n.width !== 120 ? { width: n.width, height: n.height } : undefined,
+            data: { label: n.label || "Node", kumaMonitorId: n.kuma_monitor_id, icon: n.icon || "server" } satisfies KumaNodeData,
+          };
+        });
         const rfEdges: Edge[] = (data.edges || []).map((e: any) => {
           const cd = e.custom_data ? JSON.parse(e.custom_data) : {};
           return {
@@ -246,9 +267,14 @@ function CanvasInner({
 
   // Link creation via context menu — simplified two-click flow
   const [linkSource, setLinkSource] = useState<string | null>(null);
+  const linkSourceRef = useRef<string | null>(null);
+
+  // Keep ref in sync
+  useEffect(() => { linkSourceRef.current = linkSource; }, [linkSource]);
 
   const startLinkCreation = (nodeId: string) => {
     setLinkSource(nodeId);
+    linkSourceRef.current = nodeId;
     const node = nodes.find((n) => n.id === nodeId);
     toast.info(`Enlazando desde "${node?.data.label || nodeId}"`, {
       description: "Haz clic en el nodo destino, o ESC para cancelar",
@@ -263,6 +289,7 @@ function CanvasInner({
     const handler = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         setLinkSource(null);
+        linkSourceRef.current = null;
         toast.dismiss("link-mode");
       }
     };
@@ -272,33 +299,36 @@ function CanvasInner({
 
   // Click handler — if in link mode, treat click as target selection
   const onNodeClick = useCallback((_e: React.MouseEvent, node: Node) => {
-    if (!linkSource) return;
-    if (linkSource === node.id) {
+    const src = linkSourceRef.current;
+    if (!src) return;
+    if (src === node.id) {
       toast.error("No puedes enlazar un nodo consigo mismo");
       return;
     }
     // Check duplicate
     const exists = edges.some(
       (e) =>
-        (e.source === linkSource && e.target === node.id) ||
-        (e.source === node.id && e.target === linkSource)
+        (e.source === src && e.target === node.id) ||
+        (e.source === node.id && e.target === src)
     );
     if (exists) {
       toast.error("Ya existe una conexion entre estos nodos");
       setLinkSource(null);
+      linkSourceRef.current = null;
       toast.dismiss("link-mode");
       return;
     }
-    const srcNode = nodes.find((n) => n.id === linkSource);
+    const srcNode = nodes.find((n) => n.id === src);
     setLinkModalData({
-      connection: { source: linkSource, target: node.id, sourceHandle: null, targetHandle: null },
-      srcName: srcNode?.data.label as string,
-      tgtName: node.data.label as string,
+      connection: { source: src, target: node.id, sourceHandle: null, targetHandle: null },
+      srcName: (srcNode?.data.label || srcNode?.data.text || src) as string,
+      tgtName: (node.data.label || node.data.text || node.id) as string,
     });
     setLinkModalOpen(true);
     setLinkSource(null);
+    linkSourceRef.current = null;
     toast.dismiss("link-mode");
-  }, [linkSource, edges, nodes]);
+  }, [edges, nodes]);
 
   // Find nearby unconnected nodes for quick link submenu
   const getNearbyUnlinked = (nodeId: string) => {
@@ -313,6 +343,37 @@ function CanvasInner({
   const getNodeCtxItems = (nodeId: string) => {
     const node = nodes.find((n) => n.id === nodeId);
     if (!node) return [];
+
+    // Text label node — different menu
+    if (node.type === "textLabel") {
+      return [
+        {
+          label: "Editar texto", icon: menuIcons.Pencil, onClick: () => {
+            const text = prompt("Texto:", String(node.data.text || ""));
+            if (text?.trim()) setNodes((nds) => nds.map((n) => n.id === nodeId ? { ...n, data: { ...n.data, text: text.trim() } } : n));
+          },
+        },
+        {
+          label: "Tamano de fuente", icon: menuIcons.Type, onClick: () => {
+            const size = prompt("Tamano (px):", String(node.data.fontSize || 14));
+            if (size) setNodes((nds) => nds.map((n) => n.id === nodeId ? { ...n, data: { ...n.data, fontSize: parseInt(size) } } : n));
+          },
+        },
+        {
+          label: "Color", icon: menuIcons.Palette, onClick: () => {
+            const colors: Record<string, string> = { blanco: "#ededed", azul: "#60a5fa", verde: "#4ade80", rojo: "#f87171", amarillo: "#fbbf24", gris: "#888" };
+            const choice = prompt(`Color (${Object.keys(colors).join(", ")}):`, "blanco");
+            if (choice && colors[choice]) setNodes((nds) => nds.map((n) => n.id === nodeId ? { ...n, data: { ...n.data, color: colors[choice] } } : n));
+          },
+        },
+        {
+          label: node.data.bgEnabled !== false ? "Quitar fondo" : "Agregar fondo", icon: menuIcons.Maximize2, onClick: () => {
+            setNodes((nds) => nds.map((n) => n.id === nodeId ? { ...n, data: { ...n.data, bgEnabled: !(n.data.bgEnabled !== false) } } : n));
+          },
+        },
+        { label: "Eliminar", icon: menuIcons.Trash2, onClick: () => deleteNode(nodeId), danger: true, divider: true },
+      ];
+    }
     const nearby = getNearbyUnlinked(nodeId);
 
     const items: any[] = [];
@@ -388,8 +449,23 @@ function CanvasInner({
     setInputModalOpen(false);
   };
 
+  const handleAddLabelAtPos = () => {
+    if (!ctxMenu) return;
+    const pos = reactFlow.screenToFlowPosition({ x: ctxMenu.x, y: ctxMenu.y });
+    const text = prompt("Texto de la etiqueta:", "Etiqueta");
+    if (!text?.trim()) return;
+    setNodes((nds) => [...nds, {
+      id: `label-${Date.now()}`,
+      type: "textLabel",
+      position: pos,
+      data: { text: text.trim(), fontSize: 14, color: "#ededed", bgEnabled: true } satisfies TextLabelData,
+    }]);
+  };
+
   const getPaneCtxItems = () => [
     { label: "Agregar nodo", icon: menuIcons.Plus, onClick: handleAddNodeAtPos },
+    { label: "Agregar etiqueta", icon: menuIcons.Type, onClick: handleAddLabelAtPos },
+    { divider: true, label: "", icon: menuIcons.Plus, onClick: () => {} },
     { label: "Ajustar vista", icon: menuIcons.RotateCcw, onClick: () => reactFlow.fitView({ padding: 0.2 }) },
   ];
 
@@ -520,7 +596,12 @@ function CanvasInner({
 
   // Double-click node
   const onNodeDoubleClick = useCallback((_e: React.MouseEvent, node: Node) => {
-    editNodeLabel(node.id);
+    if (node.type === "textLabel") {
+      const text = prompt("Texto:", String(node.data.text || ""));
+      if (text?.trim()) setNodes((nds) => nds.map((n) => n.id === node.id ? { ...n, data: { ...n.data, text: text.trim() } } : n));
+    } else {
+      editNodeLabel(node.id);
+    }
   }, [nodes, setNodes]);
 
   // Double-click edge
@@ -534,9 +615,15 @@ function CanvasInner({
     try {
       const saveNodes = nodes.map((n) => ({
         id: n.id, kuma_monitor_id: n.data.kumaMonitorId ?? null,
-        label: n.data.label, x: n.position.x, y: n.position.y,
+        label: n.type === "textLabel" ? (n.data.text || "Etiqueta") : n.data.label,
+        x: n.position.x, y: n.position.y,
         width: (n.style as any)?.width || 120, height: (n.style as any)?.height || 80,
-        icon: n.data.icon || "server", color: null, custom_data: null,
+        icon: n.type === "textLabel" ? "_textLabel" : (n.data.icon || "server"),
+        color: n.type === "textLabel" ? (n.data.color || "#ededed") : null,
+        custom_data: n.type === "textLabel" ? JSON.stringify({
+          type: "textLabel", fontSize: n.data.fontSize || 14,
+          bgEnabled: n.data.bgEnabled !== false,
+        }) : null,
       }));
       const saveEdges = edges.map((e) => ({
         id: e.id, source_node_id: e.source, target_node_id: e.target,
@@ -739,6 +826,17 @@ function CanvasInner({
           onFitView={() => reactFlow.fitView({ padding: 0.2 })}
           onAutoLayout={handleAutoLayout}
           onAddNode={handleAddNode}
+          onAddLabel={() => {
+            const text = prompt("Texto de la etiqueta:", "Etiqueta");
+            if (!text?.trim()) return;
+            const vp = reactFlow.getViewport();
+            setNodes((nds) => [...nds, {
+              id: `label-${Date.now()}`,
+              type: "textLabel",
+              position: { x: -vp.x / vp.zoom + 400, y: -vp.y / vp.zoom + 300 },
+              data: { text: text.trim(), fontSize: 14, color: "#ededed", bgEnabled: true } satisfies TextLabelData,
+            }]);
+          }}
           onDeleteSelected={handleDeleteSelected}
           onToggleConnectMode={() => setConnectMode((v) => !v)}
           onBack={onBack}
@@ -817,6 +915,8 @@ function CanvasInner({
             fitView
             snapToGrid
             snapGrid={[20, 20]}
+            minZoom={0.1}
+            maxZoom={6}
             deleteKeyCode="Delete"
             defaultEdgeOptions={{
               type: "interface",

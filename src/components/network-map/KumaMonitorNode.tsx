@@ -132,96 +132,137 @@ function KumaMonitorNode({ data, selected }: NodeProps & { data: KumaNodeData })
       {/* Hover tooltip with full details */}
       {hovered && (
         <div
-          className="absolute top-10 left-1/2 -translate-x-1/2 z-50 rounded-xl p-3 min-w-[200px] max-w-[260px]"
+          className="absolute top-10 left-1/2 -translate-x-1/2 z-50 rounded-2xl p-0 overflow-hidden"
           style={{
-            background: "rgba(12,12,12,0.97)",
-            border: "1px solid rgba(255,255,255,0.1)",
-            boxShadow: "0 8px 32px rgba(0,0,0,0.6)",
-            backdropFilter: "blur(16px)",
+            minWidth: 260,
+            maxWidth: 300,
+            background: "linear-gradient(180deg, rgba(16,16,16,0.98), rgba(10,10,10,0.99))",
+            border: "1px solid rgba(255,255,255,0.08)",
+            boxShadow: `0 12px 40px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.04), inset 0 1px 0 rgba(255,255,255,0.03)`,
+            backdropFilter: "blur(20px)",
           }}
         >
-          {/* Tooltip header */}
-          <div className="flex items-center gap-2 mb-2">
-            <div
-              className="flex h-7 w-7 items-center justify-center rounded-lg shrink-0"
-              style={{ background: status.color + "22", border: `1px solid ${status.color}33` }}
-            >
-              <IconComponent className="h-3.5 w-3.5" style={{ color: status.color }} />
-            </div>
-            <div className="min-w-0">
-              <div className="text-xs font-bold text-[#ededed] truncate">{data.label}</div>
-              <div className="text-[10px] font-semibold" style={{ color: status.color }}>
-                {status.text}
-                {data.ping != null && <span className="text-[#737373] ml-1.5">{data.ping}ms</span>}
+          {/* Status bar top accent */}
+          <div className="h-[3px] w-full" style={{ background: `linear-gradient(90deg, ${status.color}, ${status.color}44)` }} />
+
+          <div className="p-3.5">
+            {/* Header */}
+            <div className="flex items-center gap-2.5 mb-3">
+              <div
+                className="flex h-9 w-9 items-center justify-center rounded-xl shrink-0"
+                style={{
+                  background: `linear-gradient(135deg, ${status.color}33, ${status.color}11)`,
+                  border: `1px solid ${status.color}33`,
+                  boxShadow: `0 0 12px ${status.color}22`,
+                }}
+              >
+                <IconComponent className="h-4 w-4" style={{ color: status.color }} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="text-[11px] font-bold text-[#ededed] truncate">{data.label}</div>
+                <div className="flex items-center gap-2 mt-0.5">
+                  <span
+                    className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-[1px] rounded"
+                    style={{
+                      background: status.color + "22",
+                      color: status.color,
+                      border: `1px solid ${status.color}33`,
+                    }}
+                  >
+                    {status.text}
+                  </span>
+                  {data.ping != null && (
+                    <span className="text-[10px] text-[#888] font-semibold">{data.ping}ms</span>
+                  )}
+                </div>
               </div>
             </div>
+
+            {/* Stats grid - 2 columns */}
+            {data.kumaMonitorId != null && (
+              <div
+                className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-[10px] mb-3 pb-3"
+                style={{ borderBottom: "1px solid rgba(255,255,255,0.05)" }}
+              >
+                {data.type && (
+                  <div className="flex justify-between">
+                    <span className="text-[#555]">Tipo</span>
+                    <span className="uppercase font-bold text-[#bbb]">{data.type}</span>
+                  </div>
+                )}
+                {data.ping != null && (
+                  <div className="flex justify-between">
+                    <span className="text-[#555]">Ping</span>
+                    <span className="font-bold text-[#bbb]">
+                      <ArrowUpDown className="inline h-2.5 w-2.5 mr-0.5 text-blue-400" />
+                      {data.ping}ms
+                    </span>
+                  </div>
+                )}
+                {data.uptime24 != null && (
+                  <div className="flex justify-between">
+                    <span className="text-[#555]">Uptime</span>
+                    <span className="font-bold" style={{
+                      color: (data.uptime24 as number) > 0.99 ? "#22c55e" : (data.uptime24 as number) > 0.95 ? "#f59e0b" : "#ef4444",
+                    }}>
+                      {((data.uptime24 as number) * 100).toFixed(2)}%
+                    </span>
+                  </div>
+                )}
+                {data.lastCheck && (
+                  <div className="flex justify-between">
+                    <span className="text-[#555]">Check</span>
+                    <span className="text-[#888] font-medium">
+                      <Clock className="inline h-2.5 w-2.5 mr-0.5" />
+                      {new Date(data.lastCheck as string).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* URL */}
+            {data.url && (
+              <div className="mb-2 text-[9px] font-mono text-[#666] truncate">
+                <Globe className="inline h-2.5 w-2.5 mr-1 text-[#555]" />
+                {data.url as string}
+              </div>
+            )}
+
+            {/* Message */}
+            {data.msg && (
+              <div className="mb-2 text-[9px] text-[#777] truncate">
+                <Activity className="inline h-2.5 w-2.5 mr-1 text-[#555]" />
+                {data.msg as string}
+              </div>
+            )}
+
+            {/* Live ping chart with stats */}
+            {data.kumaMonitorId != null && (
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <div className="text-[8px] text-[#555] font-bold uppercase tracking-wider">Latencia en vivo</div>
+                  <div className="flex items-center gap-1">
+                    <div className="h-1 w-1 rounded-full bg-blue-500 animate-pulse" />
+                    <span className="text-[7px] text-[#555]">en tiempo real</span>
+                  </div>
+                </div>
+                <MiniChart
+                  monitorId={data.kumaMonitorId as number}
+                  width={240}
+                  height={55}
+                  showStats={true}
+                  showTimeline={true}
+                />
+              </div>
+            )}
+
+            {data.kumaMonitorId == null && (
+              <div className="text-[10px] text-[#555] italic text-center py-2">
+                Nodo manual — sin monitor Kuma asociado
+              </div>
+            )}
           </div>
-
-          {/* Stats grid */}
-          {data.kumaMonitorId != null && (
-            <div className="space-y-1.5 text-[10px] text-[#999]">
-              {data.type && (
-                <div className="flex justify-between">
-                  <span className="text-[#666]">Tipo</span>
-                  <span className="uppercase font-semibold text-[#bbb]">{data.type}</span>
-                </div>
-              )}
-              {data.ping != null && (
-                <div className="flex justify-between">
-                  <span className="text-[#666]">Latencia</span>
-                  <span className="font-semibold text-[#bbb]">
-                    <ArrowUpDown className="inline h-2.5 w-2.5 mr-0.5" />
-                    {data.ping}ms
-                  </span>
-                </div>
-              )}
-              {data.uptime24 != null && (
-                <div className="flex justify-between">
-                  <span className="text-[#666]">Uptime 24h</span>
-                  <span className="font-semibold" style={{ color: data.uptime24 > 0.99 ? "#22c55e" : data.uptime24 > 0.95 ? "#f59e0b" : "#ef4444" }}>
-                    <Activity className="inline h-2.5 w-2.5 mr-0.5" />
-                    {(data.uptime24 * 100).toFixed(2)}%
-                  </span>
-                </div>
-              )}
-              {data.url && (
-                <div className="flex justify-between gap-2">
-                  <span className="text-[#666] shrink-0">URL</span>
-                  <span className="font-mono text-[9px] text-[#888] truncate">
-                    <Globe className="inline h-2.5 w-2.5 mr-0.5" />
-                    {data.url}
-                  </span>
-                </div>
-              )}
-              {data.msg && (
-                <div className="flex justify-between gap-2">
-                  <span className="text-[#666] shrink-0">Mensaje</span>
-                  <span className="text-[#888] truncate">{data.msg}</span>
-                </div>
-              )}
-              {data.lastCheck && (
-                <div className="flex justify-between">
-                  <span className="text-[#666]">Ultimo check</span>
-                  <span className="text-[#888]">
-                    <Clock className="inline h-2.5 w-2.5 mr-0.5" />
-                    {new Date(data.lastCheck).toLocaleTimeString()}
-                  </span>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Live ping chart */}
-          {data.kumaMonitorId != null && (
-            <div className="mt-2 pt-2" style={{ borderTop: "1px solid rgba(255,255,255,0.06)" }}>
-              <div className="text-[9px] text-[#666] mb-1 font-semibold uppercase tracking-wider">Latencia en vivo</div>
-              <MiniChart monitorId={data.kumaMonitorId as number} width={190} height={45} />
-            </div>
-          )}
-
-          {data.kumaMonitorId == null && (
-            <div className="text-[10px] text-[#666] italic">Nodo manual (sin monitor Kuma)</div>
-          )}
         </div>
       )}
     </div>

@@ -117,6 +117,7 @@ export default function LeafletMapView({
   const [mapStyle, setMapStyle] = useState<"dark" | "satellite" | "streets">(initialViewState?.mapStyle || "dark");
   const tileLayerRef = useRef<any>(null);
   const labelMarkersRef = useRef<Map<string, any>>(new Map());
+  const dragLineRef = useRef<any>(null);
 
   const tileUrls: Record<string, { url: string; maxZoom: number; maxNativeZoom?: number }> = {
     dark: { url: "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", maxZoom: 22, maxNativeZoom: 19 },
@@ -695,17 +696,42 @@ export default function LeafletMapView({
     linkSourceRef.current = nodeId;
     setLinkSource(nodeId);
     const node = nodesRef.current.find((n) => n.id === nodeId);
-    toast.info(`Selecciona el nodo destino`, {
-      description: `Origen: ${node?.label || nodeId}. Haz click o clic derecho en otro nodo.`,
-      duration: 6000,
+    toast.info(`Arrastra hacia el nodo destino o haz clic en el`, {
+      description: `Origen: ${node?.label || nodeId}`,
+      duration: 4000,
     });
 
     // Highlight source marker
     if (LRef.current && mapRef.current) {
+      const L = LRef.current;
+      const map = mapRef.current;
       const marker = markersRef.current.get(nodeId);
       if (marker) {
         const color = getStatusColor(node?.kuma_monitor_id ?? null);
-        marker.setIcon(createMarkerIcon(LRef.current, color, false, true));
+        marker.setIcon(createMarkerIcon(L, color, false, true));
+      }
+
+      // Create rubber-band line from source to cursor
+      if (node) {
+        const srcLatLng = [node.x, node.y] as [number, number];
+        dragLineRef.current = L.polyline([srcLatLng, srcLatLng], {
+          color: "#60a5fa",
+          weight: 2.5,
+          opacity: 0.8,
+          dashArray: "8,5",
+          interactive: false,
+        }).addTo(map);
+
+        const onMouseMove = (e: any) => {
+          if (dragLineRef.current) {
+            dragLineRef.current.setLatLngs([srcLatLng, [e.latlng.lat, e.latlng.lng]]);
+          }
+        };
+        map.on("mousemove", onMouseMove);
+        // Store cleanup function
+        (dragLineRef.current as any)._cleanup = () => {
+          map.off("mousemove", onMouseMove);
+        };
       }
     }
   }
@@ -713,14 +739,19 @@ export default function LeafletMapView({
   function completeLinkCreation(targetId: string) {
     if (!linkSource) return;
 
+    // Remove rubber-band line
+    if (dragLineRef.current && mapRef.current) {
+      if ((dragLineRef.current as any)._cleanup) (dragLineRef.current as any)._cleanup();
+      try { mapRef.current.removeLayer(dragLineRef.current); } catch {}
+      dragLineRef.current = null;
+    }
+
     // Prevent self-link
     if (linkSource === targetId) {
       toast.error("No se puede conectar un nodo consigo mismo");
       cancelLinkCreation();
       return;
     }
-
-
 
     // Open modal to fill interface details
     setLinkModalData({ sourceId: linkSource, targetId });
@@ -772,6 +803,12 @@ export default function LeafletMapView({
   }
 
   function cancelLinkCreation() {
+    // Remove rubber-band line
+    if (dragLineRef.current && mapRef.current) {
+      if ((dragLineRef.current as any)._cleanup) (dragLineRef.current as any)._cleanup();
+      try { mapRef.current.removeLayer(dragLineRef.current); } catch {}
+      dragLineRef.current = null;
+    }
     linkSourceRef.current = null;
     setLinkSource(null);
     if (LRef.current && mapRef.current) {

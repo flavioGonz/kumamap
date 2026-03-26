@@ -6,7 +6,7 @@ import type { KumaMonitor } from "./MonitorPanel";
 import ContextMenu, { menuIcons } from "./ContextMenu";
 import LinkModal, { type LinkFormData } from "./LinkModal";
 import InputModal from "./InputModal";
-import { Pencil, MapPin } from "lucide-react";
+import { Pencil, MapPin, Signal } from "lucide-react";
 
 interface SavedNode {
   id: string;
@@ -98,6 +98,9 @@ export default function LeafletMapView({
   const [linkModalData, setLinkModalData] = useState<{ sourceId: string; targetId: string; edgeId?: string; initial?: Partial<LinkFormData> }>({ sourceId: "", targetId: "" });
   const [inputModalOpen, setInputModalOpen] = useState(false);
   const [inputModalConfig, setInputModalConfig] = useState<{ nodeId: string; initial: string }>({ nodeId: "", initial: "" });
+  const [assignModalOpen, setAssignModalOpen] = useState(false);
+  const [assignNodeId, setAssignNodeId] = useState<string>("");
+  const [assignSearch, setAssignSearch] = useState("");
 
   // Keep ref in sync with state for closures
   useEffect(() => { linkSourceRef.current = linkSource; }, [linkSource]);
@@ -343,14 +346,19 @@ export default function LeafletMapView({
       const tgtNode = nodesRef.current.find((n) => n.id === edge.target_node_id);
       if (!srcNode || !tgtNode) return;
 
-      const srcColor = getStatusColor(srcNode.kuma_monitor_id);
+      const cd = edge.custom_data ? JSON.parse(edge.custom_data) : {};
+      const srcMon = srcNode.kuma_monitor_id ? kumaMonitors.find((m) => m.id === srcNode.kuma_monitor_id) : null;
+      const tgtMon = tgtNode.kuma_monitor_id ? kumaMonitors.find((m) => m.id === tgtNode.kuma_monitor_id) : null;
+      const isFiber = cd.linkType === "fiber";
+      const isDown = srcMon?.status === 0 || tgtMon?.status === 0;
+
+      let lineColor = isDown ? "#ef4444" : isFiber ? "#3b82f6" : "#22c55e";
+      let dashArray = isDown ? "8,6" : undefined;
 
       const line = L.polyline(
         [[srcNode.x, srcNode.y], [tgtNode.x, tgtNode.y]],
-        { color: srcColor, weight: 3, opacity: 0.85, dashArray: "8,6" }
+        { color: lineColor, weight: 3, opacity: 0.9, dashArray }
       );
-
-      const cd = edge.custom_data ? JSON.parse(edge.custom_data) : {};
 
       // Tooltip for cable label on hover
       if (edge.label) {
@@ -571,6 +579,32 @@ export default function LeafletMapView({
           setInputModalOpen(true);
         },
       },
+      // Assign / reassign monitor
+      {
+        label: node?.kuma_monitor_id ? "Reasignar monitor" : "Asignar monitor",
+        icon: menuIcons.Signal,
+        onClick: () => {
+          setAssignNodeId(nodeId);
+          setAssignSearch("");
+          setAssignModalOpen(true);
+        },
+      },
+      // Unassign if has monitor
+      ...(node?.kuma_monitor_id ? [{
+        label: "Desasignar monitor",
+        icon: menuIcons.Trash2,
+        onClick: () => {
+          const idx = nodesRef.current.findIndex((n) => n.id === nodeId);
+          if (idx >= 0) {
+            nodesRef.current[idx] = { ...nodesRef.current[idx], kuma_monitor_id: null };
+            if (LRef.current && mapRef.current) {
+              renderNodes(LRef.current, mapRef.current);
+              renderEdges(LRef.current, mapRef.current);
+            }
+            toast.success("Monitor desasignado");
+          }
+        },
+      }] : []),
       {
         label: "Eliminar nodo",
         icon: menuIcons.Trash2,
@@ -608,6 +642,20 @@ export default function LeafletMapView({
             initial: { sourceInterface: cd.sourceInterface || "", targetInterface: cd.targetInterface || "", label: edge?.label || "", snmpMonitorId: cd.snmpMonitorId ?? null },
           });
           setLinkModalOpen(true);
+        },
+      },
+      {
+        label: cd.linkType === "fiber" ? "Cambiar a Cobre" : "Cambiar a Fibra",
+        icon: menuIcons.Link2,
+        onClick: () => {
+          const idx = edgesRef.current.findIndex((e) => e.id === edgeId);
+          if (idx >= 0) {
+            const oldCd = edgesRef.current[idx].custom_data ? JSON.parse(edgesRef.current[idx].custom_data!) : {};
+            oldCd.linkType = cd.linkType === "fiber" ? "copper" : "fiber";
+            edgesRef.current[idx] = { ...edgesRef.current[idx], custom_data: JSON.stringify(oldCd) };
+            if (LRef.current && mapRef.current) renderEdges(LRef.current, mapRef.current);
+            toast.success(oldCd.linkType === "fiber" ? "Enlace: Fibra (azul)" : "Enlace: Cobre (verde)");
+          }
         },
       },
       {
@@ -978,6 +1026,69 @@ export default function LeafletMapView({
         initial={inputModalConfig.initial}
         icon={<Pencil className="h-4 w-4 text-blue-400" />}
       />
+
+      {/* Assign Monitor Modal */}
+      {assignModalOpen && (
+        <div className="fixed inset-0 z-[99999] flex items-center justify-center" style={{ background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }}>
+          <div className="rounded-2xl w-[380px] max-h-[500px] flex flex-col overflow-hidden"
+            style={{ background: "rgba(16,16,16,0.98)", border: "1px solid rgba(255,255,255,0.08)", boxShadow: "0 20px 60px rgba(0,0,0,0.7)" }}>
+            <div className="px-4 py-3 flex items-center gap-2" style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+              <Signal className="h-4 w-4 text-blue-400" />
+              <span className="text-sm font-bold text-[#ededed]">Asignar Monitor Kuma</span>
+              <button onClick={() => setAssignModalOpen(false)} className="ml-auto text-[#555] hover:text-[#ededed] text-lg leading-none">&times;</button>
+            </div>
+            <div className="px-4 py-2" style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+              <input
+                autoFocus
+                type="text"
+                placeholder="Buscar monitor..."
+                value={assignSearch}
+                onChange={(e) => setAssignSearch(e.target.value)}
+                className="w-full rounded-lg px-3 py-2 text-xs text-[#ededed] placeholder:text-[#555] focus:outline-none focus:ring-1 focus:ring-blue-500/40"
+                style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}
+              />
+            </div>
+            <div className="flex-1 overflow-y-auto px-2 py-2 space-y-0.5">
+              {kumaMonitors
+                .filter((m) => m.type !== "group" && m.active !== false)
+                .filter((m) => !assignSearch || m.name.toLowerCase().includes(assignSearch.toLowerCase()))
+                .map((m) => {
+                  const color = statusColors[m.status ?? 2] || "#f59e0b";
+                  const alreadyUsed = nodesRef.current.some((n) => n.kuma_monitor_id === m.id && n.id !== assignNodeId);
+                  return (
+                    <button
+                      key={m.id}
+                      disabled={alreadyUsed}
+                      onClick={() => {
+                        const idx = nodesRef.current.findIndex((n) => n.id === assignNodeId);
+                        if (idx >= 0) {
+                          nodesRef.current[idx] = { ...nodesRef.current[idx], kuma_monitor_id: m.id, label: m.name };
+                          if (LRef.current && mapRef.current) {
+                            renderNodes(LRef.current, mapRef.current);
+                            renderEdges(LRef.current, mapRef.current);
+                          }
+                          toast.success("Monitor asignado", { description: m.name });
+                        }
+                        setAssignModalOpen(false);
+                      }}
+                      className="w-full flex items-center gap-2.5 rounded-xl px-3 py-2 text-left transition-all disabled:opacity-30"
+                      style={{ background: "transparent" }}
+                      onMouseEnter={(e) => { if (!alreadyUsed) (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.04)"; }}
+                      onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}
+                    >
+                      <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ backgroundColor: color, boxShadow: `0 0 6px ${color}88` }} />
+                      <div className="flex-1 min-w-0">
+                        <div className="text-xs font-semibold text-[#ededed] truncate">{m.name}</div>
+                        <div className="text-[10px] text-[#555]">{m.type.toUpperCase()} {m.ping != null ? `· ${m.ping}ms` : ""}</div>
+                      </div>
+                      {alreadyUsed && <span className="text-[9px] text-[#555]">en uso</span>}
+                    </button>
+                  );
+                })}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Custom CSS */}
       <style>{`

@@ -31,6 +31,7 @@ interface MapViewState {
   zoom: number;
   center: [number, number];
   mapStyle: "dark" | "satellite" | "streets";
+  overlayOpacity?: number;
 }
 
 interface LeafletMapViewProps {
@@ -101,7 +102,7 @@ export default function LeafletMapView({
   const [linkModalData, setLinkModalData] = useState<{ sourceId: string; targetId: string; edgeId?: string; initial?: Partial<LinkFormData> }>({ sourceId: "", targetId: "" });
   const [inputModalOpen, setInputModalOpen] = useState(false);
   const [inputModalConfig, setInputModalConfig] = useState<{ nodeId: string; initial: string; mac?: string; ip?: string }>({ nodeId: "", initial: "" });
-  const [overlayOpacity, setOverlayOpacity] = useState(0);
+  const [overlayOpacity, setOverlayOpacity] = useState(initialViewState?.overlayOpacity ?? 0);
   const [assignModalOpen, setAssignModalOpen] = useState(false);
   const [assignNodeId, setAssignNodeId] = useState<string>("");
   const [assignSearch, setAssignSearch] = useState("");
@@ -819,6 +820,39 @@ export default function LeafletMapView({
   // ─── Context menu items ─────────────────────
   function getNodeCtxItems(nodeId: string) {
     const node = nodesRef.current.find((n) => n.id === nodeId);
+    const isLabel = node?.icon === "_textLabel";
+
+    // Labels only get edit text + delete
+    if (isLabel) {
+      return [
+        {
+          label: "Editar texto",
+          icon: menuIcons.Pencil,
+          onClick: () => {
+            const newText = prompt("Texto de la etiqueta:", node?.label || "");
+            if (newText?.trim()) {
+              const idx = nodesRef.current.findIndex((n) => n.id === nodeId);
+              if (idx >= 0) {
+                nodesRef.current[idx] = { ...nodesRef.current[idx], label: newText.trim() };
+                if (LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current);
+              }
+            }
+          },
+        },
+        {
+          label: "Eliminar etiqueta",
+          icon: menuIcons.Trash2,
+          danger: true,
+          divider: true,
+          onClick: () => {
+            nodesRef.current = nodesRef.current.filter((n) => n.id !== nodeId);
+            if (LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current);
+            toast.success("Etiqueta eliminada");
+          },
+        },
+      ];
+    }
+
     return [
       {
         label: linkSource ? "Cancelar enlace" : "Nuevo link",
@@ -1017,6 +1051,7 @@ export default function LeafletMapView({
       zoom: mapRef.current?.getZoom() || 12,
       center: mapRef.current ? [mapRef.current.getCenter().lat, mapRef.current.getCenter().lng] : [-34.85, -56.05],
       mapStyle,
+      overlayOpacity,
     };
     onSave(nodesRef.current, edgesRef.current, viewState);
     setSaving(false);

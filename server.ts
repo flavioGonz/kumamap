@@ -18,7 +18,7 @@ app.prepare().then(() => {
 
   // Socket.IO server on same port
   const io = new SocketIOServer(server, {
-    path: "/maps/socket.io",
+    path: "/ws",
     cors: { origin: "*" },
     transports: ["websocket", "polling"],
   });

@@ -6,9 +6,8 @@ let socket: Socket | null = null;
 
 export function getSocket(): Socket {
   if (!socket) {
-    const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
     socket = io({
-      path: `${basePath}/socket.io`,
+      path: "/ws",
       transports: ["websocket", "polling"],
       reconnection: true,
       reconnectionDelay: 3000,

@@ -751,7 +751,7 @@ export default function LeafletMapView({
             if (!mapRef.current) return;
             const center = mapRef.current.getCenter();
             const id = `node-${Date.now()}`;
-            nodesRef.current = [...nodesRef.current, { id, map_id: mapId, kuma_monitor_id: null, label: "Nuevo equipo", x: center.lat, y: center.lng, width: 120, height: 80, icon: "server", color: null, custom_data: null }];
+            nodesRef.current = [...nodesRef.current, { id, kuma_monitor_id: null, label: "Nuevo equipo", x: center.lat, y: center.lng, icon: "server" }];
             if (LRef.current) renderNodes(LRef.current, mapRef.current);
           }} title="Agregar nodo"
             className="group flex items-center gap-1 rounded-xl px-2 py-1.5 text-[#888] hover:text-[#ededed] hover:bg-white/[0.06] transition-all">
@@ -762,7 +762,7 @@ export default function LeafletMapView({
             if (!mapRef.current) return;
             const center = mapRef.current.getCenter();
             const id = `label-${Date.now()}`;
-            nodesRef.current = [...nodesRef.current, { id, map_id: mapId, kuma_monitor_id: null, label: "Etiqueta", x: center.lat, y: center.lng, width: 120, height: 80, icon: "_textLabel", color: "#ededed", custom_data: JSON.stringify({ type: "textLabel", fontSize: 14, bgEnabled: true }) }];
+            nodesRef.current = [...nodesRef.current, { id, kuma_monitor_id: null, label: "Etiqueta", x: center.lat, y: center.lng, icon: "_textLabel" }];
             if (LRef.current) renderNodes(LRef.current, mapRef.current);
           }} title="Agregar etiqueta"
             className="group flex items-center gap-1 rounded-xl px-2 py-1.5 text-[#888] hover:text-[#ededed] hover:bg-white/[0.06] transition-all">

@@ -106,6 +106,8 @@ export default function LeafletMapView({
   const [assignSearch, setAssignSearch] = useState("");
   const [colorPickerOpen, setColorPickerOpen] = useState(false);
   const [colorPickerNodeId, setColorPickerNodeId] = useState<string>("");
+  const [lensPickerOpen, setLensPickerOpen] = useState(false);
+  const [lensPickerNodeId, setLensPickerNodeId] = useState<string>("");
 
   // Keep ref in sync with state for closures
   useEffect(() => { linkSourceRef.current = linkSource; }, [linkSource]);
@@ -374,6 +376,39 @@ export default function LeafletMapView({
         });
         rangeHandle.addTo(map);
         camHandlesRef.current.set(node.id + "-range", rangeHandle);
+
+        // ── FOV angle handle (◆ at the edge of the cone spread) ──
+        const fovEdgeAngle = rotation + fov / 2;
+        const fovHandleLat = node.x + fovRange * 0.6 * Math.cos(fovEdgeAngle * radConst);
+        const fovHandleLng = node.y + fovRange * 0.6 * Math.sin(fovEdgeAngle * radConst);
+        const fovHandle = L.marker([fovHandleLat, fovHandleLng], {
+          icon: L.divIcon({
+            className: "cam-handle",
+            html: `<div style="width:12px;height:12px;border-radius:2px;background:rgba(250,204,21,0.85);border:2px solid #facc15;box-shadow:0 0 8px rgba(250,204,21,0.5);cursor:ew-resize;transform:rotate(45deg);"></div>`,
+            iconSize: [12, 12], iconAnchor: [6, 6],
+          }),
+          draggable: true,
+        });
+        fovHandle.bindTooltip("Apertura", { direction: "top", offset: [0, -10], className: "leaflet-label-dark" });
+        fovHandle.on("drag", () => {
+          const fp = fovHandle.getLatLng();
+          const mp = marker.getLatLng();
+          const angleToHandle = Math.atan2(fp.lng - mp.lng, fp.lat - mp.lat) * (180 / Math.PI);
+          const idx = nodesRef.current.findIndex((n) => n.id === node.id);
+          if (idx >= 0) {
+            const ncd = nodesRef.current[idx].custom_data ? JSON.parse(nodesRef.current[idx].custom_data!) : {};
+            const rot = ncd.rotation ?? rotation;
+            // FOV = 2 * angle difference between handle and center direction
+            const diff = Math.abs(((angleToHandle - rot + 540) % 360) - 180);
+            const newFov = Math.max(5, Math.min(360, Math.round(diff * 2)));
+            ncd.fov = newFov;
+            nodesRef.current[idx] = { ...nodesRef.current[idx], custom_data: JSON.stringify(ncd) };
+            const range = ncd.fovRange || fovRange;
+            fovPoly.setLatLngs(buildFovPoints(mp.lat, mp.lng, rot, range, newFov));
+          }
+        });
+        fovHandle.addTo(map);
+        camHandlesRef.current.set(node.id + "-fov", fovHandle);
       }
 
       // Label tooltip (always visible) — only for non-label/camera nodes
@@ -478,6 +513,13 @@ export default function LeafletMapView({
           // Live update range handle
           const rng = camHandlesRef.current.get(node.id + "-range");
           if (rng) rng.setLatLng([pos.lat + range * Math.cos(rot * radConst), pos.lng + range * Math.sin(rot * radConst)]);
+
+          // Live update FOV angle handle
+          const fovH = camHandlesRef.current.get(node.id + "-fov");
+          if (fovH) {
+            const fovEdge = rot + fovAngle / 2;
+            fovH.setLatLng([pos.lat + range * 0.6 * Math.cos(fovEdge * radConst), pos.lng + range * 0.6 * Math.sin(fovEdge * radConst)]);
+          }
         }
 
         // Live update edges
@@ -775,22 +817,15 @@ export default function LeafletMapView({
           }
         },
       }] : []),
-      // Camera-specific: rotate and FOV
+      // Camera-specific options
       ...(node?.icon === "_camera" ? [
         {
-          label: "Angulo de vision (FOV)",
+          label: "Lente / FOV",
           icon: menuIcons.Maximize2,
+          submenu: true,
           onClick: () => {
-            const cd = node.custom_data ? JSON.parse(node.custom_data) : {};
-            const fov = prompt("Angulo FOV (grados, ej: 60, 90, 120, 180):", String(cd.fov || 60));
-            if (fov !== null) {
-              cd.fov = Math.max(5, Math.min(360, parseInt(fov) || 60));
-              const idx = nodesRef.current.findIndex((n) => n.id === nodeId);
-              if (idx >= 0) {
-                nodesRef.current[idx] = { ...nodesRef.current[idx], custom_data: JSON.stringify(cd) };
-                if (LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current);
-              }
-            }
+            setLensPickerNodeId(nodeId);
+            setLensPickerOpen(true);
           },
         },
         {
@@ -799,6 +834,26 @@ export default function LeafletMapView({
           onClick: () => {
             setColorPickerNodeId(nodeId);
             setColorPickerOpen(true);
+          },
+        },
+        {
+          label: "Duplicar camara",
+          icon: menuIcons.Plus,
+          onClick: () => {
+            const cd = node.custom_data ? JSON.parse(node.custom_data) : {};
+            const newId = `node-${Date.now()}`;
+            const offset = 0.0003; // slight offset so it doesn't overlap
+            nodesRef.current = [...nodesRef.current, {
+              id: newId,
+              kuma_monitor_id: node.kuma_monitor_id,
+              label: node.label + " (copia)",
+              x: node.x + offset,
+              y: node.y + offset,
+              icon: "_camera",
+              custom_data: JSON.stringify({ ...cd }),
+            }];
+            if (LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current);
+            toast.success("Camara duplicada");
           },
         },
       ] : []),
@@ -1386,6 +1441,122 @@ export default function LeafletMapView({
                     </button>
                   ))}
                 </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Lens Picker Modal */}
+      {lensPickerOpen && (() => {
+        const lpNode = nodesRef.current.find((n) => n.id === lensPickerNodeId);
+        const lpCd = lpNode?.custom_data ? JSON.parse(lpNode.custom_data) : {};
+        const currentFov = lpCd.fov || 60;
+
+        const lensPresets = [
+          { name: "Ojo de pez", fov: 180, mm: "1.2mm", desc: "Vista 180° panoramica" },
+          { name: "Super gran angular", fov: 120, mm: "2.8mm", desc: "Cobertura amplia 120°" },
+          { name: "Gran angular", fov: 90, mm: "3.6mm", desc: "Estandar de vigilancia 90°" },
+          { name: "Normal", fov: 60, mm: "6mm", desc: "Angulo medio 60°" },
+          { name: "Teleobjetivo", fov: 35, mm: "12mm", desc: "Enfoque selectivo 35°" },
+          { name: "Tele largo", fov: 18, mm: "25mm", desc: "Lectura de placas 18°" },
+          { name: "PTZ Zoom", fov: 8, mm: "50mm", desc: "Detalle maximo 8°" },
+          { name: "Personalizado", fov: currentFov, mm: "custom", desc: "Define tu propio FOV" },
+        ];
+
+        const applyLens = (fov: number) => {
+          const idx = nodesRef.current.findIndex((n) => n.id === lensPickerNodeId);
+          if (idx >= 0) {
+            const ncd = nodesRef.current[idx].custom_data ? JSON.parse(nodesRef.current[idx].custom_data!) : {};
+            ncd.fov = fov;
+            nodesRef.current[idx] = { ...nodesRef.current[idx], custom_data: JSON.stringify(ncd) };
+            if (LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current);
+          }
+        };
+
+        return (
+          <div className="fixed inset-0 z-[99999] flex items-center justify-center" style={{ background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }}
+            onClick={() => setLensPickerOpen(false)}>
+            <div className="rounded-2xl w-[380px] overflow-hidden" onClick={(e) => e.stopPropagation()}
+              style={{ background: "rgba(16,16,16,0.98)", border: "1px solid rgba(255,255,255,0.08)", boxShadow: "0 20px 60px rgba(0,0,0,0.7)" }}>
+              <div className="px-4 py-3 flex items-center gap-2" style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#60a5fa" strokeWidth="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg>
+                <span className="text-sm font-bold text-[#ededed]">Seleccionar Lente</span>
+                <span className="text-[10px] text-[#555] ml-1">Actual: {currentFov}°</span>
+                <button onClick={() => setLensPickerOpen(false)} className="ml-auto text-[#555] hover:text-[#ededed] text-lg leading-none">&times;</button>
+              </div>
+
+              <div className="p-3 space-y-1.5 max-h-[400px] overflow-y-auto">
+                {lensPresets.map((lens) => {
+                  const isActive = currentFov === lens.fov;
+                  const isCustom = lens.mm === "custom";
+                  return (
+                    <div key={lens.name}>
+                      <button
+                        onClick={() => {
+                          if (!isCustom) {
+                            applyLens(lens.fov);
+                            toast.success(`Lente: ${lens.name}`, { description: `${lens.fov}° (${lens.mm})` });
+                          }
+                        }}
+                        className="w-full flex items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-all"
+                        style={{
+                          background: isActive ? "rgba(59,130,246,0.12)" : "rgba(255,255,255,0.02)",
+                          border: `1px solid ${isActive ? "rgba(59,130,246,0.3)" : "rgba(255,255,255,0.04)"}`,
+                        }}
+                      >
+                        {/* FOV visual indicator */}
+                        <div className="relative w-10 h-10 shrink-0 flex items-center justify-center">
+                          <svg width="40" height="40" viewBox="0 0 40 40">
+                            <path
+                              d={(() => {
+                                const cx = 20, cy = 20, r = 16;
+                                const startAngle = -lens.fov / 2;
+                                const endAngle = lens.fov / 2;
+                                const x1 = cx + r * Math.cos(startAngle * Math.PI / 180 - Math.PI / 2);
+                                const y1 = cy + r * Math.sin(startAngle * Math.PI / 180 - Math.PI / 2);
+                                const x2 = cx + r * Math.cos(endAngle * Math.PI / 180 - Math.PI / 2);
+                                const y2 = cy + r * Math.sin(endAngle * Math.PI / 180 - Math.PI / 2);
+                                const largeArc = lens.fov > 180 ? 1 : 0;
+                                return `M ${cx},${cy} L ${x1},${y1} A ${r},${r} 0 ${largeArc},1 ${x2},${y2} Z`;
+                              })()}
+                              fill={isActive ? "rgba(59,130,246,0.3)" : "rgba(255,255,255,0.08)"}
+                              stroke={isActive ? "#60a5fa" : "#555"}
+                              strokeWidth="1"
+                            />
+                            <circle cx="20" cy="20" r="3" fill={isActive ? "#60a5fa" : "#888"} />
+                          </svg>
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="text-[12px] font-bold text-[#ededed]">{lens.name}</span>
+                            {!isCustom && <span className="text-[10px] font-mono text-[#666]">{lens.mm}</span>}
+                          </div>
+                          <div className="text-[10px] text-[#777]">{lens.desc}</div>
+                        </div>
+                        <span className="text-[11px] font-bold tabular-nums" style={{ color: isActive ? "#60a5fa" : "#666" }}>
+                          {lens.fov}°
+                        </span>
+                      </button>
+                      {/* Custom FOV slider */}
+                      {isCustom && (
+                        <div className="mt-2 px-3 pb-1">
+                          <div className="flex items-center gap-3">
+                            <span className="text-[10px] text-[#666] shrink-0">5°</span>
+                            <input
+                              type="range" min="5" max="360" step="1" value={currentFov}
+                              onChange={(e) => applyLens(parseInt(e.target.value))}
+                              className="flex-1 h-1.5 rounded-full appearance-none cursor-pointer"
+                              style={{ background: `linear-gradient(to right, #3b82f6 ${((currentFov - 5) / 355) * 100}%, #333 0%)` }}
+                            />
+                            <span className="text-[10px] text-[#666] shrink-0">360°</span>
+                          </div>
+                          <div className="text-center text-[10px] text-[#888] mt-1 font-mono">{currentFov}°</div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </div>
           </div>

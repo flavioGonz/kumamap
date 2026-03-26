@@ -365,16 +365,16 @@ export default function LeafletMapView({
         line.bindTooltip(edge.label, { sticky: true, className: "leaflet-label-dark" });
       }
 
-      // Source interface label — positioned 15% along the line from source
+      // Source interface label — plain text near source
       if (cd.sourceInterface) {
         const lat = srcNode.x + (tgtNode.x - srcNode.x) * 0.12;
         const lng = srcNode.y + (tgtNode.y - srcNode.y) * 0.12;
         const srcLabel = L.marker([lat, lng], {
           icon: L.divIcon({
             className: "interface-label",
-            html: `<div style="background:rgba(37,99,235,0.25);border:1px solid rgba(59,130,246,0.5);color:#93c5fd;font-size:9px;font-weight:700;font-family:ui-monospace,monospace;padding:1px 5px;border-radius:4px;white-space:nowrap;box-shadow:0 2px 8px rgba(0,0,0,0.4);pointer-events:none;">${cd.sourceInterface}</div>`,
+            html: `<span style="color:#93c5fd;font-size:8px;font-weight:600;font-family:ui-monospace,monospace;white-space:nowrap;text-shadow:0 1px 3px rgba(0,0,0,0.9);pointer-events:none;">${cd.sourceInterface}</span>`,
             iconSize: [0, 0],
-            iconAnchor: [0, 8],
+            iconAnchor: [0, 6],
           }),
           interactive: false,
         });
@@ -382,16 +382,16 @@ export default function LeafletMapView({
         labelMarkersRef.current.set(`${edge.id}-src`, srcLabel);
       }
 
-      // Target interface label — positioned 85% along the line (near target)
+      // Target interface label — plain text near target
       if (cd.targetInterface) {
         const lat = srcNode.x + (tgtNode.x - srcNode.x) * 0.88;
         const lng = srcNode.y + (tgtNode.y - srcNode.y) * 0.88;
         const tgtLabel = L.marker([lat, lng], {
           icon: L.divIcon({
             className: "interface-label",
-            html: `<div style="background:rgba(109,40,217,0.25);border:1px solid rgba(139,92,246,0.5);color:#c4b5fd;font-size:9px;font-weight:700;font-family:ui-monospace,monospace;padding:1px 5px;border-radius:4px;white-space:nowrap;box-shadow:0 2px 8px rgba(0,0,0,0.4);pointer-events:none;">${cd.targetInterface}</div>`,
+            html: `<span style="color:#c4b5fd;font-size:8px;font-weight:600;font-family:ui-monospace,monospace;white-space:nowrap;text-shadow:0 1px 3px rgba(0,0,0,0.9);pointer-events:none;">${cd.targetInterface}</span>`,
             iconSize: [0, 0],
-            iconAnchor: [0, 8],
+            iconAnchor: [0, 6],
           }),
           interactive: false,
         });

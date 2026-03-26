@@ -230,23 +230,33 @@ export default function LeafletMapView({
     markersRef.current.clear();
 
     nodesRef.current.forEach((node) => {
+      const isLabel = node.icon === "_textLabel";
       const color = getStatusColor(node.kuma_monitor_id);
       const m = getMonitorData(node.kuma_monitor_id);
-      const pulse = m?.status === 0 || m?.status === 2;
+      const pulse = !isLabel && (m?.status === 0 || m?.status === 2);
       const isSource = linkSource === node.id;
 
       const marker = L.marker([node.x, node.y], {
-        icon: createMarkerIcon(L, color, pulse, isSource),
+        icon: isLabel
+          ? L.divIcon({
+              className: "text-label-marker",
+              html: `<div style="background:rgba(0,0,0,0.6);border:1px solid rgba(255,255,255,0.15);backdrop-filter:blur(8px);color:#ededed;font-size:13px;font-weight:700;padding:4px 12px;border-radius:8px;white-space:nowrap;text-shadow:0 1px 4px rgba(0,0,0,0.8);cursor:move;">${node.label}</div>`,
+              iconSize: [0, 0],
+              iconAnchor: [0, 12],
+            })
+          : createMarkerIcon(L, color, pulse, isSource),
         draggable: true,
       });
 
-      // Label tooltip (always visible)
-      marker.bindTooltip(node.label, {
-        permanent: true,
-        direction: "top",
-        offset: [0, -16],
-        className: "leaflet-label-dark",
-      });
+      // Label tooltip (always visible) — only for non-label nodes
+      if (!isLabel) {
+        marker.bindTooltip(node.label, {
+          permanent: true,
+          direction: "top",
+          offset: [0, -16],
+          className: "leaflet-label-dark",
+        });
+      }
 
       // Click handler — manual popup management to avoid conflict with link mode
       marker.on("click", (e: any) => {
@@ -256,11 +266,25 @@ export default function LeafletMapView({
           completeLinkCreation(node.id);
           return;
         }
+        // Labels: do nothing on single click (use dblclick to edit)
+        if (isLabel) return;
         // Normal mode: open popup manually
         const popup = L.popup({ className: "leaflet-popup-dark", maxWidth: 280 })
           .setLatLng(marker.getLatLng())
           .setContent(createPopupContent(node));
         popup.openOn(map);
+      });
+
+      // Double-click to edit label or node name
+      marker.on("dblclick", () => {
+        const newText = prompt(isLabel ? "Texto de la etiqueta:" : "Nombre del nodo:", node.label);
+        if (newText?.trim()) {
+          const idx = nodesRef.current.findIndex((n) => n.id === node.id);
+          if (idx >= 0) {
+            nodesRef.current[idx] = { ...nodesRef.current[idx], label: newText.trim() };
+            renderNodes(L, map);
+          }
+        }
       });
 
       // Right-click context menu
@@ -314,7 +338,7 @@ export default function LeafletMapView({
 
       const line = L.polyline(
         [[srcNode.x, srcNode.y], [tgtNode.x, tgtNode.y]],
-        { color: srcColor, weight: 2, opacity: 0.6, dashArray: "6,8" }
+        { color: srcColor, weight: 3, opacity: 0.85, dashArray: "8,6" }
       );
 
       const cd = edge.custom_data ? JSON.parse(edge.custom_data) : {};

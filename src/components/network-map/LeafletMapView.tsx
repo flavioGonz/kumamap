@@ -99,10 +99,10 @@ export default function LeafletMapView({
   const tileLayerRef = useRef<any>(null);
   const labelMarkersRef = useRef<Map<string, any>>(new Map());
 
-  const tileUrls: Record<string, { url: string; maxZoom: number }> = {
-    dark: { url: "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", maxZoom: 19 },
-    satellite: { url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", maxZoom: 18 },
-    streets: { url: "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", maxZoom: 19 },
+  const tileUrls: Record<string, { url: string; maxZoom: number; maxNativeZoom?: number }> = {
+    dark: { url: "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", maxZoom: 22, maxNativeZoom: 19 },
+    satellite: { url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", maxZoom: 22, maxNativeZoom: 18 },
+    streets: { url: "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", maxZoom: 22, maxNativeZoom: 19 },
   };
 
   // Initialize Leaflet map
@@ -125,12 +125,14 @@ export default function LeafletMapView({
       map = L.map(containerRef.current, {
         center: [-34.85, -56.05],
         zoom: 12,
+        maxZoom: 22,
         zoomControl: false,
         attributionControl: false,
       });
 
       tileLayerRef.current = L.tileLayer(tileUrls.dark.url, {
         maxZoom: tileUrls.dark.maxZoom,
+        maxNativeZoom: tileUrls.dark.maxNativeZoom,
       }).addTo(map);
 
       L.control.zoom({ position: "bottomleft" }).addTo(map);
@@ -161,7 +163,7 @@ export default function LeafletMapView({
     if (!mapRef.current || !LRef.current || !tileLayerRef.current) return;
     const tile = tileUrls[mapStyle];
     mapRef.current.removeLayer(tileLayerRef.current);
-    tileLayerRef.current = LRef.current.tileLayer(tile.url, { maxZoom: tile.maxZoom }).addTo(mapRef.current);
+    tileLayerRef.current = LRef.current.tileLayer(tile.url, { maxZoom: tile.maxZoom, maxNativeZoom: tile.maxNativeZoom }).addTo(mapRef.current);
   }, [mapStyle]);
 
   // Update markers when kuma data changes
@@ -658,7 +660,7 @@ export default function LeafletMapView({
   }, [searchQuery]);
 
   return (
-    <div className="relative h-full w-full" style={{ marginRight: "320px" }}>
+    <div className="relative h-full w-full" style={{ marginRight: "320px", isolation: "isolate" }}>
       <div
         ref={containerRef}
         className="absolute inset-0"

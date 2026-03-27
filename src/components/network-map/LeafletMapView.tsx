@@ -41,10 +41,11 @@ interface LeafletMapViewProps {
   kumaMonitors: KumaMonitor[];
   kumaConnected: boolean;
   onSave: (nodes: SavedNode[], edges: SavedEdge[], viewState?: MapViewState) => void;
-  onBack: () => void;
+  onBack?: () => void;
   initialNodes: SavedNode[];
   initialEdges: SavedEdge[];
   initialViewState?: MapViewState;
+  readonly?: boolean;
 }
 
 function formatTraffic(bytes: number): string {
@@ -71,6 +72,7 @@ export default function LeafletMapView({
   initialNodes,
   initialEdges,
   initialViewState,
+  readonly = false,
 }: LeafletMapViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<any>(null);
@@ -534,7 +536,7 @@ export default function LeafletMapView({
 
       const marker = L.marker([node.x, node.y], {
         icon: nodeIcon,
-        draggable: true,
+        draggable: !readonly,
       });
 
       // Camera FOV cone + interactive handles
@@ -568,7 +570,7 @@ export default function LeafletMapView({
             html: `<div style="width:14px;height:14px;border-radius:50%;background:rgba(59,130,246,0.8);border:2px solid #60a5fa;box-shadow:0 0 8px rgba(59,130,246,0.6);cursor:grab;"></div>`,
             iconSize: [14, 14], iconAnchor: [7, 7],
           }),
-          draggable: true,
+          draggable: !readonly,
         });
         rotHandle.bindTooltip("Rotar", { direction: "top", offset: [0, -10], className: "leaflet-label-dark" });
         rotHandle.on("drag", () => {
@@ -598,7 +600,7 @@ export default function LeafletMapView({
             html: `<div style="width:12px;height:12px;border-radius:2px;background:rgba(34,197,94,0.8);border:2px solid #4ade80;box-shadow:0 0 8px rgba(34,197,94,0.5);cursor:ns-resize;transform:rotate(45deg);"></div>`,
             iconSize: [12, 12], iconAnchor: [6, 6],
           }),
-          draggable: true,
+          draggable: !readonly,
         });
         rangeHandle.bindTooltip("Alcance", { direction: "top", offset: [0, -10], className: "leaflet-label-dark" });
         rangeHandle.on("drag", () => {
@@ -631,7 +633,7 @@ export default function LeafletMapView({
             html: `<div style="width:12px;height:12px;border-radius:2px;background:rgba(250,204,21,0.85);border:2px solid #facc15;box-shadow:0 0 8px rgba(250,204,21,0.5);cursor:ew-resize;transform:rotate(45deg);"></div>`,
             iconSize: [12, 12], iconAnchor: [6, 6],
           }),
-          draggable: true,
+          draggable: !readonly,
         });
         fovHandle.bindTooltip("Apertura", { direction: "top", offset: [0, -10], className: "leaflet-label-dark" });
         fovHandle.on("drag", () => {
@@ -681,6 +683,7 @@ export default function LeafletMapView({
       marker.on("contextmenu", (e: any) => {
         e.originalEvent.preventDefault();
         e.originalEvent.stopPropagation();
+        if (readonly) return;
         map.closePopup();
 
         // Link mode is handled by overlay — skip context menu
@@ -1534,7 +1537,7 @@ export default function LeafletMapView({
   }, [searchQuery]);
 
   return (
-    <div className="relative h-full w-full" style={{ marginRight: "320px", isolation: "isolate" }}>
+    <div className="relative h-full w-full" style={{ marginRight: readonly ? "0" : "320px", isolation: "isolate" }}>
       <div
         ref={containerRef}
         className="absolute inset-0"
@@ -1627,7 +1630,7 @@ export default function LeafletMapView({
       `}</style>
 
       {/* ── Floating Top Bar ── */}
-      <div
+      {!readonly && <div
         className="absolute top-3 left-3 flex items-center gap-1.5 rounded-2xl px-2.5 py-1.5"
         id="leaflet-toolbar"
         style={{
@@ -1950,10 +1953,10 @@ export default function LeafletMapView({
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15.2 3a2 2 0 0 1 1.4.6l3.8 3.8a2 2 0 0 1 .6 1.4V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/><path d="M17 21v-7a1 1 0 0 0-1-1H8a1 1 0 0 0-1 1v7"/><path d="M7 3v4a1 1 0 0 0 1 1h7"/></svg>
           {saving ? "Guardando..." : "Guardar"}
         </button>
-      </div>
+      </div>}
 
       {/* Context Menu */}
-      {ctxMenu && (
+      {!readonly && ctxMenu && (
         <ContextMenu
           x={ctxMenu.x}
           y={ctxMenu.y}
@@ -2323,7 +2326,7 @@ export default function LeafletMapView({
       })()}
 
       {/* ── Status bar bottom ── */}
-      {(() => {
+      {!readonly && (() => {
         const total = nodesRef.current.filter(n => n.kuma_monitor_id && n.icon !== "_textLabel" && n.icon !== "_waypoint").length;
         const up = nodesRef.current.filter(n => { const m = getMonitorData(n.kuma_monitor_id); return m?.status === 1; }).length;
         const down = nodesRef.current.filter(n => { const m = getMonitorData(n.kuma_monitor_id); return m?.status === 0; }).length;
@@ -2345,7 +2348,7 @@ export default function LeafletMapView({
       })()}
 
       {/* Time travel blur — only during drag */}
-      <div
+      {!readonly && <div
         className="absolute inset-0 pointer-events-none"
         style={{
           zIndex: 999,
@@ -2353,10 +2356,10 @@ export default function LeafletMapView({
           background: timeDragging ? "rgba(0,10,40,0.15)" : "transparent",
           transition: timeDragging ? "none" : "backdrop-filter 0.5s ease-out, background 0.5s ease-out",
         }}
-      />
+      />}
 
       {/* Time Machine */}
-      <TimeMachine
+      {!readonly && <TimeMachine
         open={timeMachineOpen}
         onToggle={() => setTimeMachineOpen((v) => !v)}
         onDragging={useCallback((d: boolean) => setTimeDragging(d), [])}
@@ -2405,7 +2408,7 @@ export default function LeafletMapView({
           status: m.status,
           parent: m.parent,
         }))}
-      />
+      />}
 
       {/* Custom CSS */}
       <style>{`

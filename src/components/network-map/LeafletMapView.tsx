@@ -2187,16 +2187,34 @@ export default function LeafletMapView({
         );
       })()}
 
+      {/* Time travel blur effect */}
+      {timeMachineTime && (
+        <div className="absolute inset-0 pointer-events-none transition-all duration-300"
+          style={{ zIndex: 999, backdropFilter: "blur(1px)", background: "rgba(0,0,20,0.08)" }} />
+      )}
+
       {/* Time Machine */}
       <TimeMachine
         open={timeMachineOpen}
         onToggle={() => setTimeMachineOpen((v) => !v)}
-        onTimeChange={useCallback((time: Date | null) => {
+        onTimeChange={useCallback((time: Date | null, statuses: Map<number, number>) => {
           setTimeMachineTime(time);
-          // When time changes, update all markers to reflect historical status
-          if (LRef.current && mapRef.current) {
-            updateMarkerStatus();
-          }
+          // Update marker colors based on historical status
+          if (!LRef.current || !mapRef.current) return;
+          const L = LRef.current;
+          nodesRef.current.forEach((node) => {
+            const marker = markersRef.current.get(node.id);
+            if (!marker || !node.kuma_monitor_id) return;
+            let color: string;
+            if (time && statuses.has(node.kuma_monitor_id)) {
+              const st = statuses.get(node.kuma_monitor_id)!;
+              color = st === 0 ? "#ef4444" : st === 1 ? "#22c55e" : st === 3 ? "#8b5cf6" : "#f59e0b";
+            } else {
+              color = getStatusColor(node.kuma_monitor_id);
+            }
+            const pulse = time ? (statuses.get(node.kuma_monitor_id) === 0) : false;
+            marker.setIcon(createMarkerIcon(L, color, pulse, false));
+          });
         }, [])}
         monitors={kumaMonitors.map((m) => ({
           id: m.id,

@@ -776,6 +776,52 @@ export default function LeafletMapView({
     });
   }
 
+  // Trace a route through waypoints to find the REAL endpoint nodes (with kuma_monitor_id)
+  // Waypoints (icon === "waypoint" or no kuma_monitor_id and connected to exactly 2 edges) are transparent
+  function findRealEndpoints(edgeId: string): { srcStatus: number | undefined; tgtStatus: number | undefined } {
+    const edge = edgesRef.current.find((e) => e.id === edgeId);
+    if (!edge) return { srcStatus: undefined, tgtStatus: undefined };
+
+    const allNodes = nodesRef.current;
+    const allEdges = edgesRef.current;
+
+    // Walk from source side to find real node
+    function walkToRealNode(startNodeId: string, fromEdgeId: string, visited: Set<string>): number | undefined {
+      const node = allNodes.find((n) => n.id === startNodeId);
+      if (!node) return undefined;
+
+      // If this node has a kuma monitor, it's a real node — return its status
+      if (node.kuma_monitor_id) {
+        const mon = kumaMonitors.find((m) => m.id === node.kuma_monitor_id);
+        return mon?.status;
+      }
+
+      // If this is a waypoint/blind node (icon === "waypoint" or no monitor), follow the chain
+      const isWaypoint = node.icon === "waypoint" || !node.kuma_monitor_id;
+      if (!isWaypoint) return undefined;
+
+      visited.add(fromEdgeId);
+
+      // Find other edges connected to this waypoint (not the one we came from)
+      const connectedEdges = allEdges.filter(
+        (e) => !visited.has(e.id) && (e.source_node_id === startNodeId || e.target_node_id === startNodeId)
+      );
+
+      for (const nextEdge of connectedEdges) {
+        const nextNodeId = nextEdge.source_node_id === startNodeId ? nextEdge.target_node_id : nextEdge.source_node_id;
+        const result = walkToRealNode(nextNodeId, nextEdge.id, visited);
+        if (result !== undefined) return result;
+      }
+
+      return undefined; // dead end — no real node found
+    }
+
+    const srcStatus = walkToRealNode(edge.source_node_id, edgeId, new Set([edgeId]));
+    const tgtStatus = walkToRealNode(edge.target_node_id, edgeId, new Set([edgeId]));
+
+    return { srcStatus, tgtStatus };
+  }
+
   function renderEdges(L: any, map: any) {
     if (!map || !map.getContainer()) return;
     polylinesRef.current.forEach((p) => { try { map.removeLayer(p); } catch {} });
@@ -790,14 +836,19 @@ export default function LeafletMapView({
       if (!srcNode || !tgtNode) return;
 
       const cd = edge.custom_data ? JSON.parse(edge.custom_data) : {};
-      const srcMon = srcNode.kuma_monitor_id ? kumaMonitors.find((m) => m.id === srcNode.kuma_monitor_id) : null;
-      const tgtMon = tgtNode.kuma_monitor_id ? kumaMonitors.find((m) => m.id === tgtNode.kuma_monitor_id) : null;
+
+      // Find real endpoints through waypoint chains
+      const { srcStatus, tgtStatus } = findRealEndpoints(edge.id);
       const isFiber = cd.linkType === "fiber";
       const isWireless = cd.linkType === "wireless";
-      const isDown = srcMon?.status === 0 || tgtMon?.status === 0;
+      const isDown = srcStatus === 0 || tgtStatus === 0;
+      const isBothDown = srcStatus === 0 && tgtStatus === 0;
+      const isMaint = (srcStatus === 3 || tgtStatus === 3) && !isDown;
+      const isPending = (srcStatus === 2 || tgtStatus === 2) && !isDown && !isMaint;
 
-      let lineColor = isDown ? "#ef4444" : isFiber ? "#3b82f6" : isWireless ? "#f97316" : "#22c55e";
+      let lineColor = isBothDown ? "#991b1b" : isDown ? "#ef4444" : isMaint ? "#8b5cf6" : isPending ? "#f59e0b" : isFiber ? "#3b82f6" : isWireless ? "#f97316" : "#22c55e";
       let dashArray = isDown ? "8,6" : isWireless ? "6,8" : undefined;
+      const lineOpacity = isBothDown ? 0.4 : isDown ? 0.9 : 0.9;
 
       // Bezier curve: add control point offset perpendicular to the line
       const dx = tgtNode.y - srcNode.y;
@@ -818,13 +869,33 @@ export default function LeafletMapView({
       }
 
       const line = L.polyline(curvePoints, {
-        color: lineColor, weight: 3, opacity: 0.9, dashArray,
+        color: lineColor, weight: isDown ? 4 : 3, opacity: lineOpacity, dashArray,
         smoothFactor: 1,
+        className: isDown && !isBothDown ? "link-pulse" : undefined,
       });
 
-      // Tooltip for cable label on hover
-      if (edge.label) {
-        line.bindTooltip(edge.label, { sticky: true, className: "leaflet-label-dark" });
+      // Tooltip for cable label on hover — include endpoint status
+      const statusLabel = (s: number | undefined) => s === 0 ? "🔴 DOWN" : s === 1 ? "🟢 UP" : s === 2 ? "🟡 PENDING" : s === 3 ? "🟣 MAINT" : "⚪ N/A";
+      const tooltipParts: string[] = [];
+      if (edge.label) tooltipParts.push(`<b>${edge.label}</b>`);
+      if (isDown || isMaint || isPending) {
+        // Find real endpoint names
+        const findRealName = (nodeId: string, fromEdge: string, visited: Set<string>): string => {
+          const node = nodesRef.current.find((n) => n.id === nodeId);
+          if (!node) return "?";
+          if (node.kuma_monitor_id) return node.label || "?";
+          visited.add(fromEdge);
+          const next = edgesRef.current.find((e) => !visited.has(e.id) && (e.source_node_id === nodeId || e.target_node_id === nodeId));
+          if (!next) return node.label || "?";
+          const nextNodeId = next.source_node_id === nodeId ? next.target_node_id : next.source_node_id;
+          return findRealName(nextNodeId, next.id, visited);
+        };
+        const srcName = findRealName(edge.source_node_id, edge.id, new Set([edge.id]));
+        const tgtName = findRealName(edge.target_node_id, edge.id, new Set([edge.id]));
+        tooltipParts.push(`<span style="font-size:10px">${srcName}: ${statusLabel(srcStatus)}<br/>${tgtName}: ${statusLabel(tgtStatus)}</span>`);
+      }
+      if (tooltipParts.length > 0) {
+        line.bindTooltip(tooltipParts.join("<br/>"), { sticky: true, className: "leaflet-label-dark" });
       }
 
       // Source interface label — plain text near source

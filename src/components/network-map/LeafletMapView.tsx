@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { toast } from "sonner";
 import type { KumaMonitor } from "./MonitorPanel";
 import ContextMenu, { menuIcons } from "./ContextMenu";
 import LinkModal, { type LinkFormData } from "./LinkModal";
 import InputModal from "./InputModal";
-import { Pencil, MapPin, Signal } from "lucide-react";
+import { Pencil, Signal } from "lucide-react";
 
 interface SavedNode {
   id: string;
@@ -112,6 +112,7 @@ export default function LeafletMapView({
   const polygonPointsRef = useRef<[number, number][]>([]);
   const polygonPreviewRef = useRef<any>(null);
   const polygonLayersRef = useRef<Map<string, any>>(new Map());
+  const edgeUpdateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [colorPickerNodeId, setColorPickerNodeId] = useState<string>("");
   const [lensPickerOpen, setLensPickerOpen] = useState(false);
   const [lensPickerNodeId, setLensPickerNodeId] = useState<string>("");
@@ -275,15 +276,22 @@ export default function LeafletMapView({
     updateMarkerStatus();
   }, [kumaMonitors]);
 
+  // Performance: index monitors by ID for O(1) lookup instead of O(n) .find()
+  const monitorIndex = useMemo(() => {
+    const map = new Map<number, KumaMonitor>();
+    kumaMonitors.forEach((m) => map.set(m.id, m));
+    return map;
+  }, [kumaMonitors]);
+
   function getStatusColor(monitorId: number | null): string {
     if (monitorId == null) return "#6b7280";
-    const m = kumaMonitors.find((mon) => mon.id === monitorId);
+    const m = monitorIndex.get(monitorId);
     return statusColors[m?.status ?? 2] || "#f59e0b";
   }
 
   function getMonitorData(monitorId: number | null): KumaMonitor | undefined {
     if (monitorId == null) return undefined;
-    return kumaMonitors.find((mon) => mon.id === monitorId);
+    return monitorIndex.get(monitorId);
   }
 
   function createMarkerIcon(L: any, color: string, pulse: boolean, isLinkSource: boolean = false) {
@@ -395,9 +403,9 @@ export default function LeafletMapView({
       if (isLabel) {
         nodeIcon = L.divIcon({
           className: "text-label-marker",
-          html: `<div style="background:rgba(0,0,0,0.6);border:1px solid rgba(255,255,255,0.15);backdrop-filter:blur(8px);color:#ededed;font-size:13px;font-weight:700;padding:4px 12px;border-radius:8px;white-space:nowrap;text-shadow:0 1px 4px rgba(0,0,0,0.8);cursor:move;">${node.label}</div>`,
+          html: `<span style="color:#ededed;font-size:13px;font-weight:600;white-space:nowrap;text-shadow:0 1px 6px rgba(0,0,0,0.9),0 0 12px rgba(0,0,0,0.6);cursor:move;pointer-events:auto;user-select:none;">${node.label}</span>`,
           iconSize: [0, 0],
-          iconAnchor: [0, 12],
+          iconAnchor: [0, 8],
         });
       } else if (isWaypoint) {
         nodeIcon = L.divIcon({
@@ -832,8 +840,13 @@ export default function LeafletMapView({
       marker.setPopupContent(createPopupContent(node));
     });
 
-    // Also update edge colors
-    renderEdges(LRef.current, mapRef.current);
+    // Throttle edge color updates (expensive) — only if a status changed
+    if (!edgeUpdateTimerRef.current) {
+      edgeUpdateTimerRef.current = setTimeout(() => {
+        renderEdges(LRef.current!, mapRef.current!);
+        edgeUpdateTimerRef.current = null;
+      }, 3000);
+    }
   }
 
   // ─── Link creation flow ─────────────────────

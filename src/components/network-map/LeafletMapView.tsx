@@ -296,9 +296,7 @@ export default function LeafletMapView({
     if (m.status === 0) return "#ef4444"; // DOWN = red
     if (m.status === 2) return "#f59e0b"; // PENDING = amber
     if (m.status === 3) return "#8b5cf6"; // MAINTENANCE = purple
-    // UP: use first tag color if available, otherwise green
-    if (m.status === 1 && m.tags && m.tags.length > 0) return m.tags[0].color;
-    return "#22c55e"; // UP = green
+    return "#22c55e"; // UP = green (tag colors shown in popup only, not on map to avoid confusion with status)
   }
 
   function getMonitorData(monitorId: number | null): KumaMonitor | undefined {

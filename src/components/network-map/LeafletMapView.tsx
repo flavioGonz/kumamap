@@ -2560,58 +2560,63 @@ export default function LeafletMapView({
             }, i * 500);
           }
 
-          // Open fail popup AFTER a short delay (ensures map settled)
+          // Open event popup AFTER a short delay (ensures map settled)
           setTimeout(() => {
-            if (eventType === "down") {
-              const mon = kumaMonitors.find(m => m.id === monitorId);
-              // Remove any existing popup for this node
-              const existing = failPopupsRef.current.get(node.id);
-              if (existing) { try { map.removeLayer(existing); } catch {} }
+            const mon = kumaMonitors.find(m => m.id === monitorId);
+            const existing = failPopupsRef.current.get(node.id);
+            if (existing) { try { map.removeLayer(existing); } catch {} }
 
-              const popup = L.popup({
-                closeButton: false, autoClose: false, closeOnClick: false,
-                className: "fail-popup-tm", offset: [0, -22], autoPan: false,
-              })
-                .setLatLng(nodeLatLng)
-                .setContent(`
-                  <div style="background:linear-gradient(135deg,#dc2626,#991b1b);border:2px solid #fca5a5;border-radius:14px;padding:10px 16px;min-width:160px;box-shadow:0 8px 32px rgba(239,68,68,0.4),0 0 60px rgba(239,68,68,0.2),inset 0 1px 0 rgba(255,255,255,0.15);animation:failPopupIn 0.4s cubic-bezier(0.34,1.56,0.64,1);">
-                    <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
-                      <div style="width:28px;height:28px;border-radius:8px;background:rgba(255,255,255,0.15);display:flex;align-items:center;justify-content:center;animation:failIconPulse 1.5s ease-in-out infinite;">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-                      </div>
-                      <div>
-                        <div style="color:white;font-size:13px;font-weight:800;text-shadow:0 1px 2px rgba(0,0,0,0.3);">${node.label}</div>
-                        <div style="color:rgba(255,255,255,0.8);font-size:10px;font-weight:700;letter-spacing:0.05em;">▼ OFFLINE</div>
-                      </div>
+            // Colors based on event type
+            const isDown = eventType === "down";
+            const bgGrad = isDown ? "linear-gradient(135deg,#dc2626,#991b1b)" : "linear-gradient(135deg,#16a34a,#15803d)";
+            const borderColor = isDown ? "#fca5a5" : "#86efac";
+            const shadowColor = isDown ? "rgba(239,68,68" : "rgba(34,197,94";
+            const statusText = isDown ? "▼ OFFLINE" : "▲ RECOVERED";
+            const icon = isDown
+              ? '<path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>'
+              : '<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>';
+
+            const popup = L.popup({
+              closeButton: false, autoClose: false, closeOnClick: false,
+              className: "fail-popup-tm", offset: [0, -22], autoPan: false,
+            })
+              .setLatLng(nodeLatLng)
+              .setContent(`
+                <div style="background:${bgGrad};border:2px solid ${borderColor};border-radius:14px;padding:10px 16px;min-width:160px;box-shadow:0 8px 32px ${shadowColor},0.4),0 0 60px ${shadowColor},0.2),inset 0 1px 0 rgba(255,255,255,0.15);animation:failPopupIn 0.4s cubic-bezier(0.34,1.56,0.64,1);">
+                  <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+                    <div style="width:28px;height:28px;border-radius:8px;background:rgba(255,255,255,0.15);display:flex;align-items:center;justify-content:center;animation:failIconPulse 1.5s ease-in-out infinite;">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round">${icon}</svg>
                     </div>
-                    ${mon?.msg ? `<div style="color:rgba(255,255,255,0.65);font-size:9px;margin-top:2px;">${mon.msg}</div>` : ""}
-                    <button onclick="window.__kumamap_showEventDetail(${monitorId})" style="margin-top:6px;width:100%;padding:4px 0;border-radius:8px;background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.25);color:white;font-size:10px;font-weight:700;cursor:pointer;transition:all 0.2s;letter-spacing:0.05em;" onmouseover="this.style.background='rgba(255,255,255,0.25)'" onmouseout="this.style.background='rgba(255,255,255,0.15)'">
-                      📋 Detalles
-                    </button>
+                    <div>
+                      <div style="color:white;font-size:13px;font-weight:800;text-shadow:0 1px 2px rgba(0,0,0,0.3);">${node.label}</div>
+                      <div style="color:rgba(255,255,255,0.8);font-size:10px;font-weight:700;letter-spacing:0.05em;">${statusText}</div>
+                    </div>
                   </div>
-                `);
-              // Use addTo instead of openOn to avoid closing other popups
-              popup.addTo(map);
-              failPopupsRef.current.set(node.id, popup);
+                  ${mon?.msg ? `<div style="color:rgba(255,255,255,0.65);font-size:9px;margin-top:2px;">${mon.msg}</div>` : ""}
+                  <button onclick="window.__kumamap_showEventDetail(${monitorId})" style="margin-top:6px;width:100%;padding:4px 0;border-radius:8px;background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.25);color:white;font-size:10px;font-weight:700;cursor:pointer;transition:all 0.2s;letter-spacing:0.05em;" onmouseover="this.style.background='rgba(255,255,255,0.25)'" onmouseout="this.style.background='rgba(255,255,255,0.15)'">
+                    📋 Detalles
+                  </button>
+                </div>
+              `);
+            popup.addTo(map);
+            failPopupsRef.current.set(node.id, popup);
 
-              // Register global handler for the Detalles button
-              (window as any).__kumamap_showEventDetail = (mid: number) => {
-                const m = kumaMonitors.find(km => km.id === mid);
-                setEventDetail({
-                  nodeLabel: node.label || "?",
-                  monitorId: mid,
-                  msg: m?.msg || mon?.msg || "",
-                  time: new Date(),
-                  type: m?.type || "unknown",
-                  ping: m?.ping ?? null,
-                  status: m?.status ?? 0,
-                });
-              };
+            // Register global handler
+            (window as any).__kumamap_showEventDetail = (mid: number) => {
+              const m = kumaMonitors.find(km => km.id === mid);
+              setEventDetail({
+                nodeLabel: node.label || "?",
+                monitorId: mid,
+                msg: m?.msg || mon?.msg || "",
+                time: new Date(),
+                type: m?.type || "unknown",
+                ping: m?.ping ?? null,
+                status: m?.status ?? 0,
+              });
+            };
 
-              // Auto-close after 8s
-              setTimeout(() => { try { map.removeLayer(popup); failPopupsRef.current.delete(node.id); } catch {} }, 8000);
-            }
-          }, 300); // Delay to let panTo settle
+            setTimeout(() => { try { map.removeLayer(popup); failPopupsRef.current.delete(node.id); } catch {} }, 8000);
+          }, 300);
         }, [kumaMonitors])}
         onTimeChange={(time: Date | null, statuses: Map<number, number>) => {
           setTimeMachineTime(time);

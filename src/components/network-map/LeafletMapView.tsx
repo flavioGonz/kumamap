@@ -2206,6 +2206,22 @@ export default function LeafletMapView({
         open={timeMachineOpen}
         onToggle={() => setTimeMachineOpen((v) => !v)}
         onDragging={useCallback((d: boolean) => setTimeDragging(d), [])}
+        onFocusEvent={useCallback((monitorId: number, eventType: "down" | "up") => {
+          // Find the node with this monitor and zoom to it
+          const node = nodesRef.current.find(n => n.kuma_monitor_id === monitorId);
+          if (node && mapRef.current) {
+            mapRef.current.flyTo([node.x, node.y], Math.max(mapRef.current.getZoom(), 16), { duration: 1.2 });
+            // Flash the marker
+            const marker = markersRef.current.get(node.id);
+            if (marker?.getElement()) {
+              const el = marker.getElement();
+              const flashColor = eventType === "down" ? "#ef4444" : "#22c55e";
+              el.style.filter = `drop-shadow(0 0 20px ${flashColor}) brightness(1.5)`;
+              el.style.transition = "filter 0.2s";
+              setTimeout(() => { el.style.filter = ""; el.style.transition = "filter 1s"; }, 2000);
+            }
+          }
+        }, [])}
         onTimeChange={useCallback((time: Date | null, statuses: Map<number, number>) => {
           setTimeMachineTime(time);
           if (!LRef.current || !mapRef.current) return;

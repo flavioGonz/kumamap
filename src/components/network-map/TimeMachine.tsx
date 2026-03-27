@@ -11,10 +11,11 @@ interface TimeMachineProps {
   onToggle: () => void;
   onTimeChange: (time: Date | null, statuses: Map<number, number>) => void;
   onDragging?: (isDragging: boolean) => void;
+  onFocusEvent?: (monitorId: number, eventType: "down" | "up") => void;
   monitors: MonitorInfo[];
 }
 
-export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, monitors }: TimeMachineProps) {
+export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, onFocusEvent, monitors }: TimeMachineProps) {
   const [timeline, setTimeline] = useState<Record<number, HeartbeatEntry[]>>({});
   const [position, setPosition] = useState(1);
   const [playing, setPlaying] = useState(false);
@@ -91,10 +92,16 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
       setPosition(prev => {
         const next = prev + step;
         if (next >= 1) { setPlaying(false); return 1; }
-        // Check if we crossed an event — if so, pause there
+        // Check if we crossed an event — pause and focus
         for (const evt of events) {
           if (prev < evt.position && next >= evt.position) {
             setPlaying(false);
+            // Focus on the node that had the event
+            if (evt.toStatus === 0) {
+              onFocusEvent?.(evt.monitorId, "down");
+            } else if (evt.fromStatus === 0 && evt.toStatus === 1) {
+              onFocusEvent?.(evt.monitorId, "up");
+            }
             return evt.position;
           }
         }
@@ -174,20 +181,43 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
           <div className="absolute inset-0" style={{ background: "linear-gradient(180deg, rgba(30,30,50,0.3), rgba(10,10,10,0.1))" }} />
 
           {/* Event markers (status changes) */}
-          {events.map((evt, i) => (
-            <div key={i} className="absolute left-0 right-0"
-              style={{ top: `${evt.position * 100}%` }}>
-              {/* Line */}
-              <div className="h-[2px] w-full" style={{
-                background: evt.toStatus === 0 ? "#ef4444" : evt.toStatus === 1 ? "#22c55e" : "#f59e0b",
-                boxShadow: `0 0 6px ${evt.toStatus === 0 ? "#ef4444" : evt.toStatus === 1 ? "#22c55e" : "#f59e0b"}`,
-                opacity: 0.7,
-              }} />
-              {/* Dot */}
-              <div className="absolute left-1/2 -translate-x-1/2 -translate-y-1/2 w-[6px] h-[6px] rounded-full"
-                style={{ background: evt.toStatus === 0 ? "#ef4444" : evt.toStatus === 1 ? "#22c55e" : "#f59e0b" }} />
-            </div>
-          ))}
+          {events.map((evt, i) => {
+            const isDown = evt.toStatus === 0;
+            const isRecovery = evt.fromStatus === 0 && evt.toStatus === 1;
+            const evtColor = isDown ? "#ef4444" : isRecovery ? "#22c55e" : "#f59e0b";
+            return (
+              <div key={i} className="absolute left-0 right-0 group/evt cursor-pointer"
+                style={{ top: `${evt.position * 100}%` }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setPosition(evt.position);
+                  setPlaying(false);
+                  onFocusEvent?.(evt.monitorId, isDown ? "down" : "up");
+                }}>
+                {/* Glow line */}
+                <div className="h-[2px] w-full transition-all group-hover/evt:h-[3px]" style={{
+                  background: evtColor,
+                  boxShadow: `0 0 8px ${evtColor}`,
+                  opacity: isDown ? 0.9 : 0.6,
+                }} />
+                {/* Dot */}
+                <div className="absolute left-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full transition-all group-hover/evt:scale-150"
+                  style={{
+                    width: isDown ? 8 : 6, height: isDown ? 8 : 6,
+                    background: evtColor,
+                    boxShadow: `0 0 6px ${evtColor}`,
+                  }} />
+                {/* Tooltip on hover */}
+                <div className="absolute left-[54px] -top-3 rounded-md px-1.5 py-1 text-[8px] font-bold whitespace-nowrap opacity-0 group-hover/evt:opacity-100 transition-opacity pointer-events-none"
+                  style={{ background: "rgba(10,10,10,0.95)", border: `1px solid ${evtColor}44`, color: evtColor, boxShadow: "0 4px 12px rgba(0,0,0,0.6)", zIndex: 10 }}>
+                  <div>{evt.monitorName}</div>
+                  <div style={{ color: "#888", fontWeight: 500 }}>
+                    {isDown ? "▼ DOWN" : isRecovery ? "▲ UP" : "● Cambio"} — {evt.time.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
 
           {/* Time ticks */}
           <div className="absolute inset-0 flex flex-col justify-between pointer-events-none py-1">
@@ -209,8 +239,13 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
           <div className="absolute left-0 right-0 pointer-events-none"
             style={{ top: `${position * 100}%`, transition: dragging ? "none" : "top 0.05s linear" }}>
             <div className="relative">
+              {/* Pulse ring during play */}
+              {playing && (
+                <div className="absolute -left-1 -right-1 -top-2 -bottom-2 rounded-full animate-ping"
+                  style={{ background: `${isLive ? "#4ade80" : "#60a5fa"}15`, border: `1px solid ${isLive ? "#4ade80" : "#60a5fa"}33` }} />
+              )}
               <div className="h-[3px] w-full rounded-full"
-                style={{ background: isLive ? "#4ade80" : "#60a5fa", boxShadow: `0 0 10px ${isLive ? "#4ade80" : "#60a5fa"}` }} />
+                style={{ background: isLive ? "#4ade80" : "#60a5fa", boxShadow: `0 0 ${playing ? 16 : 10}px ${isLive ? "#4ade80" : "#60a5fa"}` }} />
               {!isLive && (
                 <div className="absolute left-[54px] -top-2.5 rounded-md px-1.5 py-0.5 text-[9px] font-mono font-bold whitespace-nowrap"
                   style={{ background: "rgba(10,10,10,0.95)", border: "1px solid rgba(59,130,246,0.3)", color: "#60a5fa", boxShadow: "0 4px 12px rgba(0,0,0,0.5)" }}>

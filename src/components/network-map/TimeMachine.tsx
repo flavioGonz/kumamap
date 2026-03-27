@@ -132,9 +132,9 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
         const next = prev + step;
         if (next >= 1) { setPlaying(false); return 1; }
         for (const evt of visibleEvents) {
-          if (evt.status === 0 && prev < evt.position && next >= evt.position) {
+          if (prev < evt.position && next >= evt.position) {
             setPlaying(false);
-            onFocusEvent?.(evt.monitorId, "down");
+            onFocusEvent?.(evt.monitorId, evt.status === 0 ? "down" : "up");
             return evt.position;
           }
         }

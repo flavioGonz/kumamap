@@ -1756,7 +1756,6 @@ export default function LeafletMapView({
         className="absolute top-3 left-3 flex items-center gap-1.5 rounded-2xl px-2.5 py-1.5"
         id="leaflet-toolbar"
         style={{
-          right: "12px",
           zIndex: 10000,
           background: "rgba(10,10,10,0.82)",
           border: "1px solid rgba(255,255,255,0.06)",
@@ -1818,34 +1817,6 @@ export default function LeafletMapView({
           </svg>
           {editMode ? "Editar" : "Edit"}
         </button>
-
-        {editMode && <div className="h-5 w-px mx-0.5" style={{ background: "rgba(255,255,255,0.06)" }} />}
-
-        {/* Zoom controls — always visible */}
-        <div className="flex items-center gap-0.5">
-        {/* Zoom controls */}
-        <div className="flex items-center gap-0.5">
-          <button onClick={() => mapRef.current?.zoomIn()} title="Zoom In"
-            className="rounded-xl p-1.5 text-[#888] hover:text-[#ededed] hover:bg-white/[0.06] transition-all">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.3-4.3"/><path d="M8 11h6"/><path d="M11 8v6"/></svg>
-          </button>
-          <button onClick={() => mapRef.current?.zoomOut()} title="Zoom Out"
-            className="rounded-xl p-1.5 text-[#888] hover:text-[#ededed] hover:bg-white/[0.06] transition-all">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.3-4.3"/><path d="M8 11h6"/></svg>
-          </button>
-          <button onClick={() => {
-            if (mapRef.current && nodesRef.current.length > 0) {
-              const LLocal = LRef.current;
-              if (!LLocal) return;
-              const bounds = nodesRef.current.map((n) => [n.x, n.y] as [number, number]);
-              mapRef.current.fitBounds(LLocal.latLngBounds(bounds), { padding: [50, 50] });
-            }
-          }} title="Ajustar vista"
-            className="rounded-xl p-1.5 text-[#888] hover:text-[#ededed] hover:bg-white/[0.06] transition-all">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 3h6v6"/><path d="M9 21H3v-6"/><path d="m21 3-7 7"/><path d="m3 21 7-7"/></svg>
-          </button>
-        </div>
-        </div>
 
         {/* ═══ EDIT MODE TOOLS ═══ */}
         {editMode && <>
@@ -1944,8 +1915,6 @@ export default function LeafletMapView({
           </div>
         )}
         </>}
-
-        <div className="flex-1" />
 
         {/* ═══ RIGHT SIDE ═══ */}
 
@@ -2473,6 +2442,28 @@ export default function LeafletMapView({
           </div>
         );
       })()}
+
+      {/* ── Zoom controls bottom-right ── */}
+      <div className="absolute bottom-14 right-3 z-[10000] flex flex-col gap-1 rounded-2xl p-1"
+        style={{ background: "rgba(10,10,10,0.85)", border: "1px solid rgba(255,255,255,0.06)", backdropFilter: "blur(16px)", boxShadow: "0 4px 20px rgba(0,0,0,0.4)" }}>
+        <button onClick={() => mapRef.current?.zoomIn()} title="Zoom In"
+          className="flex items-center justify-center h-8 w-8 rounded-xl text-[#888] hover:text-[#ededed] hover:bg-white/[0.06] transition-all">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
+        </button>
+        <button onClick={() => mapRef.current?.zoomOut()} title="Zoom Out"
+          className="flex items-center justify-center h-8 w-8 rounded-xl text-[#888] hover:text-[#ededed] hover:bg-white/[0.06] transition-all">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M5 12h14"/></svg>
+        </button>
+        <button onClick={() => {
+          if (mapRef.current && nodesRef.current.length > 0 && LRef.current) {
+            const bounds = nodesRef.current.map((n) => [n.x, n.y] as [number, number]);
+            mapRef.current.fitBounds(LRef.current.latLngBounds(bounds), { padding: [50, 50] });
+          }
+        }} title="Ajustar vista"
+          className="flex items-center justify-center h-8 w-8 rounded-xl text-[#888] hover:text-[#ededed] hover:bg-white/[0.06] transition-all">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M15 3h6v6"/><path d="M9 21H3v-6"/><path d="m21 3-7 7"/><path d="m3 21 7-7"/></svg>
+        </button>
+      </div>
 
       {/* ── Map Clock ── */}
       <MapClock timeMachineTime={timeMachineTime} timeMachineOpen={timeMachineOpen} />

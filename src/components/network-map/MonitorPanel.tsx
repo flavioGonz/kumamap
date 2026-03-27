@@ -105,24 +105,27 @@ export default function MonitorPanel({
 
   if (collapsed) {
     return (
-      <div className="absolute right-0 top-0 z-20 h-full flex items-start pt-16">
+      <div className="absolute right-3 top-1/2 -translate-y-1/2 z-20">
         <button
           onClick={onToggleCollapse}
-          className="flex items-center gap-1.5 rounded-l-xl px-2.5 py-4 shadow-2xl transition-all hover:pr-4"
+          className="flex flex-col items-center gap-2 rounded-2xl px-2.5 py-5 transition-all hover:px-3.5"
           style={{
-            background: "rgba(20,20,20,0.95)",
-            border: "1px solid rgba(255,255,255,0.08)",
-            borderRight: "none",
-            backdropFilter: "blur(12px)",
+            background: "rgba(10,10,10,0.88)",
+            border: "1px solid rgba(255,255,255,0.06)",
+            backdropFilter: "blur(16px)",
+            boxShadow: "0 4px 24px rgba(0,0,0,0.4)",
           }}
         >
-          <ChevronLeft className="h-4 w-4 text-[#737373]" />
           <Signal className="h-4 w-4 text-blue-400" />
           <span
-            className="text-[10px] font-bold text-[#737373] tracking-wider"
+            className="text-[7px] font-black text-[#555] tracking-wider"
             style={{ writingMode: "vertical-rl" }}
           >
-            MONITORES ({counts.total})
+            MONITORES
+          </span>
+          <span className="text-[9px] font-bold rounded-full px-1.5 py-0.5"
+            style={{ background: "rgba(59,130,246,0.15)", color: "#60a5fa", border: "1px solid rgba(59,130,246,0.25)" }}>
+            {counts.total}
           </span>
         </button>
       </div>

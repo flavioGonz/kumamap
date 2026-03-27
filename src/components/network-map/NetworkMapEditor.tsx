@@ -167,7 +167,7 @@ function CanvasInner({
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [connectMode, setConnectMode] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [panelCollapsed, setPanelCollapsed] = useState(false);
+  const [panelCollapsed, setPanelCollapsed] = useState(true);
   const [mapData, setMapData] = useState<MapData | null>(null);
   const [mapNavMode, setMapNavMode] = useState(false);
 

@@ -1754,7 +1754,7 @@ export default function LeafletMapView({
 
       {/* ── Floating Top Bar ── */}
       {!readonly && <div
-        className="absolute top-3 left-3 flex items-center gap-1.5 rounded-2xl px-2.5 py-1.5"
+        className="absolute top-3 left-1/2 -translate-x-1/2 flex items-center gap-1.5 rounded-2xl px-2.5 py-1.5"
         id="leaflet-toolbar"
         style={{
           zIndex: 10000,

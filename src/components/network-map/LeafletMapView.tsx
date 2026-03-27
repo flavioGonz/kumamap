@@ -2517,14 +2517,14 @@ export default function LeafletMapView({
         onDragging={useCallback((d: boolean) => setTimeDragging(d), [])}
         mapMonitorIds={useMemo(() => nodesRef.current.filter(n => n.kuma_monitor_id).map(n => n.kuma_monitor_id!), [initialNodes])}
         onFocusEvent={useCallback((monitorId: number, eventType: "down" | "up") => {
-          // Find the node with this monitor and zoom/animate
+          // Find the node with this monitor and animate
           const node = nodesRef.current.find(n => n.kuma_monitor_id === monitorId);
           if (!node || !mapRef.current || !LRef.current) return;
           const L = LRef.current;
           const map = mapRef.current;
 
-          // Fly to the node
-          map.flyTo([node.x, node.y], Math.max(map.getZoom(), 16), { duration: 1.2 });
+          // Pan to node WITHOUT changing zoom (prevents node flying off screen)
+          map.panTo([node.x, node.y], { animate: true, duration: 0.8 });
 
           // Animate the marker with dramatic pulse ring
           const flashColor = eventType === "down" ? "#ef4444" : "#22c55e";
@@ -2571,7 +2571,40 @@ export default function LeafletMapView({
               el.style.transition = "filter 1s, transform 0.5s";
             }, 4000);
           }
-        }, [])}
+
+          // Open dramatic fail popup on the node
+          if (eventType === "down") {
+            const mon = kumaMonitors.find(m => m.id === monitorId);
+            // Remove existing fail popup for this node
+            const existingPopup = failPopupsRef.current.get(node.id);
+            if (existingPopup) { try { map.removeLayer(existingPopup); } catch {} }
+
+            const popup = L.popup({
+              closeButton: false, autoClose: false, closeOnClick: false,
+              className: "fail-popup-tm", offset: [0, -20], autoPan: false,
+            })
+              .setLatLng([node.x, node.y])
+              .setContent(`
+                <div style="background:linear-gradient(135deg,#dc2626,#991b1b);border:2px solid #fca5a5;border-radius:14px;padding:8px 14px;min-width:140px;box-shadow:0 8px 32px rgba(239,68,68,0.4),0 0 60px rgba(239,68,68,0.2),inset 0 1px 0 rgba(255,255,255,0.15);animation:failPopupIn 0.4s cubic-bezier(0.34,1.56,0.64,1);">
+                  <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+                    <div style="width:24px;height:24px;border-radius:8px;background:rgba(255,255,255,0.15);display:flex;align-items:center;justify-content:center;animation:failIconPulse 1.5s ease-in-out infinite;">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                    </div>
+                    <div>
+                      <div style="color:white;font-size:12px;font-weight:800;text-shadow:0 1px 2px rgba(0,0,0,0.3);">${node.label}</div>
+                      <div style="color:rgba(255,255,255,0.7);font-size:9px;font-weight:600;">▼ OFFLINE</div>
+                    </div>
+                  </div>
+                  ${mon?.msg ? `<div style="color:rgba(255,255,255,0.6);font-size:8px;font-style:italic;">${mon.msg}</div>` : ""}
+                </div>
+              `)
+              .openOn(map);
+            failPopupsRef.current.set(node.id, popup);
+
+            // Auto-close after 5s
+            setTimeout(() => { try { map.removeLayer(popup); failPopupsRef.current.delete(node.id); } catch {} }, 5000);
+          }
+        }, [kumaMonitors])}
         onTimeChange={(time: Date | null, statuses: Map<number, number>) => {
           setTimeMachineTime(time);
           if (!LRef.current || !mapRef.current) return;

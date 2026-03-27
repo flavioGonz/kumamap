@@ -235,6 +235,12 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
             })}
           </div>
 
+          {/* NOW marker (always at bottom = current time) */}
+          <div className="absolute left-0 right-0 bottom-0 pointer-events-none">
+            <div className="h-[2px] w-full" style={{ background: "#4ade80", boxShadow: "0 0 8px #4ade80", opacity: 0.5 }} />
+            <div className="absolute right-0 -top-3 text-[6px] font-bold text-emerald-400 opacity-60">AHORA</div>
+          </div>
+
           {/* Scrubber */}
           <div className="absolute left-0 right-0 pointer-events-none"
             style={{ top: `${position * 100}%`, transition: dragging ? "none" : "top 0.05s linear" }}>

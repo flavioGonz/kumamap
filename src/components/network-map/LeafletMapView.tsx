@@ -2222,14 +2222,15 @@ export default function LeafletMapView({
             }
           }
         }, [])}
-        onTimeChange={useCallback((time: Date | null, statuses: Map<number, number>) => {
+        onTimeChange={(time: Date | null, statuses: Map<number, number>) => {
           setTimeMachineTime(time);
           if (!LRef.current || !mapRef.current) return;
           const L = LRef.current;
 
           if (!time || statuses.size === 0) {
-            // Back to LIVE — restore real status
-            updateMarkerStatus();
+            // Back to LIVE — force full re-render with current kuma data
+            renderNodes(L, mapRef.current);
+            renderEdges(L, mapRef.current);
             return;
           }
 
@@ -2242,7 +2243,7 @@ export default function LeafletMapView({
             const color = st === 0 ? "#ef4444" : st === 1 ? "#22c55e" : st === 3 ? "#8b5cf6" : "#f59e0b";
             marker.setIcon(createMarkerIcon(L, color, st === 0, false));
           });
-        }, [])}
+        }}
         monitors={kumaMonitors.map((m) => ({
           id: m.id,
           name: m.name,

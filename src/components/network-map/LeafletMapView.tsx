@@ -46,6 +46,7 @@ interface LeafletMapViewProps {
   initialEdges: SavedEdge[];
   initialViewState?: MapViewState;
   readonly?: boolean;
+  panelCollapsed?: boolean;
 }
 
 function MapClock({ timeMachineTime, timeMachineOpen }: { timeMachineTime: Date | null; timeMachineOpen: boolean }) {
@@ -79,11 +80,10 @@ function MapClock({ timeMachineTime, timeMachineOpen }: { timeMachineTime: Date 
 
   return (
     <div
-      className="absolute z-[10000] flex flex-col items-center transition-all duration-500"
+      className="absolute z-[10000] flex flex-col items-end transition-all duration-500"
       style={{
-        top: 56,
-        left: "50%",
-        transform: "translateX(-50%)",
+        bottom: 16,
+        right: 16,
         pointerEvents: "none",
       }}
     >
@@ -186,7 +186,9 @@ export default function LeafletMapView({
   initialEdges,
   initialViewState,
   readonly = false,
+  panelCollapsed = false,
 }: LeafletMapViewProps) {
+  const sidebarWidth = readonly ? 0 : panelCollapsed ? 40 : 320;
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<any>(null);
   const markersRef = useRef<Map<string, any>>(new Map());
@@ -1650,7 +1652,7 @@ export default function LeafletMapView({
   }, [searchQuery]);
 
   return (
-    <div className="relative h-full w-full" style={{ marginRight: readonly ? "0" : "320px", isolation: "isolate" }}>
+    <div className="relative h-full w-full transition-all duration-300" style={{ marginRight: `${sidebarWidth}px`, isolation: "isolate" }}>
       <div
         ref={containerRef}
         className="absolute inset-0"
@@ -1747,7 +1749,7 @@ export default function LeafletMapView({
         className="absolute top-3 left-3 flex items-center gap-1.5 rounded-2xl px-2.5 py-1.5"
         id="leaflet-toolbar"
         style={{
-          right: "340px",
+          right: "12px",
           zIndex: 10000,
           background: "rgba(10,10,10,0.82)",
           border: "1px solid rgba(255,255,255,0.06)",
@@ -2448,7 +2450,7 @@ export default function LeafletMapView({
         const down = nodesRef.current.filter(n => { const m = getMonitorData(n.kuma_monitor_id); return m?.status === 0; }).length;
         const pending = total - up - down;
         return (
-          <div className="absolute bottom-3 left-3 z-[10000] flex items-center gap-3 rounded-xl px-3 py-1.5"
+          <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-[10000] flex items-center gap-3 rounded-2xl px-4 py-1.5"
             style={{ background: "rgba(10,10,10,0.8)", border: "1px solid rgba(255,255,255,0.06)", backdropFilter: "blur(16px)" }}>
             <span className="text-[10px] font-bold text-[#888]">{nodesRef.current.filter(n => n.icon !== "_textLabel" && n.icon !== "_waypoint").length} nodos</span>
             <span className="text-[10px] text-[#555]">|</span>

@@ -934,6 +934,7 @@ function CanvasInner({
             kumaMonitors={kumaMonitors}
             kumaConnected={kumaConnected}
             onBack={onBack}
+            panelCollapsed={panelCollapsed}
             initialNodes={(mapData?.nodes || []).map((n: any) => ({
               id: n.id,
               kuma_monitor_id: n.kuma_monitor_id,

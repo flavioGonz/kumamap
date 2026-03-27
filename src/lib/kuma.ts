@@ -26,7 +26,7 @@ export interface KumaHeartbeat {
   duration: number;
 }
 
-const MAX_HISTORY = 60; // Keep last 60 heartbeats per monitor (~1h at 60s intervals)
+const MAX_HISTORY = 1440; // Keep last 1440 heartbeats per monitor (~24h at 60s intervals)
 
 class KumaClient {
   private socket: Socket | null = null;

@@ -7,6 +7,7 @@ import ContextMenu, { menuIcons } from "./ContextMenu";
 import LinkModal, { type LinkFormData } from "./LinkModal";
 import InputModal from "./InputModal";
 import { Pencil, Signal } from "lucide-react";
+import TimeMachine from "./TimeMachine";
 
 interface SavedNode {
   id: string;
@@ -113,6 +114,8 @@ export default function LeafletMapView({
   const polygonPreviewRef = useRef<any>(null);
   const polygonLayersRef = useRef<Map<string, any>>(new Map());
   const edgeUpdateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [timeMachineOpen, setTimeMachineOpen] = useState(false);
+  const [timeMachineTime, setTimeMachineTime] = useState<Date | null>(null);
   const [colorPickerNodeId, setColorPickerNodeId] = useState<string>("");
   const [lensPickerOpen, setLensPickerOpen] = useState(false);
   const [lensPickerNodeId, setLensPickerNodeId] = useState<string>("");
@@ -417,47 +420,6 @@ export default function LeafletMapView({
       const m = getMonitorData(node.kuma_monitor_id);
       const pulse = !isLabel && (m?.status === 0 || m?.status === 2);
 
-      // Render group rectangle
-      const isGroup = node.icon === "_group";
-      if (isGroup) {
-        const gw = cd.width || 0.004;
-        const gh = cd.height || 0.003;
-        const gColor = cd.color || "#3b82f6";
-        const gOpacity = cd.opacity ?? 0.08;
-        const bounds: [[number, number], [number, number]] = [
-          [node.x - gh / 2, node.y - gw / 2],
-          [node.x + gh / 2, node.y + gw / 2],
-        ];
-        const rect = L.rectangle(bounds, {
-          color: gColor, fillColor: gColor, fillOpacity: gOpacity,
-          weight: 1.5, opacity: 0.4, dashArray: "6,3",
-        });
-        // Label at top-left
-        const labelMarker = L.marker([node.x + gh / 2, node.y - gw / 2], {
-          icon: L.divIcon({
-            className: "group-label",
-            html: `<span style="color:${gColor};font-size:11px;font-weight:700;text-shadow:0 1px 4px rgba(0,0,0,0.9);white-space:nowrap;">${node.label}</span>`,
-            iconSize: [0, 0], iconAnchor: [-4, 14],
-          }),
-          interactive: false,
-        });
-        rect.on("dblclick", () => {
-          const newName = prompt("Nombre del grupo:", node.label);
-          if (newName?.trim()) {
-            const idx = nodesRef.current.findIndex((n) => n.id === node.id);
-            if (idx >= 0) { nodesRef.current[idx] = { ...nodesRef.current[idx], label: newName.trim() }; renderNodes(L, map); }
-          }
-        });
-        rect.on("contextmenu", (e: any) => {
-          e.originalEvent.preventDefault();
-          setCtxMenu({ x: e.originalEvent.clientX, y: e.originalEvent.clientY, nodeId: node.id });
-        });
-        rect.addTo(map);
-        labelMarker.addTo(map);
-        polygonLayersRef.current.set(node.id, rect);
-        polygonLayersRef.current.set(node.id + "-label", labelMarker);
-        return;
-      }
 
       // Render polygon zone
       if (isPolygon && cd.points?.length >= 3) {
@@ -1093,23 +1055,6 @@ export default function LeafletMapView({
     const isLabel = node?.icon === "_textLabel";
     const isWaypoint = node?.icon === "_waypoint";
 
-    // Groups: rename, color, resize, delete
-    const isGroup = node?.icon === "_group";
-    if (isGroup) {
-      return [
-        { label: "Editar nombre", icon: menuIcons.Pencil, onClick: () => {
-          const n = prompt("Nombre del grupo:", node?.label); if (n?.trim()) {
-            const idx = nodesRef.current.findIndex((x) => x.id === nodeId);
-            if (idx >= 0) { nodesRef.current[idx] = { ...nodesRef.current[idx], label: n.trim() }; if (LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current); }
-          }
-        }},
-        { label: "Color", icon: menuIcons.Palette, onClick: () => { setColorPickerNodeId(nodeId); setColorPickerOpen(true); }},
-        { label: "Eliminar grupo", icon: menuIcons.Trash2, danger: true, divider: true, onClick: () => {
-          pushUndo(); nodesRef.current = nodesRef.current.filter((n) => n.id !== nodeId);
-          if (LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current); toast.success("Grupo eliminado");
-        }},
-      ];
-    }
 
     // Polygons: rename, color, delete
     const isPolygon = node?.icon === "_polygon";
@@ -1659,21 +1604,6 @@ export default function LeafletMapView({
             className="group flex items-center gap-1 rounded-xl px-2 py-1.5 text-[#888] hover:text-[#ededed] hover:bg-white/[0.06] transition-all">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" x2="15" y1="20" y2="20"/><line x1="12" x2="12" y1="4" y2="20"/></svg>
             <span className="text-[10px] font-semibold hidden xl:inline">Etiqueta</span>
-          </button>
-          <button onClick={() => {
-            if (!mapRef.current) return;
-            const center = mapRef.current.getCenter();
-            const id = `grp-${Date.now()}`;
-            nodesRef.current = [...nodesRef.current, {
-              id, kuma_monitor_id: null, label: "Grupo", x: center.lat, y: center.lng, icon: "_group",
-              custom_data: JSON.stringify({ width: 0.004, height: 0.003, color: "#3b82f6", opacity: 0.08 }),
-            }];
-            if (LRef.current) renderNodes(LRef.current, mapRef.current);
-            toast.success("Grupo visual agregado — doble clic para renombrar");
-          }} title="Agrupar nodos visualmente"
-            className="group flex items-center gap-1 rounded-xl px-2 py-1.5 text-[#888] hover:text-[#ededed] hover:bg-white/[0.06] transition-all">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
-            <span className="text-[10px] font-semibold hidden xl:inline">Grupo</span>
           </button>
           <button onClick={() => {
             if (!mapRef.current) return;
@@ -2256,6 +2186,26 @@ export default function LeafletMapView({
           </div>
         );
       })()}
+
+      {/* Time Machine */}
+      <TimeMachine
+        open={timeMachineOpen}
+        onToggle={() => setTimeMachineOpen((v) => !v)}
+        onTimeChange={useCallback((time: Date | null) => {
+          setTimeMachineTime(time);
+          // When time changes, update all markers to reflect historical status
+          if (LRef.current && mapRef.current) {
+            updateMarkerStatus();
+          }
+        }, [])}
+        monitors={kumaMonitors.map((m) => ({
+          id: m.id,
+          name: m.name,
+          type: m.type,
+          status: m.status,
+          parent: m.parent,
+        }))}
+      />
 
       {/* Custom CSS */}
       <style>{`

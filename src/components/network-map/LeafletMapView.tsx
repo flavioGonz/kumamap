@@ -8,6 +8,7 @@ import LinkModal, { type LinkFormData } from "./LinkModal";
 import InputModal from "./InputModal";
 import { Pencil, Signal } from "lucide-react";
 import TimeMachine from "./TimeMachine";
+import EventReportModal from "./EventReportModal";
 
 interface SavedNode {
   id: string;
@@ -2721,9 +2722,17 @@ export default function LeafletMapView({
         }))}
       />}
 
-      {/* ── Event Detail Modal ── */}
+      {/* ── Event Report Modal ── */}
       {eventDetail && (
-        <div className="fixed inset-0 z-[20000] flex items-center justify-center" style={{ background: "rgba(0,0,0,0.6)", backdropFilter: "blur(8px)" }}
+        <EventReportModal
+          monitorId={eventDetail.monitorId}
+          nodeLabel={eventDetail.nodeLabel}
+          onClose={() => setEventDetail(null)}
+        />
+      )}
+      {/* Old modal removed — using EventReportModal now */}
+      {false && (
+        <div className="hidden"
           onClick={() => setEventDetail(null)}>
           <div className="rounded-3xl overflow-hidden" style={{ width: 420, background: "rgba(12,12,12,0.98)", border: "1px solid rgba(255,255,255,0.08)", boxShadow: "0 24px 80px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.03)", animation: "failPopupIn 0.3s cubic-bezier(0.34,1.56,0.64,1)" }}
             onClick={e => e.stopPropagation()}>

@@ -2,8 +2,18 @@
 
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { Clock, Play, Pause, Radio } from "lucide-react";
+import { apiUrl } from "@/lib/api";
 
-interface HeartbeatEntry { time: string; status: number; ping: number | null; }
+interface TimelineEvent {
+  monitorId: number;
+  monitorName: string;
+  time: string;
+  status: number;
+  prevStatus: number;
+  ping: number | null;
+  msg: string;
+}
+
 interface MonitorInfo { id: number; name: string; type: string; status?: number; }
 
 interface TimeMachineProps {
@@ -16,12 +26,14 @@ interface TimeMachineProps {
 }
 
 export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, onFocusEvent, monitors }: TimeMachineProps) {
-  const [timeline, setTimeline] = useState<Record<number, HeartbeatEntry[]>>({});
+  const [events, setEvents] = useState<TimelineEvent[]>([]);
+  const [statusChanges, setStatusChanges] = useState<Record<number, Array<{ t: number; s: number }>>>({});
   const [position, setPosition] = useState(1);
   const [playing, setPlaying] = useState(false);
   const [speed, setSpeed] = useState(1);
   const [dragging, setDragging] = useState(false);
   const [hoursBack, setHoursBack] = useState(2);
+  const [loading, setLoading] = useState(false);
   const barRef = useRef<HTMLDivElement>(null);
   const playRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -31,54 +43,64 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
   const isLive = position >= 0.999;
   const rangeMs = timeEnd.getTime() - timeStart.getTime();
 
-  // Fetch timeline
+  // Fetch real timeline from Kuma DB
   useEffect(() => {
     if (!open) return;
-    const doFetch = () => { fetch("/maps/api/kuma/timeline").then(r => r.json()).then(d => setTimeline(d.timeline || {})).catch(() => {}); };
+    setLoading(true);
+    const doFetch = () => {
+      fetch(apiUrl(`/api/kuma/timeline?hours=${hoursBack}`))
+        .then(r => r.json())
+        .then(d => {
+          setEvents(d.events || []);
+          setStatusChanges(d.statusChanges || {});
+          setLoading(false);
+        })
+        .catch(() => setLoading(false));
+    };
     doFetch();
-    const iv = setInterval(doFetch, 30000);
+    // Refresh every 60s (data is cached 5min server-side)
+    const iv = setInterval(doFetch, 60000);
     return () => clearInterval(iv);
-  }, [open]);
+  }, [open, hoursBack]);
 
-  // Get statuses at time — default to current live status if no history
+  // Filter events to visible range
+  const visibleEvents = useMemo(() => {
+    const startMs = timeStart.getTime();
+    const endMs = timeEnd.getTime();
+    return events
+      .filter(e => {
+        const t = new Date(e.time).getTime();
+        return t >= startMs && t <= endMs;
+      })
+      .map(e => ({
+        ...e,
+        position: (new Date(e.time).getTime() - startMs) / rangeMs,
+        timeDate: new Date(e.time),
+      }));
+  }, [events, timeStart, timeEnd, rangeMs]);
+
+  // Get statuses at a specific time using statusChanges from Kuma DB
   const getStatusesAtTime = useCallback((t: Date): Map<number, number> => {
     const map = new Map<number, number>();
+    const targetMs = t.getTime();
+
     for (const mon of activeMonitors) {
-      const entries = timeline[mon.id] || [];
-      if (entries.length === 0) {
-        // No history: assume current live status (not pending)
+      const changes = statusChanges[mon.id];
+      if (!changes || changes.length === 0) {
+        // No history — assume current live status
         map.set(mon.id, mon.status ?? 1);
         continue;
       }
-      // If requested time is before first entry, assume UP
-      if (new Date(entries[0].time) > t) {
-        map.set(mon.id, 1);
-        continue;
+      // Binary search for the last change before target time
+      let status = changes[0].s;
+      for (const c of changes) {
+        if (c.t <= targetMs) status = c.s;
+        else break;
       }
-      let status = entries[0].status;
-      for (const e of entries) { if (new Date(e.time) <= t) status = e.status; else break; }
       map.set(mon.id, status);
     }
     return map;
-  }, [timeline, activeMonitors]);
-
-  // Compute events (status changes) for markers on timeline
-  const events = useMemo(() => {
-    const evts: Array<{ position: number; monitorId: number; monitorName: string; fromStatus: number; toStatus: number; time: Date }> = [];
-    for (const mon of activeMonitors) {
-      const entries = timeline[mon.id] || [];
-      for (let i = 1; i < entries.length; i++) {
-        if (entries[i].status !== entries[i - 1].status) {
-          const t = new Date(entries[i].time);
-          const pos = (t.getTime() - timeStart.getTime()) / rangeMs;
-          if (pos >= 0 && pos <= 1) {
-            evts.push({ position: pos, monitorId: mon.id, monitorName: mon.name, fromStatus: entries[i - 1].status, toStatus: entries[i].status, time: t });
-          }
-        }
-      }
-    }
-    return evts.sort((a, b) => a.position - b.position);
-  }, [timeline, activeMonitors, timeStart, rangeMs]);
+  }, [statusChanges, activeMonitors]);
 
   const currentTime = useMemo(() => {
     if (isLive) return null;
@@ -94,7 +116,7 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
   // Notify drag state
   useEffect(() => { onDragging?.(dragging); }, [dragging, onDragging]);
 
-  // Play — pause at events
+  // Play — pause at DOWN events
   useEffect(() => {
     if (!playing) { if (playRef.current) clearInterval(playRef.current); return; }
     const step = (speed * 60000) / rangeMs;
@@ -102,9 +124,9 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
       setPosition(prev => {
         const next = prev + step;
         if (next >= 1) { setPlaying(false); return 1; }
-        // Check if we crossed a DOWN event — pause and focus on failure
-        for (const evt of events) {
-          if (evt.toStatus === 0 && prev < evt.position && next >= evt.position) {
+        // Pause at DOWN events
+        for (const evt of visibleEvents) {
+          if (evt.status === 0 && prev < evt.position && next >= evt.position) {
             setPlaying(false);
             onFocusEvent?.(evt.monitorId, "down");
             return evt.position;
@@ -114,7 +136,7 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
       });
     }, 50);
     return () => { if (playRef.current) clearInterval(playRef.current); };
-  }, [playing, speed, rangeMs, events]);
+  }, [playing, speed, rangeMs, visibleEvents]);
 
   // Drag — immediate response
   const updatePosition = useCallback((clientY: number) => {
@@ -136,7 +158,7 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
 
   const handlePointerUp = useCallback(() => setDragging(false), []);
 
-  // Down count
+  // Down count at current time
   const downCount = useMemo(() => {
     if (!currentTime) return 0;
     const st = getStatusesAtTime(currentTime);
@@ -182,13 +204,20 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}
         >
-          {/* Background: subtle gradient */}
+          {/* Background gradient */}
           <div className="absolute inset-0" style={{ background: "linear-gradient(180deg, rgba(30,30,50,0.3), rgba(10,10,10,0.1))" }} />
 
-          {/* Event markers (status changes) */}
-          {events.map((evt, i) => {
-            const isDown = evt.toStatus === 0;
-            const isRecovery = evt.fromStatus === 0 && evt.toStatus === 1;
+          {/* Loading indicator */}
+          {loading && (
+            <div className="absolute inset-0 flex items-center justify-center">
+              <div className="animate-spin rounded-full h-4 w-4 border-b border-blue-500" />
+            </div>
+          )}
+
+          {/* Event markers from REAL Kuma history */}
+          {visibleEvents.map((evt, i) => {
+            const isDown = evt.status === 0;
+            const isRecovery = evt.prevStatus === 0 && evt.status === 1;
             const evtColor = isDown ? "#ef4444" : isRecovery ? "#22c55e" : "#f59e0b";
             return (
               <div key={i} className="absolute left-0 right-0 group/evt cursor-pointer"
@@ -212,13 +241,34 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
                     background: evtColor,
                     boxShadow: `0 0 6px ${evtColor}`,
                   }} />
-                {/* Tooltip on hover */}
-                <div className="absolute left-[54px] -top-3 rounded-md px-1.5 py-1 text-[8px] font-bold whitespace-nowrap opacity-0 group-hover/evt:opacity-100 transition-opacity pointer-events-none"
-                  style={{ background: "rgba(10,10,10,0.95)", border: `1px solid ${evtColor}44`, color: evtColor, boxShadow: "0 4px 12px rgba(0,0,0,0.6)", zIndex: 10 }}>
-                  <div>{evt.monitorName}</div>
-                  <div style={{ color: "#888", fontWeight: 500 }}>
-                    {isDown ? "▼ DOWN" : isRecovery ? "▲ UP" : "● Cambio"} — {evt.time.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+                {/* Tooltip on hover — styled */}
+                <div className="absolute left-[54px] -top-4 rounded-xl px-2.5 py-1.5 opacity-0 group-hover/evt:opacity-100 transition-opacity pointer-events-none"
+                  style={{
+                    background: "rgba(8,8,8,0.97)",
+                    border: `1px solid ${evtColor}33`,
+                    boxShadow: `0 8px 24px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.03), inset 0 0 20px ${evtColor}08`,
+                    backdropFilter: "blur(12px)",
+                    zIndex: 10,
+                    minWidth: 160,
+                  }}>
+                  <div className="flex items-center gap-1.5 mb-1">
+                    <div className="h-2 w-2 rounded-full" style={{ background: evtColor, boxShadow: `0 0 6px ${evtColor}` }} />
+                    <span className="text-[10px] font-bold text-[#ededed]">{evt.monitorName}</span>
                   </div>
+                  <div className="flex items-center gap-2 text-[9px]">
+                    <span className="font-bold" style={{ color: evtColor }}>
+                      {isDown ? "▼ DOWN" : isRecovery ? "▲ RECOVERED" : "● CAMBIO"}
+                    </span>
+                    <span className="text-[#666]">
+                      {evt.timeDate.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+                    </span>
+                  </div>
+                  {evt.msg && (
+                    <div className="text-[8px] text-[#555] mt-0.5 truncate max-w-[180px]">{evt.msg}</div>
+                  )}
+                  {evt.ping != null && (
+                    <div className="text-[8px] text-[#555] mt-0.5">Ping: {evt.ping}ms</div>
+                  )}
                 </div>
               </div>
             );
@@ -240,7 +290,7 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
             })}
           </div>
 
-          {/* NOW marker (always at bottom = current time) */}
+          {/* NOW marker */}
           <div className="absolute left-0 right-0 bottom-0 pointer-events-none">
             <div className="h-[2px] w-full" style={{ background: "#4ade80", boxShadow: "0 0 8px #4ade80", opacity: 0.5 }} />
             <div className="absolute right-0 -top-3 text-[6px] font-bold text-emerald-400 opacity-60">AHORA</div>
@@ -250,7 +300,6 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
           <div className="absolute left-0 right-0 pointer-events-none"
             style={{ top: `${position * 100}%`, transition: dragging ? "none" : "top 0.05s linear" }}>
             <div className="relative">
-              {/* Pulse ring during play */}
               {playing && (
                 <div className="absolute -left-1 -right-1 -top-2 -bottom-2 rounded-full animate-ping"
                   style={{ background: `${isLive ? "#4ade80" : "#60a5fa"}15`, border: `1px solid ${isLive ? "#4ade80" : "#60a5fa"}33` }} />
@@ -258,7 +307,7 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
               <div className="h-[3px] w-full rounded-full"
                 style={{ background: isLive ? "#4ade80" : "#60a5fa", boxShadow: `0 0 ${playing ? 16 : 10}px ${isLive ? "#4ade80" : "#60a5fa"}` }} />
               {!isLive && (
-                <div className="absolute left-[54px] -top-2.5 rounded-md px-1.5 py-0.5 text-[9px] font-mono font-bold whitespace-nowrap"
+                <div className="absolute left-[54px] -top-2.5 rounded-lg px-2 py-0.5 text-[9px] font-mono font-bold whitespace-nowrap"
                   style={{ background: "rgba(10,10,10,0.95)", border: "1px solid rgba(59,130,246,0.3)", color: "#60a5fa", boxShadow: "0 4px 12px rgba(0,0,0,0.5)" }}>
                   {currentTime?.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
                   {downCount > 0 && <span className="ml-1 text-red-400">{downCount}↓</span>}
@@ -270,6 +319,7 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
 
         {/* Bottom controls */}
         <div className="flex flex-col items-center gap-1 py-2 px-1" style={{ borderTop: "1px solid rgba(255,255,255,0.04)" }}>
+          <div className="text-[6px] font-bold text-[#444] uppercase tracking-wider mb-0.5">Vel</div>
           {[1, 4, 16].map(s => (
             <button key={s} onClick={() => setSpeed(s)}
               className="text-[7px] font-bold rounded-md px-1 py-0.5 w-full text-center transition-all"
@@ -278,8 +328,9 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
             </button>
           ))}
           <div className="h-px w-full my-0.5" style={{ background: "rgba(255,255,255,0.04)" }} />
+          <div className="text-[6px] font-bold text-[#444] uppercase tracking-wider mb-0.5">Rango</div>
           {[1, 2, 6, 24].map(h => (
-            <button key={h} onClick={() => setHoursBack(h)}
+            <button key={h} onClick={() => { setHoursBack(h); setPosition(1); setPlaying(false); }}
               className="text-[7px] font-bold rounded-md px-1 py-0.5 w-full text-center transition-all"
               style={{ color: hoursBack === h ? "#ededed" : "#444", background: hoursBack === h ? "rgba(255,255,255,0.05)" : "transparent" }}>
               {h}h
@@ -289,6 +340,9 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
             <div className="text-[8px] font-mono font-bold" style={{ color: isLive ? "#4ade80" : "#60a5fa" }}>
               {isLive ? "LIVE" : currentTime?.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
             </div>
+            {visibleEvents.length > 0 && (
+              <div className="text-[7px] text-[#555] mt-0.5">{visibleEvents.length} eventos</div>
+            )}
           </div>
         </div>
       </div>

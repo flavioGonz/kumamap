@@ -174,6 +174,69 @@ class KumaClient {
   getHistory(monitorId: number): KumaHeartbeat[] {
     return this.heartbeatHistory.get(monitorId) || [];
   }
+
+  // Fetch historical beats from Kuma DB (cached 5 min per monitor)
+  private beatsCache: Map<string, { data: KumaHeartbeat[]; ts: number }> = new Map();
+  private CACHE_TTL = 5 * 60 * 1000; // 5 min
+
+  async getMonitorBeats(monitorId: number, hours: number = 24): Promise<KumaHeartbeat[]> {
+    const cacheKey = `${monitorId}-${hours}`;
+    const cached = this.beatsCache.get(cacheKey);
+    if (cached && Date.now() - cached.ts < this.CACHE_TTL) {
+      return cached.data;
+    }
+
+    if (!this.socket || !this.authenticated) {
+      return this.heartbeatHistory.get(monitorId) || [];
+    }
+
+    return new Promise((resolve) => {
+      const timeout = setTimeout(() => {
+        // Fallback to in-memory history
+        resolve(this.heartbeatHistory.get(monitorId) || []);
+      }, 5000);
+
+      this.socket!.emit(
+        "getMonitorBeats",
+        monitorId,
+        hours,
+        (res: { ok: boolean; data: any[] }) => {
+          clearTimeout(timeout);
+          if (res.ok && Array.isArray(res.data)) {
+            // Compress: only keep fields we need
+            const beats: KumaHeartbeat[] = res.data.map((b: any) => ({
+              monitorID: monitorId,
+              status: b.status,
+              time: b.time,
+              msg: b.msg || "",
+              ping: b.ping,
+              duration: b.duration || 0,
+            }));
+            this.beatsCache.set(cacheKey, { data: beats, ts: Date.now() });
+            resolve(beats);
+          } else {
+            resolve(this.heartbeatHistory.get(monitorId) || []);
+          }
+        }
+      );
+    });
+  }
+
+  // Bulk fetch: all monitors in parallel, but throttled
+  async getAllBeats(monitorIds: number[], hours: number = 24): Promise<Map<number, KumaHeartbeat[]>> {
+    const result = new Map<number, KumaHeartbeat[]>();
+    // Process in batches of 5 to not overload Kuma
+    const batchSize = 5;
+    for (let i = 0; i < monitorIds.length; i += batchSize) {
+      const batch = monitorIds.slice(i, i + batchSize);
+      const promises = batch.map(async (id) => {
+        const beats = await this.getMonitorBeats(id, hours);
+        result.set(id, beats);
+      });
+      await Promise.all(promises);
+    }
+    return result;
+  }
 }
 
 // Singleton

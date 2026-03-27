@@ -48,6 +48,69 @@ interface LeafletMapViewProps {
   readonly?: boolean;
 }
 
+function MapClock({ timeMachineTime, timeMachineOpen }: { timeMachineTime: Date | null; timeMachineOpen: boolean }) {
+  const [now, setNow] = useState(new Date());
+  useEffect(() => {
+    const iv = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(iv);
+  }, []);
+
+  const displayTime = timeMachineTime || now;
+  const isHistorical = !!timeMachineTime;
+  const hrs = displayTime.getHours().toString().padStart(2, "0");
+  const min = displayTime.getMinutes().toString().padStart(2, "0");
+  const sec = displayTime.getSeconds().toString().padStart(2, "0");
+  const dateStr = displayTime.toLocaleDateString("es-UY", { weekday: "short", day: "numeric", month: "short" });
+
+  return (
+    <div
+      className="absolute top-3 z-[10000] flex items-center gap-2 rounded-2xl px-3 py-1.5 transition-all duration-500"
+      style={{
+        right: "12px",
+        background: isHistorical ? "rgba(59,130,246,0.12)" : "rgba(10,10,10,0.7)",
+        border: `1px solid ${isHistorical ? "rgba(59,130,246,0.3)" : "rgba(255,255,255,0.06)"}`,
+        backdropFilter: "blur(16px)",
+        boxShadow: isHistorical ? "0 0 20px rgba(59,130,246,0.15)" : "none",
+      }}
+    >
+      {isHistorical && (
+        <div className="flex items-center gap-1">
+          <div className="h-1.5 w-1.5 rounded-full bg-blue-400 animate-pulse" />
+          <span className="text-[8px] font-bold text-blue-400 uppercase tracking-wider">TIME MACHINE</span>
+          <div className="h-3 w-px mx-1" style={{ background: "rgba(59,130,246,0.3)" }} />
+        </div>
+      )}
+      <div className="flex items-baseline gap-0.5">
+        <span
+          className="font-mono font-black tracking-tight transition-all duration-300"
+          style={{
+            fontSize: isHistorical ? 18 : 14,
+            color: isHistorical ? "#60a5fa" : "#ededed",
+            textShadow: isHistorical ? "0 0 12px rgba(96,165,250,0.5)" : "none",
+          }}
+        >
+          {hrs}:{min}
+        </span>
+        <span
+          className="font-mono font-bold transition-all duration-300"
+          style={{
+            fontSize: isHistorical ? 12 : 10,
+            color: isHistorical ? "rgba(96,165,250,0.6)" : "#666",
+          }}
+        >
+          :{sec}
+        </span>
+      </div>
+      <span
+        className="text-[9px] font-medium transition-all duration-300"
+        style={{ color: isHistorical ? "rgba(96,165,250,0.5)" : "#555" }}
+      >
+        {dateStr}
+      </span>
+    </div>
+  );
+}
+
 function formatTraffic(bytes: number): string {
   if (bytes >= 1_000_000_000) return `${(bytes / 1_000_000_000).toFixed(1)} Gbps`;
   if (bytes >= 1_000_000) return `${(bytes / 1_000_000).toFixed(1)} Mbps`;
@@ -2324,6 +2387,9 @@ export default function LeafletMapView({
           </div>
         );
       })()}
+
+      {/* ── Map Clock ── */}
+      <MapClock timeMachineTime={timeMachineTime} timeMachineOpen={timeMachineOpen} />
 
       {/* ── Status bar bottom ── */}
       {!readonly && (() => {

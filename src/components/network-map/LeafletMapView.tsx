@@ -285,7 +285,14 @@ export default function LeafletMapView({
   function getStatusColor(monitorId: number | null): string {
     if (monitorId == null) return "#6b7280";
     const m = monitorIndex.get(monitorId);
-    return statusColors[m?.status ?? 2] || "#f59e0b";
+    if (!m) return "#f59e0b";
+    // DOWN/PENDING: always red/amber
+    if (m.status === 0) return "#ef4444";
+    if (m.status === 2) return "#f59e0b";
+    if (m.status === 3) return "#8b5cf6";
+    // UP: use first tag color if available, otherwise green
+    if (m.status === 1 && m.tags && m.tags.length > 0) return m.tags[0].color;
+    return "#22c55e";
   }
 
   function getMonitorData(monitorId: number | null): KumaMonitor | undefined {
@@ -308,35 +315,81 @@ export default function LeafletMapView({
     });
   }
 
+  // Build sparkline SVG from ping history
+  function buildSparkline(pings: number[], width: number = 200, height: number = 40): string {
+    if (pings.length < 2) return "";
+    const max = Math.max(...pings, 1);
+    const min = Math.min(...pings, 0);
+    const range = max - min || 1;
+    const step = width / (pings.length - 1);
+    const points = pings.map((p, i) => `${i * step},${height - ((p - min) / range) * (height - 4) - 2}`).join(" ");
+    const avg = Math.round(pings.reduce((a, b) => a + b, 0) / pings.length);
+    const maxP = Math.round(max);
+    const minP = Math.round(min);
+    return `
+      <div style="margin-top:8px;border-top:1px solid #222;padding-top:6px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+          <span style="font-size:8px;color:#555;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;">Latencia</span>
+          <span style="font-size:8px;color:#888;">min ${minP}ms · avg ${avg}ms · max ${maxP}ms</span>
+        </div>
+        <svg width="${width}" height="${height}" style="display:block;">
+          <defs><linearGradient id="sg" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#3b82f6" stop-opacity="0.3"/><stop offset="100%" stop-color="#3b82f6" stop-opacity="0"/></linearGradient></defs>
+          <polygon points="0,${height} ${points} ${width},${height}" fill="url(#sg)" />
+          <polyline points="${points}" fill="none" stroke="#3b82f6" stroke-width="1.5" stroke-linejoin="round" />
+          <circle cx="${width}" cy="${points.split(" ").pop()?.split(",")[1]}" r="2.5" fill="#60a5fa" />
+        </svg>
+      </div>`;
+  }
+
+  // Ping history cache
+  const pingHistoryRef = useRef<Map<number, number[]>>(new Map());
+
   function createPopupContent(node: SavedNode): string {
     const m = getMonitorData(node.kuma_monitor_id);
     const color = getStatusColor(node.kuma_monitor_id);
     const statusText = m ? (m.status === 1 ? "UP" : m.status === 0 ? "DOWN" : "PENDING") : "N/A";
     const cd = node.custom_data ? JSON.parse(node.custom_data) : {};
 
+    // Get tag info for display
+    const tagBadges = (m?.tags || []).map((t: any) =>
+      `<span style="background:${t.color}22;border:1px solid ${t.color}44;color:${t.color};padding:1px 5px;border-radius:4px;font-size:8px;font-weight:700;">${t.name}</span>`
+    ).join(" ");
+
+    // Sparkline from history
+    const history = node.kuma_monitor_id ? (pingHistoryRef.current.get(node.kuma_monitor_id) || []) : [];
+    const sparkline = history.length >= 3 ? buildSparkline(history) : "";
+
+    // Async fetch history (updates for next popup open)
+    if (node.kuma_monitor_id) {
+      fetch(`/maps/api/kuma/history/${node.kuma_monitor_id}`).then(r => r.json()).then((data: any[]) => {
+        const pings = data.filter((h: any) => h.ping != null).map((h: any) => h.ping).slice(-30);
+        pingHistoryRef.current.set(node.kuma_monitor_id!, pings);
+      }).catch(() => {});
+    }
+
     return `
-      <div style="background:#111;color:#eee;padding:10px 14px;border-radius:12px;min-width:220px;font-family:system-ui;border:1px solid ${color}44;">
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+      <div style="background:#111;color:#eee;padding:10px 14px;border-radius:12px;min-width:240px;max-width:300px;font-family:system-ui;border:1px solid ${color}44;">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
           <div style="width:10px;height:10px;border-radius:50%;background:${color};box-shadow:0 0 8px ${color};"></div>
-          <strong style="font-size:13px;">${node.label}</strong>
-          <span style="color:${color};font-size:10px;font-weight:700;margin-left:auto;">${statusText}</span>
+          <strong style="font-size:13px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${node.label}</strong>
+          <span style="color:${color};font-size:10px;font-weight:700;">${statusText}</span>
         </div>
+        ${tagBadges ? `<div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:6px;">${tagBadges}</div>` : ""}
         ${cd.ip || cd.mac ? `
-          <div style="font-size:10px;color:#999;margin-bottom:6px;display:flex;gap:8px;flex-wrap:wrap;">
+          <div style="font-size:10px;color:#999;margin-bottom:6px;display:flex;gap:6px;flex-wrap:wrap;">
             ${cd.ip ? `<span style="background:rgba(59,130,246,0.12);border:1px solid rgba(59,130,246,0.25);color:#60a5fa;padding:1px 6px;border-radius:6px;font-family:monospace;font-size:10px;">${cd.ip}</span>` : ""}
             ${cd.mac ? `<span style="background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.08);color:#888;padding:1px 6px;border-radius:6px;font-family:monospace;font-size:9px;">${cd.mac}</span>` : ""}
           </div>
         ` : ""}
         ${m ? `
-          <div style="font-size:10px;color:#888;space-y:4px;">
+          <div style="font-size:10px;color:#888;">
             ${m.type ? `<div style="display:flex;justify-content:space-between;"><span>Tipo</span><span style="color:#bbb;text-transform:uppercase;">${m.type}</span></div>` : ""}
             ${m.ping != null ? `<div style="display:flex;justify-content:space-between;"><span>Latencia</span><span style="color:#bbb;">${m.ping}ms</span></div>` : ""}
-            ${m.uptime24 != null ? `<div style="display:flex;justify-content:space-between;"><span>Uptime 24h</span><span style="color:${m.uptime24 > 0.99 ? "#22c55e" : "#f59e0b"};">${(m.uptime24 * 100).toFixed(2)}%</span></div>` : ""}
-            ${m.url ? `<div style="display:flex;justify-content:space-between;gap:8px;"><span>URL</span><span style="color:#888;font-size:9px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:140px;">${m.url}</span></div>` : ""}
-            ${m.msg ? `<div style="display:flex;justify-content:space-between;gap:8px;"><span>Msg</span><span style="color:#888;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:140px;">${m.msg}</span></div>` : ""}
+            ${m.uptime24 != null ? `<div style="display:flex;justify-content:space-between;"><span>Uptime</span><span style="color:${m.uptime24 > 0.99 ? "#22c55e" : "#f59e0b"};">${(m.uptime24 * 100).toFixed(2)}%</span></div>` : ""}
+            ${m.msg ? `<div style="display:flex;justify-content:space-between;gap:8px;"><span>Msg</span><span style="color:#777;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:140px;">${m.msg}</span></div>` : ""}
           </div>
         ` : '<div style="font-size:10px;color:#666;font-style:italic;">Nodo manual</div>'}
-        <div style="margin-top:6px;font-size:9px;color:#555;">Lat: ${node.x.toFixed(5)}, Lng: ${node.y.toFixed(5)}</div>
+        ${sparkline}
       </div>
     `;
   }
@@ -363,6 +416,48 @@ export default function LeafletMapView({
       const color = getStatusColor(node.kuma_monitor_id);
       const m = getMonitorData(node.kuma_monitor_id);
       const pulse = !isLabel && (m?.status === 0 || m?.status === 2);
+
+      // Render group rectangle
+      const isGroup = node.icon === "_group";
+      if (isGroup) {
+        const gw = cd.width || 0.004;
+        const gh = cd.height || 0.003;
+        const gColor = cd.color || "#3b82f6";
+        const gOpacity = cd.opacity ?? 0.08;
+        const bounds: [[number, number], [number, number]] = [
+          [node.x - gh / 2, node.y - gw / 2],
+          [node.x + gh / 2, node.y + gw / 2],
+        ];
+        const rect = L.rectangle(bounds, {
+          color: gColor, fillColor: gColor, fillOpacity: gOpacity,
+          weight: 1.5, opacity: 0.4, dashArray: "6,3",
+        });
+        // Label at top-left
+        const labelMarker = L.marker([node.x + gh / 2, node.y - gw / 2], {
+          icon: L.divIcon({
+            className: "group-label",
+            html: `<span style="color:${gColor};font-size:11px;font-weight:700;text-shadow:0 1px 4px rgba(0,0,0,0.9);white-space:nowrap;">${node.label}</span>`,
+            iconSize: [0, 0], iconAnchor: [-4, 14],
+          }),
+          interactive: false,
+        });
+        rect.on("dblclick", () => {
+          const newName = prompt("Nombre del grupo:", node.label);
+          if (newName?.trim()) {
+            const idx = nodesRef.current.findIndex((n) => n.id === node.id);
+            if (idx >= 0) { nodesRef.current[idx] = { ...nodesRef.current[idx], label: newName.trim() }; renderNodes(L, map); }
+          }
+        });
+        rect.on("contextmenu", (e: any) => {
+          e.originalEvent.preventDefault();
+          setCtxMenu({ x: e.originalEvent.clientX, y: e.originalEvent.clientY, nodeId: node.id });
+        });
+        rect.addTo(map);
+        labelMarker.addTo(map);
+        polygonLayersRef.current.set(node.id, rect);
+        polygonLayersRef.current.set(node.id + "-label", labelMarker);
+        return;
+      }
 
       // Render polygon zone
       if (isPolygon && cd.points?.length >= 3) {
@@ -694,10 +789,28 @@ export default function LeafletMapView({
       let lineColor = isDown ? "#ef4444" : isFiber ? "#3b82f6" : "#22c55e";
       let dashArray = isDown ? "8,6" : undefined;
 
-      const line = L.polyline(
-        [[srcNode.x, srcNode.y], [tgtNode.x, tgtNode.y]],
-        { color: lineColor, weight: 3, opacity: 0.9, dashArray }
-      );
+      // Bezier curve: add control point offset perpendicular to the line
+      const dx = tgtNode.y - srcNode.y;
+      const dy = tgtNode.x - srcNode.x;
+      const len = Math.sqrt(dx * dx + dy * dy) || 0.001;
+      const curvature = 0.15; // adjust for more/less curve
+      const cpLat = (srcNode.x + tgtNode.x) / 2 + (-dx / len) * len * curvature;
+      const cpLng = (srcNode.y + tgtNode.y) / 2 + (dy / len) * len * curvature;
+
+      // Create curved path with intermediate points
+      const steps = 20;
+      const curvePoints: [number, number][] = [];
+      for (let i = 0; i <= steps; i++) {
+        const t = i / steps;
+        const lat = (1 - t) * (1 - t) * srcNode.x + 2 * (1 - t) * t * cpLat + t * t * tgtNode.x;
+        const lng = (1 - t) * (1 - t) * srcNode.y + 2 * (1 - t) * t * cpLng + t * t * tgtNode.y;
+        curvePoints.push([lat, lng]);
+      }
+
+      const line = L.polyline(curvePoints, {
+        color: lineColor, weight: 3, opacity: 0.9, dashArray,
+        smoothFactor: 1,
+      });
 
       // Tooltip for cable label on hover
       if (edge.label) {
@@ -979,6 +1092,24 @@ export default function LeafletMapView({
     const node = nodesRef.current.find((n) => n.id === nodeId);
     const isLabel = node?.icon === "_textLabel";
     const isWaypoint = node?.icon === "_waypoint";
+
+    // Groups: rename, color, resize, delete
+    const isGroup = node?.icon === "_group";
+    if (isGroup) {
+      return [
+        { label: "Editar nombre", icon: menuIcons.Pencil, onClick: () => {
+          const n = prompt("Nombre del grupo:", node?.label); if (n?.trim()) {
+            const idx = nodesRef.current.findIndex((x) => x.id === nodeId);
+            if (idx >= 0) { nodesRef.current[idx] = { ...nodesRef.current[idx], label: n.trim() }; if (LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current); }
+          }
+        }},
+        { label: "Color", icon: menuIcons.Palette, onClick: () => { setColorPickerNodeId(nodeId); setColorPickerOpen(true); }},
+        { label: "Eliminar grupo", icon: menuIcons.Trash2, danger: true, divider: true, onClick: () => {
+          pushUndo(); nodesRef.current = nodesRef.current.filter((n) => n.id !== nodeId);
+          if (LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current); toast.success("Grupo eliminado");
+        }},
+      ];
+    }
 
     // Polygons: rename, color, delete
     const isPolygon = node?.icon === "_polygon";
@@ -1528,6 +1659,21 @@ export default function LeafletMapView({
             className="group flex items-center gap-1 rounded-xl px-2 py-1.5 text-[#888] hover:text-[#ededed] hover:bg-white/[0.06] transition-all">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" x2="15" y1="20" y2="20"/><line x1="12" x2="12" y1="4" y2="20"/></svg>
             <span className="text-[10px] font-semibold hidden xl:inline">Etiqueta</span>
+          </button>
+          <button onClick={() => {
+            if (!mapRef.current) return;
+            const center = mapRef.current.getCenter();
+            const id = `grp-${Date.now()}`;
+            nodesRef.current = [...nodesRef.current, {
+              id, kuma_monitor_id: null, label: "Grupo", x: center.lat, y: center.lng, icon: "_group",
+              custom_data: JSON.stringify({ width: 0.004, height: 0.003, color: "#3b82f6", opacity: 0.08 }),
+            }];
+            if (LRef.current) renderNodes(LRef.current, mapRef.current);
+            toast.success("Grupo visual agregado — doble clic para renombrar");
+          }} title="Agrupar nodos visualmente"
+            className="group flex items-center gap-1 rounded-xl px-2 py-1.5 text-[#888] hover:text-[#ededed] hover:bg-white/[0.06] transition-all">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+            <span className="text-[10px] font-semibold hidden xl:inline">Grupo</span>
           </button>
           <button onClick={() => {
             if (!mapRef.current) return;

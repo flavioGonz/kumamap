@@ -35,6 +35,8 @@ interface MapSummary {
   background_type: string;
   kuma_group_id: number | null;
   updated_at: string;
+  node_count: number;
+  edge_count: number;
 }
 
 // ─── Hook: Real-time Kuma monitors via Socket.IO ──
@@ -308,7 +310,7 @@ function MapListView({
       {/* Table */}
       <div className="rounded-2xl overflow-hidden" style={{ background: "rgba(255,255,255,0.015)", border: "1px solid rgba(255,255,255,0.06)" }}>
         {/* Table header */}
-        <div className="grid grid-cols-[1fr_100px_120px_130px_80px_100px] gap-2 px-5 py-3 text-[10px] font-bold uppercase tracking-wider text-[#555]"
+        <div className="grid grid-cols-[1fr_100px_80px_120px_130px_80px_100px] gap-2 px-5 py-3 text-[10px] font-bold uppercase tracking-wider text-[#555]"
           style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
           <button className="flex items-center gap-1 text-left hover:text-[#ededed] transition-colors" onClick={() => toggleSort("name")}>
             Nombre <SortIcon col="name" />
@@ -316,6 +318,7 @@ function MapListView({
           <button className="flex items-center gap-1 hover:text-[#ededed] transition-colors" onClick={() => toggleSort("type")}>
             Tipo <SortIcon col="type" />
           </button>
+          <span>Nodos</span>
           <span>Grupo</span>
           <button className="flex items-center gap-1 hover:text-[#ededed] transition-colors" onClick={() => toggleSort("updated")}>
             Actualizado <SortIcon col="updated" />
@@ -329,7 +332,7 @@ function MapListView({
           const groupName = getGroupName(map.kuma_group_id);
           return (
             <div key={map.id}
-              className="grid grid-cols-[1fr_100px_120px_130px_80px_100px] gap-2 items-center px-5 py-3 transition-all cursor-pointer group/row"
+              className="grid grid-cols-[1fr_100px_80px_120px_130px_80px_100px] gap-2 items-center px-5 py-3 transition-all cursor-pointer group/row"
               style={{ borderBottom: "1px solid rgba(255,255,255,0.03)" }}
               onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "rgba(59,130,246,0.04)"; }}
               onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}
@@ -356,6 +359,13 @@ function MapListView({
               <div className="flex items-center gap-1.5">
                 {bgTypeIcon(map.background_type)}
                 <span className="text-[11px] text-[#999]">{bgTypeLabel(map.background_type)}</span>
+              </div>
+
+              {/* Nodes count */}
+              <div className="flex items-center gap-1.5 text-[11px]">
+                <span className="font-bold text-[#bbb]">{map.node_count}</span>
+                <span className="text-[#555]">/</span>
+                <span className="text-[10px] text-[#666]">{map.edge_count}L</span>
               </div>
 
               {/* Group */}

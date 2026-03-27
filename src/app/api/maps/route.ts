@@ -2,7 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { mapsDb } from "@/lib/db";
 
 export async function GET() {
-  return NextResponse.json(mapsDb.getAll());
+  const maps = mapsDb.getAll();
+  const enriched = maps.map((m) => ({
+    ...m,
+    node_count: mapsDb.getNodes(m.id).length,
+    edge_count: mapsDb.getEdges(m.id).length,
+  }));
+  return NextResponse.json(enriched);
 }
 
 export async function POST(req: NextRequest) {

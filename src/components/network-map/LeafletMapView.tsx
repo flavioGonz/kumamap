@@ -80,10 +80,11 @@ function MapClock({ timeMachineTime, timeMachineOpen }: { timeMachineTime: Date 
 
   return (
     <div
-      className="absolute z-[10000] flex flex-col items-end transition-all duration-500"
+      className="absolute z-[10000] flex flex-col items-center transition-all duration-500"
       style={{
-        bottom: 16,
-        right: 16,
+        bottom: 44,
+        left: "50%",
+        transform: "translateX(-50%)",
         pointerEvents: "none",
       }}
     >
@@ -412,12 +413,16 @@ export default function LeafletMapView({
 
       // Render initial nodes after map is ready
       map.whenReady(() => {
-        renderNodes(L, map);
-        renderEdges(L, map);
-        if (initialNodes.length > 0) {
-          const bounds = initialNodes.map((n) => [n.x, n.y] as [number, number]);
-          if (bounds.length > 0) map.fitBounds(bounds, { padding: [50, 50] });
-        }
+        // Delay render slightly to ensure map is fully settled (fixes label scatter bug)
+        setTimeout(() => {
+          map.invalidateSize();
+          renderNodes(L, map);
+          renderEdges(L, map);
+          if (initialNodes.length > 0) {
+            const bounds = initialNodes.map((n) => [n.x, n.y] as [number, number]);
+            if (bounds.length > 0) map.fitBounds(bounds, { padding: [50, 50] });
+          }
+        }, 300);
       });
     });
 
@@ -1652,7 +1657,7 @@ export default function LeafletMapView({
   }, [searchQuery]);
 
   return (
-    <div className="relative h-full w-full transition-all duration-300" style={{ marginRight: `${sidebarWidth}px`, isolation: "isolate" }}>
+    <div className="relative h-full w-full transition-all duration-300" style={{ marginRight: `${sidebarWidth}px` }}>
       <div
         ref={containerRef}
         className="absolute inset-0"

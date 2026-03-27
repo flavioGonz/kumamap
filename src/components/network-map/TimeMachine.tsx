@@ -34,6 +34,7 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
   const [dragging, setDragging] = useState(false);
   const [hoursBack, setHoursBack] = useState(2);
   const [loading, setLoading] = useState(false);
+  const [loaded, setLoaded] = useState(false);
   const barRef = useRef<HTMLDivElement>(null);
   const playRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -43,25 +44,29 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
   const isLive = position >= 0.999;
   const rangeMs = timeEnd.getTime() - timeStart.getTime();
 
-  // Fetch real timeline from Kuma DB
-  useEffect(() => {
-    if (!open) return;
+  // Fetch real timeline from Kuma DB — lazy, only when requested
+  const fetchTimeline = useCallback(() => {
     setLoading(true);
-    const doFetch = () => {
-      fetch(apiUrl(`/api/kuma/timeline?hours=${hoursBack}`))
-        .then(r => r.json())
-        .then(d => {
-          setEvents(d.events || []);
-          setStatusChanges(d.statusChanges || {});
-          setLoading(false);
-        })
-        .catch(() => setLoading(false));
-    };
-    doFetch();
-    // Refresh every 60s (data is cached 5min server-side)
-    const iv = setInterval(doFetch, 60000);
+    fetch(apiUrl(`/api/kuma/timeline?hours=${hoursBack}`))
+      .then(r => r.json())
+      .then(d => {
+        setEvents(d.events || []);
+        setStatusChanges(d.statusChanges || {});
+        setLoading(false);
+        setLoaded(true);
+      })
+      .catch(() => setLoading(false));
+  }, [hoursBack]);
+
+  // Reset loaded state when hours change
+  useEffect(() => { setLoaded(false); }, [hoursBack]);
+
+  // Auto-refresh every 2 min if loaded
+  useEffect(() => {
+    if (!open || !loaded) return;
+    const iv = setInterval(fetchTimeline, 120000);
     return () => clearInterval(iv);
-  }, [open, hoursBack]);
+  }, [open, loaded, fetchTimeline]);
 
   // Filter events to visible range
   const visibleEvents = useMemo(() => {
@@ -184,7 +189,7 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
         {/* Controls */}
         <div className="flex flex-col items-center gap-1.5 py-2 px-1" style={{ borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
           <button onClick={onToggle} className="text-blue-400 hover:text-blue-300"><Clock className="h-3.5 w-3.5" /></button>
-          <button onClick={() => { if (isLive) { setPosition(0); setPlaying(true); } else setPlaying(!playing); }}
+          <button onClick={() => { if (!loaded) fetchTimeline(); if (isLive) { setPosition(0); setPlaying(true); } else setPlaying(!playing); }}
             className="rounded-lg p-1 transition-all"
             style={{ background: playing ? "rgba(59,130,246,0.15)" : "transparent", color: playing ? "#60a5fa" : "#888" }}>
             {playing ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3" />}
@@ -207,10 +212,19 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
           {/* Background gradient */}
           <div className="absolute inset-0" style={{ background: "linear-gradient(180deg, rgba(30,30,50,0.3), rgba(10,10,10,0.1))" }} />
 
-          {/* Loading indicator */}
+          {/* Loading / Load button */}
           {loading && (
             <div className="absolute inset-0 flex items-center justify-center">
               <div className="animate-spin rounded-full h-4 w-4 border-b border-blue-500" />
+            </div>
+          )}
+          {!loaded && !loading && (
+            <div className="absolute inset-0 flex items-center justify-center">
+              <button onClick={fetchTimeline}
+                className="rounded-lg px-2 py-1 text-[7px] font-bold uppercase tracking-wider transition-all"
+                style={{ background: "rgba(59,130,246,0.12)", border: "1px solid rgba(59,130,246,0.25)", color: "#60a5fa", pointerEvents: "auto" }}>
+                Cargar
+              </button>
             </div>
           )}
 

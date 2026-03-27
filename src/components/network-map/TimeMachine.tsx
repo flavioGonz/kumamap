@@ -3,29 +3,20 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { Clock, Play, Pause, Radio } from "lucide-react";
 
-interface HeartbeatEntry {
-  time: string;
-  status: number;
-  ping: number | null;
-}
-
-interface MonitorInfo {
-  id: number;
-  name: string;
-  type: string;
-  status?: number;
-}
+interface HeartbeatEntry { time: string; status: number; ping: number | null; }
+interface MonitorInfo { id: number; name: string; type: string; status?: number; }
 
 interface TimeMachineProps {
   open: boolean;
   onToggle: () => void;
   onTimeChange: (time: Date | null, statuses: Map<number, number>) => void;
+  onDragging?: (isDragging: boolean) => void;
   monitors: MonitorInfo[];
 }
 
-export default function TimeMachine({ open, onToggle, onTimeChange, monitors }: TimeMachineProps) {
+export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, monitors }: TimeMachineProps) {
   const [timeline, setTimeline] = useState<Record<number, HeartbeatEntry[]>>({});
-  const [position, setPosition] = useState(1); // 0=oldest, 1=LIVE
+  const [position, setPosition] = useState(1);
   const [playing, setPlaying] = useState(false);
   const [speed, setSpeed] = useState(1);
   const [dragging, setDragging] = useState(false);
@@ -37,6 +28,7 @@ export default function TimeMachine({ open, onToggle, onTimeChange, monitors }: 
   const timeStart = useMemo(() => new Date(Date.now() - hoursBack * 3600000), [hoursBack]);
   const timeEnd = useMemo(() => new Date(), []);
   const isLive = position >= 0.999;
+  const rangeMs = timeEnd.getTime() - timeStart.getTime();
 
   // Fetch timeline
   useEffect(() => {
@@ -47,7 +39,7 @@ export default function TimeMachine({ open, onToggle, onTimeChange, monitors }: 
     return () => clearInterval(iv);
   }, [open]);
 
-  // Statuses at time
+  // Get statuses at time
   const getStatusesAtTime = useCallback((t: Date): Map<number, number> => {
     const map = new Map<number, number>();
     for (const mon of activeMonitors) {
@@ -59,10 +51,28 @@ export default function TimeMachine({ open, onToggle, onTimeChange, monitors }: 
     return map;
   }, [timeline, activeMonitors]);
 
+  // Compute events (status changes) for markers on timeline
+  const events = useMemo(() => {
+    const evts: Array<{ position: number; monitorId: number; monitorName: string; fromStatus: number; toStatus: number; time: Date }> = [];
+    for (const mon of activeMonitors) {
+      const entries = timeline[mon.id] || [];
+      for (let i = 1; i < entries.length; i++) {
+        if (entries[i].status !== entries[i - 1].status) {
+          const t = new Date(entries[i].time);
+          const pos = (t.getTime() - timeStart.getTime()) / rangeMs;
+          if (pos >= 0 && pos <= 1) {
+            evts.push({ position: pos, monitorId: mon.id, monitorName: mon.name, fromStatus: entries[i - 1].status, toStatus: entries[i].status, time: t });
+          }
+        }
+      }
+    }
+    return evts.sort((a, b) => a.position - b.position);
+  }, [timeline, activeMonitors, timeStart, rangeMs]);
+
   const currentTime = useMemo(() => {
     if (isLive) return null;
-    return new Date(timeStart.getTime() + position * (timeEnd.getTime() - timeStart.getTime()));
-  }, [position, isLive, timeStart, timeEnd]);
+    return new Date(timeStart.getTime() + position * rangeMs);
+  }, [position, isLive, timeStart, rangeMs]);
 
   // Notify parent
   useEffect(() => {
@@ -70,57 +80,57 @@ export default function TimeMachine({ open, onToggle, onTimeChange, monitors }: 
     onTimeChange(currentTime, statuses);
   }, [currentTime]);
 
-  // Summary color segments (vertical: top=oldest, bottom=newest)
-  const summarySegments = useMemo(() => {
-    const count = 150;
-    const rangeMs = timeEnd.getTime() - timeStart.getTime();
-    const colors: string[] = [];
-    for (let i = 0; i < count; i++) {
-      const t = new Date(timeStart.getTime() + (i / count) * rangeMs);
-      let hasDown = false, hasPending = false;
-      for (const mon of activeMonitors) {
-        const entries = timeline[mon.id] || [];
-        let st = 2;
-        for (const e of entries) { if (new Date(e.time) <= t) st = e.status; else break; }
-        if (st === 0) hasDown = true;
-        if (st === 2) hasPending = true;
-      }
-      colors.push(hasDown ? "#ef4444" : hasPending ? "#f59e0b" : "#22c55e");
-    }
-    return colors;
-  }, [timeline, activeMonitors, timeStart, timeEnd]);
+  // Notify drag state
+  useEffect(() => { onDragging?.(dragging); }, [dragging, onDragging]);
 
-  // Play
+  // Play — pause at events
   useEffect(() => {
     if (!playing) { if (playRef.current) clearInterval(playRef.current); return; }
-    const step = (speed * 60000) / (timeEnd.getTime() - timeStart.getTime());
+    const step = (speed * 60000) / rangeMs;
     playRef.current = setInterval(() => {
-      setPosition(p => { const n = p + step; if (n >= 1) { setPlaying(false); return 1; } return n; });
-    }, 80);
+      setPosition(prev => {
+        const next = prev + step;
+        if (next >= 1) { setPlaying(false); return 1; }
+        // Check if we crossed an event — if so, pause there
+        for (const evt of events) {
+          if (prev < evt.position && next >= evt.position) {
+            setPlaying(false);
+            return evt.position;
+          }
+        }
+        return next;
+      });
+    }, 50);
     return () => { if (playRef.current) clearInterval(playRef.current); };
-  }, [playing, speed, timeStart, timeEnd]);
+  }, [playing, speed, rangeMs, events]);
 
-  // Drag (vertical)
+  // Drag — immediate response
+  const updatePosition = useCallback((clientY: number) => {
+    if (!barRef.current) return;
+    const rect = barRef.current.getBoundingClientRect();
+    setPosition(Math.max(0, Math.min(1, (clientY - rect.top) / rect.height)));
+  }, []);
+
   const handlePointerDown = useCallback((e: React.PointerEvent) => {
     setDragging(true); setPlaying(false);
-    e.currentTarget.setPointerCapture(e.pointerId);
-    const rect = barRef.current!.getBoundingClientRect();
-    setPosition(Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height)));
-  }, []);
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    updatePosition(e.clientY);
+  }, [updatePosition]);
+
   const handlePointerMove = useCallback((e: React.PointerEvent) => {
     if (!dragging) return;
-    const rect = barRef.current!.getBoundingClientRect();
-    setPosition(Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height)));
-  }, [dragging]);
+    updatePosition(e.clientY);
+  }, [dragging, updatePosition]);
+
   const handlePointerUp = useCallback(() => setDragging(false), []);
 
+  // Down count
   const downCount = useMemo(() => {
     if (!currentTime) return 0;
     const st = getStatusesAtTime(currentTime);
     let c = 0; st.forEach(s => { if (s === 0) c++; }); return c;
   }, [currentTime, getStatusesAtTime]);
 
-  // Closed state: small button
   if (!open) {
     return (
       <button onClick={onToggle}
@@ -133,18 +143,13 @@ export default function TimeMachine({ open, onToggle, onTimeChange, monitors }: 
   }
 
   return (
-    <div className="absolute left-0 top-0 bottom-0 z-[10000] flex"
-      style={{ width: 52 }}>
-
-      {/* Vertical bar */}
+    <div className="absolute left-0 top-0 bottom-0 z-[10000] flex" style={{ width: 52 }}>
       <div className="h-full w-full flex flex-col"
         style={{ background: "rgba(6,6,6,0.95)", borderRight: "1px solid rgba(255,255,255,0.06)", backdropFilter: "blur(24px)" }}>
 
-        {/* Top: controls */}
+        {/* Controls */}
         <div className="flex flex-col items-center gap-1.5 py-2 px-1" style={{ borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
-          <button onClick={onToggle} className="text-blue-400 hover:text-blue-300 transition-colors">
-            <Clock className="h-3.5 w-3.5" />
-          </button>
+          <button onClick={onToggle} className="text-blue-400 hover:text-blue-300"><Clock className="h-3.5 w-3.5" /></button>
           <button onClick={() => { if (isLive) { setPosition(0); setPlaying(true); } else setPlaying(!playing); }}
             className="rounded-lg p-1 transition-all"
             style={{ background: playing ? "rgba(59,130,246,0.15)" : "transparent", color: playing ? "#60a5fa" : "#888" }}>
@@ -157,73 +162,87 @@ export default function TimeMachine({ open, onToggle, onTimeChange, monitors }: 
           </button>
         </div>
 
-        {/* Timeline scrubber (vertical) */}
-        <div ref={barRef} className="flex-1 relative cursor-ns-resize select-none mx-1.5 my-1 rounded-lg overflow-hidden"
-          style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.03)" }}
+        {/* Timeline bar */}
+        <div ref={barRef}
+          className="flex-1 relative cursor-ns-resize select-none mx-1.5 my-1 rounded-lg overflow-hidden"
+          style={{ background: "rgba(255,255,255,0.015)", border: "1px solid rgba(255,255,255,0.03)", touchAction: "none" }}
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
-          onPointerUp={handlePointerUp}>
+          onPointerUp={handlePointerUp}
+        >
+          {/* Background: subtle gradient */}
+          <div className="absolute inset-0" style={{ background: "linear-gradient(180deg, rgba(30,30,50,0.3), rgba(10,10,10,0.1))" }} />
 
-          {/* Color segments (vertical) */}
-          <div className="absolute inset-0 flex flex-col">
-            {summarySegments.map((c, i) => (
-              <div key={i} className="flex-1 w-full" style={{ background: c, opacity: 0.35 }} />
-            ))}
+          {/* Event markers (status changes) */}
+          {events.map((evt, i) => (
+            <div key={i} className="absolute left-0 right-0"
+              style={{ top: `${evt.position * 100}%` }}>
+              {/* Line */}
+              <div className="h-[2px] w-full" style={{
+                background: evt.toStatus === 0 ? "#ef4444" : evt.toStatus === 1 ? "#22c55e" : "#f59e0b",
+                boxShadow: `0 0 6px ${evt.toStatus === 0 ? "#ef4444" : evt.toStatus === 1 ? "#22c55e" : "#f59e0b"}`,
+                opacity: 0.7,
+              }} />
+              {/* Dot */}
+              <div className="absolute left-1/2 -translate-x-1/2 -translate-y-1/2 w-[6px] h-[6px] rounded-full"
+                style={{ background: evt.toStatus === 0 ? "#ef4444" : evt.toStatus === 1 ? "#22c55e" : "#f59e0b" }} />
+            </div>
+          ))}
+
+          {/* Time ticks */}
+          <div className="absolute inset-0 flex flex-col justify-between pointer-events-none py-1">
+            {Array.from({ length: 7 }, (_, i) => {
+              const t = new Date(timeStart.getTime() + (i / 6) * rangeMs);
+              return (
+                <div key={i} className="relative">
+                  <div className="absolute left-0 right-0 h-px" style={{ background: "rgba(255,255,255,0.04)" }} />
+                  <span className="absolute left-1/2 -translate-x-1/2 text-[6px] text-[#444] font-mono"
+                    style={{ top: -1 }}>
+                    {t.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                  </span>
+                </div>
+              );
+            })}
           </div>
 
-          {/* Scrubber handle */}
-          <div className="absolute left-0 right-0 transition-[top] duration-75 pointer-events-none"
-            style={{ top: `${position * 100}%` }}>
-            <div className="relative flex items-center justify-center">
-              <div className="absolute -top-[5px] w-full h-[3px] rounded-full"
+          {/* Scrubber */}
+          <div className="absolute left-0 right-0 pointer-events-none"
+            style={{ top: `${position * 100}%`, transition: dragging ? "none" : "top 0.05s linear" }}>
+            <div className="relative">
+              <div className="h-[3px] w-full rounded-full"
                 style={{ background: isLive ? "#4ade80" : "#60a5fa", boxShadow: `0 0 10px ${isLive ? "#4ade80" : "#60a5fa"}` }} />
-              {/* Time tooltip */}
               {!isLive && (
-                <div className="absolute left-[52px] -top-2 rounded-md px-1.5 py-0.5 text-[8px] font-mono font-bold whitespace-nowrap"
-                  style={{ background: "rgba(10,10,10,0.9)", border: "1px solid rgba(59,130,246,0.3)", color: "#60a5fa" }}>
-                  {currentTime?.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                <div className="absolute left-[54px] -top-2.5 rounded-md px-1.5 py-0.5 text-[9px] font-mono font-bold whitespace-nowrap"
+                  style={{ background: "rgba(10,10,10,0.95)", border: "1px solid rgba(59,130,246,0.3)", color: "#60a5fa", boxShadow: "0 4px 12px rgba(0,0,0,0.5)" }}>
+                  {currentTime?.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+                  {downCount > 0 && <span className="ml-1 text-red-400">{downCount}↓</span>}
                 </div>
               )}
             </div>
-          </div>
-
-          {/* Time labels */}
-          <div className="absolute left-0 right-0 top-0 bottom-0 flex flex-col justify-between pointer-events-none px-0.5 py-1">
-            {Array.from({ length: 5 }, (_, i) => {
-              const t = new Date(timeStart.getTime() + (i / 4) * (timeEnd.getTime() - timeStart.getTime()));
-              return <span key={i} className="text-[6px] text-[#333] font-mono text-center">{t.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>;
-            })}
           </div>
         </div>
 
         {/* Bottom controls */}
         <div className="flex flex-col items-center gap-1 py-2 px-1" style={{ borderTop: "1px solid rgba(255,255,255,0.04)" }}>
-          {/* Speed */}
           {[1, 4, 16].map(s => (
             <button key={s} onClick={() => setSpeed(s)}
-              className="text-[7px] font-bold rounded-md px-1 py-0.5 transition-all w-full text-center"
+              className="text-[7px] font-bold rounded-md px-1 py-0.5 w-full text-center transition-all"
               style={{ color: speed === s ? "#60a5fa" : "#444", background: speed === s ? "rgba(59,130,246,0.1)" : "transparent" }}>
               {s}x
             </button>
           ))}
           <div className="h-px w-full my-0.5" style={{ background: "rgba(255,255,255,0.04)" }} />
-          {/* Hours */}
           {[1, 2, 6, 24].map(h => (
             <button key={h} onClick={() => setHoursBack(h)}
-              className="text-[7px] font-bold rounded-md px-1 py-0.5 transition-all w-full text-center"
+              className="text-[7px] font-bold rounded-md px-1 py-0.5 w-full text-center transition-all"
               style={{ color: hoursBack === h ? "#ededed" : "#444", background: hoursBack === h ? "rgba(255,255,255,0.05)" : "transparent" }}>
               {h}h
             </button>
           ))}
-
-          {/* Status */}
           <div className="mt-1 text-center">
             <div className="text-[8px] font-mono font-bold" style={{ color: isLive ? "#4ade80" : "#60a5fa" }}>
               {isLive ? "LIVE" : currentTime?.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
             </div>
-            {!isLive && downCount > 0 && (
-              <div className="text-[7px] text-red-400 font-bold animate-pulse">{downCount}↓</div>
-            )}
           </div>
         </div>
       </div>

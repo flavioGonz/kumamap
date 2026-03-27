@@ -108,7 +108,8 @@ export default function LeafletMapView({
   const [assignNodeId, setAssignNodeId] = useState<string>("");
   const [assignSearch, setAssignSearch] = useState("");
   const [colorPickerOpen, setColorPickerOpen] = useState(false);
-  const [autoSaveEnabled, setAutoSaveEnabled] = useState(true);
+  const [autoSaveEnabled, setAutoSaveEnabled] = useState(false);
+  const [timeDragging, setTimeDragging] = useState(false);
   const [polygonMode, setPolygonMode] = useState(false);
   const polygonPointsRef = useRef<[number, number][]>([]);
   const polygonPreviewRef = useRef<any>(null);
@@ -2188,17 +2189,14 @@ export default function LeafletMapView({
         );
       })()}
 
-      {/* Time travel transition effect — pulses on scrub */}
+      {/* Time travel blur — only during drag */}
       <div
         className="absolute inset-0 pointer-events-none"
         style={{
           zIndex: 999,
-          backdropFilter: timeMachineTime ? `blur(${timeBlurPulse > 0 ? 4 : 1}px)` : "none",
-          background: timeMachineTime
-            ? `rgba(0,10,40,${timeBlurPulse > 0 ? 0.2 : 0.06})`
-            : "transparent",
-          transition: "backdrop-filter 0.4s ease-out, background 0.4s ease-out, opacity 0.5s ease",
-          opacity: timeMachineTime ? 1 : 0,
+          backdropFilter: timeDragging ? "blur(3px)" : "none",
+          background: timeDragging ? "rgba(0,10,40,0.15)" : "transparent",
+          transition: timeDragging ? "none" : "backdrop-filter 0.5s ease-out, background 0.5s ease-out",
         }}
       />
 
@@ -2206,17 +2204,9 @@ export default function LeafletMapView({
       <TimeMachine
         open={timeMachineOpen}
         onToggle={() => setTimeMachineOpen((v) => !v)}
+        onDragging={useCallback((d: boolean) => setTimeDragging(d), [])}
         onTimeChange={useCallback((time: Date | null, statuses: Map<number, number>) => {
           setTimeMachineTime(time);
-
-          // Trigger blur pulse on each time change
-          if (time) {
-            setTimeBlurPulse((p) => p + 1);
-            setTimeout(() => setTimeBlurPulse(0), 400);
-          } else {
-            setTimeBlurPulse(0);
-          }
-
           if (!LRef.current || !mapRef.current) return;
           const L = LRef.current;
 

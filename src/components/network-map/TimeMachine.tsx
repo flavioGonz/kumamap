@@ -40,12 +40,22 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
     return () => clearInterval(iv);
   }, [open]);
 
-  // Get statuses at time
+  // Get statuses at time — default to current live status if no history
   const getStatusesAtTime = useCallback((t: Date): Map<number, number> => {
     const map = new Map<number, number>();
     for (const mon of activeMonitors) {
       const entries = timeline[mon.id] || [];
-      let status = 2;
+      if (entries.length === 0) {
+        // No history: assume current live status (not pending)
+        map.set(mon.id, mon.status ?? 1);
+        continue;
+      }
+      // If requested time is before first entry, assume UP
+      if (new Date(entries[0].time) > t) {
+        map.set(mon.id, 1);
+        continue;
+      }
+      let status = entries[0].status;
       for (const e of entries) { if (new Date(e.time) <= t) status = e.status; else break; }
       map.set(mon.id, status);
     }
@@ -92,16 +102,11 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
       setPosition(prev => {
         const next = prev + step;
         if (next >= 1) { setPlaying(false); return 1; }
-        // Check if we crossed an event — pause and focus
+        // Check if we crossed a DOWN event — pause and focus on failure
         for (const evt of events) {
-          if (prev < evt.position && next >= evt.position) {
+          if (evt.toStatus === 0 && prev < evt.position && next >= evt.position) {
             setPlaying(false);
-            // Focus on the node that had the event
-            if (evt.toStatus === 0) {
-              onFocusEvent?.(evt.monitorId, "down");
-            } else if (evt.fromStatus === 0 && evt.toStatus === 1) {
-              onFocusEvent?.(evt.monitorId, "up");
-            }
+            onFocusEvent?.(evt.monitorId, "down");
             return evt.position;
           }
         }

@@ -109,6 +109,11 @@ export default function LeafletMapView({
   const [assignSearch, setAssignSearch] = useState("");
   const [colorPickerOpen, setColorPickerOpen] = useState(false);
   const [autoSaveEnabled, setAutoSaveEnabled] = useState(false);
+  const [showNodes, setShowNodes] = useState(true);
+  const [showLinks, setShowLinks] = useState(true);
+  const [showCameras, setShowCameras] = useState(true);
+  const [showFOV, setShowFOV] = useState(true);
+  const [mapRotation, setMapRotation] = useState(0);
   const [timeDragging, setTimeDragging] = useState(false);
   const [polygonMode, setPolygonMode] = useState(false);
   const polygonPointsRef = useRef<[number, number][]>([]);
@@ -148,6 +153,47 @@ export default function LeafletMapView({
 
   // Keep ref in sync with state for closures
   useEffect(() => { linkSourceRef.current = linkSource; }, [linkSource]);
+
+  // Visibility toggles — show/hide layers without re-rendering
+  useEffect(() => {
+    markersRef.current.forEach((marker, nodeId) => {
+      const node = nodesRef.current.find(n => n.id === nodeId);
+      const isCamera = node?.icon === "_camera";
+      const isLabel = node?.icon === "_textLabel";
+      const isWaypoint = node?.icon === "_waypoint";
+      if (isCamera) {
+        if (showCameras) marker.getElement()?.style.setProperty("display", "");
+        else marker.getElement()?.style.setProperty("display", "none");
+      } else if (!isLabel && !isWaypoint) {
+        if (showNodes) marker.getElement()?.style.setProperty("display", "");
+        else marker.getElement()?.style.setProperty("display", "none");
+      }
+    });
+    // FOV
+    fovLayersRef.current.forEach((layer) => {
+      if (showFOV && showCameras) {
+        try { if (!mapRef.current?.hasLayer(layer)) mapRef.current?.addLayer(layer); } catch {}
+      } else {
+        try { mapRef.current?.removeLayer(layer); } catch {}
+      }
+    });
+    // Links
+    polylinesRef.current.forEach((line) => {
+      if (showLinks) {
+        try { if (!mapRef.current?.hasLayer(line)) mapRef.current?.addLayer(line); } catch {}
+      } else {
+        try { mapRef.current?.removeLayer(line); } catch {}
+      }
+    });
+  }, [showNodes, showLinks, showCameras, showFOV]);
+
+  // Map rotation
+  useEffect(() => {
+    if (containerRef.current) {
+      containerRef.current.style.transform = mapRotation ? `rotate(${mapRotation}deg)` : "";
+      containerRef.current.style.transformOrigin = "center center";
+    }
+  }, [mapRotation]);
 
   // Keyboard shortcuts: Escape = cancel link, Ctrl+Z = undo, Ctrl+S = save
   useEffect(() => {
@@ -747,10 +793,11 @@ export default function LeafletMapView({
       const srcMon = srcNode.kuma_monitor_id ? kumaMonitors.find((m) => m.id === srcNode.kuma_monitor_id) : null;
       const tgtMon = tgtNode.kuma_monitor_id ? kumaMonitors.find((m) => m.id === tgtNode.kuma_monitor_id) : null;
       const isFiber = cd.linkType === "fiber";
+      const isWireless = cd.linkType === "wireless";
       const isDown = srcMon?.status === 0 || tgtMon?.status === 0;
 
-      let lineColor = isDown ? "#ef4444" : isFiber ? "#3b82f6" : "#22c55e";
-      let dashArray = isDown ? "8,6" : undefined;
+      let lineColor = isDown ? "#ef4444" : isFiber ? "#3b82f6" : isWireless ? "#f97316" : "#22c55e";
+      let dashArray = isDown ? "8,6" : isWireless ? "6,8" : undefined;
 
       // Bezier curve: add control point offset perpendicular to the line
       const dx = tgtNode.y - srcNode.y;
@@ -1300,16 +1347,19 @@ export default function LeafletMapView({
         },
       },
       {
-        label: cd.linkType === "fiber" ? "Cambiar a Cobre" : "Cambiar a Fibra",
+        label: cd.linkType === "fiber" ? "→ Cobre" : cd.linkType === "wireless" ? "→ Fibra" : "→ Wireless",
         icon: menuIcons.Link2,
         onClick: () => {
           const idx = edgesRef.current.findIndex((e) => e.id === edgeId);
           if (idx >= 0) {
             const oldCd = edgesRef.current[idx].custom_data ? JSON.parse(edgesRef.current[idx].custom_data!) : {};
-            oldCd.linkType = cd.linkType === "fiber" ? "copper" : "fiber";
+            const cycle: Record<string, string> = { copper: "wireless", wireless: "fiber", fiber: "copper" };
+            const current = oldCd.linkType || "copper";
+            oldCd.linkType = cycle[current] || "wireless";
             edgesRef.current[idx] = { ...edgesRef.current[idx], custom_data: JSON.stringify(oldCd) };
             if (LRef.current && mapRef.current) renderEdges(LRef.current, mapRef.current);
-            toast.success(oldCd.linkType === "fiber" ? "Enlace: Fibra (azul)" : "Enlace: Cobre (verde)");
+            const names: Record<string, string> = { fiber: "Fibra (azul)", copper: "Cobre (verde)", wireless: "Wireless (naranja)" };
+            toast.success(`Enlace: ${names[oldCd.linkType]}`);
           }
         },
       },
@@ -1758,6 +1808,40 @@ export default function LeafletMapView({
             style={{ background: `linear-gradient(to right, #3b82f6 ${(overlayOpacity / 0.7) * 100}%, #333 0%)` }}
             title={`Oscuridad: ${Math.round(overlayOpacity * 100)}%`}
           />
+        </div>
+
+        <div className="h-5 w-px mx-0.5" style={{ background: "rgba(255,255,255,0.06)" }} />
+
+        {/* Visibility toggles */}
+        <div className="flex items-center gap-0.5 rounded-xl p-0.5" style={{ background: "rgba(255,255,255,0.02)" }}>
+          <button onClick={() => setShowNodes(v => !v)} title={showNodes ? "Ocultar nodos" : "Mostrar nodos"}
+            className="rounded-lg p-1.5 transition-all" style={{ color: showNodes ? "#22c55e" : "#333" }}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/></svg>
+          </button>
+          <button onClick={() => setShowLinks(v => !v)} title={showLinks ? "Ocultar links" : "Mostrar links"}
+            className="rounded-lg p-1.5 transition-all" style={{ color: showLinks ? "#3b82f6" : "#333" }}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+          </button>
+          <button onClick={() => setShowCameras(v => !v)} title={showCameras ? "Ocultar camaras" : "Mostrar camaras"}
+            className="rounded-lg p-1.5 transition-all" style={{ color: showCameras ? "#f59e0b" : "#333" }}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m16.24 7.76-1.804 5.412a2 2 0 0 1-1.265 1.265L7.76 16.24l1.804-5.412a2 2 0 0 1 1.265-1.265z"/><circle cx="12" cy="12" r="10"/></svg>
+          </button>
+          <button onClick={() => setShowFOV(v => !v)} title={showFOV ? "Ocultar areas de cobertura" : "Mostrar areas de cobertura"}
+            className="rounded-lg p-1.5 transition-all" style={{ color: showFOV ? "#8b5cf6" : "#333" }}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+          </button>
+        </div>
+
+        {/* Rotation */}
+        <div className="flex items-center gap-1 rounded-xl px-2 py-1" style={{ background: "rgba(255,255,255,0.02)" }}>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={mapRotation !== 0 ? "#60a5fa" : "#555"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>
+          <input type="range" min="-180" max="180" step="5" value={mapRotation}
+            onChange={(e) => setMapRotation(parseInt(e.target.value))}
+            onDoubleClick={() => setMapRotation(0)}
+            className="w-12 h-1 rounded-full appearance-none cursor-pointer" title={`Rotacion: ${mapRotation}°`}
+            style={{ background: `linear-gradient(to right, #333 0%, #3b82f6 ${((mapRotation + 180) / 360) * 100}%, #333 100%)` }}
+          />
+          {mapRotation !== 0 && <span className="text-[9px] text-[#666] font-mono">{mapRotation}°</span>}
         </div>
 
         <div className="h-5 w-px mx-0.5" style={{ background: "rgba(255,255,255,0.06)" }} />

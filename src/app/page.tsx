@@ -26,6 +26,7 @@ import {
 } from "lucide-react";
 import type { KumaMonitor } from "@/components/network-map/MonitorPanel";
 import NetworkMapEditor from "@/components/network-map/NetworkMapEditor";
+import LoginPage from "@/components/LoginPage";
 import { apiUrl } from "@/lib/api";
 
 interface MapSummary {
@@ -84,10 +85,12 @@ function MapListView({
   onOpenMap,
   kumaMonitors,
   kumaConnected,
+  onLogout,
 }: {
   onOpenMap: (id: string) => void;
   kumaMonitors: KumaMonitor[];
   kumaConnected: boolean;
+  onLogout: () => void;
 }) {
   const [maps, setMaps] = useState<MapSummary[]>([]);
   const [search, setSearch] = useState("");
@@ -234,6 +237,18 @@ function MapListView({
             style={{ background: "rgba(59,130,246,0.15)", border: "1px solid rgba(59,130,246,0.3)", color: "#60a5fa" }}
           >
             <Plus className="h-4 w-4" /> Nuevo Mapa
+          </button>
+          <button
+            onClick={() => {
+              localStorage.removeItem("kumamap_user");
+              fetch(apiUrl("/api/auth"), { method: "DELETE" });
+              onLogout();
+            }}
+            className="flex items-center gap-1.5 rounded-xl px-3 py-2.5 text-sm font-semibold transition-all"
+            style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)", color: "#666" }}
+            title="Cerrar sesion"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></svg>
           </button>
         </div>
       </div>
@@ -433,7 +448,26 @@ function MapListView({
 // ─── Main Page ──────────────────────────────────
 export default function Page() {
   const [selectedMapId, setSelectedMapId] = useState<string | null>(null);
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
   const { monitors, connected } = useKumaMonitors();
+
+  // Check session on mount
+  useEffect(() => {
+    const user = localStorage.getItem("kumamap_user");
+    setIsAuthenticated(!!user);
+  }, []);
+
+  // Loading
+  if (isAuthenticated === null) {
+    return <div className="min-h-screen flex items-center justify-center" style={{ background: "#0a0a0a" }}>
+      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500" />
+    </div>;
+  }
+
+  // Login
+  if (!isAuthenticated) {
+    return <LoginPage onLogin={() => setIsAuthenticated(true)} />;
+  }
 
   return (
     <>
@@ -461,6 +495,7 @@ export default function Page() {
           onOpenMap={setSelectedMapId}
           kumaMonitors={monitors}
           kumaConnected={connected}
+          onLogout={() => setIsAuthenticated(false)}
         />
       )}
     </>

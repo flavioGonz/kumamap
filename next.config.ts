@@ -1,7 +1,9 @@
 import type { NextConfig } from "next";
 
+const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
+
 const nextConfig: NextConfig = {
-  basePath: "/maps",
+  ...(basePath ? { basePath } : {}),
   serverExternalPackages: ["better-sqlite3"],
 };
 

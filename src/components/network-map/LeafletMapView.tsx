@@ -1346,23 +1346,24 @@ export default function LeafletMapView({
           setLinkModalOpen(true);
         },
       },
-      {
-        label: cd.linkType === "fiber" ? "→ Cobre" : cd.linkType === "wireless" ? "→ Fibra" : "→ Wireless",
+      ...[
+        { type: "fiber", label: "Fibra", color: "#3b82f6" },
+        { type: "copper", label: "Cobre", color: "#22c55e" },
+        { type: "wireless", label: "Wireless", color: "#f97316" },
+      ].filter(t => t.type !== (cd.linkType || "copper")).map(t => ({
+        label: `→ ${t.label}`,
         icon: menuIcons.Link2,
         onClick: () => {
           const idx = edgesRef.current.findIndex((e) => e.id === edgeId);
           if (idx >= 0) {
             const oldCd = edgesRef.current[idx].custom_data ? JSON.parse(edgesRef.current[idx].custom_data!) : {};
-            const cycle: Record<string, string> = { copper: "wireless", wireless: "fiber", fiber: "copper" };
-            const current = oldCd.linkType || "copper";
-            oldCd.linkType = cycle[current] || "wireless";
+            oldCd.linkType = t.type;
             edgesRef.current[idx] = { ...edgesRef.current[idx], custom_data: JSON.stringify(oldCd) };
             if (LRef.current && mapRef.current) renderEdges(LRef.current, mapRef.current);
-            const names: Record<string, string> = { fiber: "Fibra (azul)", copper: "Cobre (verde)", wireless: "Wireless (naranja)" };
-            toast.success(`Enlace: ${names[oldCd.linkType]}`);
+            toast.success(`Enlace: ${t.label}`);
           }
         },
-      },
+      })),
       {
         label: "Eliminar conexion",
         icon: menuIcons.Trash2,

@@ -1993,6 +1993,8 @@ export default function LeafletMapView({
           </button>
         )}
 
+        {/* ═══ EDIT MODE: Map controls ═══ */}
+        {editMode && <>
         <div className="h-5 w-px mx-0.5" style={{ background: "rgba(255,255,255,0.06)" }} />
 
         {/* Map style pills */}
@@ -2063,6 +2065,8 @@ export default function LeafletMapView({
           />
           {mapRotation !== 0 && <span className="text-[9px] text-[#666] font-mono">{mapRotation}°</span>}
         </div>
+
+        </>}
 
         <div className="h-5 w-px mx-0.5" style={{ background: "rgba(255,255,255,0.06)" }} />
 

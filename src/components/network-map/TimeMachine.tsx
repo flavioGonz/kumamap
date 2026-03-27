@@ -124,8 +124,8 @@ export default function TimeMachine({ open, onToggle, onTimeChange, monitors }: 
   if (!open) {
     return (
       <button onClick={onToggle}
-        className="absolute right-[340px] top-1/2 -translate-y-1/2 z-[10000] flex flex-col items-center gap-1 rounded-l-xl px-1.5 py-3 transition-all hover:px-2.5"
-        style={{ background: "rgba(10,10,10,0.9)", border: "1px solid rgba(255,255,255,0.06)", borderRight: "none", backdropFilter: "blur(16px)" }}>
+        className="absolute left-0 top-1/2 -translate-y-1/2 z-[10000] flex flex-col items-center gap-1 rounded-r-xl px-1.5 py-3 transition-all hover:px-2.5"
+        style={{ background: "rgba(10,10,10,0.9)", border: "1px solid rgba(255,255,255,0.06)", borderLeft: "none", backdropFilter: "blur(16px)" }}>
         <Clock className="h-3.5 w-3.5 text-blue-400" />
         <span className="text-[8px] font-bold text-[#888] tracking-wider" style={{ writingMode: "vertical-rl" }}>TIME MACHINE</span>
       </button>
@@ -133,12 +133,12 @@ export default function TimeMachine({ open, onToggle, onTimeChange, monitors }: 
   }
 
   return (
-    <div className="absolute right-[320px] top-0 bottom-0 z-[10000] flex"
+    <div className="absolute left-0 top-0 bottom-0 z-[10000] flex"
       style={{ width: 52 }}>
 
       {/* Vertical bar */}
       <div className="h-full w-full flex flex-col"
-        style={{ background: "rgba(6,6,6,0.95)", borderLeft: "1px solid rgba(255,255,255,0.06)", backdropFilter: "blur(24px)" }}>
+        style={{ background: "rgba(6,6,6,0.95)", borderRight: "1px solid rgba(255,255,255,0.06)", backdropFilter: "blur(24px)" }}>
 
         {/* Top: controls */}
         <div className="flex flex-col items-center gap-1.5 py-2 px-1" style={{ borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
@@ -179,7 +179,7 @@ export default function TimeMachine({ open, onToggle, onTimeChange, monitors }: 
                 style={{ background: isLive ? "#4ade80" : "#60a5fa", boxShadow: `0 0 10px ${isLive ? "#4ade80" : "#60a5fa"}` }} />
               {/* Time tooltip */}
               {!isLive && (
-                <div className="absolute -left-[72px] -top-2 rounded-md px-1.5 py-0.5 text-[8px] font-mono font-bold whitespace-nowrap"
+                <div className="absolute left-[52px] -top-2 rounded-md px-1.5 py-0.5 text-[8px] font-mono font-bold whitespace-nowrap"
                   style={{ background: "rgba(10,10,10,0.9)", border: "1px solid rgba(59,130,246,0.3)", color: "#60a5fa" }}>
                   {currentTime?.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                 </div>

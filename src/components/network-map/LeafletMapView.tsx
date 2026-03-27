@@ -116,6 +116,7 @@ export default function LeafletMapView({
   const edgeUpdateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [timeMachineOpen, setTimeMachineOpen] = useState(false);
   const [timeMachineTime, setTimeMachineTime] = useState<Date | null>(null);
+  const [timeBlurPulse, setTimeBlurPulse] = useState(0);
   const [colorPickerNodeId, setColorPickerNodeId] = useState<string>("");
   const [lensPickerOpen, setLensPickerOpen] = useState(false);
   const [lensPickerNodeId, setLensPickerNodeId] = useState<string>("");
@@ -2187,11 +2188,19 @@ export default function LeafletMapView({
         );
       })()}
 
-      {/* Time travel blur effect */}
-      {timeMachineTime && (
-        <div className="absolute inset-0 pointer-events-none transition-all duration-300"
-          style={{ zIndex: 999, backdropFilter: "blur(1px)", background: "rgba(0,0,20,0.08)" }} />
-      )}
+      {/* Time travel transition effect — pulses on scrub */}
+      <div
+        className="absolute inset-0 pointer-events-none"
+        style={{
+          zIndex: 999,
+          backdropFilter: timeMachineTime ? `blur(${timeBlurPulse > 0 ? 4 : 1}px)` : "none",
+          background: timeMachineTime
+            ? `rgba(0,10,40,${timeBlurPulse > 0 ? 0.2 : 0.06})`
+            : "transparent",
+          transition: "backdrop-filter 0.4s ease-out, background 0.4s ease-out, opacity 0.5s ease",
+          opacity: timeMachineTime ? 1 : 0,
+        }}
+      />
 
       {/* Time Machine */}
       <TimeMachine
@@ -2199,21 +2208,32 @@ export default function LeafletMapView({
         onToggle={() => setTimeMachineOpen((v) => !v)}
         onTimeChange={useCallback((time: Date | null, statuses: Map<number, number>) => {
           setTimeMachineTime(time);
-          // Update marker colors based on historical status
+
+          // Trigger blur pulse on each time change
+          if (time) {
+            setTimeBlurPulse((p) => p + 1);
+            setTimeout(() => setTimeBlurPulse(0), 400);
+          } else {
+            setTimeBlurPulse(0);
+          }
+
           if (!LRef.current || !mapRef.current) return;
           const L = LRef.current;
+
+          if (!time || statuses.size === 0) {
+            // Back to LIVE — restore real status
+            updateMarkerStatus();
+            return;
+          }
+
+          // Apply historical statuses to map markers
           nodesRef.current.forEach((node) => {
             const marker = markersRef.current.get(node.id);
             if (!marker || !node.kuma_monitor_id) return;
-            let color: string;
-            if (time && statuses.has(node.kuma_monitor_id)) {
-              const st = statuses.get(node.kuma_monitor_id)!;
-              color = st === 0 ? "#ef4444" : st === 1 ? "#22c55e" : st === 3 ? "#8b5cf6" : "#f59e0b";
-            } else {
-              color = getStatusColor(node.kuma_monitor_id);
-            }
-            const pulse = time ? (statuses.get(node.kuma_monitor_id) === 0) : false;
-            marker.setIcon(createMarkerIcon(L, color, pulse, false));
+            const st = statuses.get(node.kuma_monitor_id);
+            if (st === undefined) return;
+            const color = st === 0 ? "#ef4444" : st === 1 ? "#22c55e" : st === 3 ? "#8b5cf6" : "#f59e0b";
+            marker.setIcon(createMarkerIcon(L, color, st === 0, false));
           });
         }, [])}
         monitors={kumaMonitors.map((m) => ({

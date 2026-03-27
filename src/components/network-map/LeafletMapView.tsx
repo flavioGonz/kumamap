@@ -2517,93 +2517,91 @@ export default function LeafletMapView({
         onDragging={useCallback((d: boolean) => setTimeDragging(d), [])}
         mapMonitorIds={useMemo(() => nodesRef.current.filter(n => n.kuma_monitor_id).map(n => n.kuma_monitor_id!), [initialNodes])}
         onFocusEvent={useCallback((monitorId: number, eventType: "down" | "up") => {
-          // Find the node with this monitor and animate
           const node = nodesRef.current.find(n => n.kuma_monitor_id === monitorId);
           if (!node || !mapRef.current || !LRef.current) return;
           const L = LRef.current;
           const map = mapRef.current;
-
-          // Pan to node WITHOUT changing zoom (prevents node flying off screen)
-          map.panTo([node.x, node.y], { animate: true, duration: 0.8 });
-
-          // Animate the marker with dramatic pulse ring
           const flashColor = eventType === "down" ? "#ef4444" : "#22c55e";
+          const marker = markersRef.current.get(node.id);
 
-          // Create expanding pulse rings at the node position
-          for (let i = 0; i < 3; i++) {
-            setTimeout(() => {
-              const ring = L.circleMarker([node.x, node.y], {
-                radius: 5,
-                color: flashColor,
-                fillColor: flashColor,
-                fillOpacity: 0.4,
-                weight: 3,
-                opacity: 0.8,
-                className: "focus-ring",
-              }).addTo(map);
-
-              // Animate expansion
-              let r = 5;
-              const expandInterval = setInterval(() => {
-                r += 2;
-                ring.setRadius(r);
-                ring.setStyle({ opacity: Math.max(0, 0.8 - r / 60), fillOpacity: Math.max(0, 0.4 - r / 80) });
-                if (r > 60) { clearInterval(expandInterval); map.removeLayer(ring); }
-              }, 30);
-            }, i * 400);
+          // Check if node is visible in current viewport — only pan if not visible
+          const bounds = map.getBounds();
+          const nodeLatLng = L.latLng(node.x, node.y);
+          if (!bounds.contains(nodeLatLng)) {
+            map.panTo(nodeLatLng, { animate: true, duration: 0.6 });
           }
 
-          // Flash the marker itself
-          const marker = markersRef.current.get(node.id);
+          // Subtle vibration animation on marker (NO scale, NO transform)
           if (marker?.getElement()) {
             const el = marker.getElement();
-            el.style.filter = `drop-shadow(0 0 30px ${flashColor}) drop-shadow(0 0 60px ${flashColor}) brightness(2)`;
-            el.style.transition = "filter 0.15s";
-            el.style.transform = "scale(1.8)";
+            // Glow effect only — no position/scale changes
+            el.style.filter = `drop-shadow(0 0 20px ${flashColor}) drop-shadow(0 0 40px ${flashColor}) brightness(1.8)`;
+            el.style.transition = "filter 0.2s";
+            // CSS vibration class
+            el.classList.add("node-vibrate");
             setTimeout(() => {
-              el.style.transform = "scale(1.3)";
-              el.style.filter = `drop-shadow(0 0 15px ${flashColor}) brightness(1.3)`;
-              el.style.transition = "filter 1s, transform 0.8s";
-            }, 800);
+              el.style.filter = `drop-shadow(0 0 10px ${flashColor}) brightness(1.2)`;
+              el.style.transition = "filter 1.5s";
+            }, 1500);
             setTimeout(() => {
               el.style.filter = "";
-              el.style.transform = "";
-              el.style.transition = "filter 1s, transform 0.5s";
+              el.style.transition = "filter 1s";
+              el.classList.remove("node-vibrate");
             }, 4000);
           }
 
-          // Open dramatic fail popup on the node
-          if (eventType === "down") {
-            const mon = kumaMonitors.find(m => m.id === monitorId);
-            // Remove existing fail popup for this node
-            const existingPopup = failPopupsRef.current.get(node.id);
-            if (existingPopup) { try { map.removeLayer(existingPopup); } catch {} }
-
-            const popup = L.popup({
-              closeButton: false, autoClose: false, closeOnClick: false,
-              className: "fail-popup-tm", offset: [0, -20], autoPan: false,
-            })
-              .setLatLng([node.x, node.y])
-              .setContent(`
-                <div style="background:linear-gradient(135deg,#dc2626,#991b1b);border:2px solid #fca5a5;border-radius:14px;padding:8px 14px;min-width:140px;box-shadow:0 8px 32px rgba(239,68,68,0.4),0 0 60px rgba(239,68,68,0.2),inset 0 1px 0 rgba(255,255,255,0.15);animation:failPopupIn 0.4s cubic-bezier(0.34,1.56,0.64,1);">
-                  <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
-                    <div style="width:24px;height:24px;border-radius:8px;background:rgba(255,255,255,0.15);display:flex;align-items:center;justify-content:center;animation:failIconPulse 1.5s ease-in-out infinite;">
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-                    </div>
-                    <div>
-                      <div style="color:white;font-size:12px;font-weight:800;text-shadow:0 1px 2px rgba(0,0,0,0.3);">${node.label}</div>
-                      <div style="color:rgba(255,255,255,0.7);font-size:9px;font-weight:600;">▼ OFFLINE</div>
-                    </div>
-                  </div>
-                  ${mon?.msg ? `<div style="color:rgba(255,255,255,0.6);font-size:8px;font-style:italic;">${mon.msg}</div>` : ""}
-                </div>
-              `)
-              .openOn(map);
-            failPopupsRef.current.set(node.id, popup);
-
-            // Auto-close after 5s
-            setTimeout(() => { try { map.removeLayer(popup); failPopupsRef.current.delete(node.id); } catch {} }, 5000);
+          // Pulse rings around the node (visual only, don't move node)
+          for (let i = 0; i < 2; i++) {
+            setTimeout(() => {
+              const ring = L.circleMarker(nodeLatLng, {
+                radius: 8, color: flashColor, fillColor: flashColor,
+                fillOpacity: 0.3, weight: 2, opacity: 0.7,
+              }).addTo(map);
+              let r = 8;
+              const iv = setInterval(() => {
+                r += 1.5;
+                ring.setRadius(r);
+                ring.setStyle({ opacity: Math.max(0, 0.7 - r / 50), fillOpacity: Math.max(0, 0.3 - r / 70) });
+                if (r > 45) { clearInterval(iv); try { map.removeLayer(ring); } catch {} }
+              }, 30);
+            }, i * 500);
           }
+
+          // Open fail popup AFTER a short delay (ensures map settled)
+          setTimeout(() => {
+            if (eventType === "down") {
+              const mon = kumaMonitors.find(m => m.id === monitorId);
+              // Remove any existing popup for this node
+              const existing = failPopupsRef.current.get(node.id);
+              if (existing) { try { map.removeLayer(existing); } catch {} }
+
+              const popup = L.popup({
+                closeButton: false, autoClose: false, closeOnClick: false,
+                className: "fail-popup-tm", offset: [0, -22], autoPan: false,
+              })
+                .setLatLng(nodeLatLng)
+                .setContent(`
+                  <div style="background:linear-gradient(135deg,#dc2626,#991b1b);border:2px solid #fca5a5;border-radius:14px;padding:10px 16px;min-width:160px;box-shadow:0 8px 32px rgba(239,68,68,0.4),0 0 60px rgba(239,68,68,0.2),inset 0 1px 0 rgba(255,255,255,0.15);animation:failPopupIn 0.4s cubic-bezier(0.34,1.56,0.64,1);">
+                    <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+                      <div style="width:28px;height:28px;border-radius:8px;background:rgba(255,255,255,0.15);display:flex;align-items:center;justify-content:center;animation:failIconPulse 1.5s ease-in-out infinite;">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                      </div>
+                      <div>
+                        <div style="color:white;font-size:13px;font-weight:800;text-shadow:0 1px 2px rgba(0,0,0,0.3);">${node.label}</div>
+                        <div style="color:rgba(255,255,255,0.8);font-size:10px;font-weight:700;letter-spacing:0.05em;">▼ OFFLINE</div>
+                      </div>
+                    </div>
+                    ${mon?.msg ? `<div style="color:rgba(255,255,255,0.65);font-size:9px;margin-top:2px;">${mon.msg}</div>` : ""}
+                  </div>
+                `);
+              // Use addTo instead of openOn to avoid closing other popups
+              popup.addTo(map);
+              failPopupsRef.current.set(node.id, popup);
+
+              // Auto-close after 6s
+              setTimeout(() => { try { map.removeLayer(popup); failPopupsRef.current.delete(node.id); } catch {} }, 6000);
+            }
+          }, 300); // Delay to let panTo settle
         }, [kumaMonitors])}
         onTimeChange={(time: Date | null, statuses: Map<number, number>) => {
           setTimeMachineTime(time);
@@ -2789,6 +2787,22 @@ export default function LeafletMapView({
           background: #dc2626 !important;
           border: 1px solid #fca5a5 !important;
           box-shadow: 0 4px 12px rgba(239,68,68,0.4) !important;
+        }
+        /* Subtle vibration for focused nodes — NO position/scale change */
+        @keyframes nodeVibrate {
+          0%, 100% { transform: translate(0, 0); }
+          10% { transform: translate(-1px, 0); }
+          20% { transform: translate(1px, -1px); }
+          30% { transform: translate(-1px, 1px); }
+          40% { transform: translate(1px, 0); }
+          50% { transform: translate(0, -1px); }
+          60% { transform: translate(-1px, 0); }
+          70% { transform: translate(1px, 1px); }
+          80% { transform: translate(0, -1px); }
+          90% { transform: translate(-1px, 0); }
+        }
+        .node-vibrate {
+          animation: nodeVibrate 0.5s ease-in-out 3 !important;
         }
         @keyframes failPopupIn {
           0% { transform: scale(0.3) translateY(10px); opacity: 0; }

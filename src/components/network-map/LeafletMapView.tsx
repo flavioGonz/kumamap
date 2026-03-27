@@ -187,7 +187,6 @@ export default function LeafletMapView({
   const [mapStyle, setMapStyle] = useState<"dark" | "satellite" | "streets">(initialViewState?.mapStyle || "dark");
   const tileLayerRef = useRef<any>(null);
   const labelMarkersRef = useRef<Map<string, any>>(new Map());
-  const dragLineRef = useRef<any>(null);
 
   const tileUrls: Record<string, { url: string; maxZoom: number; maxNativeZoom?: number }> = {
     dark: { url: "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", maxZoom: 22, maxNativeZoom: 19 },
@@ -564,13 +563,6 @@ export default function LeafletMapView({
 
       // Double-click to edit label or node name
       marker.on("dblclick", (e: any) => {
-        // In link mode: complete link instead of editing
-        if (linkSourceRef.current) {
-          e.originalEvent?.stopPropagation?.();
-          if (linkSourceRef.current !== node.id) completeLinkCreation(node.id);
-          else cancelLinkCreation();
-          return;
-        }
         const newText = prompt(isLabel ? "Texto de la etiqueta:" : "Nombre del nodo:", node.label);
         if (newText?.trim()) {
           const idx = nodesRef.current.findIndex((n) => n.id === node.id);
@@ -587,16 +579,7 @@ export default function LeafletMapView({
         e.originalEvent.stopPropagation();
         map.closePopup();
 
-        // In link mode: complete on right-click too
-        if (linkSourceRef.current && linkSourceRef.current !== node.id) {
-          completeLinkCreation(node.id);
-          return;
-        }
-        // If we clicked on the same source node, cancel
-        if (linkSourceRef.current && linkSourceRef.current === node.id) {
-          cancelLinkCreation();
-          return;
-        }
+        // Link mode is handled by overlay — skip context menu
 
         setCtxMenu({
           x: e.originalEvent.clientX,
@@ -605,31 +588,13 @@ export default function LeafletMapView({
         });
       });
 
-      // Click — complete link or open popup
-      marker.on("click", (e: any) => {
-        e.originalEvent?.preventDefault?.();
-        e.originalEvent?.stopPropagation?.();
-        if (linkSourceRef.current && linkSourceRef.current !== node.id) {
-          completeLinkCreation(node.id);
-          return;
-        }
-        if (linkSourceRef.current && linkSourceRef.current === node.id) {
-          cancelLinkCreation();
-          return;
-        }
-        if (isLabel || isCamera || isWaypoint) return;
+      // Click — open popup (link mode handled by overlay)
+      marker.on("click", () => {
+        if (isLabel || isCamera || isWaypoint || isPolygon) return;
         const popup = L.popup({ className: "leaflet-popup-dark", maxWidth: 280 })
           .setLatLng(marker.getLatLng())
           .setContent(createPopupContent(node));
         popup.openOn(map);
-      });
-
-      // Mouseup fallback for link completion (more reliable than mousedown)
-      marker.on("mouseup", (e: any) => {
-        if (linkSourceRef.current && linkSourceRef.current !== node.id) {
-          e.originalEvent?.stopPropagation?.();
-          completeLinkCreation(node.id);
-        }
       });
 
       // ── Drag: live update FOV cone, handles, edges, shadow ──
@@ -849,153 +814,33 @@ export default function LeafletMapView({
     }
   }
 
-  // ─── Link creation flow ─────────────────────
+  // ─── Link creation flow (HTML overlay approach) ─────────────────────
+  const linkOverlayRef = useRef<HTMLDivElement | null>(null);
+  const linkLineRef = useRef<SVGLineElement | null>(null);
+  const linkSvgRef = useRef<SVGSVGElement | null>(null);
+  const snappedTargetRef = useRef<string | null>(null);
+
   function startLinkCreation(nodeId: string) {
     linkSourceRef.current = nodeId;
     setLinkSource(nodeId);
     const node = nodesRef.current.find((n) => n.id === nodeId);
-    toast.info(`Arrastra hacia el nodo destino o haz clic en el`, {
+    toast.info(`Haz clic en el nodo destino`, {
       description: `Origen: ${node?.label || nodeId}`,
       duration: 4000,
     });
 
     // Highlight source marker
     if (LRef.current && mapRef.current) {
-      const L = LRef.current;
-      const map = mapRef.current;
       const marker = markersRef.current.get(nodeId);
       if (marker) {
         const color = getStatusColor(node?.kuma_monitor_id ?? null);
-        marker.setIcon(createMarkerIcon(L, color, false, true));
-      }
-
-      // Disable dragging on all markers except source (so click works on targets)
-      markersRef.current.forEach((m, id) => {
-        if (id !== nodeId) m.dragging?.disable();
-      });
-
-      // Create rubber-band line from source to cursor
-      if (node) {
-        const srcLatLng = [node.x, node.y] as [number, number];
-        dragLineRef.current = L.polyline([srcLatLng, srcLatLng], {
-          color: "#60a5fa",
-          weight: 2.5,
-          opacity: 0.8,
-          dashArray: "8,5",
-          interactive: false,
-        }).addTo(map);
-
-        let lastSnappedId: string | null = null;
-        const SNAP_RADIUS = 30; // pixels
-
-        const onMouseMove = (e: any) => {
-          if (!dragLineRef.current) return;
-          const mouseLatLng = e.latlng;
-          const mousePoint = map.latLngToContainerPoint(mouseLatLng);
-
-          // Find nearest node within snap radius
-          let snapped = false;
-          let snapTarget: [number, number] = [mouseLatLng.lat, mouseLatLng.lng];
-
-          for (const n of nodesRef.current) {
-            if (n.id === nodeId || n.icon === "_textLabel") continue;
-            const nPoint = map.latLngToContainerPoint([n.x, n.y]);
-            const dist = Math.sqrt(Math.pow(mousePoint.x - nPoint.x, 2) + Math.pow(mousePoint.y - nPoint.y, 2));
-            if (dist < SNAP_RADIUS) {
-              snapTarget = [n.x, n.y];
-              snapped = true;
-
-              // Highlight target marker with glow
-              if (lastSnappedId !== n.id) {
-                // Reset previous
-                if (lastSnappedId) {
-                  const prevMarker = markersRef.current.get(lastSnappedId);
-                  if (prevMarker?.getElement()) prevMarker.getElement().style.filter = "";
-                }
-                const targetMarker = markersRef.current.get(n.id);
-                if (targetMarker?.getElement()) {
-                  targetMarker.getElement().style.filter = "drop-shadow(0 0 12px #60a5fa) brightness(1.3)";
-                  targetMarker.getElement().style.transition = "filter 0.15s";
-                }
-                lastSnappedId = n.id;
-              }
-              // Snap line: make it solid and brighter
-              dragLineRef.current.setStyle({ dashArray: null, opacity: 1, weight: 3, color: "#60a5fa" });
-              break;
-            }
-          }
-
-          if (!snapped) {
-            // Reset glow on previous snap target
-            if (lastSnappedId) {
-              const prevMarker = markersRef.current.get(lastSnappedId);
-              if (prevMarker?.getElement()) prevMarker.getElement().style.filter = "";
-              lastSnappedId = null;
-            }
-            dragLineRef.current.setStyle({ dashArray: "8,5", opacity: 0.8, weight: 2.5, color: "#60a5fa" });
-          }
-
-          dragLineRef.current.setLatLngs([srcLatLng, snapTarget]);
-        };
-
-        // Map-level click to complete link (bypasses marker event issues)
-        const onMapClick = (e: any) => {
-          if (!linkSourceRef.current) return;
-          const clickPoint = map.latLngToContainerPoint(e.latlng);
-          for (const n of nodesRef.current) {
-            if (n.id === nodeId || n.icon === "_textLabel") continue;
-            const nPoint = map.latLngToContainerPoint([n.x, n.y]);
-            const dist = Math.sqrt(Math.pow(clickPoint.x - nPoint.x, 2) + Math.pow(clickPoint.y - nPoint.y, 2));
-            if (dist < SNAP_RADIUS) {
-              completeLinkCreation(n.id);
-              return;
-            }
-          }
-        };
-
-        map.on("mousemove", onMouseMove);
-        map.on("click", onMapClick);
-        map.on("contextmenu", (e: any) => {
-          if (!linkSourceRef.current) return;
-          e.originalEvent.preventDefault();
-          const clickPoint = map.latLngToContainerPoint(e.latlng);
-          for (const n of nodesRef.current) {
-            if (n.id === nodeId || n.icon === "_textLabel") continue;
-            const nPoint = map.latLngToContainerPoint([n.x, n.y]);
-            const dist = Math.sqrt(Math.pow(clickPoint.x - nPoint.x, 2) + Math.pow(clickPoint.y - nPoint.y, 2));
-            if (dist < SNAP_RADIUS) {
-              completeLinkCreation(n.id);
-              return;
-            }
-          }
-        });
-
-        // Store cleanup function
-        (dragLineRef.current as any)._cleanup = () => {
-          map.off("mousemove", onMouseMove);
-          map.off("click", onMapClick);
-          // Reset any lingering glow
-          if (lastSnappedId) {
-            const m = markersRef.current.get(lastSnappedId);
-            if (m?.getElement()) m.getElement().style.filter = "";
-          }
-        };
+        marker.setIcon(createMarkerIcon(LRef.current, color, false, true));
       }
     }
   }
 
   function completeLinkCreation(targetId: string) {
     if (!linkSource) return;
-
-    // Remove rubber-band line
-    if (dragLineRef.current && mapRef.current) {
-      if ((dragLineRef.current as any)._cleanup) (dragLineRef.current as any)._cleanup();
-      try { mapRef.current.removeLayer(dragLineRef.current); } catch {}
-      dragLineRef.current = null;
-    }
-
-    // Re-enable dragging on all markers
-    markersRef.current.forEach((m) => m.dragging?.enable());
 
     // Prevent self-link
     if (linkSource === targetId) {
@@ -1055,14 +900,7 @@ export default function LeafletMapView({
   }
 
   function cancelLinkCreation() {
-    // Remove rubber-band line
-    if (dragLineRef.current && mapRef.current) {
-      if ((dragLineRef.current as any)._cleanup) (dragLineRef.current as any)._cleanup();
-      try { mapRef.current.removeLayer(dragLineRef.current); } catch {}
-      dragLineRef.current = null;
-    }
-    // Re-enable dragging on all markers
-    markersRef.current.forEach((m) => m.dragging?.enable());
+    snappedTargetRef.current = null;
     linkSourceRef.current = null;
     setLinkSource(null);
     if (LRef.current && mapRef.current) {
@@ -1505,6 +1343,84 @@ export default function LeafletMapView({
         onDrop={handleDrop}
         onDragOver={handleDragOver}
       />
+
+      {/* ── Link mode overlay: captures ALL clicks above Leaflet ── */}
+      {linkSource && (
+        <div
+          ref={linkOverlayRef}
+          className="absolute inset-0 cursor-crosshair"
+          style={{ zIndex: 1000 }}
+          onMouseMove={(e) => {
+            if (!mapRef.current || !linkSvgRef.current || !linkLineRef.current) return;
+            const rect = containerRef.current!.getBoundingClientRect();
+            const mx = e.clientX - rect.left;
+            const my = e.clientY - rect.top;
+
+            // Update SVG line endpoint
+            linkLineRef.current.setAttribute("x2", String(mx));
+            linkLineRef.current.setAttribute("y2", String(my));
+
+            // Find snap target
+            const SNAP = 40;
+            let snapped = false;
+            const srcId = linkSourceRef.current;
+            for (const n of nodesRef.current) {
+              if (n.id === srcId || n.icon === "_textLabel") continue;
+              const nPoint = mapRef.current!.latLngToContainerPoint([n.x, n.y]);
+              const dist = Math.sqrt((mx - nPoint.x) ** 2 + (my - nPoint.y) ** 2);
+              if (dist < SNAP) {
+                linkLineRef.current.setAttribute("x2", String(nPoint.x));
+                linkLineRef.current.setAttribute("y2", String(nPoint.y));
+                linkLineRef.current.setAttribute("stroke", "#60a5fa");
+                linkLineRef.current.setAttribute("stroke-dasharray", "");
+                linkLineRef.current.setAttribute("stroke-width", "3");
+                snappedTargetRef.current = n.id;
+                snapped = true;
+                break;
+              }
+            }
+            if (!snapped) {
+              snappedTargetRef.current = null;
+              linkLineRef.current.setAttribute("stroke", "#60a5fa");
+              linkLineRef.current.setAttribute("stroke-dasharray", "8,5");
+              linkLineRef.current.setAttribute("stroke-width", "2.5");
+            }
+          }}
+          onClick={(e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            if (snappedTargetRef.current) {
+              completeLinkCreation(snappedTargetRef.current);
+            }
+          }}
+          onContextMenu={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            cancelLinkCreation();
+          }}
+        >
+          <svg ref={linkSvgRef} className="absolute inset-0 w-full h-full pointer-events-none" style={{ zIndex: 1001 }}>
+            {(() => {
+              const srcNode = nodesRef.current.find(n => n.id === linkSource);
+              if (!srcNode || !mapRef.current) return null;
+              const srcPoint = mapRef.current.latLngToContainerPoint([srcNode.x, srcNode.y]);
+              return (
+                <line
+                  ref={linkLineRef}
+                  x1={srcPoint.x} y1={srcPoint.y}
+                  x2={srcPoint.x} y2={srcPoint.y}
+                  stroke="#60a5fa" strokeWidth="2.5" strokeDasharray="8,5" opacity="0.9"
+                />
+              );
+            })()}
+          </svg>
+          {/* Visual hint */}
+          <div className="absolute top-16 left-1/2 -translate-x-1/2 rounded-xl px-4 py-2 text-xs font-bold text-[#60a5fa] pointer-events-none"
+            style={{ background: "rgba(10,10,10,0.85)", border: "1px solid rgba(59,130,246,0.3)", backdropFilter: "blur(8px)", zIndex: 1002 }}>
+            Haz clic en el nodo destino &middot; Esc para cancelar
+          </div>
+        </div>
+      )}
 
       {/* ── Dark Overlay: CSS filter on tile pane only ── */}
       <style>{`

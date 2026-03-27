@@ -2364,34 +2364,75 @@ export default function LeafletMapView({
         onToggle={() => setTimeMachineOpen((v) => !v)}
         onDragging={useCallback((d: boolean) => setTimeDragging(d), [])}
         onFocusEvent={useCallback((monitorId: number, eventType: "down" | "up") => {
-          // Find the node with this monitor and zoom to it
+          // Find the node with this monitor and zoom/animate
           const node = nodesRef.current.find(n => n.kuma_monitor_id === monitorId);
-          if (node && mapRef.current) {
-            mapRef.current.flyTo([node.x, node.y], Math.max(mapRef.current.getZoom(), 16), { duration: 1.2 });
-            // Flash the marker
-            const marker = markersRef.current.get(node.id);
-            if (marker?.getElement()) {
-              const el = marker.getElement();
-              const flashColor = eventType === "down" ? "#ef4444" : "#22c55e";
-              el.style.filter = `drop-shadow(0 0 20px ${flashColor}) brightness(1.5)`;
-              el.style.transition = "filter 0.2s";
-              setTimeout(() => { el.style.filter = ""; el.style.transition = "filter 1s"; }, 2000);
-            }
+          if (!node || !mapRef.current || !LRef.current) return;
+          const L = LRef.current;
+          const map = mapRef.current;
+
+          // Fly to the node
+          map.flyTo([node.x, node.y], Math.max(map.getZoom(), 16), { duration: 1.2 });
+
+          // Animate the marker with dramatic pulse ring
+          const flashColor = eventType === "down" ? "#ef4444" : "#22c55e";
+
+          // Create expanding pulse rings at the node position
+          for (let i = 0; i < 3; i++) {
+            setTimeout(() => {
+              const ring = L.circleMarker([node.x, node.y], {
+                radius: 5,
+                color: flashColor,
+                fillColor: flashColor,
+                fillOpacity: 0.4,
+                weight: 3,
+                opacity: 0.8,
+                className: "focus-ring",
+              }).addTo(map);
+
+              // Animate expansion
+              let r = 5;
+              const expandInterval = setInterval(() => {
+                r += 2;
+                ring.setRadius(r);
+                ring.setStyle({ opacity: Math.max(0, 0.8 - r / 60), fillOpacity: Math.max(0, 0.4 - r / 80) });
+                if (r > 60) { clearInterval(expandInterval); map.removeLayer(ring); }
+              }, 30);
+            }, i * 400);
+          }
+
+          // Flash the marker itself
+          const marker = markersRef.current.get(node.id);
+          if (marker?.getElement()) {
+            const el = marker.getElement();
+            el.style.filter = `drop-shadow(0 0 30px ${flashColor}) drop-shadow(0 0 60px ${flashColor}) brightness(2)`;
+            el.style.transition = "filter 0.15s";
+            el.style.transform = "scale(1.8)";
+            setTimeout(() => {
+              el.style.transform = "scale(1.3)";
+              el.style.filter = `drop-shadow(0 0 15px ${flashColor}) brightness(1.3)`;
+              el.style.transition = "filter 1s, transform 0.8s";
+            }, 800);
+            setTimeout(() => {
+              el.style.filter = "";
+              el.style.transform = "";
+              el.style.transition = "filter 1s, transform 0.5s";
+            }, 4000);
           }
         }, [])}
         onTimeChange={(time: Date | null, statuses: Map<number, number>) => {
           setTimeMachineTime(time);
           if (!LRef.current || !mapRef.current) return;
           const L = LRef.current;
+          const map = mapRef.current;
 
           if (!time || statuses.size === 0) {
             // Back to LIVE — force full re-render with current kuma data
-            renderNodes(L, mapRef.current);
-            renderEdges(L, mapRef.current);
+            renderNodes(L, map);
+            renderEdges(L, map);
             return;
           }
 
-          // Apply historical statuses to map markers
+          // Apply historical statuses to nodes (update marker icons)
           nodesRef.current.forEach((node) => {
             const marker = markersRef.current.get(node.id);
             if (!marker || !node.kuma_monitor_id) return;
@@ -2399,6 +2440,24 @@ export default function LeafletMapView({
             if (st === undefined) return;
             const color = st === 0 ? "#ef4444" : st === 1 ? "#22c55e" : st === 3 ? "#8b5cf6" : "#f59e0b";
             marker.setIcon(createMarkerIcon(L, color, st === 0, false));
+          });
+
+          // Re-render edges with historical statuses
+          // Temporarily override kumaMonitors statuses for renderEdges
+          const originalStatuses = new Map<number, number | undefined>();
+          kumaMonitors.forEach(m => {
+            originalStatuses.set(m.id, m.status);
+            const historicalStatus = statuses.get(m.id);
+            if (historicalStatus !== undefined) {
+              (m as any).status = historicalStatus;
+            }
+          });
+
+          renderEdges(L, map);
+
+          // Restore original statuses
+          kumaMonitors.forEach(m => {
+            (m as any).status = originalStatuses.get(m.id);
           });
         }}
         monitors={kumaMonitors.map((m) => ({

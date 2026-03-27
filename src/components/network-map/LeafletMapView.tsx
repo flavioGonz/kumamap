@@ -290,14 +290,15 @@ export default function LeafletMapView({
   function getStatusColor(monitorId: number | null): string {
     if (monitorId == null) return "#6b7280";
     const m = monitorIndex.get(monitorId);
-    if (!m) return "#f59e0b";
-    // DOWN/PENDING: always red/amber
-    if (m.status === 0) return "#ef4444";
-    if (m.status === 2) return "#f59e0b";
-    if (m.status === 3) return "#8b5cf6";
+    if (!m) return "#6b7280"; // unknown monitor = gray
+    if (!m.active) return "#6b7280"; // inactive = gray
+    if (m.status == null) return "#6b7280"; // no status yet = gray
+    if (m.status === 0) return "#ef4444"; // DOWN = red
+    if (m.status === 2) return "#f59e0b"; // PENDING = amber
+    if (m.status === 3) return "#8b5cf6"; // MAINTENANCE = purple
     // UP: use first tag color if available, otherwise green
     if (m.status === 1 && m.tags && m.tags.length > 0) return m.tags[0].color;
-    return "#22c55e";
+    return "#22c55e"; // UP = green
   }
 
   function getMonitorData(monitorId: number | null): KumaMonitor | undefined {

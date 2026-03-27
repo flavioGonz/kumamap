@@ -193,6 +193,7 @@ export default function LeafletMapView({
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<any>(null);
   const markersRef = useRef<Map<string, any>>(new Map());
+  const failPopupsRef = useRef<Map<string, any>>(new Map());
   const polylinesRef = useRef<Map<string, any>>(new Map());
   const fovLayersRef = useRef<Map<string, any>>(new Map());
   const camHandlesRef = useRef<Map<string, any>>(new Map());
@@ -2550,13 +2551,19 @@ export default function LeafletMapView({
           const map = mapRef.current;
 
           if (!time || statuses.size === 0) {
-            // Back to LIVE — force full re-render with current kuma data
+            // Back to LIVE — clear fail popups and re-render
+            failPopupsRef.current.forEach((p) => { try { map.removeLayer(p); } catch {} });
+            failPopupsRef.current.clear();
             renderNodes(L, map);
             renderEdges(L, map);
             return;
           }
 
-          // Apply historical statuses to nodes (update marker icons + show tooltips for DOWN)
+          // Apply historical statuses to nodes + show dramatic fail popups
+          // First close all existing fail popups
+          failPopupsRef.current.forEach((p) => { try { map.removeLayer(p); } catch {} });
+          failPopupsRef.current.clear();
+
           nodesRef.current.forEach((node) => {
             const marker = markersRef.current.get(node.id);
             if (!marker || !node.kuma_monitor_id) return;
@@ -2564,11 +2571,58 @@ export default function LeafletMapView({
             if (st === undefined) return;
             const color = st === 0 ? "#ef4444" : st === 1 ? "#22c55e" : st === 3 ? "#8b5cf6" : "#f59e0b";
             marker.setIcon(createMarkerIcon(L, color, st === 0, false));
-            // Open tooltip on DOWN nodes during time travel
-            if (st === 0 && marker.getTooltip()) {
-              try { marker.openTooltip(); } catch {}
-            } else {
-              try { marker.closeTooltip(); } catch {}
+
+            // Show dramatic red fail popup for DOWN nodes
+            if (st === 0) {
+              const mon = kumaMonitors.find(m => m.id === node.kuma_monitor_id);
+              const popup = L.popup({
+                closeButton: false,
+                autoClose: false,
+                closeOnClick: false,
+                className: "fail-popup-tm",
+                offset: [0, -20],
+                autoPan: false,
+              })
+                .setLatLng([node.x, node.y])
+                .setContent(`
+                  <div style="
+                    background: linear-gradient(135deg, #dc2626, #991b1b);
+                    border: 2px solid #fca5a5;
+                    border-radius: 14px;
+                    padding: 8px 14px;
+                    min-width: 140px;
+                    box-shadow: 0 8px 32px rgba(239,68,68,0.4), 0 0 60px rgba(239,68,68,0.2), inset 0 1px 0 rgba(255,255,255,0.15);
+                    animation: failPopupIn 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+                  ">
+                    <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+                      <div style="
+                        width:24px;height:24px;border-radius:8px;
+                        background:rgba(255,255,255,0.15);
+                        display:flex;align-items:center;justify-content:center;
+                        animation: failIconPulse 1.5s ease-in-out infinite;
+                      ">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round">
+                          <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                          <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+                        </svg>
+                      </div>
+                      <div>
+                        <div style="color:white;font-size:12px;font-weight:800;text-shadow:0 1px 2px rgba(0,0,0,0.3);">
+                          ${node.label}
+                        </div>
+                        <div style="color:rgba(255,255,255,0.7);font-size:9px;font-weight:600;letter-spacing:0.05em;">
+                          ▼ OFFLINE
+                        </div>
+                      </div>
+                    </div>
+                    ${mon?.msg ? `<div style="color:rgba(255,255,255,0.6);font-size:8px;margin-top:2px;font-style:italic;">${mon.msg}</div>` : ""}
+                    ${time ? `<div style="color:rgba(255,255,255,0.5);font-size:8px;font-family:monospace;margin-top:3px;">
+                      ${time.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+                    </div>` : ""}
+                  </div>
+                `)
+                .openOn(map);
+              failPopupsRef.current.set(node.id, popup);
             }
           });
 
@@ -2659,6 +2713,29 @@ export default function LeafletMapView({
         }
         @keyframes ping {
           75%, 100% { transform: scale(2); opacity: 0; }
+        }
+        /* Time Machine fail popup */
+        .fail-popup-tm .leaflet-popup-content-wrapper {
+          background: transparent !important;
+          box-shadow: none !important;
+          padding: 0 !important;
+          border-radius: 0 !important;
+        }
+        .fail-popup-tm .leaflet-popup-content {
+          margin: 0 !important;
+        }
+        .fail-popup-tm .leaflet-popup-tip {
+          background: #dc2626 !important;
+          border: 1px solid #fca5a5 !important;
+          box-shadow: 0 4px 12px rgba(239,68,68,0.4) !important;
+        }
+        @keyframes failPopupIn {
+          0% { transform: scale(0.3) translateY(10px); opacity: 0; }
+          100% { transform: scale(1) translateY(0); opacity: 1; }
+        }
+        @keyframes failIconPulse {
+          0%, 100% { transform: scale(1); opacity: 1; }
+          50% { transform: scale(1.15); opacity: 0.8; }
         }
       `}</style>
     </div>

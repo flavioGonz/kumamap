@@ -23,9 +23,10 @@ interface TimeMachineProps {
   onDragging?: (isDragging: boolean) => void;
   onFocusEvent?: (monitorId: number, eventType: "down" | "up") => void;
   monitors: MonitorInfo[];
+  mapMonitorIds?: number[]; // Only show events for these monitors (nodes on current map)
 }
 
-export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, onFocusEvent, monitors }: TimeMachineProps) {
+export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, onFocusEvent, monitors, mapMonitorIds }: TimeMachineProps) {
   const [events, setEvents] = useState<TimelineEvent[]>([]);
   const [statusChanges, setStatusChanges] = useState<Record<number, Array<{ t: number; s: number }>>>({});
   const [position, setPosition] = useState(1);
@@ -35,12 +36,28 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
   const [hoursBack, setHoursBack] = useState(2);
   const [loading, setLoading] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const [customRange, setCustomRange] = useState(false);
+  const [rangeFrom, setRangeFrom] = useState("");
+  const [rangeTo, setRangeTo] = useState("");
   const barRef = useRef<HTMLDivElement>(null);
   const playRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const activeMonitors = useMemo(() => monitors.filter(m => m.type !== "group"), [monitors]);
-  const timeStart = useMemo(() => new Date(Date.now() - hoursBack * 3600000), [hoursBack]);
-  const timeEnd = useMemo(() => new Date(), []);
+  // Only monitors that are on the current map
+  const mapMonitorSet = useMemo(() => new Set(mapMonitorIds || []), [mapMonitorIds]);
+  const activeMonitors = useMemo(() => {
+    const filtered = monitors.filter(m => m.type !== "group");
+    if (mapMonitorSet.size === 0) return filtered;
+    return filtered.filter(m => mapMonitorSet.has(m.id));
+  }, [monitors, mapMonitorSet]);
+
+  const timeStart = useMemo(() => {
+    if (customRange && rangeFrom) return new Date(rangeFrom);
+    return new Date(Date.now() - hoursBack * 3600000);
+  }, [hoursBack, customRange, rangeFrom]);
+  const timeEnd = useMemo(() => {
+    if (customRange && rangeTo) return new Date(rangeTo);
+    return new Date();
+  }, [customRange, rangeTo]);
   const isLive = position >= 0.999;
   const rangeMs = timeEnd.getTime() - timeStart.getTime();
 
@@ -68,12 +85,14 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
     return () => clearInterval(iv);
   }, [open, loaded, fetchTimeline]);
 
-  // Filter events to visible range
+  // Filter events to visible range AND only map monitors
   const visibleEvents = useMemo(() => {
     const startMs = timeStart.getTime();
     const endMs = timeEnd.getTime();
     return events
       .filter(e => {
+        // Only events for monitors on this map
+        if (mapMonitorSet.size > 0 && !mapMonitorSet.has(e.monitorId)) return false;
         const t = new Date(e.time).getTime();
         return t >= startMs && t <= endMs;
       })
@@ -82,7 +101,7 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
         position: (new Date(e.time).getTime() - startMs) / rangeMs,
         timeDate: new Date(e.time),
       }));
-  }, [events, timeStart, timeEnd, rangeMs]);
+  }, [events, timeStart, timeEnd, rangeMs, mapMonitorSet]);
 
   // Get statuses at a specific time using statusChanges from Kuma DB
   const getStatusesAtTime = useCallback((t: Date): Map<number, number> => {
@@ -343,19 +362,67 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
           ))}
           <div className="h-px w-full my-0.5" style={{ background: "rgba(255,255,255,0.04)" }} />
           <div className="text-[6px] font-bold text-[#444] uppercase tracking-wider mb-0.5">Rango</div>
-          {[1, 2, 6, 24].map(h => (
-            <button key={h} onClick={() => { setHoursBack(h); setPosition(1); setPlaying(false); }}
+          {!customRange && [1, 2, 6, 24].map(h => (
+            <button key={h} onClick={() => { setHoursBack(h); setCustomRange(false); setLoaded(false); setPosition(1); setPlaying(false); }}
               className="text-[7px] font-bold rounded-md px-1 py-0.5 w-full text-center transition-all"
-              style={{ color: hoursBack === h ? "#ededed" : "#444", background: hoursBack === h ? "rgba(255,255,255,0.05)" : "transparent" }}>
+              style={{ color: !customRange && hoursBack === h ? "#ededed" : "#444", background: !customRange && hoursBack === h ? "rgba(255,255,255,0.05)" : "transparent" }}>
               {h}h
             </button>
           ))}
+          {/* Custom range button */}
+          <button onClick={() => {
+            if (customRange) {
+              setCustomRange(false);
+              setLoaded(false);
+            } else {
+              // Default: last 24h
+              const now = new Date();
+              const from = new Date(now.getTime() - 24 * 3600000);
+              setRangeFrom(from.toISOString().slice(0, 16));
+              setRangeTo(now.toISOString().slice(0, 16));
+              setCustomRange(true);
+              setLoaded(false);
+            }
+          }}
+            className="text-[7px] font-bold rounded-md px-1 py-0.5 w-full text-center transition-all mt-0.5"
+            style={{ color: customRange ? "#f59e0b" : "#444", background: customRange ? "rgba(245,158,11,0.1)" : "transparent", border: customRange ? "1px solid rgba(245,158,11,0.2)" : "1px solid transparent" }}>
+            {customRange ? "Fijo" : "Fecha"}
+          </button>
+
+          {/* Custom date inputs (shown as popout on the left) */}
+          {customRange && (
+            <div className="absolute left-[56px] bottom-4 rounded-xl p-3 space-y-2"
+              style={{ background: "rgba(8,8,8,0.97)", border: "1px solid rgba(255,255,255,0.08)", backdropFilter: "blur(16px)", boxShadow: "0 8px 32px rgba(0,0,0,0.6)", width: 200, zIndex: 10 }}>
+              <div className="text-[9px] font-bold text-[#888] uppercase tracking-wider">Rango personalizado</div>
+              <div>
+                <label className="text-[8px] text-[#555] font-semibold">Desde</label>
+                <input type="datetime-local" value={rangeFrom} onChange={e => setRangeFrom(e.target.value)}
+                  className="w-full rounded-lg px-2 py-1 text-[10px] text-[#ededed] mt-0.5 focus:outline-none focus:ring-1 focus:ring-blue-500/50"
+                  style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }} />
+              </div>
+              <div>
+                <label className="text-[8px] text-[#555] font-semibold">Hasta</label>
+                <input type="datetime-local" value={rangeTo} onChange={e => setRangeTo(e.target.value)}
+                  className="w-full rounded-lg px-2 py-1 text-[10px] text-[#ededed] mt-0.5 focus:outline-none focus:ring-1 focus:ring-blue-500/50"
+                  style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }} />
+              </div>
+              <button onClick={() => { setLoaded(false); fetchTimeline(); setPosition(0); }}
+                className="w-full rounded-lg py-1.5 text-[9px] font-bold uppercase tracking-wider transition-all"
+                style={{ background: "rgba(59,130,246,0.15)", border: "1px solid rgba(59,130,246,0.3)", color: "#60a5fa" }}>
+                Aplicar rango
+              </button>
+            </div>
+          )}
+
           <div className="mt-1 text-center">
             <div className="text-[8px] font-mono font-bold" style={{ color: isLive ? "#4ade80" : "#60a5fa" }}>
               {isLive ? "LIVE" : currentTime?.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
             </div>
             {visibleEvents.length > 0 && (
-              <div className="text-[7px] text-[#555] mt-0.5">{visibleEvents.length} eventos</div>
+              <div className="text-[7px] text-[#555] mt-0.5">{visibleEvents.length} evt</div>
+            )}
+            {mapMonitorSet.size > 0 && (
+              <div className="text-[6px] text-[#444] mt-0.5">{mapMonitorSet.size} nodos</div>
             )}
           </div>
         </div>

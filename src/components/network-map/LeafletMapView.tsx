@@ -2486,6 +2486,7 @@ export default function LeafletMapView({
         open={timeMachineOpen}
         onToggle={() => setTimeMachineOpen((v) => !v)}
         onDragging={useCallback((d: boolean) => setTimeDragging(d), [])}
+        mapMonitorIds={useMemo(() => nodesRef.current.filter(n => n.kuma_monitor_id).map(n => n.kuma_monitor_id!), [initialNodes])}
         onFocusEvent={useCallback((monitorId: number, eventType: "down" | "up") => {
           // Find the node with this monitor and zoom/animate
           const node = nodesRef.current.find(n => n.kuma_monitor_id === monitorId);
@@ -2555,7 +2556,7 @@ export default function LeafletMapView({
             return;
           }
 
-          // Apply historical statuses to nodes (update marker icons)
+          // Apply historical statuses to nodes (update marker icons + show tooltips for DOWN)
           nodesRef.current.forEach((node) => {
             const marker = markersRef.current.get(node.id);
             if (!marker || !node.kuma_monitor_id) return;
@@ -2563,6 +2564,12 @@ export default function LeafletMapView({
             if (st === undefined) return;
             const color = st === 0 ? "#ef4444" : st === 1 ? "#22c55e" : st === 3 ? "#8b5cf6" : "#f59e0b";
             marker.setIcon(createMarkerIcon(L, color, st === 0, false));
+            // Open tooltip on DOWN nodes during time travel
+            if (st === 0 && marker.getTooltip()) {
+              try { marker.openTooltip(); } catch {}
+            } else {
+              try { marker.closeTooltip(); } catch {}
+            }
           });
 
           // Re-render edges with historical statuses

@@ -191,7 +191,7 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
 
   // ─── Open state — Floating compact bar ───
   return (
-    <div className="absolute left-2 top-16 bottom-16 z-[10000] flex" style={{ width: 48 }}>
+    <div className="absolute left-2 top-16 bottom-16 z-[10000] flex" style={{ width: 56 }}>
       <div className="h-full w-full flex flex-col rounded-2xl overflow-hidden"
         style={{ background: "rgba(6,6,6,0.92)", border: "1px solid rgba(255,255,255,0.06)", backdropFilter: "blur(24px)", boxShadow: "0 8px 40px rgba(0,0,0,0.5)" }}>
 
@@ -257,7 +257,7 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
                 <div className="absolute left-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full transition-all group-hover/evt:scale-[2]"
                   style={{ width: isDown ? 7 : 5, height: isDown ? 7 : 5, background: evtColor, boxShadow: `0 0 6px ${evtColor}` }} />
                 {/* Tooltip */}
-                <div className="absolute left-[52px] -top-5 rounded-xl px-3 py-2 opacity-0 group-hover/evt:opacity-100 transition-opacity pointer-events-none"
+                <div className="absolute left-[60px] -top-5 rounded-xl px-3 py-2 opacity-0 group-hover/evt:opacity-100 transition-opacity pointer-events-none"
                   style={{ background: "rgba(6,6,6,0.97)", border: `1px solid ${evtColor}33`, boxShadow: `0 8px 32px rgba(0,0,0,0.7), 0 0 20px ${evtColor}15`, backdropFilter: "blur(16px)", zIndex: 20, minWidth: 180 }}>
                   <div className="flex items-center gap-2 mb-1.5">
                     <div className="h-2.5 w-2.5 rounded-full" style={{ background: evtColor, boxShadow: `0 0 8px ${evtColor}` }} />
@@ -302,7 +302,7 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
               {playing && <div className="absolute -left-1 -right-1 -top-2 -bottom-2 rounded-full animate-ping" style={{ background: `${isLive ? "#4ade80" : "#60a5fa"}12` }} />}
               <div className="h-[3px] w-full rounded-full" style={{ background: isLive ? "#4ade80" : "#60a5fa", boxShadow: `0 0 12px ${isLive ? "#4ade80" : "#60a5fa"}` }} />
               {!isLive && (
-                <div className="absolute left-[52px] -top-3 rounded-lg px-2 py-0.5 text-[9px] font-mono font-bold whitespace-nowrap"
+                <div className="absolute left-[60px] -top-3 rounded-lg px-2 py-0.5 text-[9px] font-mono font-bold whitespace-nowrap"
                   style={{ background: "rgba(8,8,8,0.95)", border: "1px solid rgba(59,130,246,0.3)", color: "#60a5fa", boxShadow: "0 4px 16px rgba(0,0,0,0.5)" }}>
                   {currentTime?.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
                   {downCount > 0 && <span className="ml-1 text-red-400">{downCount}↓</span>}
@@ -324,7 +324,7 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
             {showSpeed ? <ChevronUp className="h-2 w-2" /> : <ChevronDown className="h-2 w-2" />}
           </button>
           {showSpeed && (
-            <div className="absolute left-[52px] bottom-[80px] rounded-xl p-2 space-y-1"
+            <div className="absolute left-[60px] bottom-[80px] rounded-xl p-2 space-y-1"
               style={{ background: "rgba(6,6,6,0.97)", border: "1px solid rgba(255,255,255,0.06)", backdropFilter: "blur(16px)", boxShadow: "0 8px 24px rgba(0,0,0,0.5)", zIndex: 20, width: 80 }}>
               <div className="text-[8px] font-bold text-[#555] uppercase tracking-wider mb-1">Velocidad</div>
               {[1, 2, 4, 8, 16].map(s => (
@@ -346,7 +346,7 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
             {showRange ? <ChevronUp className="h-2 w-2" /> : <ChevronDown className="h-2 w-2" />}
           </button>
           {showRange && (
-            <div className="absolute left-[52px] bottom-[56px] rounded-xl p-2 space-y-1"
+            <div className="absolute left-[60px] bottom-[56px] rounded-xl p-2 space-y-1"
               style={{ background: "rgba(6,6,6,0.97)", border: "1px solid rgba(255,255,255,0.06)", backdropFilter: "blur(16px)", boxShadow: "0 8px 24px rgba(0,0,0,0.5)", zIndex: 20, width: 200 }}>
               <div className="text-[8px] font-bold text-[#555] uppercase tracking-wider mb-1">Rango de tiempo</div>
               <div className="flex gap-1 flex-wrap">
@@ -393,7 +393,7 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
             {showEvents ? <ChevronUp className="h-2 w-2" /> : <ChevronDown className="h-2 w-2" />}
           </button>
           {showEvents && (
-            <div className="absolute left-[52px] bottom-[32px] rounded-xl p-2"
+            <div className="absolute left-[60px] bottom-[32px] rounded-xl p-2"
               style={{ background: "rgba(6,6,6,0.97)", border: "1px solid rgba(255,255,255,0.06)", backdropFilter: "blur(16px)", boxShadow: "0 8px 24px rgba(0,0,0,0.5)", zIndex: 20, width: 240, maxHeight: 300, overflowY: "auto" }}>
               <div className="text-[8px] font-bold text-[#555] uppercase tracking-wider mb-2">
                 Eventos ({visibleEvents.length})

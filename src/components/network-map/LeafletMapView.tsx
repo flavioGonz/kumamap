@@ -203,6 +203,7 @@ export default function LeafletMapView({
   const [searchVisible, setSearchVisible] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [saving, setSaving] = useState(false);
+  const [editMode, setEditMode] = useState(false);
 
   // Context menu state
   const [ctxMenu, setCtxMenu] = useState<{
@@ -1799,10 +1800,29 @@ export default function LeafletMapView({
           </div>
         </div>
 
-        <div className="flex-1" />
+        <div className="h-5 w-px mx-0.5" style={{ background: "rgba(255,255,255,0.06)" }} />
 
-        {/* ═══ CENTERED TOOLS ═══ */}
+        {/* Edit mode toggle */}
+        <button
+          onClick={() => setEditMode(v => !v)}
+          className="flex items-center gap-1 rounded-xl px-2 py-1.5 text-[10px] font-bold uppercase tracking-wider transition-all"
+          style={{
+            background: editMode ? "rgba(245,158,11,0.15)" : "transparent",
+            border: editMode ? "1px solid rgba(245,158,11,0.3)" : "1px solid transparent",
+            color: editMode ? "#f59e0b" : "#666",
+          }}
+          title={editMode ? "Modo compacto" : "Modo edicion"}
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            {editMode ? <><path d="M12 20h9"/><path d="M16.376 3.622a1 1 0 0 1 3.002 3.002L7.368 18.635a2 2 0 0 1-.855.506l-2.872.838a.5.5 0 0 1-.62-.62l.838-2.872a2 2 0 0 1 .506-.855z"/></> : <><path d="M12 20h9"/><path d="M16.376 3.622a1 1 0 0 1 3.002 3.002L7.368 18.635a2 2 0 0 1-.855.506l-2.872.838a.5.5 0 0 1-.62-.62l.838-2.872a2 2 0 0 1 .506-.855z"/></>}
+          </svg>
+          {editMode ? "Editar" : "Edit"}
+        </button>
 
+        {editMode && <div className="h-5 w-px mx-0.5" style={{ background: "rgba(255,255,255,0.06)" }} />}
+
+        {/* Zoom controls — always visible */}
+        <div className="flex items-center gap-0.5">
         {/* Zoom controls */}
         <div className="flex items-center gap-0.5">
           <button onClick={() => mapRef.current?.zoomIn()} title="Zoom In"
@@ -1825,7 +1845,10 @@ export default function LeafletMapView({
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 3h6v6"/><path d="M9 21H3v-6"/><path d="m21 3-7 7"/><path d="m3 21 7-7"/></svg>
           </button>
         </div>
+        </div>
 
+        {/* ═══ EDIT MODE TOOLS ═══ */}
+        {editMode && <>
         <div className="h-5 w-px mx-0.5" style={{ background: "rgba(255,255,255,0.06)" }} />
 
         {/* Node/Edge controls */}
@@ -1920,6 +1943,7 @@ export default function LeafletMapView({
             <button onClick={cancelLinkCreation} className="ml-0.5 text-[#888] hover:text-white">✕</button>
           </div>
         )}
+        </>}
 
         <div className="flex-1" />
 

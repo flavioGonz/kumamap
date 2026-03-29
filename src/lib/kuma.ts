@@ -131,6 +131,11 @@ class KumaClient {
         history.push(data);
         if (history.length > MAX_HISTORY) history.shift();
         this.heartbeatHistory.set(data.monitorID, history);
+
+        // If heartbeat arrives for unknown monitor, request updated list
+        if (!monitor && this.authenticated) {
+          this.socket!.emit("getMonitorList", () => {});
+        }
       });
 
       this.socket.on(
@@ -142,6 +147,69 @@ class KumaClient {
           }
         }
       );
+
+      // Also listen for individual monitor additions/edits
+      this.socket.on("monitorListDesktop", (data: Record<string, any>) => {
+        // Same handler as monitorList — Kuma uses this event in some versions
+        for (const [id, monitor] of Object.entries(data)) {
+          const mid = parseInt(id);
+          if (isNaN(mid)) continue;
+          const hb = this.heartbeats.get(mid);
+          this.monitors.set(mid, {
+            id: mid,
+            name: monitor.name,
+            type: monitor.type,
+            url: monitor.url || "",
+            hostname: monitor.hostname || "",
+            port: monitor.port || 0,
+            interval: monitor.interval || 60,
+            active: monitor.active !== false,
+            parent: monitor.parent ?? null,
+            tags: (monitor.tags || []).map((t: any) => ({ name: t.name, color: t.color })),
+            status: hb?.status ?? monitor.status,
+            ping: hb?.ping ?? null,
+            msg: hb?.msg ?? "",
+          });
+        }
+      });
+
+      // Periodic monitor list refresh — ensures new sensors are detected
+      // even if Kuma doesn't fire monitorList for additions
+      setInterval(() => {
+        if (this.socket && this.authenticated) {
+          this.socket.emit("getMonitorList", (res: any) => {
+            if (res?.ok && res.data) {
+              const data: Record<string, any> = res.data;
+              const newIds = new Set(Object.keys(data).map((k) => parseInt(k)));
+              for (const existingId of this.monitors.keys()) {
+                if (!newIds.has(existingId)) this.monitors.delete(existingId);
+              }
+              for (const [id, monitor] of Object.entries(data)) {
+                const mid = parseInt(id);
+                if (isNaN(mid)) continue;
+                const existing = this.monitors.get(mid);
+                const hb = this.heartbeats.get(mid);
+                this.monitors.set(mid, {
+                  id: mid,
+                  name: monitor.name,
+                  type: monitor.type,
+                  url: monitor.url || "",
+                  hostname: monitor.hostname || "",
+                  port: monitor.port || 0,
+                  interval: monitor.interval || 60,
+                  active: monitor.active !== false,
+                  parent: monitor.parent ?? null,
+                  tags: (monitor.tags || []).map((t: any) => ({ name: t.name, color: t.color })),
+                  status: existing?.status ?? hb?.status ?? monitor.status,
+                  ping: existing?.ping ?? hb?.ping ?? null,
+                  msg: existing?.msg ?? hb?.msg ?? "",
+                  uptime24: existing?.uptime24,
+                });
+              }
+            }
+          });
+        }
+      }, 30000); // Every 30 seconds
 
       this.socket.on("disconnect", () => {
         console.log("[Kuma] Disconnected");

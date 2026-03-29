@@ -6,7 +6,19 @@ export const dynamic = "force-dynamic";
 export async function GET(req: NextRequest) {
   const kuma = getKumaClient();
   const monitors = kuma.getMonitors();
-  const hours = parseInt(req.nextUrl.searchParams.get("hours") || "24");
+
+  // Support both "hours" (relative) and "from"/"to" (absolute) range
+  const fromParam = req.nextUrl.searchParams.get("from");
+  const toParam = req.nextUrl.searchParams.get("to");
+  let hours: number;
+  if (fromParam && toParam) {
+    const fromMs = new Date(fromParam).getTime();
+    const toMs = new Date(toParam).getTime();
+    hours = Math.ceil((toMs - fromMs) / 3600000);
+    if (hours <= 0) hours = 24;
+  } else {
+    hours = parseInt(req.nextUrl.searchParams.get("hours") || "24");
+  }
 
   // Optional: filter to specific monitor IDs (from map nodes)
   const monitorIdsParam = req.nextUrl.searchParams.get("monitorIds");
@@ -19,7 +31,7 @@ export async function GET(req: NextRequest) {
     .filter((m) => m.active && m.type !== "group" && (!filterSet || filterSet.has(m.id)))
     .map((m) => m.id);
 
-  const allBeats = await kuma.getAllBeats(activeMonitorIds, Math.min(hours, 168)); // max 7 days
+  const allBeats = await kuma.getAllBeats(activeMonitorIds, Math.min(hours, 720)); // max 30 days
 
   // Compress timeline: only send status changes (events), not every heartbeat
   // This dramatically reduces payload size

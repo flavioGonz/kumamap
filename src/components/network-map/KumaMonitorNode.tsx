@@ -37,6 +37,8 @@ import {
   Phone,
   Smartphone,
   Monitor,
+  // Shapes
+  Circle,
   // Power & Infrastructure
   Zap,
   Battery,
@@ -135,6 +137,7 @@ export const iconRegistry: Record<string, IconDef> = {
   servercog:    { component: ServerCog,     label: "Servidor Config", category: "compute" },
 
   // General / Cloud
+  circle:       { component: Circle,        label: "Círculo",        category: "general" },
   cloud:        { component: Cloud,         label: "Nube",           category: "general" },
   cloudcog:     { component: CloudCog,      label: "Nube Config",    category: "general" },
   activity:     { component: Activity,      label: "Actividad",      category: "general" },
@@ -370,4 +373,16 @@ function KumaMonitorNode({ data, selected }: NodeProps & { data: KumaNodeData })
   );
 }
 
-export default memo(KumaMonitorNode);
+export default memo(KumaMonitorNode, (prev, next) => {
+  const pd = prev.data as KumaNodeData;
+  const nd = next.data as KumaNodeData;
+  return (
+    pd.icon === nd.icon &&
+    pd.label === nd.label &&
+    pd.status === nd.status &&
+    pd.ping === nd.ping &&
+    pd.nodeSize === nd.nodeSize &&
+    pd.msg === nd.msg &&
+    prev.selected === next.selected
+  );
+});

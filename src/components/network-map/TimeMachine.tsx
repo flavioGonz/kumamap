@@ -34,6 +34,9 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
   const [speed, setSpeed] = useState(1);
   const [dragging, setDragging] = useState(false);
   const [hoursBack, setHoursBack] = useState(6);
+  const [useCustomRange, setUseCustomRange] = useState(false);
+  const [customFrom, setCustomFrom] = useState("");
+  const [customTo, setCustomTo] = useState("");
   const [loading, setLoading] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [activePanel, setActivePanel] = useState<"speed" | "range" | "events" | null>(null);
@@ -49,15 +52,38 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
     return filtered.filter(m => mapMonitorSet.has(m.id));
   }, [monitors, mapMonitorSet]);
 
-  const timeStart = useMemo(() => new Date(Date.now() - hoursBack * 3600000), [hoursBack]);
-  const timeEnd = useMemo(() => new Date(), []);
-  const isLive = position >= 0.999;
+  const timeStart = useMemo(() => {
+    if (useCustomRange && customFrom) return new Date(customFrom);
+    return new Date(Date.now() - hoursBack * 3600000);
+  }, [hoursBack, useCustomRange, customFrom]);
+  const timeEnd = useMemo(() => {
+    if (useCustomRange && customTo) return new Date(customTo);
+    return new Date();
+  }, [useCustomRange, customTo]);
+  const isLive = useCustomRange ? false : position >= 0.999;
   const rangeMs = timeEnd.getTime() - timeStart.getTime();
 
-  // Fetch timeline — filtered to map monitors + hoursBack
+  // Helper: format Date to datetime-local input value
+  const toLocalInput = (d: Date) => {
+    const pad = (n: number) => n.toString().padStart(2, "0");
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  };
+
+  // Range label for badge
+  const rangeLabel = useMemo(() => {
+    if (!useCustomRange) return `${hoursBack}h`;
+    if (customFrom && customTo) {
+      const from = new Date(customFrom);
+      const to = new Date(customTo);
+      const diffH = Math.round((to.getTime() - from.getTime()) / 3600000);
+      return diffH < 24 ? `${diffH}h` : `${Math.round(diffH / 24)}d`;
+    }
+    return "Custom";
+  }, [useCustomRange, hoursBack, customFrom, customTo]);
+
+  // Fetch timeline — filtered to map monitors + time range
   const fetchTimeline = useCallback(() => {
     if (mapMonitorSet.size === 0) {
-      // No monitors on this map — show nothing
       setAllEvents([]);
       setStatusChanges({});
       setLoaded(true);
@@ -65,7 +91,13 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
     }
     setLoading(true);
     const ids = Array.from(mapMonitorSet).join(",");
-    fetch(apiUrl(`/api/kuma/timeline?hours=${hoursBack}&monitorIds=${ids}`))
+    let url: string;
+    if (useCustomRange && customFrom && customTo) {
+      url = apiUrl(`/api/kuma/timeline?from=${encodeURIComponent(customFrom)}&to=${encodeURIComponent(customTo)}&monitorIds=${ids}`);
+    } else {
+      url = apiUrl(`/api/kuma/timeline?hours=${hoursBack}&monitorIds=${ids}`);
+    }
+    fetch(url)
       .then(r => r.json())
       .then(d => {
         setAllEvents(d.events || []);
@@ -74,13 +106,13 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
         setLoaded(true);
       })
       .catch(() => { setLoading(false); });
-  }, [hoursBack, mapMonitorKey]);
+  }, [hoursBack, useCustomRange, customFrom, customTo, mapMonitorKey]);
 
-  // Auto-fetch when opened or hours change
+  // Auto-fetch when opened or range changes
   useEffect(() => {
     if (!open) return;
     fetchTimeline();
-  }, [open, hoursBack, fetchTimeline]);
+  }, [open, fetchTimeline]);
 
   // Refresh every 2 min
   useEffect(() => {
@@ -323,9 +355,9 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
           <button onClick={() => togglePanel("range")}
             className="flex items-center justify-center h-8 w-8 rounded-xl transition-all relative"
             style={{ background: activePanel === "range" ? "rgba(245,158,11,0.15)" : "rgba(255,255,255,0.04)", border: `1px solid ${activePanel === "range" ? "rgba(245,158,11,0.3)" : "rgba(255,255,255,0.06)"}`, color: activePanel === "range" ? "#f59e0b" : "#666" }}
-            title={`Rango: ${hoursBack}h`}>
+            title={`Rango: ${rangeLabel}`}>
             <Calendar className="h-4 w-4" />
-            <span className="absolute -top-1 -right-1 text-[7px] font-bold rounded-full px-1" style={{ background: "rgba(245,158,11,0.2)", color: "#f59e0b" }}>{hoursBack}h</span>
+            <span className="absolute -top-1 -right-1 text-[7px] font-bold rounded-full px-1" style={{ background: useCustomRange ? "rgba(168,85,247,0.2)" : "rgba(245,158,11,0.2)", color: useCustomRange ? "#a855f7" : "#f59e0b" }}>{rangeLabel}</span>
           </button>
 
           {/* Events */}
@@ -340,8 +372,8 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
           </button>
 
           {/* LIVE indicator */}
-          <div className="text-[9px] font-mono font-black mt-1" style={{ color: isLive ? "#4ade80" : "#60a5fa" }}>
-            {isLive ? "LIVE" : currentTime?.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+          <div className="text-[9px] font-mono font-black mt-1" style={{ color: isLive ? "#4ade80" : useCustomRange ? "#a855f7" : "#60a5fa" }}>
+            {isLive ? "LIVE" : currentTime?.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) || "▶"}
           </div>
         </div>
       </div>
@@ -371,19 +403,61 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
       {/* Range panel */}
       {activePanel === "range" && (
         <div className="absolute left-[64px] bottom-[60px] rounded-2xl p-3"
-          style={{ background: "rgba(8,8,8,0.97)", border: "1px solid rgba(255,255,255,0.08)", backdropFilter: "blur(16px)", boxShadow: "0 8px 32px rgba(0,0,0,0.6)", zIndex: 20, width: 200 }}>
+          style={{ background: "rgba(8,8,8,0.97)", border: "1px solid rgba(255,255,255,0.08)", backdropFilter: "blur(16px)", boxShadow: "0 8px 32px rgba(0,0,0,0.6)", zIndex: 20, width: 260 }}>
           <div className="flex items-center gap-2 mb-3">
             <Calendar className="h-4 w-4 text-amber-400" />
             <span className="text-[11px] font-bold text-[#ededed]">Rango de tiempo</span>
           </div>
-          <div className="grid grid-cols-4 gap-1.5">
+
+          {/* Preset buttons */}
+          <div className="grid grid-cols-4 gap-1.5 mb-3">
             {[1, 2, 6, 12, 24, 48, 72, 168].map(h => (
-              <button key={h} onClick={() => { setHoursBack(h); setPosition(1); setPlaying(false); setActivePanel(null); }}
+              <button key={h} onClick={() => {
+                setUseCustomRange(false); setHoursBack(h); setPosition(1); setPlaying(false);
+              }}
                 className="rounded-xl py-2 text-[11px] font-bold text-center transition-all"
-                style={{ background: hoursBack === h ? "rgba(245,158,11,0.15)" : "rgba(255,255,255,0.03)", border: `1px solid ${hoursBack === h ? "rgba(245,158,11,0.3)" : "rgba(255,255,255,0.04)"}`, color: hoursBack === h ? "#f59e0b" : "#888" }}>
+                style={{ background: !useCustomRange && hoursBack === h ? "rgba(245,158,11,0.15)" : "rgba(255,255,255,0.03)", border: `1px solid ${!useCustomRange && hoursBack === h ? "rgba(245,158,11,0.3)" : "rgba(255,255,255,0.04)"}`, color: !useCustomRange && hoursBack === h ? "#f59e0b" : "#888" }}>
                 {h < 24 ? `${h}h` : `${h / 24}d`}
               </button>
             ))}
+          </div>
+
+          {/* Divider */}
+          <div className="h-px mb-3" style={{ background: "rgba(255,255,255,0.06)" }} />
+
+          {/* Custom date/time range */}
+          <div className="text-[10px] font-bold text-[#999] mb-2 uppercase tracking-wider">Rango personalizado</div>
+          <div className="space-y-2">
+            <div>
+              <label className="text-[9px] text-[#666] block mb-0.5">Desde</label>
+              <input type="datetime-local"
+                value={customFrom || toLocalInput(new Date(Date.now() - hoursBack * 3600000))}
+                onChange={(e) => { setCustomFrom(e.target.value); setUseCustomRange(true); }}
+                className="w-full rounded-lg px-2 py-1.5 text-[11px] font-mono outline-none"
+                style={{ background: "rgba(255,255,255,0.05)", border: `1px solid ${useCustomRange ? "rgba(168,85,247,0.3)" : "rgba(255,255,255,0.06)"}`, color: "#ddd" }}
+              />
+            </div>
+            <div>
+              <label className="text-[9px] text-[#666] block mb-0.5">Hasta</label>
+              <input type="datetime-local"
+                value={customTo || toLocalInput(new Date())}
+                onChange={(e) => { setCustomTo(e.target.value); setUseCustomRange(true); }}
+                className="w-full rounded-lg px-2 py-1.5 text-[11px] font-mono outline-none"
+                style={{ background: "rgba(255,255,255,0.05)", border: `1px solid ${useCustomRange ? "rgba(168,85,247,0.3)" : "rgba(255,255,255,0.06)"}`, color: "#ddd" }}
+              />
+            </div>
+            <button
+              onClick={() => {
+                if (!customFrom || !customTo) {
+                  setCustomFrom(toLocalInput(new Date(Date.now() - hoursBack * 3600000)));
+                  setCustomTo(toLocalInput(new Date()));
+                }
+                setUseCustomRange(true); setPosition(0); setPlaying(false); setActivePanel(null);
+              }}
+              className="w-full rounded-xl py-2 text-[11px] font-bold text-center transition-all"
+              style={{ background: useCustomRange ? "rgba(168,85,247,0.15)" : "rgba(255,255,255,0.04)", border: `1px solid ${useCustomRange ? "rgba(168,85,247,0.35)" : "rgba(255,255,255,0.06)"}`, color: useCustomRange ? "#a855f7" : "#aaa" }}>
+              Aplicar rango
+            </button>
           </div>
         </div>
       )}
@@ -395,7 +469,7 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
           <div className="flex items-center gap-2 mb-3">
             <Zap className="h-4 w-4 text-red-400" />
             <span className="text-[11px] font-bold text-[#ededed]">Eventos ({visibleEvents.length})</span>
-            <span className="text-[9px] text-[#555] ml-auto">{hoursBack}h</span>
+            <span className="text-[9px] text-[#555] ml-auto">{rangeLabel}</span>
           </div>
           {visibleEvents.length === 0 && (
             <div className="text-[10px] text-[#555] text-center py-6">

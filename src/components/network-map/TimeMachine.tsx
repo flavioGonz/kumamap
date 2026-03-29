@@ -40,10 +40,12 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
   const barRef = useRef<HTMLDivElement>(null);
   const playRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const mapMonitorSet = useMemo(() => new Set(mapMonitorIds || []), [mapMonitorIds]);
+  // Stable key for the monitor ID set (avoids unnecessary refetches)
+  const mapMonitorKey = useMemo(() => (mapMonitorIds || []).sort().join(","), [mapMonitorIds]);
+  const mapMonitorSet = useMemo(() => new Set(mapMonitorIds || []), [mapMonitorKey]);
   const activeMonitors = useMemo(() => {
     const filtered = monitors.filter(m => m.type !== "group");
-    if (mapMonitorSet.size === 0) return filtered;
+    if (mapMonitorSet.size === 0) return [];  // No monitors on map = show nothing
     return filtered.filter(m => mapMonitorSet.has(m.id));
   }, [monitors, mapMonitorSet]);
 
@@ -52,10 +54,18 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
   const isLive = position >= 0.999;
   const rangeMs = timeEnd.getTime() - timeStart.getTime();
 
-  // Fetch timeline — always uses hoursBack
+  // Fetch timeline — filtered to map monitors + hoursBack
   const fetchTimeline = useCallback(() => {
+    if (mapMonitorSet.size === 0) {
+      // No monitors on this map — show nothing
+      setAllEvents([]);
+      setStatusChanges({});
+      setLoaded(true);
+      return;
+    }
     setLoading(true);
-    fetch(apiUrl(`/api/kuma/timeline?hours=${hoursBack}`))
+    const ids = Array.from(mapMonitorSet).join(",");
+    fetch(apiUrl(`/api/kuma/timeline?hours=${hoursBack}&monitorIds=${ids}`))
       .then(r => r.json())
       .then(d => {
         setAllEvents(d.events || []);
@@ -64,7 +74,7 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
         setLoaded(true);
       })
       .catch(() => { setLoading(false); });
-  }, [hoursBack]);
+  }, [hoursBack, mapMonitorKey]);
 
   // Auto-fetch when opened or hours change
   useEffect(() => {

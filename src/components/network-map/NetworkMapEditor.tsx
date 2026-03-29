@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect, useRef, useMemo } from "react";
+import { useState, useCallback, useEffect, useRef, useMemo, type RefObject } from "react";
 import {
   ReactFlow,
   Background,
@@ -26,7 +26,7 @@ import { toast } from "sonner";
 import KumaMonitorNode, { type KumaNodeData } from "./KumaMonitorNode";
 import TextLabelNode, { type TextLabelData } from "./TextLabelNode";
 import MonitorPanel, { type KumaMonitor } from "./MonitorPanel";
-import MapToolbar from "./MapToolbar";
+// MapToolbar no longer used - toolbar is inline for consistency with LeafletMapView
 import ContextMenu, { menuIcons } from "./ContextMenu";
 import LinkModal, { type LinkFormData } from "./LinkModal";
 import InputModal from "./InputModal";
@@ -177,6 +177,9 @@ function CanvasInner({
   const [panelCollapsed, setPanelCollapsed] = useState(true);
   const [mapData, setMapData] = useState<MapData | null>(null);
   const [mapNavMode, setMapNavMode] = useState(false);
+  const [editMode, setEditMode] = useState(true);
+  const [autoSaveEnabled, setAutoSaveEnabled] = useState(false);
+  const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Context menu state
   const [ctxMenu, setCtxMenu] = useState<{
@@ -227,15 +230,17 @@ function CanvasInner({
         });
         const rfEdges: Edge[] = (data.edges || []).map((e: any) => {
           const cd = e.custom_data ? JSON.parse(e.custom_data) : {};
-          const isVpn = cd.linkType === "vpn";
+          const lt = cd.linkType || "copper";
+          const linkColors: Record<string, string> = { fiber: "#3b82f6", copper: "#22c55e", wireless: "#f97316", vpn: "#3b82f6" };
+          const edgeColor = linkColors[lt] || e.color || "#4b5563";
           return {
             id: e.id, source: e.source_node_id, target: e.target_node_id, type: "interface",
-            data: { label: e.label || undefined, sourceInterface: cd.sourceInterface || "", targetInterface: cd.targetInterface || "", linkType: cd.linkType },
+            data: { label: e.label || undefined, sourceInterface: cd.sourceInterface || "", targetInterface: cd.targetInterface || "", linkType: lt },
             style: {
-              stroke: isVpn ? "#3b82f6" : (e.color || "#4b5563"),
-              strokeWidth: isVpn ? 4 : 2,
-              strokeDasharray: isVpn ? "2,10" : (e.style === "dashed" ? "5,5" : undefined),
-              strokeLinecap: isVpn ? "round" : undefined,
+              stroke: edgeColor,
+              strokeWidth: lt === "vpn" ? 4 : 2,
+              strokeDasharray: lt === "vpn" ? "2,10" : lt === "wireless" ? "6,4" : undefined,
+              strokeLinecap: lt === "vpn" ? "round" : undefined,
             } as any,
             animated: !!e.animated,
           };
@@ -437,10 +442,42 @@ function CanvasInner({
     return items;
   };
 
-  const getEdgeCtxItems = (edgeId: string) => [
-    { label: "Editar interfaces", icon: menuIcons.Link2, onClick: () => editEdgeInterfaces(edgeId) },
-    { label: "Eliminar conexion", icon: menuIcons.Trash2, onClick: () => setEdges((eds) => eds.filter((e) => e.id !== edgeId)), danger: true, divider: true },
-  ];
+  const getEdgeCtxItems = (edgeId: string) => {
+    const edge = edges.find((e) => e.id === edgeId);
+    const currentLinkType = (edge?.data as any)?.linkType || "copper";
+    const linkTypes = [
+      { type: "fiber", label: "Fibra", color: "#3b82f6" },
+      { type: "copper", label: "Cobre", color: "#22c55e" },
+      { type: "wireless", label: "Wireless", color: "#f97316" },
+      { type: "vpn", label: "VPN", color: "#3b82f6" },
+    ];
+    return [
+      { label: "Editar interfaces", icon: menuIcons.Link2, onClick: () => editEdgeInterfaces(edgeId) },
+      ...linkTypes.filter(t => t.type !== currentLinkType).map(t => ({
+        label: `→ ${t.label}`,
+        icon: menuIcons.Link2,
+        onClick: () => {
+          setEdges((eds) => eds.map((e) => {
+            if (e.id !== edgeId) return e;
+            const isVpn = t.type === "vpn";
+            const isWireless = t.type === "wireless";
+            return {
+              ...e,
+              data: { ...e.data, linkType: t.type },
+              style: {
+                stroke: t.color,
+                strokeWidth: isVpn ? 4 : 2,
+                strokeDasharray: isVpn ? "2,10" : isWireless ? "6,4" : undefined,
+                strokeLinecap: isVpn ? "round" : undefined,
+              } as any,
+            };
+          }));
+          toast.success(`Enlace: ${t.label}`);
+        },
+      })),
+      { label: "Eliminar conexion", icon: menuIcons.Trash2, onClick: () => setEdges((eds) => eds.filter((e) => e.id !== edgeId)), danger: true, divider: true },
+    ];
+  };
 
   // ─── Modal handlers ────────────────────────
   const handleLinkModalSubmit = (data: LinkFormData) => {
@@ -450,11 +487,11 @@ function CanvasInner({
         ? { ...e, data: { ...e.data, sourceInterface: data.sourceInterface, targetInterface: data.targetInterface, label: data.label } }
         : e));
     } else if (linkModalData.connection) {
-      // New connection
+      // New connection — default copper style (green) like Leaflet
       setEdges((eds) => addEdge({
         ...linkModalData.connection!, type: "interface",
-        data: { sourceInterface: data.sourceInterface, targetInterface: data.targetInterface, label: data.label },
-        style: { stroke: "#4b5563", strokeWidth: 2 }, animated: false,
+        data: { sourceInterface: data.sourceInterface, targetInterface: data.targetInterface, label: data.label, linkType: "copper" },
+        style: { stroke: "#22c55e", strokeWidth: 2 }, animated: false,
       }, eds));
     }
     setLinkModalOpen(false);
@@ -657,14 +694,22 @@ function CanvasInner({
           ? JSON.stringify({ nodeSize: n.data.nodeSize })
           : null,
       }));
-      const saveEdges = edges.map((e) => ({
-        id: e.id, source_node_id: e.source, target_node_id: e.target,
-        label: (e.data as any)?.label || null,
-        style: (e.style as any)?.strokeDasharray ? "dashed" : "solid",
-        color: (e.style as any)?.stroke || "#4b5563",
-        animated: e.animated ? 1 : 0,
-        custom_data: JSON.stringify({ sourceInterface: (e.data as any)?.sourceInterface || "", targetInterface: (e.data as any)?.targetInterface || "" }),
-      }));
+      const saveEdges = edges.map((e) => {
+        const d = (e.data as any) || {};
+        const linkType = d.linkType || "copper";
+        return {
+          id: e.id, source_node_id: e.source, target_node_id: e.target,
+          label: d.label || null,
+          style: (e.style as any)?.strokeDasharray ? "dashed" : "solid",
+          color: (e.style as any)?.stroke || "#4b5563",
+          animated: e.animated ? 1 : 0,
+          custom_data: JSON.stringify({
+            sourceInterface: d.sourceInterface || "",
+            targetInterface: d.targetInterface || "",
+            ...(linkType !== "copper" ? { linkType } : {}),
+          }),
+        };
+      });
       await fetch(apiUrl(`/api/maps/${mapId}/state`), {
         method: "PUT", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ nodes: saveNodes, edges: saveEdges }),
@@ -673,6 +718,18 @@ function CanvasInner({
     } catch { toast.error("Error al guardar"); }
     finally { setSaving(false); }
   }, [mapId, nodes, edges]);
+
+  // Auto-save debounce
+  const handleSaveRef = useRef<(() => void) | null>(null);
+  useEffect(() => { handleSaveRef.current = handleSave; }, [handleSave]);
+  useEffect(() => {
+    if (!autoSaveEnabled || !mapData) return;
+    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+    autoSaveTimerRef.current = setTimeout(() => {
+      handleSaveRef.current?.();
+    }, 5000);
+    return () => { if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current); };
+  }, [nodes, edges, autoSaveEnabled, mapData]);
 
   // ─── Background handlers ──────────────────────
   const handleUploadBg = useCallback(() => fileInputRef.current?.click(), []);
@@ -842,9 +899,9 @@ function CanvasInner({
 
       {bgType !== "livemap" ? (
         <div
-          className="absolute top-3 left-3 flex items-center gap-1.5 rounded-2xl px-2.5 py-1.5"
+          className="absolute top-3 left-1/2 -translate-x-1/2 flex items-center gap-1.5 rounded-2xl px-2.5 py-1.5"
           style={{
-            right: "340px", zIndex: 10000,
+            zIndex: 10000,
             background: "rgba(10,10,10,0.82)", border: "1px solid rgba(255,255,255,0.06)",
             backdropFilter: "blur(24px)", boxShadow: "0 8px 32px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.03)",
             pointerEvents: "auto",
@@ -867,21 +924,30 @@ function CanvasInner({
             </div>
           </div>
 
-          <div className="flex-1" />
-
-          {/* ═══ CENTERED TOOLS ═══ */}
-          <div className="flex items-center gap-0.5">
-            <button onClick={() => reactFlow.zoomIn()} title="Zoom In" className="rounded-xl p-1.5 text-[#888] hover:text-[#ededed] hover:bg-white/[0.06] transition-all">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.3-4.3"/><path d="M8 11h6"/><path d="M11 8v6"/></svg>
-            </button>
-            <button onClick={() => reactFlow.zoomOut()} title="Zoom Out" className="rounded-xl p-1.5 text-[#888] hover:text-[#ededed] hover:bg-white/[0.06] transition-all">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.3-4.3"/><path d="M8 11h6"/></svg>
-            </button>
-            <button onClick={() => reactFlow.fitView({ padding: 0.2 })} title="Ajustar vista" className="rounded-xl p-1.5 text-[#888] hover:text-[#ededed] hover:bg-white/[0.06] transition-all">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 3h6v6"/><path d="M9 21H3v-6"/><path d="M21 3l-7 7"/><path d="M3 21l7-7"/></svg>
-            </button>
-          </div>
           <div className="h-5 w-px mx-0.5" style={{ background: "rgba(255,255,255,0.06)" }} />
+
+          {/* Edit mode toggle */}
+          <button
+            onClick={() => setEditMode(v => !v)}
+            className="flex items-center gap-1 rounded-xl px-2 py-1.5 text-[10px] font-bold uppercase tracking-wider transition-all"
+            style={{
+              background: editMode ? "rgba(245,158,11,0.15)" : "transparent",
+              border: editMode ? "1px solid rgba(245,158,11,0.3)" : "1px solid transparent",
+              color: editMode ? "#f59e0b" : "#666",
+            }}
+            title={editMode ? "Modo compacto" : "Modo edicion"}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 20h9"/><path d="M16.376 3.622a1 1 0 0 1 3.002 3.002L7.368 18.635a2 2 0 0 1-.855.506l-2.872.838a.5.5 0 0 1-.62-.62l.838-2.872a2 2 0 0 1 .506-.855z"/>
+            </svg>
+            {editMode ? "Editar" : "Edit"}
+          </button>
+
+          {/* ═══ EDIT MODE TOOLS ═══ */}
+          {editMode && <>
+          <div className="h-5 w-px mx-0.5" style={{ background: "rgba(255,255,255,0.06)" }} />
+
+          {/* Node/Edge controls */}
           <div className="flex items-center gap-0.5">
             <button onClick={handleAddNode} title="Agregar nodo" className="group flex items-center gap-1 rounded-xl px-2 py-1.5 text-[#888] hover:text-[#ededed] hover:bg-white/[0.06] transition-all">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
@@ -915,7 +981,7 @@ function CanvasInner({
           <div className="h-5 w-px mx-0.5" style={{ background: "rgba(255,255,255,0.06)" }} />
 
           {/* Background controls */}
-          <div className="flex items-center gap-0.5">
+          <div className="flex items-center gap-0.5 rounded-xl p-0.5" style={{ background: "rgba(255,255,255,0.02)" }}>
             <button onClick={handleUploadBg} title="Subir imagen" className="rounded-xl p-1.5 text-[#888] hover:text-[#ededed] hover:bg-white/[0.06] transition-all">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>
             </button>
@@ -949,13 +1015,32 @@ function CanvasInner({
               </div>
             </>
           )}
+          </>}
 
-          <div className="flex-1" />
+          <div className="h-5 w-px mx-0.5" style={{ background: "rgba(255,255,255,0.06)" }} />
+
+          {/* Auto-save toggle */}
+          <button onClick={() => setAutoSaveEnabled(v => !v)} title={autoSaveEnabled ? "Auto-save ON" : "Auto-save OFF"}
+            className="rounded-lg p-1.5 transition-all"
+            style={{ color: autoSaveEnabled ? "#4ade80" : "#555" }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              {autoSaveEnabled ? <><path d="M12 2v4"/><path d="m16.2 7.8 2.9-2.9"/><path d="M18 12h4"/><path d="m16.2 16.2 2.9 2.9"/><path d="M12 18v4"/><path d="m4.9 19.1 2.9-2.9"/><path d="M2 12h4"/><path d="m4.9 4.9 2.9 2.9"/></> : <><circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/></>}
+            </svg>
+          </button>
 
           {/* Save */}
           <button onClick={handleSave} disabled={saving}
             className="flex items-center gap-1.5 rounded-xl px-4 py-1.5 text-[11px] font-bold transition-all"
-            style={{ background: "linear-gradient(135deg, rgba(59,130,246,0.2), rgba(99,102,241,0.15))", border: "1px solid rgba(59,130,246,0.3)", color: "#60a5fa", boxShadow: "0 2px 12px rgba(59,130,246,0.1)" }}>
+            style={{ background: "linear-gradient(135deg, rgba(59,130,246,0.2), rgba(99,102,241,0.15))", border: "1px solid rgba(59,130,246,0.3)", color: "#60a5fa", boxShadow: "0 2px 12px rgba(59,130,246,0.1)" }}
+            onMouseEnter={(e) => {
+              (e.currentTarget as HTMLElement).style.background = "linear-gradient(135deg, rgba(59,130,246,0.3), rgba(99,102,241,0.25))";
+              (e.currentTarget as HTMLElement).style.boxShadow = "0 4px 20px rgba(59,130,246,0.2)";
+            }}
+            onMouseLeave={(e) => {
+              (e.currentTarget as HTMLElement).style.background = "linear-gradient(135deg, rgba(59,130,246,0.2), rgba(99,102,241,0.15))";
+              (e.currentTarget as HTMLElement).style.boxShadow = "0 2px 12px rgba(59,130,246,0.1)";
+            }}
+          >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15.2 3a2 2 0 0 1 1.4.6l3.8 3.8a2 2 0 0 1 .6 1.4V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/><path d="M17 21v-7a1 1 0 0 0-1-1H8a1 1 0 0 0-1 1v7"/><path d="M7 3v4a1 1 0 0 0 1 1h7"/></svg>
             {saving ? "Guardando..." : "Guardar"}
           </button>
@@ -1027,7 +1112,7 @@ function CanvasInner({
             deleteKeyCode="Delete"
             defaultEdgeOptions={{
               type: "interface",
-              style: { stroke: "#4b5563", strokeWidth: 2 },
+              style: { stroke: "#22c55e", strokeWidth: 2 },
               animated: false,
             }}
             style={{ background: "#0a0a0a" }}

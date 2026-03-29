@@ -8,9 +8,15 @@ export async function GET(req: NextRequest) {
   const monitors = kuma.getMonitors();
   const hours = parseInt(req.nextUrl.searchParams.get("hours") || "24");
 
+  // Optional: filter to specific monitor IDs (from map nodes)
+  const monitorIdsParam = req.nextUrl.searchParams.get("monitorIds");
+  const filterSet = monitorIdsParam
+    ? new Set(monitorIdsParam.split(",").map(Number).filter(n => !isNaN(n) && n > 0))
+    : null;
+
   // Get real historical beats from Kuma DB (cached 5min)
   const activeMonitorIds = monitors
-    .filter((m) => m.active && m.type !== "group")
+    .filter((m) => m.active && m.type !== "group" && (!filterSet || filterSet.has(m.id)))
     .map((m) => m.id);
 
   const allBeats = await kuma.getAllBeats(activeMonitorIds, Math.min(hours, 168)); // max 7 days
@@ -75,7 +81,7 @@ export async function GET(req: NextRequest) {
     events,
     statusChanges,
     monitors: monitors
-      .filter((m) => m.active && m.type !== "group")
+      .filter((m) => m.active && m.type !== "group" && (!filterSet || filterSet.has(m.id)))
       .map((m) => ({ id: m.id, name: m.name, type: m.type, status: m.status, parent: m.parent })),
   });
 }

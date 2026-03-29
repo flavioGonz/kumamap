@@ -256,6 +256,15 @@ export default function LeafletMapView({
   const edgeUpdateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [timeMachineOpen, setTimeMachineOpen] = useState(false);
   const [timeMachineTime, setTimeMachineTime] = useState<Date | null>(null);
+  // Compute monitor IDs for nodes on THIS map — used by TimeMachine to filter events
+  const [mapMonitorIdsVersion, setMapMonitorIdsVersion] = useState(0);
+  const mapMonitorIds = useMemo(() => {
+    // eslint-disable-next-line @typescript-eslint/no-unused-expressions
+    mapMonitorIdsVersion; // reactive trigger
+    return nodesRef.current
+      .filter(n => n.kuma_monitor_id != null && n.kuma_monitor_id > 0)
+      .map(n => n.kuma_monitor_id!);
+  }, [initialNodes, mapMonitorIdsVersion]);
   const [timeBlurPulse, setTimeBlurPulse] = useState(0);
   const [colorPickerNodeId, setColorPickerNodeId] = useState<string>("");
   const [lensPickerOpen, setLensPickerOpen] = useState(false);
@@ -2603,7 +2612,7 @@ export default function LeafletMapView({
         open={timeMachineOpen}
         onToggle={() => setTimeMachineOpen((v) => !v)}
         onDragging={useCallback((d: boolean) => setTimeDragging(d), [])}
-        mapMonitorIds={useMemo(() => nodesRef.current.filter(n => n.kuma_monitor_id).map(n => n.kuma_monitor_id!), [initialNodes])}
+        mapMonitorIds={mapMonitorIds}
         onFocusEvent={useCallback((monitorId: number, eventType: "down" | "up") => {
           const node = nodesRef.current.find(n => n.kuma_monitor_id === monitorId);
           if (!node || !mapRef.current || !LRef.current) return;

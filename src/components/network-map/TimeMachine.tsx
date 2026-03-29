@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { Clock, Play, Pause, Radio, Gauge, Calendar, Zap, ChevronRight } from "lucide-react";
+import { Clock, Play, Pause, Radio, Gauge, Calendar, Zap, ChevronRight, Crosshair } from "lucide-react";
 import { apiUrl } from "@/lib/api";
 
 interface TimelineEvent {
@@ -39,7 +39,8 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
   const [customTo, setCustomTo] = useState("");
   const [loading, setLoading] = useState(false);
   const [loaded, setLoaded] = useState(false);
-  const [activePanel, setActivePanel] = useState<"speed" | "range" | "events" | null>(null);
+  const [activePanel, setActivePanel] = useState<"speed" | "range" | "events" | "sensor" | null>(null);
+  const [focusMonitorId, setFocusMonitorId] = useState<number | null>(null); // null = all monitors
   const barRef = useRef<HTMLDivElement>(null);
   const playRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -121,12 +122,13 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
     return () => clearInterval(iv);
   }, [open, loaded, fetchTimeline]);
 
-  // Filter events to map monitors + time range
+  // Filter events to map monitors + time range + focus sensor
   const visibleEvents = useMemo(() => {
     const startMs = timeStart.getTime();
     const endMs = timeEnd.getTime();
     return allEvents
       .filter(e => {
+        if (focusMonitorId !== null && e.monitorId !== focusMonitorId) return false;
         if (mapMonitorSet.size > 0 && !mapMonitorSet.has(e.monitorId)) return false;
         const t = new Date(e.time).getTime();
         return t >= startMs && t <= endMs;
@@ -136,7 +138,13 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
         position: (new Date(e.time).getTime() - startMs) / rangeMs,
         timeDate: new Date(e.time),
       }));
-  }, [allEvents, timeStart, timeEnd, rangeMs, mapMonitorSet]);
+  }, [allEvents, timeStart, timeEnd, rangeMs, mapMonitorSet, focusMonitorId]);
+
+  // Focused monitor name for display
+  const focusMonitorName = useMemo(() => {
+    if (focusMonitorId === null) return null;
+    return activeMonitors.find(m => m.id === focusMonitorId)?.name || `#${focusMonitorId}`;
+  }, [focusMonitorId, activeMonitors]);
 
   const downEvents = useMemo(() => visibleEvents.filter(e => e.status === 0), [visibleEvents]);
 
@@ -211,7 +219,7 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
     let c = 0; st.forEach(s => { if (s === 0) c++; }); return c;
   }, [currentTime, getStatusesAtTime]);
 
-  const togglePanel = (p: "speed" | "range" | "events") => setActivePanel(prev => prev === p ? null : p);
+  const togglePanel = (p: "speed" | "range" | "events" | "sensor") => setActivePanel(prev => prev === p ? null : p);
 
   // ─── Closed ───
   if (!open) {
@@ -371,6 +379,17 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
             )}
           </button>
 
+          {/* Sensor focus */}
+          <button onClick={() => togglePanel("sensor")}
+            className="flex items-center justify-center h-8 w-8 rounded-xl transition-all relative"
+            style={{ background: activePanel === "sensor" ? "rgba(34,197,94,0.15)" : focusMonitorId !== null ? "rgba(34,197,94,0.1)" : "rgba(255,255,255,0.04)", border: `1px solid ${activePanel === "sensor" || focusMonitorId !== null ? "rgba(34,197,94,0.3)" : "rgba(255,255,255,0.06)"}`, color: activePanel === "sensor" || focusMonitorId !== null ? "#4ade80" : "#666" }}
+            title={focusMonitorId !== null ? `Sensor: ${focusMonitorName}` : "Filtrar por sensor"}>
+            <Crosshair className="h-4 w-4" />
+            {focusMonitorId !== null && (
+              <span className="absolute -top-1 -right-1 text-[7px] font-bold rounded-full px-1" style={{ background: "rgba(34,197,94,0.2)", color: "#4ade80" }}>1</span>
+            )}
+          </button>
+
           {/* LIVE indicator */}
           <div className="text-[9px] font-mono font-black mt-1" style={{ color: isLive ? "#4ade80" : useCustomRange ? "#a855f7" : "#60a5fa" }}>
             {isLive ? "LIVE" : currentTime?.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) || "▶"}
@@ -502,6 +521,54 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
               );
             })}
           </div>
+        </div>
+      )}
+
+      {/* Sensor focus panel */}
+      {activePanel === "sensor" && (
+        <div className="absolute left-[64px] bottom-[20px] rounded-2xl p-3"
+          style={{ background: "rgba(8,8,8,0.97)", border: "1px solid rgba(255,255,255,0.08)", backdropFilter: "blur(16px)", boxShadow: "0 8px 32px rgba(0,0,0,0.6)", zIndex: 20, width: 260, maxHeight: 400, overflowY: "auto" }}>
+          <div className="flex items-center gap-2 mb-3">
+            <Crosshair className="h-4 w-4 text-green-400" />
+            <span className="text-[11px] font-bold text-[#ededed]">Filtrar por sensor</span>
+          </div>
+
+          {/* "All" option */}
+          <button
+            onClick={() => { setFocusMonitorId(null); setActivePanel(null); }}
+            className="w-full flex items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-all mb-1"
+            style={{ background: focusMonitorId === null ? "rgba(34,197,94,0.1)" : "rgba(255,255,255,0.02)", border: `1px solid ${focusMonitorId === null ? "rgba(34,197,94,0.3)" : "rgba(255,255,255,0.04)"}` }}>
+            <Radio className="h-3.5 w-3.5 shrink-0" style={{ color: focusMonitorId === null ? "#4ade80" : "#555" }} />
+            <span className="text-[11px] font-bold" style={{ color: focusMonitorId === null ? "#4ade80" : "#aaa" }}>Todos los sensores</span>
+          </button>
+
+          {/* Monitor list */}
+          <div className="space-y-1">
+            {activeMonitors.map(m => {
+              const isActive = focusMonitorId === m.id;
+              const mStatus = m.status ?? 2;
+              const statusColor = mStatus === 0 ? "#ef4444" : mStatus === 1 ? "#22c55e" : "#f59e0b";
+              return (
+                <button key={m.id}
+                  onClick={() => { setFocusMonitorId(m.id); setActivePanel(null); onFocusEvent?.(m.id, mStatus === 0 ? "down" : "up"); }}
+                  className="w-full flex items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-all group/sm"
+                  style={{ background: isActive ? "rgba(34,197,94,0.1)" : "rgba(255,255,255,0.02)", border: `1px solid ${isActive ? "rgba(34,197,94,0.3)" : "rgba(255,255,255,0.04)"}` }}
+                  onMouseEnter={e => { if (!isActive) { (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.05)"; } }}
+                  onMouseLeave={e => { if (!isActive) { (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.02)"; } }}
+                >
+                  <div className="h-3 w-3 rounded-full shrink-0" style={{ background: statusColor, boxShadow: `0 0 6px ${statusColor}` }} />
+                  <div className="flex-1 min-w-0">
+                    <div className="text-[10px] font-bold text-[#ededed] truncate">{m.name}</div>
+                  </div>
+                  {isActive && <Crosshair className="h-3 w-3 text-green-400 shrink-0" />}
+                </button>
+              );
+            })}
+          </div>
+
+          {activeMonitors.length === 0 && (
+            <div className="text-[10px] text-[#555] text-center py-4">No hay sensores en este mapa</div>
+          )}
         </div>
       )}
     </div>

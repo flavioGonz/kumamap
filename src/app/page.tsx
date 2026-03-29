@@ -336,7 +336,7 @@ function MapListView({
               style={{ borderBottom: "1px solid rgba(255,255,255,0.03)" }}
               onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "rgba(59,130,246,0.04)"; }}
               onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}
-              onDoubleClick={() => onOpenMap(map.id)}
+              onClick={() => onOpenMap(map.id)}
             >
               {/* Name */}
               <div className="flex items-center gap-3 min-w-0">

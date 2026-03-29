@@ -19,6 +19,7 @@ import {
   EdgeLabelRenderer,
   BaseEdge,
   getBezierPath,
+  getStraightPath,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { toast } from "sonner";
@@ -37,8 +38,14 @@ import { apiUrl } from "@/lib/api";
 import { Pencil, Type } from "lucide-react";
 
 // ─── Custom Edge with interface labels ──────────
+// Module-level edge style setting (avoids prop drilling through ReactFlow)
+let _edgeStyleStraight = false;
+export function setEdgeStyleStraight(v: boolean) { _edgeStyleStraight = v; }
+
 function InterfaceEdge({ id, sourceX, sourceY, targetX, targetY, data, style, selected, markerEnd }: any) {
-  const [edgePath, labelX, labelY] = getBezierPath({ sourceX, sourceY, targetX, targetY });
+  const [edgePath, labelX, labelY] = _edgeStyleStraight
+    ? getStraightPath({ sourceX, sourceY, targetX, targetY })
+    : getBezierPath({ sourceX, sourceY, targetX, targetY });
 
   // Calculate perpendicular offset to avoid overlapping labels
   const dx = targetX - sourceX;
@@ -179,7 +186,11 @@ function CanvasInner({
   const [mapNavMode, setMapNavMode] = useState(false);
   const [editMode, setEditMode] = useState(true);
   const [autoSaveEnabled, setAutoSaveEnabled] = useState(false);
+  const [straightEdges, setStraightEdges] = useState(false);
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Sync module-level edge style with state
+  useEffect(() => { setEdgeStyleStraight(straightEdges); }, [straightEdges]);
 
   // Context menu state
   const [ctxMenu, setCtxMenu] = useState<{
@@ -247,6 +258,13 @@ function CanvasInner({
         });
         setNodes(rfNodes);
         setEdges(rfEdges);
+        // Load view_state preferences (straightEdges, etc.)
+        if (data.view_state) {
+          try {
+            const vs = JSON.parse(data.view_state);
+            if (vs.straightEdges) setStraightEdges(true);
+          } catch {}
+        }
         setTimeout(() => reactFlow.fitView({ padding: 0.2 }), 200);
       });
   }, [mapId, setNodes, setEdges, reactFlow]);
@@ -370,6 +388,25 @@ function CanvasInner({
 
     // Text label node — different menu
     if (node.type === "textLabel") {
+      const textColors = [
+        { label: "Blanco", hex: "#ededed" },
+        { label: "Azul", hex: "#60a5fa" },
+        { label: "Verde", hex: "#4ade80" },
+        { label: "Rojo", hex: "#f87171" },
+        { label: "Amarillo", hex: "#fbbf24" },
+        { label: "Naranja", hex: "#fb923c" },
+        { label: "Violeta", hex: "#a78bfa" },
+        { label: "Gris", hex: "#888888" },
+      ];
+      const currentColor = (node.data.color as string) || "#ededed";
+      const textSizes = [
+        { label: "Pequeño", value: 10 },
+        { label: "Normal", value: 14 },
+        { label: "Grande", value: 20 },
+        { label: "Muy grande", value: 28 },
+        { label: "Título", value: 36 },
+      ];
+      const currentFontSize = (node.data.fontSize as number) || 14;
       return [
         {
           label: "Editar texto", icon: menuIcons.Pencil, onClick: () => {
@@ -377,21 +414,25 @@ function CanvasInner({
             if (text?.trim()) setNodes((nds) => nds.map((n) => n.id === nodeId ? { ...n, data: { ...n.data, text: text.trim() } } : n));
           },
         },
+        // Font size sub-items
+        ...textSizes.filter(s => s.value !== currentFontSize).map(s => ({
+          label: `Tamaño: ${s.label} (${s.value}px)`,
+          icon: menuIcons.Type,
+          onClick: () => setNodes((nds) => nds.map((n) => n.id === nodeId ? { ...n, data: { ...n.data, fontSize: s.value } } : n)),
+        })),
+        { label: "Tamaño personalizado", icon: menuIcons.Type, divider: true, onClick: () => {
+          const size = prompt("Tamaño (px):", String(currentFontSize));
+          if (size && parseInt(size) > 0) setNodes((nds) => nds.map((n) => n.id === nodeId ? { ...n, data: { ...n.data, fontSize: parseInt(size) } } : n));
+        }},
+        // Color sub-items
+        ...textColors.filter(c => c.hex !== currentColor).map(c => ({
+          label: `Color: ${c.label}`,
+          icon: menuIcons.Palette,
+          onClick: () => setNodes((nds) => nds.map((n) => n.id === nodeId ? { ...n, data: { ...n.data, color: c.hex } } : n)),
+          colorDot: c.hex,
+        })),
         {
-          label: "Tamano de fuente", icon: menuIcons.Type, onClick: () => {
-            const size = prompt("Tamano (px):", String(node.data.fontSize || 14));
-            if (size) setNodes((nds) => nds.map((n) => n.id === nodeId ? { ...n, data: { ...n.data, fontSize: parseInt(size) } } : n));
-          },
-        },
-        {
-          label: "Color", icon: menuIcons.Palette, onClick: () => {
-            const colors: Record<string, string> = { blanco: "#ededed", azul: "#60a5fa", verde: "#4ade80", rojo: "#f87171", amarillo: "#fbbf24", gris: "#888" };
-            const choice = prompt(`Color (${Object.keys(colors).join(", ")}):`, "blanco");
-            if (choice && colors[choice]) setNodes((nds) => nds.map((n) => n.id === nodeId ? { ...n, data: { ...n.data, color: colors[choice] } } : n));
-          },
-        },
-        {
-          label: node.data.bgEnabled !== false ? "Quitar fondo" : "Agregar fondo", icon: menuIcons.Maximize2, onClick: () => {
+          label: node.data.bgEnabled !== false ? "Quitar fondo" : "Agregar fondo", icon: menuIcons.Maximize2, divider: true, onClick: () => {
             setNodes((nds) => nds.map((n) => n.id === nodeId ? { ...n, data: { ...n.data, bgEnabled: !(n.data.bgEnabled !== false) } } : n));
           },
         },
@@ -680,20 +721,36 @@ function CanvasInner({
   const handleSave = useCallback(async () => {
     setSaving(true);
     try {
-      const saveNodes = nodes.map((n) => ({
-        id: n.id, kuma_monitor_id: n.data.kumaMonitorId ?? null,
-        label: n.type === "textLabel" ? (n.data.text || "Etiqueta") : n.data.label,
-        x: n.position.x, y: n.position.y,
-        width: (n.style as any)?.width || 120, height: (n.style as any)?.height || 80,
-        icon: n.type === "textLabel" ? "_textLabel" : (n.data.icon || "server"),
-        color: n.type === "textLabel" ? (n.data.color || "#ededed") : null,
-        custom_data: n.type === "textLabel" ? JSON.stringify({
-          type: "textLabel", fontSize: n.data.fontSize || 14,
-          bgEnabled: n.data.bgEnabled !== false,
-        }) : (n.data.nodeSize && n.data.nodeSize !== 1.0)
-          ? JSON.stringify({ nodeSize: n.data.nodeSize })
-          : null,
-      }));
+      const saveNodes = nodes.map((n) => {
+        if (n.type === "textLabel") {
+          return {
+            id: n.id, kuma_monitor_id: null,
+            label: n.data.text || "Etiqueta",
+            x: n.position.x, y: n.position.y,
+            width: (n.style as any)?.width || 120, height: (n.style as any)?.height || 80,
+            icon: "_textLabel",
+            color: n.data.color || "#ededed",
+            custom_data: JSON.stringify({
+              type: "textLabel", fontSize: n.data.fontSize || 14,
+              bgEnabled: n.data.bgEnabled !== false,
+            }),
+          };
+        }
+        // Regular kumaMonitor node — save all custom properties
+        const cd: Record<string, any> = {};
+        if (n.data.nodeSize && n.data.nodeSize !== 1.0) cd.nodeSize = n.data.nodeSize;
+        // Preserve any existing custom_data fields (camera, stream, etc.)
+        if (n.data.customFields) Object.assign(cd, n.data.customFields);
+        return {
+          id: n.id, kuma_monitor_id: n.data.kumaMonitorId ?? null,
+          label: n.data.label,
+          x: n.position.x, y: n.position.y,
+          width: (n.style as any)?.width || 120, height: (n.style as any)?.height || 80,
+          icon: n.data.icon || "server",
+          color: null,
+          custom_data: Object.keys(cd).length > 0 ? JSON.stringify(cd) : null,
+        };
+      });
       const saveEdges = edges.map((e) => {
         const d = (e.data as any) || {};
         const linkType = d.linkType || "copper";
@@ -710,14 +767,15 @@ function CanvasInner({
           }),
         };
       });
+      const viewState = JSON.stringify({ straightEdges });
       await fetch(apiUrl(`/api/maps/${mapId}/state`), {
         method: "PUT", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ nodes: saveNodes, edges: saveEdges }),
+        body: JSON.stringify({ nodes: saveNodes, edges: saveEdges, view_state: viewState }),
       });
       toast.success("Mapa guardado");
     } catch { toast.error("Error al guardar"); }
     finally { setSaving(false); }
-  }, [mapId, nodes, edges]);
+  }, [mapId, nodes, edges, straightEdges]);
 
   // Auto-save debounce
   const handleSaveRef = useRef<(() => void) | null>(null);
@@ -1018,6 +1076,17 @@ function CanvasInner({
           </>}
 
           <div className="h-5 w-px mx-0.5" style={{ background: "rgba(255,255,255,0.06)" }} />
+
+          {/* Straight/Curved edges toggle */}
+          <button onClick={() => { setStraightEdges(v => !v); setEdges(eds => [...eds]); }} title={straightEdges ? "Links rectos (clic para curvas)" : "Links curvos (clic para rectas)"}
+            className="rounded-lg p-1.5 transition-all"
+            style={{ color: straightEdges ? "#f59e0b" : "#555" }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              {straightEdges
+                ? <><line x1="4" y1="20" x2="20" y2="4" /></>
+                : <><path d="M4 20 C 10 20, 14 4, 20 4" /></>}
+            </svg>
+          </button>
 
           {/* Auto-save toggle */}
           <button onClick={() => setAutoSaveEnabled(v => !v)} title={autoSaveEnabled ? "Auto-save ON" : "Auto-save OFF"}

@@ -256,6 +256,7 @@ export default function LeafletMapView({
   const edgeUpdateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [timeMachineOpen, setTimeMachineOpen] = useState(false);
   const [timeMachineTime, setTimeMachineTime] = useState<Date | null>(null);
+  const [tmFocusMonitorId, setTmFocusMonitorId] = useState<number | null>(null);
   // Compute monitor IDs for nodes on THIS map — used by TimeMachine to filter events
   const [mapMonitorIdsVersion, setMapMonitorIdsVersion] = useState(0);
   const mapMonitorIds = useMemo(() => {
@@ -967,8 +968,8 @@ export default function LeafletMapView({
         return mon?.status;
       }
 
-      // If this is a waypoint/blind node (icon === "waypoint" or no monitor), follow the chain
-      const isWaypoint = node.icon === "waypoint" || !node.kuma_monitor_id;
+      // If this is a waypoint/blind node (not a label, camera, polygon), follow the chain
+      const isWaypoint = node.icon === "_waypoint" || (node.icon !== "_textLabel" && node.icon !== "_camera" && node.icon !== "_polygon" && !node.kuma_monitor_id);
       if (!isWaypoint) return undefined;
 
       visited.add(fromEdgeId);
@@ -1418,8 +1419,27 @@ export default function LeafletMapView({
       ];
     }
 
-    // Labels only get edit text + delete
+    // Labels: edit text, font size, color, delete
     if (isLabel) {
+      const cd = node?.custom_data ? JSON.parse(node.custom_data) : {};
+      const labelSizes = [
+        { label: "Pequeño (10px)", value: 10 },
+        { label: "Normal (13px)", value: 13 },
+        { label: "Grande (18px)", value: 18 },
+        { label: "Muy grande (24px)", value: 24 },
+        { label: "Título (32px)", value: 32 },
+      ];
+      const labelColors = [
+        { label: "Blanco", hex: "#ededed" },
+        { label: "Azul", hex: "#60a5fa" },
+        { label: "Verde", hex: "#4ade80" },
+        { label: "Rojo", hex: "#f87171" },
+        { label: "Amarillo", hex: "#fbbf24" },
+        { label: "Naranja", hex: "#fb923c" },
+        { label: "Gris", hex: "#888888" },
+      ];
+      const currentColor = cd.color || "#ededed";
+      const currentSize = cd.fontSize || 13;
       return [
         {
           label: "Editar texto",
@@ -1435,6 +1455,35 @@ export default function LeafletMapView({
             }
           },
         },
+        // Font sizes
+        ...labelSizes.filter(s => s.value !== currentSize).map(s => ({
+          label: `Tamaño: ${s.label}`,
+          icon: menuIcons.Pencil,
+          onClick: () => {
+            const idx = nodesRef.current.findIndex((n) => n.id === nodeId);
+            if (idx >= 0) {
+              const prev = nodesRef.current[idx];
+              const prevCd = prev.custom_data ? JSON.parse(prev.custom_data) : {};
+              nodesRef.current[idx] = { ...prev, custom_data: JSON.stringify({ ...prevCd, type: "textLabel", fontSize: s.value }) };
+              if (LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current);
+            }
+          },
+        })),
+        // Colors
+        ...labelColors.filter(c => c.hex !== currentColor).map(c => ({
+          label: `Color: ${c.label}`,
+          icon: menuIcons.Pencil,
+          colorDot: c.hex,
+          onClick: () => {
+            const idx = nodesRef.current.findIndex((n) => n.id === nodeId);
+            if (idx >= 0) {
+              const prev = nodesRef.current[idx];
+              const prevCd = prev.custom_data ? JSON.parse(prev.custom_data) : {};
+              nodesRef.current[idx] = { ...prev, custom_data: JSON.stringify({ ...prevCd, type: "textLabel", color: c.hex }) };
+              if (LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current);
+            }
+          },
+        })),
         {
           label: "Eliminar etiqueta",
           icon: menuIcons.Trash2,
@@ -1605,6 +1654,16 @@ export default function LeafletMapView({
           }];
           if (LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current);
           toast.success("Nodo duplicado");
+        },
+      }] : []),
+      // TimeMachine: open pre-filtered to this sensor
+      ...(node?.kuma_monitor_id ? [{
+        label: "TimeMachine",
+        icon: menuIcons.Clock,
+        divider: true,
+        onClick: () => {
+          setTmFocusMonitorId(node!.kuma_monitor_id!);
+          setTimeMachineOpen(true);
         },
       }] : []),
       {
@@ -2613,6 +2672,7 @@ export default function LeafletMapView({
         onToggle={() => setTimeMachineOpen((v) => !v)}
         onDragging={useCallback((d: boolean) => setTimeDragging(d), [])}
         mapMonitorIds={mapMonitorIds}
+        initialFocusMonitorId={tmFocusMonitorId}
         onFocusEvent={useCallback((monitorId: number, eventType: "down" | "up") => {
           const node = nodesRef.current.find(n => n.kuma_monitor_id === monitorId);
           if (!node || !mapRef.current || !LRef.current) return;

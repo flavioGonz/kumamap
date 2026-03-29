@@ -291,6 +291,56 @@ function CanvasInner({
     });
   }, [kumaMonitors, setNodes]);
 
+  // Update edge colors based on endpoint monitor statuses (DOWN=red, MAINT=purple, PENDING=yellow)
+  useEffect(() => {
+    if (nodes.length === 0 || edges.length === 0) return;
+    const nodeMap = new Map<string, Node>();
+    nodes.forEach((n) => nodeMap.set(n.id, n));
+
+    setEdges((prev) => {
+      let changed = false;
+      const next = prev.map((edge) => {
+        const srcNode = nodeMap.get(edge.source);
+        const tgtNode = nodeMap.get(edge.target);
+        const srcStatus = srcNode?.data?.status as number | undefined;
+        const tgtStatus = tgtNode?.data?.status as number | undefined;
+        const lt = (edge.data as any)?.linkType || "copper";
+        const linkColors: Record<string, string> = { fiber: "#3b82f6", copper: "#22c55e", wireless: "#f97316", vpn: "#3b82f6" };
+
+        const isDown = srcStatus === 0 || tgtStatus === 0;
+        const isBothDown = srcStatus === 0 && tgtStatus === 0;
+        const isMaint = (srcStatus === 3 || tgtStatus === 3) && !isDown;
+        const isPending = (srcStatus === 2 || tgtStatus === 2) && !isDown && !isMaint;
+
+        let newColor: string;
+        if (isBothDown) newColor = "#991b1b";
+        else if (isDown) newColor = "#ef4444";
+        else if (isMaint) newColor = "#8b5cf6";
+        else if (isPending) newColor = "#f59e0b";
+        else newColor = linkColors[lt] || "#22c55e";
+
+        const currentStroke = (edge.style as any)?.stroke;
+        if (currentStroke !== newColor) {
+          changed = true;
+          const isVpn = lt === "vpn";
+          const isWireless = lt === "wireless";
+          return {
+            ...edge,
+            style: {
+              ...edge.style,
+              stroke: newColor,
+              strokeWidth: isDown ? 3 : isVpn ? 4 : 2,
+              strokeDasharray: isDown ? "8,6" : isVpn ? "2,10" : isWireless ? "6,4" : undefined,
+            } as any,
+            animated: isDown && !isBothDown,
+          };
+        }
+        return edge;
+      });
+      return changed ? next : prev;
+    });
+  }, [nodes, edges.length, setEdges]);
+
   // ─── Context Menu handlers ────────────────────
   const onNodeContextMenu = useCallback((event: React.MouseEvent, node: Node) => {
     event.preventDefault();

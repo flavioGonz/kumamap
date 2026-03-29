@@ -24,9 +24,10 @@ interface TimeMachineProps {
   onFocusEvent?: (monitorId: number, eventType: "down" | "up") => void;
   monitors: MonitorInfo[];
   mapMonitorIds?: number[];
+  initialFocusMonitorId?: number | null;
 }
 
-export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, onFocusEvent, monitors, mapMonitorIds }: TimeMachineProps) {
+export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, onFocusEvent, monitors, mapMonitorIds, initialFocusMonitorId }: TimeMachineProps) {
   const [allEvents, setAllEvents] = useState<TimelineEvent[]>([]);
   const [statusChanges, setStatusChanges] = useState<Record<number, Array<{ t: number; s: number }>>>({});
   const [position, setPosition] = useState(1);
@@ -43,6 +44,13 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
   const [focusMonitorId, setFocusMonitorId] = useState<number | null>(null); // null = all monitors
   const barRef = useRef<HTMLDivElement>(null);
   const playRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // External focus trigger — when a node context menu opens TimeMachine with a specific sensor
+  useEffect(() => {
+    if (initialFocusMonitorId != null && initialFocusMonitorId !== focusMonitorId) {
+      setFocusMonitorId(initialFocusMonitorId);
+    }
+  }, [initialFocusMonitorId]);
 
   // Stable key for the monitor ID set (avoids unnecessary refetches)
   const mapMonitorKey = useMemo(() => (mapMonitorIds || []).sort().join(","), [mapMonitorIds]);
@@ -528,10 +536,13 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
       {activePanel === "sensor" && (
         <div className="absolute left-[64px] bottom-[20px] rounded-2xl p-3"
           style={{ background: "rgba(8,8,8,0.97)", border: "1px solid rgba(255,255,255,0.08)", backdropFilter: "blur(16px)", boxShadow: "0 8px 32px rgba(0,0,0,0.6)", zIndex: 20, width: 260, maxHeight: 400, overflowY: "auto" }}>
-          <div className="flex items-center gap-2 mb-3">
+          <div className="flex items-center gap-2 mb-2">
             <Crosshair className="h-4 w-4 text-green-400" />
             <span className="text-[11px] font-bold text-[#ededed]">Filtrar por sensor</span>
           </div>
+          <p className="text-[9px] text-[#777] mb-3 leading-relaxed">
+            Selecciona un sensor para ver solo sus eventos en la linea de tiempo. Esto permite analizar el historial de caidas y recuperaciones de un dispositivo especifico.
+          </p>
 
           {/* "All" option */}
           <button

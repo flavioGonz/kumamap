@@ -18,12 +18,46 @@ import {
   Shield,
   Cpu,
   Cloud,
+  // Networking
+  Network,
+  EthernetPort,
+  Cable,
+  Signal,
+  Antenna,
+  RadioTower,
+  SatelliteDish,
+  // Security
+  ShieldCheck,
+  ShieldAlert,
+  Lock,
+  BrickWallFire,
+  // Devices
+  Camera,
+  Printer,
+  Phone,
+  Smartphone,
+  Monitor,
+  // Power & Infrastructure
+  Zap,
+  Battery,
+  BatteryFull,
+  Plug,
+  PlugZap,
+  Power,
+  // Storage & Compute
+  Microchip,
+  CircuitBoard,
+  ServerCog,
+  DatabaseZap,
+  HardDriveDownload,
+  CloudCog,
 } from "lucide-react";
 
 export interface KumaNodeData {
   label: string;
   kumaMonitorId: number | null;
   icon: string;
+  nodeSize?: number; // Scale factor: 1.0 = default, 0.6 = tiny, 2.4 = extra large
   status?: number;
   ping?: number | null;
   msg?: string;
@@ -44,16 +78,81 @@ const statusConfig: Record<
   3: { color: "#8b5cf6", glow: "0 0 12px rgba(139,92,246,0.4), 0 0 30px rgba(139,92,246,0.15)", text: "MAINT", pulse: false },
 };
 
-const iconMap: Record<string, React.ComponentType<{ className?: string; style?: React.CSSProperties }>> = {
-  server: Server, globe: Globe, wifi: Wifi, monitor: MonitorSmartphone,
-  database: Database, activity: Activity, radio: Radio, harddrive: HardDrive,
-  router: Router, shield: Shield, cpu: Cpu, cloud: Cloud,
+// ─── Icon Registry ─────────────────────────────
+// Categories help organize the icon picker modal
+export interface IconDef {
+  component: React.ComponentType<{ className?: string; style?: React.CSSProperties }>;
+  label: string;
+  category: "red" | "seguridad" | "dispositivos" | "infra" | "compute" | "general";
+}
+
+export const iconRegistry: Record<string, IconDef> = {
+  // Red / Networking
+  router:       { component: Router,        label: "Router",         category: "red" },
+  switch:       { component: Network,       label: "Switch",         category: "red" },
+  ethernet:     { component: EthernetPort,  label: "Puerto Ethernet",category: "red" },
+  cable:        { component: Cable,         label: "Cable",          category: "red" },
+  wifi:         { component: Wifi,          label: "Wi-Fi / AP",     category: "red" },
+  antenna:      { component: Antenna,       label: "Antena",         category: "red" },
+  radio:        { component: Radio,         label: "Radio",          category: "red" },
+  tower:        { component: RadioTower,    label: "Torre",          category: "red" },
+  satellite:    { component: SatelliteDish, label: "Satelital",      category: "red" },
+  signal:       { component: Signal,        label: "Señal",          category: "red" },
+  globe:        { component: Globe,         label: "Internet",       category: "red" },
+
+  // Seguridad
+  firewall:     { component: BrickWallFire, label: "Firewall",       category: "seguridad" },
+  shield:       { component: Shield,        label: "Escudo",         category: "seguridad" },
+  shieldcheck:  { component: ShieldCheck,   label: "Seguridad OK",   category: "seguridad" },
+  shieldalert:  { component: ShieldAlert,   label: "Alerta Seguridad", category: "seguridad" },
+  lock:         { component: Lock,          label: "Candado",        category: "seguridad" },
+
+  // Dispositivos
+  server:       { component: Server,        label: "Servidor",       category: "dispositivos" },
+  camera:       { component: Camera,        label: "Cámara IP",      category: "dispositivos" },
+  printer:      { component: Printer,       label: "Impresora",      category: "dispositivos" },
+  phone:        { component: Phone,         label: "Teléfono IP",    category: "dispositivos" },
+  smartphone:   { component: Smartphone,    label: "Smartphone",     category: "dispositivos" },
+  monitor:      { component: Monitor,       label: "Monitor/PC",     category: "dispositivos" },
+  monitorphone: { component: MonitorSmartphone, label: "Escritorio", category: "dispositivos" },
+
+  // Infraestructura / Energía
+  ups:          { component: BatteryFull,   label: "UPS",            category: "infra" },
+  battery:      { component: Battery,       label: "Batería",        category: "infra" },
+  power:        { component: Power,         label: "Energía",        category: "infra" },
+  plug:         { component: Plug,          label: "Enchufe",        category: "infra" },
+  plugzap:      { component: PlugZap,       label: "PDU",            category: "infra" },
+  zap:          { component: Zap,           label: "Rayo",           category: "infra" },
+
+  // Compute / Storage
+  cpu:          { component: Cpu,           label: "CPU",            category: "compute" },
+  chip:         { component: Microchip,     label: "Microchip",      category: "compute" },
+  circuit:      { component: CircuitBoard,  label: "Circuito",       category: "compute" },
+  database:     { component: Database,      label: "Base de Datos",  category: "compute" },
+  dbzap:        { component: DatabaseZap,   label: "DB Activa",      category: "compute" },
+  harddrive:    { component: HardDrive,     label: "Disco",          category: "compute" },
+  nas:          { component: HardDriveDownload, label: "NAS",        category: "compute" },
+  servercog:    { component: ServerCog,     label: "Servidor Config", category: "compute" },
+
+  // General / Cloud
+  cloud:        { component: Cloud,         label: "Nube",           category: "general" },
+  cloudcog:     { component: CloudCog,      label: "Nube Config",    category: "general" },
+  activity:     { component: Activity,      label: "Actividad",      category: "general" },
 };
+
+const iconMap: Record<string, React.ComponentType<{ className?: string; style?: React.CSSProperties }>> =
+  Object.fromEntries(Object.entries(iconRegistry).map(([k, v]) => [k, v.component]));
 
 function KumaMonitorNode({ data, selected }: NodeProps & { data: KumaNodeData }) {
   const [hovered, setHovered] = useState(false);
   const status = statusConfig[data.status ?? 2] || statusConfig[2];
   const IconComponent = iconMap[data.icon] || Server;
+  const scale = data.nodeSize || 1.0;
+  const baseSize = selected ? 34 : 28;
+  const circleSize = Math.round(baseSize * scale);
+  const iconSize = Math.round(14 * scale);
+  const pulseSize = Math.round(36 * scale);
+  const labelOffset = Math.round(5 + (circleSize / 2));
 
   return (
     <div
@@ -89,8 +188,10 @@ function KumaMonitorNode({ data, selected }: NodeProps & { data: KumaNodeData })
 
       {/* Label above */}
       <div
-        className="absolute -top-5 left-1/2 -translate-x-1/2 whitespace-nowrap text-[10px] font-bold tracking-wide"
+        className="absolute left-1/2 -translate-x-1/2 whitespace-nowrap font-bold tracking-wide"
         style={{
+          top: -labelOffset,
+          fontSize: Math.max(9, Math.round(10 * Math.min(scale, 1.4))),
           color: selected ? "#fff" : "#ccc",
           textShadow: "0 1px 4px rgba(0,0,0,0.8), 0 0 8px rgba(0,0,0,0.5)",
         }}
@@ -103,8 +204,8 @@ function KumaMonitorNode({ data, selected }: NodeProps & { data: KumaNodeData })
         <div
           className="absolute rounded-full animate-ping"
           style={{
-            width: 36,
-            height: 36,
+            width: pulseSize,
+            height: pulseSize,
             top: "50%",
             left: "50%",
             transform: "translate(-50%, -50%)",
@@ -117,8 +218,8 @@ function KumaMonitorNode({ data, selected }: NodeProps & { data: KumaNodeData })
       <div
         className="relative flex items-center justify-center rounded-full transition-all duration-200 cursor-pointer"
         style={{
-          width: selected ? 34 : 28,
-          height: selected ? 34 : 28,
+          width: circleSize,
+          height: circleSize,
           background: `radial-gradient(circle, ${status.color}44, ${status.color}11)`,
           border: `2px solid ${status.color}`,
           boxShadow: selected
@@ -126,7 +227,7 @@ function KumaMonitorNode({ data, selected }: NodeProps & { data: KumaNodeData })
             : status.glow,
         }}
       >
-        <IconComponent className="h-3.5 w-3.5" style={{ color: status.color }} />
+        <IconComponent style={{ width: iconSize, height: iconSize, color: status.color }} />
       </div>
 
       {/* Hover tooltip with full details */}

@@ -9,6 +9,10 @@ import InputModal from "./InputModal";
 import { Pencil, Signal } from "lucide-react";
 import TimeMachine from "./TimeMachine";
 import EventReportModal from "./EventReportModal";
+import CameraStreamConfigModal, { type CameraStreamConfig } from "./CameraStreamConfigModal";
+import CameraStreamViewer from "./CameraStreamViewer";
+import IconPickerModal from "./IconPickerModal";
+import NodeSizeModal from "./NodeSizeModal";
 
 interface SavedNode {
   id: string;
@@ -225,6 +229,14 @@ export default function LeafletMapView({
   const [linkModalData, setLinkModalData] = useState<{ sourceId: string; targetId: string; edgeId?: string; initial?: Partial<LinkFormData> }>({ sourceId: "", targetId: "" });
   const [inputModalOpen, setInputModalOpen] = useState(false);
   const [inputModalConfig, setInputModalConfig] = useState<{ nodeId: string; initial: string; mac?: string; ip?: string }>({ nodeId: "", initial: "" });
+
+  // Camera stream modals
+  const [streamConfigNodeId, setStreamConfigNodeId] = useState<string | null>(null);
+  const [streamViewerNodeId, setStreamViewerNodeId] = useState<string | null>(null);
+
+  // Icon picker & Node size modals (Leaflet)
+  const [iconPickerNodeId, setIconPickerNodeId] = useState<string | null>(null);
+  const [sizePickerNodeId, setSizePickerNodeId] = useState<string | null>(null);
   const [overlayOpacity, setOverlayOpacity] = useState(initialViewState?.overlayOpacity ?? 0);
   const [assignModalOpen, setAssignModalOpen] = useState(false);
   const [assignNodeId, setAssignNodeId] = useState<string>("");
@@ -291,12 +303,21 @@ export default function LeafletMapView({
         else marker.getElement()?.style.setProperty("display", "none");
       }
     });
-    // FOV
+    // FOV polygons
     fovLayersRef.current.forEach((layer) => {
       if (showFOV && showCameras) {
         try { if (!mapRef.current?.hasLayer(layer)) mapRef.current?.addLayer(layer); } catch {}
       } else {
         try { mapRef.current?.removeLayer(layer); } catch {}
+      }
+    });
+    // Camera edit handles (rotation, range, fov angle)
+    camHandlesRef.current.forEach((handle, key) => {
+      const shouldShow = showCameras && showFOV;
+      if (shouldShow) {
+        try { if (!mapRef.current?.hasLayer(handle)) mapRef.current?.addLayer(handle); } catch {}
+      } else {
+        try { mapRef.current?.removeLayer(handle); } catch {}
       }
     });
     // Links
@@ -476,18 +497,21 @@ export default function LeafletMapView({
     return monitorIndex.get(monitorId);
   }
 
-  function createMarkerIcon(L: any, color: string, pulse: boolean, isLinkSource: boolean = false) {
+  function createMarkerIcon(L: any, color: string, pulse: boolean, isLinkSource: boolean = false, scale: number = 1.0) {
+    const dotSize = Math.round(18 * scale);
+    const containerSize = Math.round(28 * scale);
+    const pulseSize = Math.round(28 * scale);
     const ring = isLinkSource ? `border:3px solid #60a5fa;` : `border:2px solid ${color};`;
     return L.divIcon({
       className: "custom-marker",
       html: `
         <div style="position:relative;display:flex;align-items:center;justify-content:center;">
-          ${pulse ? `<div style="position:absolute;width:28px;height:28px;border-radius:50%;background:${color}30;animation:ping 1.5s cubic-bezier(0,0,0.2,1) infinite;"></div>` : ""}
-          <div style="width:18px;height:18px;border-radius:50%;background:${color};${ring}box-shadow:0 0 14px ${color}88, 0 0 4px ${color};cursor:pointer;"></div>
+          ${pulse ? `<div style="position:absolute;width:${pulseSize}px;height:${pulseSize}px;border-radius:50%;background:${color}30;animation:ping 1.5s cubic-bezier(0,0,0.2,1) infinite;"></div>` : ""}
+          <div style="width:${dotSize}px;height:${dotSize}px;border-radius:50%;background:${color};${ring}box-shadow:0 0 14px ${color}88, 0 0 4px ${color};cursor:pointer;"></div>
         </div>
       `,
-      iconSize: [28, 28],
-      iconAnchor: [14, 14],
+      iconSize: [containerSize, containerSize],
+      iconAnchor: [containerSize / 2, containerSize / 2],
     });
   }
 
@@ -592,6 +616,7 @@ export default function LeafletMapView({
       const color = getStatusColor(node.kuma_monitor_id);
       const m = getMonitorData(node.kuma_monitor_id);
       const pulse = !isLabel && (m?.status === 0 || m?.status === 2);
+      const nodeScale: number = cd.nodeSize || 1.0;
 
 
       // Render polygon zone
@@ -644,18 +669,20 @@ export default function LeafletMapView({
           iconAnchor: [5, 5],
         });
       } else if (isCamera) {
+        const camSize = Math.round(22 * nodeScale);
+        const camIcon = Math.round(12 * nodeScale);
         nodeIcon = L.divIcon({
           className: "camera-marker",
           html: `<div style="position:relative;display:flex;align-items:center;justify-content:center;transform:rotate(${rotation}deg);">
-            <div style="width:22px;height:22px;border-radius:4px;background:${color};border:2px solid ${isSource ? "#60a5fa" : color};box-shadow:0 0 12px ${color}88;cursor:pointer;display:flex;align-items:center;justify-content:center;">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m16.24 7.76-1.804 5.412a2 2 0 0 1-1.265 1.265L7.76 16.24l1.804-5.412a2 2 0 0 1 1.265-1.265z"/><circle cx="12" cy="12" r="10"/></svg>
+            <div style="width:${camSize}px;height:${camSize}px;border-radius:4px;background:${color};border:2px solid ${isSource ? "#60a5fa" : color};box-shadow:0 0 12px ${color}88;cursor:pointer;display:flex;align-items:center;justify-content:center;">
+              <svg width="${camIcon}" height="${camIcon}" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m16.24 7.76-1.804 5.412a2 2 0 0 1-1.265 1.265L7.76 16.24l1.804-5.412a2 2 0 0 1 1.265-1.265z"/><circle cx="12" cy="12" r="10"/></svg>
             </div>
           </div>`,
-          iconSize: [22, 22],
-          iconAnchor: [11, 11],
+          iconSize: [camSize, camSize],
+          iconAnchor: [camSize / 2, camSize / 2],
         });
       } else {
-        nodeIcon = createMarkerIcon(L, color, pulse, isSource);
+        nodeIcon = createMarkerIcon(L, color, pulse, isSource, nodeScale);
       }
 
       const marker = L.marker([node.x, node.y], {
@@ -731,7 +758,7 @@ export default function LeafletMapView({
           const rp = rangeHandle.getLatLng();
           const mp = marker.getLatLng();
           const dist = Math.sqrt(Math.pow(rp.lat - mp.lat, 2) + Math.pow(rp.lng - mp.lng, 2));
-          const newRange = Math.max(0.0005, dist);
+          const newRange = Math.max(0.00005, dist);
           const idx = nodesRef.current.findIndex((n) => n.id === node.id);
           if (idx >= 0) {
             const ncd = nodesRef.current[idx].custom_data ? JSON.parse(nodesRef.current[idx].custom_data!) : {};
@@ -786,7 +813,7 @@ export default function LeafletMapView({
         marker.bindTooltip(node.label, {
           permanent: true,
           direction: "top",
-          offset: [0, -16],
+          offset: [0, Math.round(-16 * nodeScale)],
           className: "leaflet-label-dark",
         });
       }
@@ -819,9 +846,17 @@ export default function LeafletMapView({
         });
       });
 
-      // Click — open popup (link mode handled by overlay)
+      // Click — open popup or stream viewer for cameras
       marker.on("click", () => {
-        if (isLabel || isCamera || isWaypoint || isPolygon) return;
+        if (isLabel || isWaypoint || isPolygon) return;
+        // Camera click: open stream viewer if configured
+        if (isCamera) {
+          const camCd = node.custom_data ? JSON.parse(node.custom_data) : {};
+          if (camCd.streamUrl) {
+            setStreamViewerNodeId(node.id);
+          }
+          return;
+        }
         const popup = L.popup({ className: "leaflet-popup-dark", maxWidth: 280 })
           .setLatLng(marker.getLatLng())
           .setContent(createPopupContent(node));
@@ -968,13 +1003,16 @@ export default function LeafletMapView({
       const { srcStatus, tgtStatus } = findRealEndpoints(edge.id);
       const isFiber = cd.linkType === "fiber";
       const isWireless = cd.linkType === "wireless";
+      const isVPN = cd.linkType === "vpn";
       const isDown = srcStatus === 0 || tgtStatus === 0;
       const isBothDown = srcStatus === 0 && tgtStatus === 0;
       const isMaint = (srcStatus === 3 || tgtStatus === 3) && !isDown;
       const isPending = (srcStatus === 2 || tgtStatus === 2) && !isDown && !isMaint;
 
-      let lineColor = isBothDown ? "#991b1b" : isDown ? "#ef4444" : isMaint ? "#8b5cf6" : isPending ? "#f59e0b" : isFiber ? "#3b82f6" : isWireless ? "#f97316" : "#22c55e";
-      let dashArray = isDown ? "8,6" : isWireless ? "6,8" : undefined;
+      let lineColor = isBothDown ? "#991b1b" : isDown ? "#ef4444" : isMaint ? "#8b5cf6" : isPending ? "#f59e0b" : isVPN ? "#3b82f6" : isFiber ? "#3b82f6" : isWireless ? "#f97316" : "#22c55e";
+      let dashArray = isDown ? "8,6" : isVPN ? "1,14" : isWireless ? "6,8" : undefined;
+      let lineCap: "round" | "butt" | "square" | undefined = isVPN ? "round" : undefined;
+      let lineWeight = isDown ? 4 : isVPN ? 5 : 3;
       const lineOpacity = isBothDown ? 0.4 : isDown ? 0.9 : 0.9;
 
       // Bezier curve: add control point offset perpendicular to the line
@@ -996,9 +1034,10 @@ export default function LeafletMapView({
       }
 
       const line = L.polyline(curvePoints, {
-        color: lineColor, weight: isDown ? 4 : 3, opacity: lineOpacity, dashArray,
+        color: lineColor, weight: lineWeight, opacity: lineOpacity, dashArray,
+        lineCap: lineCap || "round",
         smoothFactor: 1,
-        className: isDown && !isBothDown ? "link-pulse" : undefined,
+        className: isDown && !isBothDown ? "link-pulse" : isVPN ? "link-vpn" : undefined,
       });
 
       // Tooltip for cable label on hover — include endpoint status
@@ -1121,8 +1160,10 @@ export default function LeafletMapView({
       const color = getStatusColor(node.kuma_monitor_id);
       const m = getMonitorData(node.kuma_monitor_id);
       const pulse = m?.status === 0 || m?.status === 2;
+      const cd = node.custom_data ? JSON.parse(node.custom_data) : {};
+      const ns: number = cd.nodeSize || 1.0;
 
-      marker.setIcon(createMarkerIcon(L, color, pulse, linkSource === node.id));
+      marker.setIcon(createMarkerIcon(L, color, pulse, linkSource === node.id, ns));
       marker.setPopupContent(createPopupContent(node));
     });
 
@@ -1155,7 +1196,8 @@ export default function LeafletMapView({
       const marker = markersRef.current.get(nodeId);
       if (marker) {
         const color = getStatusColor(node?.kuma_monitor_id ?? null);
-        marker.setIcon(createMarkerIcon(LRef.current, color, false, true));
+        const ncd = node?.custom_data ? JSON.parse(node.custom_data) : {};
+        marker.setIcon(createMarkerIcon(LRef.current, color, false, true, ncd.nodeSize || 1.0));
       }
     }
   }
@@ -1443,8 +1485,38 @@ export default function LeafletMapView({
           }
         },
       }] : []),
+      // Icon & Size options (for non-special nodes + cameras)
+      ...(node?.icon !== "_waypoint" && node?.icon !== "_polygon" ? [
+        {
+          label: "Cambiar icono",
+          icon: menuIcons.Palette,
+          onClick: () => setIconPickerNodeId(nodeId),
+        },
+        {
+          label: "Tamaño",
+          icon: menuIcons.Scaling,
+          onClick: () => setSizePickerNodeId(nodeId),
+        },
+      ] : []),
       // Camera-specific options
       ...(node?.icon === "_camera" ? [
+        {
+          label: "Configurar stream",
+          icon: menuIcons.Signal,
+          onClick: () => {
+            setStreamConfigNodeId(nodeId);
+          },
+        },
+        ...(() => {
+          const camCd = node?.custom_data ? JSON.parse(node.custom_data) : {};
+          return camCd.streamUrl ? [{
+            label: "Ver stream",
+            icon: menuIcons.Signal,
+            onClick: () => {
+              setStreamViewerNodeId(nodeId);
+            },
+          }] : [];
+        })(),
         {
           label: "Lente / FOV",
           icon: menuIcons.Maximize2,
@@ -1452,6 +1524,28 @@ export default function LeafletMapView({
           onClick: () => {
             setLensPickerNodeId(nodeId);
             setLensPickerOpen(true);
+          },
+        },
+        {
+          label: "Distancia focal",
+          icon: menuIcons.Maximize2,
+          onClick: () => {
+            const camCd = node?.custom_data ? JSON.parse(node.custom_data) : {};
+            const current = camCd.fovRange || 0.002;
+            const input = prompt("Distancia focal (metros aprox):\n• 50 = muy cerca\n• 200 = normal\n• 500 = lejos\n• 1000+ = muy lejos", String(Math.round(current * 100000)));
+            if (input) {
+              const meters = parseFloat(input);
+              if (!isNaN(meters) && meters > 0) {
+                const newRange = Math.max(0.00005, meters / 100000);
+                const idx = nodesRef.current.findIndex((n) => n.id === nodeId);
+                if (idx >= 0) {
+                  const ncd = nodesRef.current[idx].custom_data ? JSON.parse(nodesRef.current[idx].custom_data!) : {};
+                  ncd.fovRange = parseFloat(newRange.toFixed(6));
+                  nodesRef.current[idx] = { ...nodesRef.current[idx], custom_data: JSON.stringify(ncd) };
+                  if (LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current);
+                }
+              }
+            }
           },
         },
         {
@@ -1548,6 +1642,7 @@ export default function LeafletMapView({
         { type: "fiber", label: "Fibra", color: "#3b82f6" },
         { type: "copper", label: "Cobre", color: "#22c55e" },
         { type: "wireless", label: "Wireless", color: "#f97316" },
+        { type: "vpn", label: "VPN", color: "#3b82f6" },
       ].filter(t => t.type !== (cd.linkType || "copper")).map(t => ({
         label: `→ ${t.label}`,
         icon: menuIcons.Link2,
@@ -2644,7 +2739,8 @@ export default function LeafletMapView({
             const st = statuses.get(node.kuma_monitor_id);
             if (st === undefined) return;
             const color = st === 0 ? "#ef4444" : st === 1 ? "#22c55e" : st === 3 ? "#8b5cf6" : "#f59e0b";
-            marker.setIcon(createMarkerIcon(L, color, st === 0, false));
+            const ncd = node.custom_data ? JSON.parse(node.custom_data) : {};
+            marker.setIcon(createMarkerIcon(L, color, st === 0, false, ncd.nodeSize || 1.0));
 
             // Show dramatic red fail popup for DOWN nodes
             if (st === 0) {
@@ -2735,6 +2831,110 @@ export default function LeafletMapView({
           onClose={() => setEventDetail(null)}
         />
       )}
+
+      {/* ── Camera Stream Config Modal ── */}
+      {streamConfigNodeId && (() => {
+        const camNode = nodesRef.current.find((n) => n.id === streamConfigNodeId);
+        const camCd = camNode?.custom_data ? JSON.parse(camNode.custom_data) : {};
+        const currentCfg: CameraStreamConfig = {
+          streamType: camCd.streamType || "",
+          streamUrl: camCd.streamUrl || "",
+          snapshotInterval: camCd.snapshotInterval,
+        };
+        return (
+          <CameraStreamConfigModal
+            currentConfig={currentCfg}
+            cameraName={camNode?.label || "Cámara"}
+            onSave={(config) => {
+              const idx = nodesRef.current.findIndex((n) => n.id === streamConfigNodeId);
+              if (idx >= 0) {
+                const ncd = nodesRef.current[idx].custom_data
+                  ? JSON.parse(nodesRef.current[idx].custom_data!)
+                  : {};
+                ncd.streamType = config.streamType || undefined;
+                ncd.streamUrl = config.streamUrl || undefined;
+                ncd.snapshotInterval = config.snapshotInterval || undefined;
+                // Clean empty fields
+                if (!ncd.streamType) { delete ncd.streamType; delete ncd.streamUrl; delete ncd.snapshotInterval; }
+                nodesRef.current[idx] = {
+                  ...nodesRef.current[idx],
+                  custom_data: JSON.stringify(ncd),
+                };
+              }
+              setStreamConfigNodeId(null);
+              toast.success(config.streamUrl ? "Stream configurado" : "Stream eliminado");
+            }}
+            onClose={() => setStreamConfigNodeId(null)}
+          />
+        );
+      })()}
+
+      {/* ── Camera Stream Viewer ── */}
+      {streamViewerNodeId && (() => {
+        const camNode = nodesRef.current.find((n) => n.id === streamViewerNodeId);
+        const camCd = camNode?.custom_data ? JSON.parse(camNode.custom_data) : {};
+        if (!camCd.streamUrl) return null;
+        const viewCfg: CameraStreamConfig = {
+          streamType: camCd.streamType || "mjpeg",
+          streamUrl: camCd.streamUrl,
+          snapshotInterval: camCd.snapshotInterval,
+        };
+        return (
+          <CameraStreamViewer
+            config={viewCfg}
+            cameraName={camNode?.label || "Cámara"}
+            onClose={() => setStreamViewerNodeId(null)}
+          />
+        );
+      })()}
+
+      {/* ── Icon Picker Modal (Leaflet) ── */}
+      {iconPickerNodeId && (() => {
+        const pickerNode = nodesRef.current.find((n) => n.id === iconPickerNodeId);
+        return (
+          <IconPickerModal
+            currentIcon={pickerNode?.icon || "server"}
+            onSelect={(icon) => {
+              const idx = nodesRef.current.findIndex((n) => n.id === iconPickerNodeId);
+              if (idx >= 0) {
+                nodesRef.current[idx] = { ...nodesRef.current[idx], icon };
+                if (LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current);
+              }
+              setIconPickerNodeId(null);
+            }}
+            onClose={() => setIconPickerNodeId(null)}
+          />
+        );
+      })()}
+
+      {/* ── Node Size Modal (Leaflet) ── */}
+      {sizePickerNodeId && (() => {
+        const sizeNode = nodesRef.current.find((n) => n.id === sizePickerNodeId);
+        const scd = sizeNode?.custom_data ? JSON.parse(sizeNode.custom_data) : {};
+        return (
+          <NodeSizeModal
+            currentSize={scd.nodeSize || 1.0}
+            nodeName={sizeNode?.label || "Nodo"}
+            onSelect={(size) => {
+              const idx = nodesRef.current.findIndex((n) => n.id === sizePickerNodeId);
+              if (idx >= 0) {
+                const ncd = nodesRef.current[idx].custom_data
+                  ? JSON.parse(nodesRef.current[idx].custom_data!)
+                  : {};
+                ncd.nodeSize = size;
+                nodesRef.current[idx] = {
+                  ...nodesRef.current[idx],
+                  custom_data: JSON.stringify(ncd),
+                };
+                if (LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current);
+              }
+              setSizePickerNodeId(null);
+            }}
+            onClose={() => setSizePickerNodeId(null)}
+          />
+        );
+      })()}
+
       {/* Custom CSS */}
       <style>{`
         .leaflet-label-dark {
@@ -2795,6 +2995,12 @@ export default function LeafletMapView({
         }
         @keyframes ping {
           75%, 100% { transform: scale(2); opacity: 0; }
+        }
+        @keyframes vpnFlow {
+          to { stroke-dashoffset: -28; }
+        }
+        .link-vpn {
+          animation: vpnFlow 1.5s linear infinite;
         }
         /* Time Machine fail popup */
         .fail-popup-tm .leaflet-popup-content-wrapper {

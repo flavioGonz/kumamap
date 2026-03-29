@@ -218,7 +218,7 @@ export default function LinkModal({
                 style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}
               />
               <div className="flex flex-wrap gap-1 mt-1">
-                {["fibra", "cat6", "cat5e", "coaxial", "10G", "1G", "100M", "wireless"].map((p) => (
+                {["fibra", "cat6", "cat5e", "coaxial", "10G", "1G", "100M", "wireless", "vpn"].map((p) => (
                   <button
                     key={p}
                     type="button"

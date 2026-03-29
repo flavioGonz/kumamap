@@ -30,6 +30,8 @@ import MapToolbar from "./MapToolbar";
 import ContextMenu, { menuIcons } from "./ContextMenu";
 import LinkModal, { type LinkFormData } from "./LinkModal";
 import InputModal from "./InputModal";
+import IconPickerModal from "./IconPickerModal";
+import NodeSizeModal from "./NodeSizeModal";
 import LeafletMapView from "./LeafletMapView";
 import { apiUrl } from "@/lib/api";
 import { Pencil, Type } from "lucide-react";
@@ -142,11 +144,16 @@ interface MapData {
 
 function getIconForType(type: string): string {
   switch (type) {
-    case "http": case "keyword": return "globe";
-    case "ping": return "wifi";
-    case "port": case "steam": return "server";
+    case "http": case "keyword": case "json-query": return "globe";
+    case "ping": case "smtp": return "wifi";
+    case "port": case "steam": case "gamedig": return "server";
     case "dns": return "database";
-    case "docker": return "cloud";
+    case "docker": case "tailscale-ping": return "cloud";
+    case "push": case "mqtt": return "signal";
+    case "radius": case "ldap": return "lock";
+    case "snmp": return "router";
+    case "sqlserver": case "postgres": case "mysql": case "mongodb": case "redis": return "database";
+    case "grpc-keyword": return "servercog";
     default: return "activity";
   }
 }
@@ -210,15 +217,26 @@ function CanvasInner({
             type: "kumaMonitor",
             position: { x: n.x, y: n.y },
             style: n.width && n.width !== 120 ? { width: n.width, height: n.height } : undefined,
-            data: { label: n.label || "Node", kumaMonitorId: n.kuma_monitor_id, icon: n.icon || "server" } satisfies KumaNodeData,
+            data: {
+              label: n.label || "Node",
+              kumaMonitorId: n.kuma_monitor_id,
+              icon: n.icon || "server",
+              ...(cd.nodeSize ? { nodeSize: cd.nodeSize } : {}),
+            } satisfies KumaNodeData,
           };
         });
         const rfEdges: Edge[] = (data.edges || []).map((e: any) => {
           const cd = e.custom_data ? JSON.parse(e.custom_data) : {};
+          const isVpn = cd.linkType === "vpn";
           return {
             id: e.id, source: e.source_node_id, target: e.target_node_id, type: "interface",
-            data: { label: e.label || undefined, sourceInterface: cd.sourceInterface || "", targetInterface: cd.targetInterface || "" },
-            style: { stroke: e.color || "#4b5563", strokeWidth: 2, strokeDasharray: e.style === "dashed" ? "5,5" : undefined },
+            data: { label: e.label || undefined, sourceInterface: cd.sourceInterface || "", targetInterface: cd.targetInterface || "", linkType: cd.linkType },
+            style: {
+              stroke: isVpn ? "#3b82f6" : (e.color || "#4b5563"),
+              strokeWidth: isVpn ? 4 : 2,
+              strokeDasharray: isVpn ? "2,10" : (e.style === "dashed" ? "5,5" : undefined),
+              strokeLinecap: isVpn ? "round" : undefined,
+            } as any,
             animated: !!e.animated,
           };
         });
@@ -411,6 +429,7 @@ function CanvasInner({
     items.push(
       { label: "Editar nombre", icon: menuIcons.Pencil, onClick: () => editNodeLabel(nodeId) },
       { label: "Cambiar icono", icon: menuIcons.Palette, onClick: () => changeNodeIcon(nodeId) },
+      { label: "Tamaño", icon: menuIcons.Scaling, onClick: () => setSizePickerNodeId(nodeId) },
       { label: "Duplicar", icon: menuIcons.Copy, onClick: () => duplicateNode(nodeId) },
       { label: "Eliminar", icon: menuIcons.Trash2, onClick: () => deleteNode(nodeId), danger: true, divider: true },
     );
@@ -484,13 +503,28 @@ function CanvasInner({
     setNodes((nds) => nds.map((n) => n.id === nodeId ? { ...n, style: { ...n.style, width: w ? parseInt(w) : undefined, height: h ? parseInt(h) : undefined } } : n));
   };
 
+  // Icon picker modal state
+  const [iconPickerNodeId, setIconPickerNodeId] = useState<string | null>(null);
+  const iconPickerCurrentIcon = useMemo(() => {
+    if (!iconPickerNodeId) return "server";
+    const node = nodes.find((n) => n.id === iconPickerNodeId);
+    return (node?.data?.icon as string) || "server";
+  }, [iconPickerNodeId, nodes]);
+
   const changeNodeIcon = (nodeId: string) => {
-    const icons = ["server", "globe", "wifi", "database", "router", "shield", "cpu", "cloud", "monitor", "harddrive", "radio", "activity"];
-    const choice = prompt(`Icono (${icons.join(", ")}):`, "server");
-    if (choice && icons.includes(choice)) {
-      setNodes((nds) => nds.map((n) => n.id === nodeId ? { ...n, data: { ...n.data, icon: choice } } : n));
-    }
+    setIconPickerNodeId(nodeId);
   };
+
+  // Node size picker modal state
+  const [sizePickerNodeId, setSizePickerNodeId] = useState<string | null>(null);
+  const sizePickerInfo = useMemo(() => {
+    if (!sizePickerNodeId) return { size: 1.0, name: "" };
+    const node = nodes.find((n) => n.id === sizePickerNodeId);
+    return {
+      size: (node?.data?.nodeSize as number) || 1.0,
+      name: (node?.data?.label as string) || "Nodo",
+    };
+  }, [sizePickerNodeId, nodes]);
 
   const duplicateNode = (nodeId: string) => {
     const node = nodes.find((n) => n.id === nodeId);
@@ -619,7 +653,9 @@ function CanvasInner({
         custom_data: n.type === "textLabel" ? JSON.stringify({
           type: "textLabel", fontSize: n.data.fontSize || 14,
           bgEnabled: n.data.bgEnabled !== false,
-        }) : null,
+        }) : (n.data.nodeSize && n.data.nodeSize !== 1.0)
+          ? JSON.stringify({ nodeSize: n.data.nodeSize })
+          : null,
       }));
       const saveEdges = edges.map((e) => ({
         id: e.id, source_node_id: e.source, target_node_id: e.target,
@@ -1057,6 +1093,31 @@ function CanvasInner({
         initial={inputModalConfig.initial}
         icon={<Pencil className="h-4 w-4 text-blue-400" />}
       />
+
+      {/* Icon Picker Modal */}
+      {iconPickerNodeId && (
+        <IconPickerModal
+          currentIcon={iconPickerCurrentIcon}
+          onSelect={(icon) => {
+            setNodes((nds) => nds.map((n) => n.id === iconPickerNodeId ? { ...n, data: { ...n.data, icon } } : n));
+            setIconPickerNodeId(null);
+          }}
+          onClose={() => setIconPickerNodeId(null)}
+        />
+      )}
+
+      {/* Node Size Picker Modal */}
+      {sizePickerNodeId && (
+        <NodeSizeModal
+          currentSize={sizePickerInfo.size}
+          nodeName={sizePickerInfo.name}
+          onSelect={(size) => {
+            setNodes((nds) => nds.map((n) => n.id === sizePickerNodeId ? { ...n, data: { ...n.data, nodeSize: size } } : n));
+            setSizePickerNodeId(null);
+          }}
+          onClose={() => setSizePickerNodeId(null)}
+        />
+      )}
     </div>
   );
 }

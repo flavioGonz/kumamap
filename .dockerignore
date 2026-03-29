@@ -1,0 +1,14 @@
+node_modules
+.next
+.git
+data/*.db
+data/*.db-shm
+data/*.db-wal
+*.tsbuildinfo
+next-env.d.ts
+.env.local
+.env*.local
+.env.production
+.DS_Store
+deploy/
+README.md

@@ -14,6 +14,10 @@ import {
   Signal,
   Radio,
   Filter,
+  Cloud,
+  Lock,
+  Router,
+  ServerCog,
 } from "lucide-react";
 
 export interface KumaMonitor {
@@ -43,11 +47,26 @@ interface MonitorPanelProps {
 const typeIcons: Record<string, React.ComponentType<{ className?: string; style?: React.CSSProperties }>> = {
   http: Globe,
   keyword: Globe,
+  "json-query": Globe,
   ping: Wifi,
+  smtp: Wifi,
   port: Server,
   dns: Database,
-  push: Activity,
+  push: Signal,
+  mqtt: Signal,
   steam: Radio,
+  docker: Cloud,
+  "tailscale-ping": Cloud,
+  radius: Lock,
+  ldap: Lock,
+  snmp: Router,
+  sqlserver: Database,
+  postgres: Database,
+  mysql: Database,
+  mongodb: Database,
+  redis: Database,
+  "grpc-keyword": ServerCog,
+  gamedig: Server,
 };
 
 const statusColors: Record<number, string> = {

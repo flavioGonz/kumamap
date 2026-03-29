@@ -1,0 +1,39 @@
+# ============================================================
+# KumaMap - Docker Compose (Production)
+# ============================================================
+# Usage:
+#   docker compose up -d --build
+#   docker compose logs -f kumamap
+#   docker compose down
+# ============================================================
+
+services:
+  kumamap:
+    build:
+      context: .
+      args:
+        NEXT_PUBLIC_BASE_PATH: ${NEXT_PUBLIC_BASE_PATH:-}
+    image: kumamap:latest
+    container_name: kumamap
+    restart: unless-stopped
+    ports:
+      - "${KUMAMAP_PORT:-3000}:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - KUMA_URL=${KUMA_URL}
+      - KUMA_USER=${KUMA_USER}
+      - KUMA_PASS=${KUMA_PASS}
+      - NEXT_PUBLIC_BASE_PATH=${NEXT_PUBLIC_BASE_PATH:-}
+    volumes:
+      - kumamap-data:/app/data
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  kumamap-data:
+    driver: local

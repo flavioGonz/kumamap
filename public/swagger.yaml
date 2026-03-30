@@ -1,0 +1,380 @@
+openapi: 3.0.0
+info:
+  title: KumaMap API
+  description: API documentation for the KumaMap application, integrating Uptime Kuma with interactive network maps.
+  version: 1.0.0
+servers:
+  - url: /api
+    description: Local API server
+paths:
+  /auth:
+    post:
+      summary: Authenticate with KumaMap
+      description: Logs in using Uptime Kuma credentials and sets a session cookie.
+      tags:
+        - Auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - username
+                - password
+              properties:
+                username:
+                  type: string
+                password:
+                  type: string
+      responses:
+        '200':
+          description: Successfully authenticated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  username:
+                    type: string
+        '400':
+          description: Missing credentials
+        '401':
+          description: Invalid credentials
+    delete:
+      summary: Logout
+      description: Clears the session cookie.
+      tags:
+        - Auth
+      responses:
+        '200':
+          description: Successfully logged out
+
+  /kuma:
+    get:
+      summary: Get Kuma status and monitors
+      description: Returns connection status and list of all monitors.
+      tags:
+        - Kuma
+      responses:
+        '200':
+          description: Kuma status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  connected:
+                    type: boolean
+                  monitors:
+                    type: array
+                    items:
+                      type: object
+
+  /kuma/history/{monitorId}:
+    get:
+      summary: Get monitor history
+      description: Returns recent heartbeat history for a specific monitor.
+      tags:
+        - Kuma
+      parameters:
+        - in: path
+          name: monitorId
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Array of heartbeats
+
+  /kuma/report/{monitorId}:
+    get:
+      summary: Get monitor report
+      description: Calculates uptime report and events for a monitor over time.
+      tags:
+        - Kuma
+      parameters:
+        - in: path
+          name: monitorId
+          required: true
+          schema:
+            type: integer
+        - in: query
+          name: hours
+          schema:
+            type: integer
+            default: 24
+      responses:
+        '200':
+          description: Detailed report
+
+  /kuma/stream:
+    get:
+      summary: Kuma monitor stream (SSE)
+      description: Server-Sent Events endpoint that pushes monitor updates.
+      tags:
+        - Kuma
+      responses:
+        '200':
+          description: SSE stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+
+  /kuma/timeline:
+    get:
+      summary: Get events timeline
+      description: Timeline of monitor events across multiple monitors.
+      tags:
+        - Kuma
+      parameters:
+        - in: query
+          name: hours
+          schema:
+            type: integer
+            default: 24
+        - in: query
+          name: from
+          schema:
+            type: string
+            format: date-time
+        - in: query
+          name: to
+          schema:
+            type: string
+            format: date-time
+        - in: query
+          name: monitorIds
+          description: Comma-separated list of monitor IDs
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Timeline events
+
+  /maps:
+    get:
+      summary: Get all maps
+      description: Returns a list of all network maps with enriched node/edge counts.
+      tags:
+        - Maps
+      responses:
+        '200':
+          description: List of maps
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+    post:
+      summary: Create a new map
+      tags:
+        - Maps
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - name
+              properties:
+                name:
+                  type: string
+                background_type:
+                  type: string
+                kuma_group_id:
+                  type: integer
+                width:
+                  type: integer
+                height:
+                  type: integer
+      responses:
+        '201':
+          description: Map created
+
+  /maps/{id}:
+    get:
+      summary: Get map details
+      description: Get details, nodes, and edges for a specific map.
+      tags:
+        - Maps
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Map details
+          content:
+            application/json:
+              schema:
+                type: object
+        '404':
+          description: Not found
+    put:
+      summary: Update map
+      tags:
+        - Maps
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Map updated
+    delete:
+      summary: Delete map
+      tags:
+        - Maps
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Successfully deleted
+
+  /maps/{id}/background:
+    post:
+      summary: Upload map background
+      tags:
+        - Maps
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                background:
+                  type: string
+                  format: binary
+      responses:
+        '200':
+          description: Upload successful
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  filename:
+                    type: string
+
+  /maps/{id}/export:
+    get:
+      summary: Export map
+      description: Downloads the map configuration as a JSON file.
+      tags:
+        - Maps
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: JSON file attachment
+
+  /maps/{id}/state:
+    put:
+      summary: Update map state
+      description: Saves nodes, edges, and view_state for a map.
+      tags:
+        - Maps
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - nodes
+                - edges
+              properties:
+                nodes:
+                  type: array
+                  items:
+                    type: object
+                edges:
+                  type: array
+                  items:
+                    type: object
+                view_state:
+                  type: object
+      responses:
+        '200':
+          description: State updated
+
+  /maps/import:
+    post:
+      summary: Import map
+      description: Imports a previously exported map JSON file.
+      tags:
+        - Maps
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                _format:
+                  type: string
+                map:
+                  type: object
+                nodes:
+                  type: array
+                edges:
+                  type: array
+      responses:
+        '201':
+          description: Import successful
+
+  /uploads/{path}:
+    get:
+      summary: Get uploaded file
+      description: Serves an uploaded file (e.g., background images).
+      tags:
+        - Uploads
+      parameters:
+        - in: path
+          name: path
+          required: true
+          schema:
+            type: string
+          description: File path segments
+      responses:
+        '200':
+          description: File bytes
+        '404':
+          description: File not found

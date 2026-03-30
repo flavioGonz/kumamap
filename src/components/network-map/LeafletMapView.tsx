@@ -200,6 +200,9 @@ export default function LeafletMapView({
   const mapRef = useRef<any>(null);
   const markersRef = useRef<Map<string, any>>(new Map());
   const failPopupsRef = useRef<Map<string, any>>(new Map());
+  const downSinceRef = useRef<Map<number, number>>(new Map()); // monitorId → timestamp when DOWN detected
+  const downtimeMarkersRef = useRef<Map<string, any>>(new Map()); // edgeId → L.marker with timer
+  const downtimeIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const polylinesRef = useRef<Map<string, any>>(new Map());
   const fovLayersRef = useRef<Map<string, any>>(new Map());
   const camHandlesRef = useRef<Map<string, any>>(new Map());
@@ -486,6 +489,18 @@ export default function LeafletMapView({
     if (!mapRef.current || !LRef.current) return;
     updateMarkerStatus();
   }, [kumaMonitors]);
+
+  // Downtime counter interval — update every second
+  useEffect(() => {
+    downtimeIntervalRef.current = setInterval(() => {
+      if (mapRef.current && LRef.current && downSinceRef.current.size > 0) {
+        updateDowntimeCounters();
+      }
+    }, 1000);
+    return () => {
+      if (downtimeIntervalRef.current) clearInterval(downtimeIntervalRef.current);
+    };
+  }, []);
 
   // Performance: index monitors by ID for O(1) lookup instead of O(n) .find()
   const monitorIndex = useMemo(() => {
@@ -1064,6 +1079,9 @@ export default function LeafletMapView({
     // Clear interface label markers
     labelMarkersRef.current.forEach((m) => { try { map.removeLayer(m); } catch {} });
     labelMarkersRef.current.clear();
+    // Clear downtime counters (they'll be recreated by the interval)
+    downtimeMarkersRef.current.forEach((m) => { try { map.removeLayer(m); } catch {} });
+    downtimeMarkersRef.current.clear();
 
     edgesRef.current.forEach((edge) => {
       const srcNode = nodesRef.current.find((n) => n.id === edge.source_node_id);
@@ -1227,9 +1245,111 @@ export default function LeafletMapView({
     });
   }
 
+  // Format downtime duration as HH:MM:SS or Xd HH:MM
+  function formatDowntime(ms: number): string {
+    const totalSec = Math.floor(ms / 1000);
+    const h = Math.floor(totalSec / 3600);
+    const m = Math.floor((totalSec % 3600) / 60);
+    const s = totalSec % 60;
+    if (h >= 24) {
+      const d = Math.floor(h / 24);
+      const rh = h % 24;
+      return `${d}d ${String(rh).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+    }
+    return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  }
+
+  // Update downtime counter labels on the map (called every second)
+  function updateDowntimeCounters() {
+    if (!LRef.current || !mapRef.current) return;
+    const L = LRef.current;
+    const map = mapRef.current;
+    const now = Date.now();
+
+    // Remove counters for edges that are no longer down
+    downtimeMarkersRef.current.forEach((marker, edgeId) => {
+      const edge = edgesRef.current.find(e => e.id === edgeId);
+      if (!edge) { try { map.removeLayer(marker); } catch {} downtimeMarkersRef.current.delete(edgeId); return; }
+      const { srcStatus, tgtStatus } = findRealEndpoints(edgeId);
+      const isDown = srcStatus === 0 || tgtStatus === 0;
+      if (!isDown) {
+        try { map.removeLayer(marker); } catch {}
+        downtimeMarkersRef.current.delete(edgeId);
+      }
+    });
+
+    // Add/update counters for down edges
+    edgesRef.current.forEach((edge) => {
+      const { srcStatus, tgtStatus } = findRealEndpoints(edge.id);
+      const isDown = srcStatus === 0 || tgtStatus === 0;
+      if (!isDown) return;
+
+      // Find which monitor is down and get its downSince timestamp
+      const srcNode = nodesRef.current.find(n => n.id === edge.source_node_id);
+      const tgtNode = nodesRef.current.find(n => n.id === edge.target_node_id);
+      if (!srcNode || !tgtNode) return;
+
+      // Get earliest downSince among the down endpoints
+      let earliest = now;
+      [srcNode, tgtNode].forEach(n => {
+        if (n.kuma_monitor_id) {
+          const mon = getMonitorData(n.kuma_monitor_id);
+          if (mon?.status === 0) {
+            const ds = downSinceRef.current.get(n.kuma_monitor_id);
+            if (ds && ds < earliest) earliest = ds;
+          }
+        }
+      });
+
+      const elapsed = now - earliest;
+      const label = formatDowntime(elapsed);
+      const midLat = (srcNode.x + tgtNode.x) / 2;
+      const midLng = (srcNode.y + tgtNode.y) / 2;
+
+      const existing = downtimeMarkersRef.current.get(edge.id);
+      if (existing) {
+        // Update label content
+        const el = existing.getElement();
+        if (el) {
+          const span = el.querySelector(".dt-val");
+          if (span) span.textContent = label;
+        }
+      } else {
+        // Create new counter marker
+        const icon = L.divIcon({
+          className: "downtime-counter",
+          html: `<div style="background:rgba(153,27,27,0.92);border:1px solid #ef4444;border-radius:8px;padding:2px 8px;display:flex;align-items:center;gap:4px;box-shadow:0 2px 12px rgba(239,68,68,0.4);white-space:nowrap;pointer-events:none;">
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#fca5a5" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            <span class="dt-val" style="font-size:10px;font-weight:800;color:#fca5a5;font-family:monospace;letter-spacing:0.5px;">${label}</span>
+          </div>`,
+          iconSize: [0, 0],
+          iconAnchor: [0, 0],
+        });
+        const marker = L.marker([midLat, midLng], { icon, interactive: false, zIndexOffset: 5000 });
+        marker.addTo(map);
+        downtimeMarkersRef.current.set(edge.id, marker);
+      }
+    });
+  }
+
   function updateMarkerStatus() {
     if (!LRef.current || !mapRef.current) return;
     const L = LRef.current;
+
+    // Track DOWN timestamps
+    nodesRef.current.forEach((node) => {
+      if (!node.kuma_monitor_id) return;
+      const m = getMonitorData(node.kuma_monitor_id);
+      if (m?.status === 0) {
+        // If not already tracked, record now
+        if (!downSinceRef.current.has(node.kuma_monitor_id)) {
+          downSinceRef.current.set(node.kuma_monitor_id, Date.now());
+        }
+      } else {
+        // Recovered — remove tracking
+        downSinceRef.current.delete(node.kuma_monitor_id);
+      }
+    });
 
     nodesRef.current.forEach((node) => {
       // Skip special node types — they have their own rendering in renderNodes

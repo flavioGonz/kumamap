@@ -1223,6 +1223,9 @@ export default function LeafletMapView({
     const L = LRef.current;
 
     nodesRef.current.forEach((node) => {
+      // Skip special node types — they have their own rendering in renderNodes
+      if (node.icon === "_textLabel" || node.icon === "_waypoint" || node.icon === "_camera" || node.icon === "_polygon") return;
+
       const marker = markersRef.current.get(node.id);
       if (!marker) return;
 

@@ -38,6 +38,7 @@ interface MapViewState {
   center: [number, number];
   mapStyle: "dark" | "satellite" | "streets";
   overlayOpacity?: number;
+  straightEdges?: boolean;
 }
 
 interface LeafletMapViewProps {
@@ -243,6 +244,9 @@ export default function LeafletMapView({
   const [assignSearch, setAssignSearch] = useState("");
   const [colorPickerOpen, setColorPickerOpen] = useState(false);
   const [autoSaveEnabled, setAutoSaveEnabled] = useState(false);
+  const [straightEdges, setStraightEdges] = useState(initialViewState?.straightEdges ?? false);
+  const straightEdgesRef = useRef(initialViewState?.straightEdges ?? false);
+  useEffect(() => { straightEdgesRef.current = straightEdges; }, [straightEdges]);
   const [showNodes, setShowNodes] = useState(true);
   const [showLinks, setShowLinks] = useState(true);
   const [showCameras, setShowCameras] = useState(true);
@@ -1084,25 +1088,30 @@ export default function LeafletMapView({
       let lineWeight = isDown ? 4 : isVPN ? 5 : 3;
       const lineOpacity = isBothDown ? 0.4 : isDown ? 0.9 : 0.9;
 
-      // Bezier curve: add control point offset perpendicular to the line
-      const dx = tgtNode.y - srcNode.y;
-      const dy = tgtNode.x - srcNode.x;
-      const len = Math.sqrt(dx * dx + dy * dy) || 0.001;
-      const curvature = 0.15; // adjust for more/less curve
-      const cpLat = (srcNode.x + tgtNode.x) / 2 + (-dx / len) * len * curvature;
-      const cpLng = (srcNode.y + tgtNode.y) / 2 + (dy / len) * len * curvature;
-
-      // Create curved path with intermediate points
-      const steps = 20;
-      const curvePoints: [number, number][] = [];
-      for (let i = 0; i <= steps; i++) {
-        const t = i / steps;
-        const lat = (1 - t) * (1 - t) * srcNode.x + 2 * (1 - t) * t * cpLat + t * t * tgtNode.x;
-        const lng = (1 - t) * (1 - t) * srcNode.y + 2 * (1 - t) * t * cpLng + t * t * tgtNode.y;
-        curvePoints.push([lat, lng]);
+      // Build line points — straight or bezier curve
+      let linePoints: [number, number][];
+      if (straightEdgesRef.current) {
+        // Straight line
+        linePoints = [[srcNode.x, srcNode.y], [tgtNode.x, tgtNode.y]];
+      } else {
+        // Bezier curve: add control point offset perpendicular to the line
+        const dx = tgtNode.y - srcNode.y;
+        const dy = tgtNode.x - srcNode.x;
+        const len = Math.sqrt(dx * dx + dy * dy) || 0.001;
+        const curvature = 0.15;
+        const cpLat = (srcNode.x + tgtNode.x) / 2 + (-dx / len) * len * curvature;
+        const cpLng = (srcNode.y + tgtNode.y) / 2 + (dy / len) * len * curvature;
+        const steps = 20;
+        linePoints = [];
+        for (let i = 0; i <= steps; i++) {
+          const t = i / steps;
+          const lat = (1 - t) * (1 - t) * srcNode.x + 2 * (1 - t) * t * cpLat + t * t * tgtNode.x;
+          const lng = (1 - t) * (1 - t) * srcNode.y + 2 * (1 - t) * t * cpLng + t * t * tgtNode.y;
+          linePoints.push([lat, lng]);
+        }
       }
 
-      const line = L.polyline(curvePoints, {
+      const line = L.polyline(linePoints, {
         color: lineColor, weight: lineWeight, opacity: lineOpacity, dashArray,
         lineCap: lineCap || "round",
         smoothFactor: 1,
@@ -1850,10 +1859,11 @@ export default function LeafletMapView({
       center: mapRef.current ? [mapRef.current.getCenter().lat, mapRef.current.getCenter().lng] : [-34.85, -56.05],
       mapStyle,
       overlayOpacity,
+      straightEdges,
     };
     onSave(nodesRef.current, edgesRef.current, viewState);
     setSaving(false);
-  }, [onSave, mapStyle, overlayOpacity]);
+  }, [onSave, mapStyle, overlayOpacity, straightEdges]);
 
   // Auto-save every 60s (if enabled)
   useEffect(() => {
@@ -2265,6 +2275,21 @@ export default function LeafletMapView({
         </>}
 
         <div className="h-5 w-px mx-0.5" style={{ background: "rgba(255,255,255,0.06)" }} />
+
+        {/* Straight/Curved edges toggle */}
+        <button onClick={() => {
+          setStraightEdges(v => !v);
+          // Re-render edges immediately
+          setTimeout(() => { if (LRef.current && mapRef.current) renderEdges(LRef.current, mapRef.current); }, 0);
+        }} title={straightEdges ? "Links rectos (clic para curvas)" : "Links curvos (clic para rectas)"}
+          className="rounded-lg p-1.5 transition-all"
+          style={{ color: straightEdges ? "#f59e0b" : "#555" }}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            {straightEdges
+              ? <line x1="4" y1="20" x2="20" y2="4" />
+              : <path d="M4 20 C 10 20, 14 4, 20 4" />}
+          </svg>
+        </button>
 
         {/* Auto-save toggle */}
         <button onClick={() => setAutoSaveEnabled(v => !v)} title={autoSaveEnabled ? "Auto-save ON (clic para desactivar)" : "Auto-save OFF (clic para activar)"}

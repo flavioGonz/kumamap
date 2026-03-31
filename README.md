@@ -239,12 +239,15 @@ EOF
 | `KUMA_DB_PASSWORD` | [MySQL] Contraseña del lector | `password_seguro` |
 | `KUMA_DB_NAME` | [MySQL] Nombre original de la BD Kuma | `kuma` |
 
-> ⚠️ **IMPORTANTE: Si habilitas la conexion directa MySQL, debes crear el usuario de solo lectura en tu base de datos antes de arrancar.**
+> ⚠️ **IMPORTANTE: Si habilitas la conexion directa MySQL/MariaDB, debes crear el usuario de solo lectura en tu base de datos antes de arrancar.**
 > 
-> Ingresa a tu servidor de MySQL. Si usas Uptime Kuma con Docker, primero entra a la terminal interna con:
+> Si usas Uptime Kuma v2 con **MariaDB embebido**, entra a la terminal usando el socket correcto:
+> `docker exec -it uptime-kuma mariadb -u root --socket=/app/data/run/mariadb.sock`
+> 
+> Si usas un servidor o contenedor MySQL externo convencional, entra al mismo con:
 > `docker exec -it <nombre_contenedor_mysql> mysql -u root -p`
 > 
-> Luego pega y ejecuta la creacion del usuario:
+> Luego, una vez dentro de `mysql>` o `MariaDB>`, pega y ejecuta la creacion del usuario:
 > ```sql
 > CREATE USER 'kumamap_reader'@'%' IDENTIFIED BY 'tu_password_mysql';
 > GRANT SELECT ON kuma.* TO 'kumamap_reader'@'%';

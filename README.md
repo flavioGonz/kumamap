@@ -239,19 +239,35 @@ EOF
 | `KUMA_DB_PASSWORD` | [MySQL] Contraseña del lector | `password_seguro` |
 | `KUMA_DB_NAME` | [MySQL] Nombre original de la BD Kuma | `kuma` |
 
-> ⚠️ **IMPORTANTE: Si habilitas la conexion directa MySQL/MariaDB, debes crear el usuario de solo lectura en tu base de datos antes de arrancar.**
+> ⚠️ **Prerequisito MySQL: crear el usuario de solo lectura**
 > 
-> Si usas Uptime Kuma v2 con **MariaDB embebido**, entra a la terminal usando el socket correcto:
-> `docker exec -it uptime-kuma mariadb -u root --socket=/app/data/run/mariadb.sock`
+> Si habilitás la conexión directa a MySQL/MariaDB, antes de arrancar KumaMap debés crear el usuario lector. Usá el script incluido que detecta tu instalación automáticamente:
 > 
-> Si usas un servidor o contenedor MySQL externo convencional, entra al mismo con:
-> `docker exec -it <nombre_contenedor_mysql> mysql -u root -p`
+> ```bash
+> bash scripts/setup-db-user.sh
+> ```
 > 
-> Luego, una vez dentro de `mysql>` o `MariaDB>`, pega y ejecuta la creacion del usuario:
+> El script detecta automáticamente si usás:
+> - **Uptime Kuma 2.0 con MariaDB embebido en Docker** (el caso más común)
+> - **MySQL/MariaDB instalado directamente en el servidor**
+> 
+> Si preferís hacerlo manualmente, el comando varía según tu instalación:
+> 
+> ```bash
+> # Kuma 2.0 Docker con MariaDB embebido (más común)
+> docker exec -it uptime-kuma mariadb -u root --socket=/app/data/run/mariadb.sock
+> 
+> # MySQL/MariaDB externo o contenedor separado
+> docker exec -it <nombre_contenedor_mysql> mysql -u root -p
+> # o directamente: mysql -h <IP> -u root -p
+> ```
+> 
+> Una vez dentro del prompt `MariaDB>` o `mysql>`:
 > ```sql
 > CREATE USER 'kumamap_reader'@'%' IDENTIFIED BY 'tu_password_mysql';
 > GRANT SELECT ON kuma.* TO 'kumamap_reader'@'%';
 > FLUSH PRIVILEGES;
+> exit
 > ```
 
 ### Paso 4: Compilar

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
+import { apiUrl } from "@/lib/api";
 import { toast } from "sonner";
 import type { KumaMonitor } from "./MonitorPanel";
 import ContextMenu, { menuIcons } from "./ContextMenu";
@@ -436,8 +437,6 @@ export default function LeafletMapView({
         maxNativeZoom: tileUrls[initStyle].maxNativeZoom,
       }).addTo(map);
 
-      L.control.zoom({ position: "bottomleft" }).addTo(map);
-
       mapRef.current = map;
 
       // General map click handler (for polygon drawing)
@@ -457,6 +456,7 @@ export default function LeafletMapView({
       map.whenReady(() => {
         // Delay render slightly to ensure map is fully settled (fixes label scatter bug)
         setTimeout(() => {
+          if (mapRef.current !== map) return;
           map.invalidateSize();
           renderNodes(L, map);
           renderEdges(L, map);
@@ -646,7 +646,7 @@ export default function LeafletMapView({
 
     // Async fetch history (updates for next popup open)
     if (node.kuma_monitor_id) {
-      fetch(`/maps/api/kuma/history/${node.kuma_monitor_id}`).then(r => r.json()).then((data: any[]) => {
+      fetch(apiUrl(`/api/kuma/history/${node.kuma_monitor_id}`)).then(r => r.json()).then((data: any[]) => {
         const pings = data.filter((h: any) => h.ping != null).map((h: any) => h.ping).slice(-30);
         pingHistoryRef.current.set(node.kuma_monitor_id!, pings);
       }).catch(() => {});

@@ -28,13 +28,17 @@ app.prepare().then(() => {
 
   // Forward Kuma events to all connected browsers
   let lastMonitors: KumaMonitor[] = [];
+  let lastConnected: boolean = false;
 
   // Poll kuma monitors and emit to clients (kuma fires monitorList on changes)
   setInterval(() => {
     const monitors = kuma.getMonitors();
-    if (JSON.stringify(monitors) !== JSON.stringify(lastMonitors)) {
+    const isConnected = kuma.isConnected;
+
+    if (isConnected !== lastConnected || JSON.stringify(monitors) !== JSON.stringify(lastMonitors)) {
+      lastConnected = isConnected;
       lastMonitors = monitors;
-      io.emit("kuma:monitors", { connected: kuma.isConnected, monitors });
+      io.emit("kuma:monitors", { connected: isConnected, monitors });
     }
   }, 2000);
 

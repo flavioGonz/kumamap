@@ -220,6 +220,12 @@ KUMA_URL=http://127.0.0.1:3001
 KUMA_USER=admin
 KUMA_PASS=tu_contraseña_kuma
 NEXT_PUBLIC_BASE_PATH=
+
+# Opcional (Recomendado): Conexion directa a MySQL para historial / TimeMachine mas rapido
+KUMA_DB_HOST=127.0.0.1
+KUMA_DB_USER=kumamap_reader
+KUMA_DB_PASSWORD=tu_password_mysql
+KUMA_DB_NAME=kuma
 EOF
 ```
 
@@ -228,7 +234,22 @@ EOF
 | `KUMA_URL` | URL interna de Uptime Kuma | `http://127.0.0.1:3001` |
 | `KUMA_USER` | Usuario de login de Kuma | `admin` |
 | `KUMA_PASS` | Contraseña de login de Kuma | `mipassword` |
-| `NEXT_PUBLIC_BASE_PATH` | Prefijo URL (vacio = raiz `/`) | `/maps` |
+| `KUMA_DB_HOST` | [MySQL] IP/Host temporal de base de datos Kuma | `192.168.1.100` |
+| `KUMA_DB_USER` | [MySQL] Usuario de SOLO LECTURA a conectar | `kumamap_reader` |
+| `KUMA_DB_PASSWORD` | [MySQL] Contraseña del lector | `password_seguro` |
+| `KUMA_DB_NAME` | [MySQL] Nombre original de la BD Kuma | `kuma` |
+
+> ⚠️ **IMPORTANTE: Si habilitas la conexion directa MySQL, debes crear el usuario de solo lectura en tu base de datos antes de arrancar.**
+> 
+> Ingresa a tu servidor de MySQL. Si usas Uptime Kuma con Docker, primero entra a la terminal interna con:
+> `docker exec -it <nombre_contenedor_mysql> mysql -u root -p`
+> 
+> Luego pega y ejecuta la creacion del usuario:
+> ```sql
+> CREATE USER 'kumamap_reader'@'%' IDENTIFIED BY 'tu_password_mysql';
+> GRANT SELECT ON kuma.* TO 'kumamap_reader'@'%';
+> FLUSH PRIVILEGES;
+> ```
 
 ### Paso 4: Compilar
 

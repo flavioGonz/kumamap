@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { Clock, Play, Pause, Radio, Gauge, Calendar, Zap, ChevronRight, Crosshair } from "lucide-react";
+import { Clock, Play, Pause, Radio, Gauge, Calendar, Zap, ChevronRight, Crosshair, ChevronLeft } from "lucide-react";
 import { apiUrl } from "@/lib/api";
 
 interface TimelineEvent {
@@ -42,6 +42,7 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
   const [loaded, setLoaded] = useState(false);
   const [activePanel, setActivePanel] = useState<"speed" | "range" | "events" | "sensor" | null>(null);
   const [focusMonitorId, setFocusMonitorId] = useState<number | null>(null); // null = all monitors
+  const [badDates, setBadDates] = useState<Set<string>>(new Set());
   const barRef = useRef<HTMLDivElement>(null);
   const playRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -117,11 +118,25 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
       .catch(() => { setLoading(false); });
   }, [hoursBack, useCustomRange, customFrom, customTo, mapMonitorKey]);
 
-  // Auto-fetch when opened or range changes
   useEffect(() => {
     if (!open) return;
     fetchTimeline();
   }, [open, fetchTimeline]);
+
+  // Fetch summary of bad dates
+  useEffect(() => {
+    if (mapMonitorSet.size === 0 || !open) {
+      setBadDates(new Set());
+      return;
+    }
+    const ids = Array.from(mapMonitorSet).join(",");
+    fetch(apiUrl(`/api/kuma/timeline/summary?monitorIds=${ids}`))
+      .then(res => res.json())
+      .then(d => {
+        if (d.badDates) setBadDates(new Set(d.badDates));
+      })
+      .catch(console.error);
+  }, [mapMonitorKey, open]);
 
   // Refresh every 2 min
   useEffect(() => {
@@ -452,6 +467,18 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
           {/* Divider */}
           <div className="h-px mb-3" style={{ background: "rgba(255,255,255,0.06)" }} />
 
+          {/* Mini Calendar for finding events */}
+          <EventMiniCalendar 
+             badDates={badDates} 
+             onSelectDate={(year, month, d) => {
+               const pad = (n: number) => n.toString().padStart(2, "0");
+               const dateStr = `${year}-${pad(month + 1)}-${pad(d)}`;
+               setCustomFrom(`${dateStr}T00:00`);
+               setCustomTo(`${dateStr}T23:59`);
+               setUseCustomRange(true);
+             }} 
+          />
+
           {/* Custom date/time range */}
           <div className="text-[10px] font-bold text-[#999] mb-2 uppercase tracking-wider">Rango personalizado</div>
           <div className="space-y-2">
@@ -582,6 +609,61 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+function EventMiniCalendar({ badDates, onSelectDate }: { badDates: Set<string>, onSelectDate: (y: number, m: number, d: number) => void }) {
+  const [currentMonth, setCurrentMonth] = useState(() => {
+    const d = new Date();
+    d.setDate(1);
+    return d;
+  });
+
+  const year = currentMonth.getFullYear();
+  const month = currentMonth.getMonth();
+
+  const handlePrev = () => setCurrentMonth(new Date(year, month - 1, 1));
+  const handleNext = () => setCurrentMonth(new Date(year, month + 1, 1));
+
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const firstDayOfWeek = new Date(year, month, 1).getDay();
+  
+  const days = [];
+  for (let i = 0; i < firstDayOfWeek; i++) days.push(null);
+  for (let i = 1; i <= daysInMonth; i++) days.push(i);
+
+  const monthNames = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
+
+  return (
+    <div className="mb-3 rounded-xl p-2" style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)" }}>
+      <div className="flex items-center justify-between mb-2 px-1">
+         <button onClick={handlePrev} className="p-1 rounded-md text-[#888] hover:text-[#eee] hover:bg-white/5"><ChevronLeft className="h-4 w-4" /></button>
+         <span className="text-[11px] font-bold text-[#ddd]">{monthNames[month]} {year}</span>
+         <button onClick={handleNext} className="p-1 rounded-md text-[#888] hover:text-[#eee] hover:bg-white/5"><ChevronRight className="h-4 w-4" /></button>
+      </div>
+      <div className="grid grid-cols-7 gap-1">
+        {["Do", "Lu", "Ma", "Mi", "Ju", "Vi", "Sa"].map(d => (
+          <div key={d} className="text-[9px] font-bold text-[#777] text-center mb-1">{d}</div>
+        ))}
+        {days.map((d, i) => {
+          if (!d) return <div key={i} className="h-6" />;
+          
+          const pad = (n: number) => n.toString().padStart(2, "0");
+          const dateStr = `${year}-${pad(month + 1)}-${pad(d)}`;
+          const hasEvent = badDates.has(dateStr);
+          
+          return (
+            <button key={i} 
+              onClick={() => onSelectDate(year, month, d)}
+              className="relative h-6 flex justify-center items-center text-[11px] rounded transition-all hover:bg-[rgba(255,255,255,0.1)] text-[#bbb] font-mono group"
+            >
+               <span style={{ color: hasEvent ? "#f87171" : "inherit" }}>{d}</span>
+               {hasEvent && <div className="absolute top-0.5 right-0.5 w-1 h-1 rounded-full bg-red-400 opacity-60 group-hover:opacity-100 shadow-[0_0_4px_#f87171]" />}
+            </button>
+          )
+        })}
+      </div>
     </div>
   );
 }

@@ -2,8 +2,8 @@ module.exports = {
   apps: [
     {
       name: "kumamap",
-      script: "npx",
-      args: "tsx server.ts",
+      script: "npm",
+      args: "start",
       env: {
         NODE_ENV: "production",
       },

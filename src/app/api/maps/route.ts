@@ -3,11 +3,18 @@ import { mapsDb } from "@/lib/db";
 
 export async function GET() {
   const maps = mapsDb.getAll();
-  const enriched = maps.map((m) => ({
-    ...m,
-    node_count: mapsDb.getNodes(m.id).length,
-    edge_count: mapsDb.getEdges(m.id).length,
-  }));
+  const enriched = maps.map((m) => {
+    const nodes = mapsDb.getNodes(m.id);
+    return {
+      ...m,
+      node_count: nodes.length,
+      edge_count: mapsDb.getEdges(m.id).length,
+      // Live monitor IDs so the frontend can compute UP/DOWN
+      monitor_ids: nodes
+        .filter((n: any) => n.kuma_monitor_id !== null)
+        .map((n: any) => n.kuma_monitor_id as number),
+    };
+  });
   return NextResponse.json(enriched);
 }
 

@@ -37,6 +37,7 @@ interface MapSummary {
   updated_at: string;
   node_count: number;
   edge_count: number;
+  monitor_ids: number[];
 }
 
 // ─── Hook: Real-time Kuma monitors via Socket.IO ──
@@ -104,6 +105,9 @@ function MapListView({
   const [showCreate, setShowCreate] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
+  const [importPreview, setImportPreview] = useState<{ maps: any[]; isBulk: boolean } | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [exportingAll, setExportingAll] = useState(false);
 
   const kumaGroups = useMemo(
     () => kumaMonitors.filter((m) => m.type === "group"),
@@ -141,6 +145,71 @@ function MapListView({
     fetchMaps();
   };
 
+  // ── Export all maps ──
+  const exportAllMaps = async () => {
+    setExportingAll(true);
+    try {
+      const allData = await Promise.all(
+        maps.map(async (m) => {
+          const res = await fetch(apiUrl(`/api/maps/${m.id}/export`));
+          return await res.json();
+        })
+      );
+      const blob = new Blob([JSON.stringify(allData, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `kumamap-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success("Exportación completa", { description: `${maps.length} mapas exportados` });
+    } catch {
+      toast.error("Error al exportar todos los mapas");
+    } finally {
+      setExportingAll(false);
+    }
+  };
+
+  // ── Import with preview ──
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const data = JSON.parse(text);
+      const isBulk = Array.isArray(data);
+      const mapsToImport = isBulk ? data : [data];
+      setImportPreview({ maps: mapsToImport, isBulk });
+    } catch {
+      toast.error("Archivo inválido — asegurate de seleccionar un JSON exportado de KumaMap");
+    }
+    e.target.value = "";
+  };
+
+  const confirmImport = async () => {
+    if (!importPreview) return;
+    setImporting(true);
+    let ok = 0, failed = 0;
+    for (const mapData of importPreview.maps) {
+      try {
+        const res = await fetch(apiUrl("/api/maps/import"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(mapData),
+        });
+        if (res.ok) ok++;
+        else failed++;
+      } catch {
+        failed++;
+      }
+    }
+    setImporting(false);
+    setImportPreview(null);
+    fetchMaps();
+    if (failed === 0) toast.success("Importación completa", { description: `${ok} mapa${ok !== 1 ? "s" : ""} importado${ok !== 1 ? "s" : ""}` });
+    else toast.warning(`${ok} importados, ${failed} fallaron`);
+  };
+
   const getGroupName = (groupId: number | null) => {
     if (!groupId) return null;
     return kumaGroups.find((g) => g.id === groupId)?.name || `Grupo #${groupId}`;
@@ -153,6 +222,20 @@ function MapListView({
   };
 
   const bgTypeLabel = (t: string) => t === "livemap" ? "Mapa real" : t === "image" ? "Imagen" : "Grilla";
+
+  // Compute live UP/DOWN per map using kumaMonitors
+  const getMapStatus = (map: MapSummary) => {
+    const monitorIds: number[] = map.monitor_ids || [];
+    let up = 0, down = 0, pending = 0;
+    for (const id of monitorIds) {
+      const m = kumaMonitors.find((km) => km.id === id);
+      if (!m) continue;
+      if (m.status === 1) up++;
+      else if (m.status === 0) down++;
+      else pending++;
+    }
+    return { up, down, pending, total: monitorIds.length };
+  };
 
   // Filter & sort
   const filtered = useMemo(() => {
@@ -202,35 +285,24 @@ function MapListView({
           </div>
         </div>
         <div className="flex items-center gap-2">
+          {/* Export All */}
+          <button
+            onClick={exportAllMaps}
+            disabled={exportingAll || maps.length === 0}
+            title="Exportar todos los mapas como un solo archivo"
+            className="flex items-center gap-2 rounded-xl px-3 py-2.5 text-sm font-semibold transition-all disabled:opacity-40"
+            style={{ background: "rgba(99,102,241,0.1)", border: "1px solid rgba(99,102,241,0.25)", color: "#818cf8" }}
+          >
+            <Layers className="h-4 w-4" />
+            {exportingAll ? "Exportando..." : "Exportar Todo"}
+          </button>
           {/* Import */}
           <label
             className="flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition-all cursor-pointer"
             style={{ background: "rgba(34,197,94,0.1)", border: "1px solid rgba(34,197,94,0.25)", color: "#4ade80" }}
           >
             <Upload className="h-4 w-4" /> Importar
-            <input type="file" accept=".json" className="hidden" onChange={async (e) => {
-              const file = e.target.files?.[0];
-              if (!file) return;
-              try {
-                const text = await file.text();
-                const data = JSON.parse(text);
-                const res = await fetch(apiUrl("/api/maps/import"), {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify(data),
-                });
-                const result = await res.json();
-                if (res.ok) {
-                  toast.success("Mapa importado", { description: `${result.name}: ${result.nodesCount} nodos, ${result.edgesCount} links` });
-                  fetchMaps();
-                } else {
-                  toast.error("Error al importar", { description: result.error });
-                }
-              } catch {
-                toast.error("Archivo invalido");
-              }
-              e.target.value = "";
-            }} />
+            <input type="file" accept=".json" className="hidden" onChange={handleFileSelect} />
           </label>
           {/* Create */}
           <button
@@ -310,7 +382,7 @@ function MapListView({
       {/* Table */}
       <div className="rounded-2xl overflow-hidden" style={{ background: "rgba(255,255,255,0.015)", border: "1px solid rgba(255,255,255,0.06)" }}>
         {/* Table header */}
-        <div className="grid grid-cols-[1fr_100px_80px_120px_130px_80px_100px] gap-2 px-5 py-3 text-[10px] font-bold uppercase tracking-wider text-[#555]"
+        <div className="grid grid-cols-[1fr_90px_90px_100px_120px_130px_70px_90px] gap-2 px-5 py-3 text-[10px] font-bold uppercase tracking-wider text-[#555]"
           style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
           <button className="flex items-center gap-1 text-left hover:text-[#ededed] transition-colors" onClick={() => toggleSort("name")}>
             Nombre <SortIcon col="name" />
@@ -319,6 +391,7 @@ function MapListView({
             Tipo <SortIcon col="type" />
           </button>
           <span>Nodos</span>
+          <span className="text-emerald-500">Estado</span>
           <span>Grupo</span>
           <button className="flex items-center gap-1 hover:text-[#ededed] transition-colors" onClick={() => toggleSort("updated")}>
             Actualizado <SortIcon col="updated" />
@@ -330,9 +403,10 @@ function MapListView({
         {/* Table rows */}
         {filtered.map((map) => {
           const groupName = getGroupName(map.kuma_group_id);
+          const { up, down, pending, total } = getMapStatus(map);
           return (
             <div key={map.id}
-              className="grid grid-cols-[1fr_100px_80px_120px_130px_80px_100px] gap-2 items-center px-5 py-3 transition-all cursor-pointer group/row"
+              className="grid grid-cols-[1fr_90px_90px_100px_120px_130px_70px_90px] gap-2 items-center px-5 py-3 transition-all cursor-pointer group/row"
               style={{ borderBottom: "1px solid rgba(255,255,255,0.03)" }}
               onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "rgba(59,130,246,0.04)"; }}
               onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}
@@ -366,6 +440,34 @@ function MapListView({
                 <span className="font-bold text-[#bbb]">{map.node_count}</span>
                 <span className="text-[#555]">/</span>
                 <span className="text-[10px] text-[#666]">{map.edge_count}L</span>
+              </div>
+
+              {/* Status UP/DOWN */}
+              <div className="flex items-center gap-1.5">
+                {total === 0 ? (
+                  <span className="text-[10px] text-[#444]">—</span>
+                ) : (
+                  <>
+                    {up > 0 && (
+                      <span className="flex items-center gap-0.5 text-[10px] font-bold text-emerald-400">
+                        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                        {up}
+                      </span>
+                    )}
+                    {down > 0 && (
+                      <span className="flex items-center gap-0.5 text-[10px] font-bold text-red-400">
+                        <span className="h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse" />
+                        {down}
+                      </span>
+                    )}
+                    {pending > 0 && (
+                      <span className="flex items-center gap-0.5 text-[10px] font-bold text-amber-400">
+                        <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+                        {pending}
+                      </span>
+                    )}
+                  </>
+                )}
               </div>
 
               {/* Group */}
@@ -449,8 +551,64 @@ function MapListView({
       {/* Footer stats */}
       <div className="mt-3 flex items-center justify-between text-[10px] text-[#555]">
         <span>{filtered.length} de {maps.length} mapa{maps.length !== 1 ? "s" : ""}</span>
-        <span>Doble clic para abrir</span>
+        <span>Click para abrir · Hover para acciones</span>
       </div>
+
+      {/* ═══ Import Preview Modal ═══ */}
+      {importPreview && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center" style={{ background: "rgba(0,0,0,0.7)", backdropFilter: "blur(8px)" }}>
+          <div className="w-full max-w-lg rounded-2xl shadow-2xl" style={{ background: "rgba(14,14,14,0.99)", border: "1px solid rgba(255,255,255,0.1)" }}>
+            {/* Header */}
+            <div className="flex items-center gap-3 px-5 py-4" style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+              <div className="flex h-9 w-9 items-center justify-center rounded-xl" style={{ background: "rgba(34,197,94,0.12)", border: "1px solid rgba(34,197,94,0.3)" }}>
+                <Upload className="h-4 w-4 text-emerald-400" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-[#ededed]">
+                  {importPreview.isBulk ? `Importación masiva — ${importPreview.maps.length} mapas` : "Importar mapa"}
+                </h3>
+                <p className="text-[10px] text-[#666] mt-0.5">
+                  {importPreview.isBulk ? "Se importarán los siguientes mapas:" : "Se importará el siguiente mapa:"}
+                </p>
+              </div>
+              <button onClick={() => setImportPreview(null)} className="ml-auto text-[#555] hover:text-[#ededed] text-lg">&times;</button>
+            </div>
+
+            {/* Preview list */}
+            <div className="px-5 py-3 max-h-[50vh] overflow-y-auto space-y-1.5">
+              {importPreview.maps.map((m, i) => (
+                <div key={i} className="flex items-center gap-3 rounded-xl px-3 py-2.5"
+                  style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.05)" }}>
+                  <MapIcon className="h-4 w-4 text-blue-400 shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-semibold text-[#ededed] truncate">{m.name || `Mapa #${i + 1}`}</div>
+                    <div className="text-[10px] text-[#666]">
+                      {m.nodes?.length ?? 0} nodos · {m.edges?.length ?? 0} links
+                      {m.background_type && ` · ${m.background_type}`}
+                    </div>
+                  </div>
+                  <span className="text-[9px] font-bold text-emerald-400 shrink-0">NUEVO</span>
+                </div>
+              ))}
+            </div>
+
+            {/* Actions */}
+            <div className="flex gap-2 px-5 py-4" style={{ borderTop: "1px solid rgba(255,255,255,0.06)" }}>
+              <button onClick={() => setImportPreview(null)}
+                className="flex-1 rounded-xl py-2.5 text-sm font-semibold"
+                style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", color: "#888" }}>
+                Cancelar
+              </button>
+              <button onClick={confirmImport} disabled={importing}
+                className="flex-1 flex items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-bold disabled:opacity-50"
+                style={{ background: "rgba(34,197,94,0.15)", border: "1px solid rgba(34,197,94,0.35)", color: "#4ade80" }}>
+                <Upload className="h-4 w-4" />
+                {importing ? "Importando..." : `Importar ${importPreview.maps.length} mapa${importPreview.maps.length !== 1 ? "s" : ""}`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -255,6 +255,7 @@ export default function LeafletMapView({
   const [showLinks, setShowLinks] = useState(true);
   const [showCameras, setShowCameras] = useState(true);
   const [showFOV, setShowFOV] = useState(true);
+  const [showLabels, setShowLabels] = useState(true);
   const [mapRotation, setMapRotation] = useState(0);
   const [timeDragging, setTimeDragging] = useState(false);
   const [polygonMode, setPolygonMode] = useState(false);
@@ -2126,6 +2127,7 @@ export default function LeafletMapView({
       {/* ── Dark Overlay: CSS filter on tile pane only ── */}
       <style>{`
         .leaflet-tile-pane { filter: brightness(${1 - overlayOpacity}); transition: filter 0.3s; }
+        ${!showLabels ? `.leaflet-tooltip.leaflet-label-dark { display: none !important; }` : ""}
       `}</style>
 
       {/* ── Floating Top Bar ── */}
@@ -2397,6 +2399,10 @@ export default function LeafletMapView({
           <button onClick={() => setShowFOV(v => !v)} title={showFOV ? "Ocultar areas de cobertura" : "Mostrar areas de cobertura"}
             className="rounded-lg p-1.5 transition-all" style={{ color: showFOV ? "#8b5cf6" : "#333" }}>
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+          </button>
+          <button onClick={() => setShowLabels(v => !v)} title={showLabels ? "Ocultar etiquetas de nodos" : "Mostrar etiquetas de nodos"}
+            className="rounded-lg p-1.5 transition-all" style={{ color: showLabels ? "#e2e8f0" : "#333" }}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" x2="15" y1="20" y2="20"/><line x1="12" x2="12" y1="4" y2="20"/></svg>
           </button>
         </div>
 

@@ -548,6 +548,30 @@ NEXT_PUBLIC_BASE_PATH=/maps
 
 ## Changelog
 
+### v1.3.0 (2026-03-31)
+
+**TimeMachine — Mini Calendario de Incidentes**
+- Nuevo mini calendario visual en el panel de Rango de Time Machine
+- Los dias con eventos DOWN se marcan en rojo con un punto indicador
+- Al hacer clic en un dia marcado se aplica automaticamente ese rango de 24h
+- Nuevo endpoint `GET /api/kuma/timeline/summary` que consulta MySQL para obtener fechas con incidentes en los ultimos 90 dias de forma eficiente
+
+**Integracion MySQL Directa (Uptime Kuma 2.0)**
+- Nuevo modulo `src/lib/kuma-db.ts` con conexion via pool `mysql2` a la base de datos de Kuma
+- El endpoint `/api/kuma/timeline` ahora usa MySQL directamente (hasta 90 dias de historial) con fallback a Socket.IO
+- Fix: se agrego validacion de array vacio en `fetchHeartbeatsFromDb` para evitar error SQL `IN ()`
+- `mysql2` agregado a `serverExternalPackages` en `next.config.ts` para evitar error de build en Turbopack
+- Script `scripts/setup-db-user.sh` para creacion automatica del usuario de solo lectura (detecta Kuma 2.0 Docker embebido y MySQL local)
+
+**Autenticacion**
+- Fix critico: el login ya no abre una nueva conexion Socket.IO a Kuma por cada intento (causaba timeout de 8s en Kuma 2.0)
+- La autenticacion ahora valida contra `KUMA_USER`/`KUMA_PASS` del entorno, que ya es verificada por el servidor principal
+
+**Configuracion y Despliegue**
+- `src/lib/api.ts`: `apiUrl()` ahora respeta `NEXT_PUBLIC_BASE_PATH` del entorno en lugar de tener `/maps` hardcodeado
+- `next.config.ts`: soporte para `allowedDevOrigins` para desarrollo remoto sin bloqueos de CORS
+- README actualizado con instrucciones detalladas para MySQL embebido de Kuma 2.0 y script de setup
+
 ### v1.2.0 (2026-03-29)
 
 - Homogeneizacion visual: mapa grilla y mapa dinamico ahora comparten el mismo estilo

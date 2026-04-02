@@ -265,7 +265,6 @@ export default function LeafletMapView({
   const polygonPreviewRef = useRef<any>(null);
   const polygonLayersRef = useRef<Map<string, any>>(new Map());
   const edgeUpdateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [submapPickerOpen, setSubmapPickerOpen] = useState(false);
   const [importMapPickerOpen, setImportMapPickerOpen] = useState(false);
   const [importingMapId, setImportingMapId] = useState<string | null>(null);
   const [nodeMapModalNodeId, setNodeMapModalNodeId] = useState<string | null>(null);
@@ -588,13 +587,17 @@ export default function LeafletMapView({
     return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${paths}</svg>`;
   }
 
-  function createMarkerIcon(L: any, color: string, pulse: boolean, isLinkSource: boolean = false, scale: number = 1.0, iconName: string = "server") {
+  function createMarkerIcon(L: any, color: string, pulse: boolean, isLinkSource: boolean = false, scale: number = 1.0, iconName: string = "server", hasLinkedMap: boolean = false) {
     const dotSize = Math.round(18 * scale);
     const containerSize = Math.round(28 * scale);
     const pulseSize = Math.round(28 * scale);
     const iconSvgSize = Math.round(12 * scale);
     const ring = isLinkSource ? `border:3px solid #60a5fa;` : `border:2px solid ${color};`;
     const svgHtml = getIconSvg(iconName, iconSvgSize);
+    const badgeSize = Math.max(7, Math.round(8 * scale));
+    const linkedMapBadge = hasLinkedMap
+      ? `<div style="position:absolute;top:-3px;right:-3px;width:${badgeSize}px;height:${badgeSize}px;border-radius:50%;background:#818cf8;border:1.5px solid rgba(0,0,0,0.6);box-shadow:0 0 5px rgba(99,102,241,0.7);z-index:10;" title="Tiene mapa vinculado"></div>`
+      : "";
     const innerContent = svgHtml
       ? `<div style="width:${dotSize}px;height:${dotSize}px;border-radius:50%;background:${color};${ring}box-shadow:0 0 14px ${color}88, 0 0 4px ${color};cursor:pointer;display:flex;align-items:center;justify-content:center;">${svgHtml}</div>`
       : `<div style="width:${dotSize}px;height:${dotSize}px;border-radius:50%;background:${color};${ring}box-shadow:0 0 14px ${color}88, 0 0 4px ${color};cursor:pointer;"></div>`;
@@ -604,6 +607,7 @@ export default function LeafletMapView({
         <div style="position:relative;display:flex;align-items:center;justify-content:center;">
           ${pulse ? `<div style="position:absolute;width:${pulseSize}px;height:${pulseSize}px;border-radius:50%;background:${color}30;animation:ping 1.5s cubic-bezier(0,0,0.2,1) infinite;"></div>` : ""}
           ${innerContent}
+          ${linkedMapBadge}
         </div>
       `,
       iconSize: [containerSize, containerSize],
@@ -703,12 +707,23 @@ export default function LeafletMapView({
     polygonLayersRef.current.forEach((l) => { try { map.removeLayer(l); } catch {} });
     polygonLayersRef.current.clear();
 
+    // Migrate legacy _submap nodes → regular server nodes with linkedMaps
+    if (nodesRef.current.some(n => n.icon === "_submap")) {
+      nodesRef.current = nodesRef.current.map(n => {
+        if (n.icon !== "_submap") return n;
+        const mcd = n.custom_data ? (() => { try { return JSON.parse(n.custom_data!); } catch { return {}; } })() : {};
+        if (mcd.submapId && !(mcd.linkedMaps?.length)) {
+          mcd.linkedMaps = [{ id: mcd.submapId, name: mcd.submapName || n.label || "Submap" }];
+        }
+        return { ...n, icon: "server", custom_data: JSON.stringify(mcd) };
+      });
+    }
+
     nodesRef.current.forEach((node) => {
       const isLabel = node.icon === "_textLabel";
       const isCamera = node.icon === "_camera";
       const isWaypoint = node.icon === "_waypoint";
       const isPolygon = node.icon === "_polygon";
-      const isSubmap = node.icon === "_submap";
       const cd = node.custom_data ? JSON.parse(node.custom_data) : {};
       const color = getStatusColor(node.kuma_monitor_id);
       const m = getMonitorData(node.kuma_monitor_id);
@@ -768,21 +783,6 @@ export default function LeafletMapView({
           iconSize: [10, 10],
           iconAnchor: [5, 5],
         });
-      } else if (isSubmap) {
-        const sz = Math.round(38 * nodeScale);
-        const ico = Math.round(18 * nodeScale);
-        const submapName = cd.submapName || node.label || "Submap";
-        nodeIcon = L.divIcon({
-          className: "submap-marker",
-          html: `<div style="display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer;">
-            <div style="width:${sz}px;height:${sz}px;border-radius:10px;background:rgba(99,102,241,0.15);border:2px solid ${isSource ? "#60a5fa" : "rgba(99,102,241,0.7)"};display:flex;align-items:center;justify-content:center;box-shadow:0 0 14px rgba(99,102,241,0.35);transition:all 0.15s;">
-              <svg width="${ico}" height="${ico}" viewBox="0 0 24 24" fill="none" stroke="rgba(165,180,252,0.95)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6l3-3h12l3 3"/><path d="M3 6h18v14a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6z"/><path d="M9 11h6"/></svg>
-            </div>
-            <span style="color:#a5b4fc;font-size:${Math.round(9*nodeScale)}px;font-weight:600;white-space:nowrap;text-shadow:0 1px 4px rgba(0,0,0,0.8);max-width:80px;overflow:hidden;text-overflow:ellipsis;">${submapName}</span>
-          </div>`,
-          iconSize: [sz, sz + 16],
-          iconAnchor: [sz / 2, sz / 2],
-        });
       } else if (isCamera) {
         const camSize = Math.round(22 * nodeScale);
         const camIcon = Math.round(12 * nodeScale);
@@ -797,7 +797,8 @@ export default function LeafletMapView({
           iconAnchor: [camSize / 2, camSize / 2],
         });
       } else {
-        nodeIcon = createMarkerIcon(L, color, pulse, isSource, nodeScale, node.icon || "server");
+        const hasLinkedMap = Array.isArray(cd.linkedMaps) && cd.linkedMaps.length > 0;
+        nodeIcon = createMarkerIcon(L, color, pulse, isSource, nodeScale, node.icon || "server", hasLinkedMap);
       }
 
       const marker = L.marker([node.x, node.y], {
@@ -947,13 +948,7 @@ export default function LeafletMapView({
       // Double-click opens the unified edit modal (not a browser prompt)
       marker.on("dblclick", (e: any) => {
         L.DomEvent.stopPropagation(e);
-        if (isSubmap) {
-          // Navigate to submap on double-click
-          const submapCd = node.custom_data ? (() => { try { return JSON.parse(node.custom_data!); } catch { return {}; } })() : {};
-          if (submapCd.submapId) {
-            window.open(apiUrl(`/view/${submapCd.submapId}`), "_blank");
-          }
-        } else if (isLabel) {
+        if (isLabel) {
           // For text labels, still allow quick inline rename
           const newText = prompt("Texto de la etiqueta:", node.label);
           if (newText?.trim()) {
@@ -1000,7 +995,7 @@ export default function LeafletMapView({
 
       // Click — open popup or stream viewer for cameras
       marker.on("click", () => {
-        if (isLabel || isWaypoint || isPolygon || isSubmap) return;
+        if (isLabel || isWaypoint || isPolygon) return;
         // Camera click: open stream viewer if configured
         if (isCamera) {
           const camCd = node.custom_data ? JSON.parse(node.custom_data) : {};
@@ -1417,7 +1412,7 @@ export default function LeafletMapView({
 
     nodesRef.current.forEach((node) => {
       // Skip special node types — they have their own rendering in renderNodes
-      if (node.icon === "_textLabel" || node.icon === "_waypoint" || node.icon === "_camera" || node.icon === "_polygon" || node.icon === "_submap") return;
+      if (node.icon === "_textLabel" || node.icon === "_waypoint" || node.icon === "_camera" || node.icon === "_polygon") return;
 
       const marker = markersRef.current.get(node.id);
       if (!marker) return;
@@ -1428,7 +1423,8 @@ export default function LeafletMapView({
       const cd = node.custom_data ? JSON.parse(node.custom_data) : {};
       const ns: number = cd.nodeSize || 1.0;
 
-      marker.setIcon(createMarkerIcon(L, color, pulse, linkSource === node.id, ns, node.icon || "server"));
+      const hasLinkedMapRefresh = Array.isArray(cd.linkedMaps) && cd.linkedMaps.length > 0;
+      marker.setIcon(createMarkerIcon(L, color, pulse, linkSource === node.id, ns, node.icon || "server", hasLinkedMapRefresh));
       marker.setPopupContent(createPopupContent(node));
     });
 
@@ -1607,41 +1603,6 @@ export default function LeafletMapView({
     const node = nodesRef.current.find((n) => n.id === nodeId);
     const isLabel = node?.icon === "_textLabel";
     const isWaypoint = node?.icon === "_waypoint";
-
-    // Submap nodes: open, rename, delete
-    if (node?.icon === "_submap") {
-      const submapCd = node.custom_data ? (() => { try { return JSON.parse(node.custom_data!); } catch { return {}; } })() : {};
-      return [
-        {
-          label: "Abrir submap",
-          icon: menuIcons.ExternalLink,
-          onClick: () => {
-            if (submapCd.submapId) window.open(apiUrl(`/view/${submapCd.submapId}`), "_blank");
-            else toast.error("Este nodo no tiene un submap asignado");
-          },
-        },
-        {
-          label: "Editar en editor",
-          icon: menuIcons.Pencil,
-          onClick: () => {
-            if (submapCd.submapId) window.location.href = `/?map=${submapCd.submapId}`;
-          },
-        },
-        {
-          label: "Eliminar nodo",
-          icon: menuIcons.Trash2,
-          danger: true,
-          divider: true,
-          onClick: () => {
-            pushUndo();
-            nodesRef.current = nodesRef.current.filter((n) => n.id !== nodeId);
-            edgesRef.current = edgesRef.current.filter((e) => e.source_node_id !== nodeId && e.target_node_id !== nodeId);
-            if (LRef.current && mapRef.current) { renderNodes(LRef.current, mapRef.current); renderEdges(LRef.current, mapRef.current); }
-            toast.success("Nodo eliminado");
-          },
-        },
-      ];
-    }
 
     // Polygons: rename, color, delete
     const isPolygon = node?.icon === "_polygon";
@@ -1955,13 +1916,32 @@ export default function LeafletMapView({
           setTimeMachineOpen(true);
         },
       }] : []),
-      // Linked maps for this node
-      {
-        label: "Mapas",
-        icon: menuIcons.FolderOpen,
-        divider: true,
-        onClick: () => setNodeMapModalNodeId(nodeId),
-      },
+      // Linked maps for this node — show quick-open entries + manage option
+      ...(() => {
+        const ncd = node?.custom_data ? (() => { try { return JSON.parse(node.custom_data!); } catch { return {}; } })() : {};
+        const linked: { id: string; name: string }[] = ncd.linkedMaps || [];
+        const items: any[] = [];
+        // Quick-open each linked map
+        linked.forEach(lm => {
+          items.push({
+            label: `Abrir: ${lm.name}`,
+            icon: menuIcons.ExternalLink,
+            divider: items.length === 0, // divider before first map item
+            onClick: () => {
+              if (readonly) window.location.href = `/?map=${lm.id}`;
+              else window.open(apiUrl(`/view/${lm.id}`), "_blank");
+            },
+          });
+        });
+        // Manage maps option
+        items.push({
+          label: linked.length > 0 ? "Gestionar mapas" : "Asignar mapa",
+          icon: menuIcons.FolderOpen,
+          divider: linked.length === 0, // divider if no maps yet
+          onClick: () => setNodeMapModalNodeId(nodeId),
+        });
+        return items;
+      })(),
       {
         label: "Eliminar nodo",
         icon: menuIcons.Trash2,
@@ -2327,51 +2307,7 @@ export default function LeafletMapView({
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m16.24 7.76-1.804 5.412a2 2 0 0 1-1.265 1.265L7.76 16.24l1.804-5.412a2 2 0 0 1 1.265-1.265z"/><circle cx="12" cy="12" r="10"/></svg>
             <span className="text-[10px] font-semibold hidden xl:inline">Camara</span>
           </button>
-          {/* ─── Submap button ─── */}
-          {availableMaps.length > 0 && (
-            <div className="relative">
-              <button onClick={() => setSubmapPickerOpen(v => !v)} title="Agregar nodo submap"
-                className="group flex items-center gap-1 rounded-xl px-2 py-1.5 transition-all"
-                style={{ color: submapPickerOpen ? "#818cf8" : "#888", background: submapPickerOpen ? "rgba(99,102,241,0.12)" : "transparent" }}
-                onMouseEnter={(e) => { if (!submapPickerOpen) { (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.06)"; (e.currentTarget as HTMLElement).style.color = "#ededed"; }}}
-                onMouseLeave={(e) => { if (!submapPickerOpen) { (e.currentTarget as HTMLElement).style.background = "transparent"; (e.currentTarget as HTMLElement).style.color = "#888"; }}}>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
-                <span className="text-[10px] font-semibold hidden xl:inline">Submap</span>
-              </button>
-              {submapPickerOpen && (
-                <div className="fixed inset-0 z-[99998]" onClick={() => setSubmapPickerOpen(false)} />
-              )}
-              {submapPickerOpen && (
-                <div className="absolute top-full left-0 mt-1 rounded-xl shadow-2xl py-1 z-[99999] min-w-[180px]"
-                  style={{ background: "rgba(12,12,12,0.98)", border: "1px solid rgba(99,102,241,0.25)", backdropFilter: "blur(20px)" }}>
-                  <div className="px-3 py-1 text-[9px] font-bold uppercase tracking-wider text-[#555]">Seleccionar submap</div>
-                  {availableMaps.filter(m => m.id !== mapId).map(m => (
-                    <button key={m.id} onClick={() => {
-                      if (!mapRef.current) return;
-                      const center = mapRef.current.getCenter();
-                      const id = `sub-${Date.now()}`;
-                      nodesRef.current = [...nodesRef.current, {
-                        id, kuma_monitor_id: null, label: m.name, x: center.lat, y: center.lng,
-                        icon: "_submap", custom_data: JSON.stringify({ submapId: m.id, submapName: m.name }),
-                      }];
-                      if (LRef.current) renderNodes(LRef.current, mapRef.current);
-                      setSubmapPickerOpen(false);
-                      toast.success(`Submap "${m.name}" agregado`);
-                    }}
-                      className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-[#a0a0a0] transition-all"
-                      onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "rgba(99,102,241,0.1)"; (e.currentTarget as HTMLElement).style.color = "#ededed"; }}
-                      onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; (e.currentTarget as HTMLElement).style.color = "#a0a0a0"; }}>
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#818cf8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
-                      <span className="truncate">{m.name}</span>
-                    </button>
-                  ))}
-                  {availableMaps.filter(m => m.id !== mapId).length === 0 && (
-                    <div className="px-3 py-2 text-[10px] text-[#555]">No hay otros mapas disponibles</div>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
+          {/* Submap button removed — use right-click → Asignar mapa on any node */}
           {/* ─── Importar mapa ─── */}
           {availableMaps.length > 0 && (
             <div className="relative">

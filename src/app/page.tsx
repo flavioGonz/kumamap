@@ -454,7 +454,7 @@ function MapListView({
       {/* Table */}
       <div className="rounded-2xl overflow-hidden" style={{ background: "rgba(255,255,255,0.015)", border: "1px solid rgba(255,255,255,0.06)" }}>
         {/* Table header */}
-        <div className="grid grid-cols-[1fr_90px_90px_100px_120px_130px_70px_90px] gap-2 px-5 py-3 text-[10px] font-bold uppercase tracking-wider text-[#555]"
+        <div className="grid grid-cols-[1fr_90px_90px_100px_120px_130px_70px_165px] gap-2 px-5 py-3 text-[10px] font-bold uppercase tracking-wider text-[#555]"
           style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
           <button className="flex items-center gap-1 text-left hover:text-[#ededed] transition-colors" onClick={() => toggleSort("name")}>
             Nombre <SortIcon col="name" />
@@ -482,7 +482,7 @@ function MapListView({
             <div key={map.id}>
             <div
               draggable
-              className="grid grid-cols-[1fr_90px_90px_100px_120px_130px_70px_90px] gap-2 items-center px-5 py-3 transition-all cursor-pointer group/row"
+              className="grid grid-cols-[1fr_90px_90px_100px_120px_130px_70px_165px] gap-2 items-center px-5 py-3 transition-all cursor-pointer group/row"
               style={{
                 borderBottom: "1px solid rgba(255,255,255,0.03)",
                 background: dragOverMapId === map.id && draggingMapId !== map.id ? "rgba(99,102,241,0.12)" : "transparent",
@@ -641,7 +641,19 @@ function MapListView({
                           lines.push(`  ${n.label || n.id}: ${Number(n.x).toFixed(5)}, ${Number(n.y).toFixed(5)}`);
                         });
                     }
-                    await navigator.clipboard.writeText(lines.join("\n"));
+                    const text = lines.join("\n");
+                    // Fallback for HTTP (non-secure) contexts where clipboard API is unavailable
+                    if (navigator.clipboard?.writeText) {
+                      await navigator.clipboard.writeText(text);
+                    } else {
+                      const el = document.createElement("textarea");
+                      el.value = text;
+                      el.style.cssText = "position:fixed;top:0;left:0;opacity:0";
+                      document.body.appendChild(el);
+                      el.select();
+                      document.execCommand("copy");
+                      document.body.removeChild(el);
+                    }
                     toast.success("Ubicación copiada", { description: `${data.nodes?.length ?? 0} nodos` });
                   } catch {
                     toast.error("No se pudo copiar la ubicación");
@@ -675,7 +687,7 @@ function MapListView({
               return (
                 <div key={child.id}
                   draggable
-                  className="grid grid-cols-[1fr_90px_90px_100px_120px_130px_70px_90px] gap-2 items-center py-2 cursor-pointer group/child"
+                  className="grid grid-cols-[1fr_90px_90px_100px_120px_130px_70px_165px] gap-2 items-center py-2 cursor-pointer group/child"
                   style={{
                     borderBottom: "1px solid rgba(255,255,255,0.02)",
                     paddingLeft: "72px", paddingRight: "20px",

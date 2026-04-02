@@ -2666,13 +2666,16 @@ export default function LeafletMapView({
       )}
 
       {/* ── VERTICAL SIDEBAR CONTROLS (Right Side) ── */}
+      {/* Offset by sidebarWidth so controls don't overlap with the MonitorPanel toggle button */}
       {!readonly && (
-        <div className="fixed bottom-24 right-5 flex flex-col gap-2 rounded-2xl p-1.5 shadow-2xl backdrop-blur-3xl shrink-0" 
-          style={{ 
-            zIndex: 10000, 
-            background: "rgba(10,10,10,0.85)", 
+        <div className="fixed bottom-24 flex flex-col gap-2 rounded-2xl p-1.5 shadow-2xl backdrop-blur-3xl shrink-0"
+          style={{
+            zIndex: 10000,
+            right: sidebarWidth + 12,
+            background: "rgba(10,10,10,0.85)",
             border: "1px solid rgba(255,255,255,0.08)",
-            boxShadow: "0 12px 40px rgba(0,0,0,0.5)"
+            boxShadow: "0 12px 40px rgba(0,0,0,0.5)",
+            transition: "right 0.3s ease",
           }}>
           {/* Zoom & View Group */}
           <button onClick={() => mapRef.current?.zoomIn()} title="Acercar (Zoom In)"

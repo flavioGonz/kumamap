@@ -2620,7 +2620,7 @@ export default function LeafletMapView({
 
       {/* ── VERTICAL SIDEBAR CONTROLS (Right Side) ── */}
       {!readonly && (
-        <div className="fixed bottom-24 flex flex-col gap-1 rounded-xl p-1 shadow-2xl backdrop-blur-3xl shrink-0"
+        <div className="fixed top-1/2 -translate-y-1/2 flex flex-col gap-1 rounded-xl p-1 shadow-2xl backdrop-blur-3xl shrink-0"
           style={{
             zIndex: 10000,
             right: sidebarWidth + 12,

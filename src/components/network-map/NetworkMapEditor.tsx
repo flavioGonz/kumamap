@@ -27,6 +27,7 @@ import { toast } from "sonner";
 import KumaMonitorNode, { type KumaNodeData } from "./KumaMonitorNode";
 import TextLabelNode, { type TextLabelData } from "./TextLabelNode";
 import MonitorPanel, { type KumaMonitor } from "./MonitorPanel";
+import TimeMachine from "./TimeMachine";
 // MapToolbar no longer used - toolbar is inline for consistency with LeafletMapView
 import ContextMenu, { menuIcons } from "./ContextMenu";
 import LinkModal, { type LinkFormData } from "./LinkModal";
@@ -184,6 +185,8 @@ function CanvasInner({
   const [rfShowEdges, setRfShowEdges] = useState(true);
   const [rfShowLabels, setRfShowLabels] = useState(true);
   const [rfShowCameras, setRfShowCameras] = useState(true);
+  const [timeMachineOpen, setTimeMachineOpen] = useState(false);
+  const [historicalStatuses, setHistoricalStatuses] = useState<Map<number, number>>(new Map());
   const [connectMode, setConnectMode] = useState(false);
   const [saving, setSaving] = useState(false);
   const [panelCollapsed, setPanelCollapsed] = useState(true);
@@ -917,15 +920,27 @@ function CanvasInner({
     ? apiUrl(`/api/uploads/network-maps/${mapData.background_image}`) : null;
   const bgScale = mapData?.background_scale || 1.0;
 
-  // Visibility-filtered nodes/edges for image-type maps
-  const visibleNodes = useMemo(() => nodes.map(n => ({
-    ...n,
-    hidden: (
-      (!rfShowNodes && n.type === "kumaNode") ||
-      (!rfShowCameras && n.type === "kumaNode" && (n.data as any)?.icon === "camera") ||
-      (!rfShowLabels && n.type === "textLabel")
-    ),
-  })), [nodes, rfShowNodes, rfShowCameras, rfShowLabels]);
+  // Monitor IDs on this map — for TimeMachine filtering
+  const mapMonitorIds = useMemo(() =>
+    nodes.filter(n => (n.data as any)?.kuma_monitor_id).map(n => (n.data as any).kuma_monitor_id as number),
+  [nodes]);
+
+  // Visibility-filtered nodes/edges for image-type maps (also applies TimeMachine historical statuses)
+  const visibleNodes = useMemo(() => nodes.map(n => {
+    const data = n.data as any;
+    const overrideStatus = historicalStatuses.size > 0 && data?.kuma_monitor_id
+      ? historicalStatuses.get(data.kuma_monitor_id)
+      : undefined;
+    return {
+      ...n,
+      data: overrideStatus !== undefined ? { ...data, status: overrideStatus } : data,
+      hidden: (
+        (!rfShowNodes && n.type === "kumaNode") ||
+        (!rfShowCameras && n.type === "kumaNode" && data?.icon === "camera") ||
+        (!rfShowLabels && n.type === "textLabel")
+      ),
+    };
+  }), [nodes, rfShowNodes, rfShowCameras, rfShowLabels, historicalStatuses]);
 
   const visibleEdges = useMemo(() => edges.map(e => ({
     ...e, hidden: !rfShowEdges,
@@ -1286,7 +1301,7 @@ function CanvasInner({
 
       {/* ── VERTICAL SIDEBAR CONTROLS – image-type maps ── */}
       {bgType !== "livemap" && (
-        <div className="fixed bottom-24 flex flex-col gap-1 rounded-xl p-1 shadow-2xl backdrop-blur-3xl shrink-0"
+        <div className="fixed top-1/2 -translate-y-1/2 flex flex-col gap-1 rounded-xl p-1 shadow-2xl backdrop-blur-3xl shrink-0"
           style={{
             zIndex: 10000,
             right: rfSidebarWidth + 12,
@@ -1350,6 +1365,13 @@ function CanvasInner({
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/></svg>
             </button>
           </Tooltip>
+          <Tooltip content={timeMachineOpen ? "Cerrar TimeMachine" : "Abrir TimeMachine"} placement="left">
+            <button onClick={() => setTimeMachineOpen(v => !v)}
+              className="h-7 w-7 flex items-center justify-center rounded-lg transition-all hover:bg-white/10"
+              style={{ color: timeMachineOpen ? "#a78bfa" : "#888" }}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            </button>
+          </Tooltip>
         </div>
       )}
 
@@ -1362,6 +1384,24 @@ function CanvasInner({
         onAutoImport={mapData?.kuma_group_id ? handleAutoImport : undefined}
         hideCollapsedButton={true}
       />
+
+      {/* TimeMachine – image-type maps */}
+      {bgType !== "livemap" && (
+        <TimeMachine
+          open={timeMachineOpen}
+          onToggle={() => setTimeMachineOpen(v => !v)}
+          onDragging={() => {}}
+          monitors={filteredMonitors}
+          mapMonitorIds={mapMonitorIds}
+          onTimeChange={(time, statuses) => {
+            setHistoricalStatuses(time ? statuses : new Map());
+          }}
+          onFocusEvent={(monitorId) => {
+            const node = nodes.find(n => (n.data as any)?.kuma_monitor_id === monitorId);
+            if (node) reactFlow.setCenter((node.position.x || 0) + 60, (node.position.y || 0) + 40, { zoom: 1.5, duration: 500 });
+          }}
+        />
+      )}
 
       {/* Context Menu */}
       {ctxMenu && (

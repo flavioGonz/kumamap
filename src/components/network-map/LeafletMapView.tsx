@@ -8,6 +8,7 @@ import ContextMenu, { menuIcons } from "./ContextMenu";
 import LinkModal, { type LinkFormData } from "./LinkModal";
 import InputModal from "./InputModal";
 import { Pencil, Signal, Plus } from "lucide-react";
+import Tooltip from "./Tooltip";
 import TimeMachine from "./TimeMachine";
 import EventReportModal from "./EventReportModal";
 import CameraStreamConfigModal, { type CameraStreamConfig } from "./CameraStreamConfigModal";
@@ -2251,6 +2252,7 @@ export default function LeafletMapView({
         <div className="h-5 w-px mx-0.5" style={{ background: "rgba(255,255,255,0.06)" }} />
 
         {/* Edit mode toggle */}
+        <Tooltip content={editMode ? "Modo compacto" : "Modo edición"}>
         <button
           onClick={() => setEditMode(v => !v)}
           className="flex items-center gap-1 rounded-xl px-2 py-1.5 text-[10px] font-bold uppercase tracking-wider transition-all"
@@ -2259,13 +2261,13 @@ export default function LeafletMapView({
             border: editMode ? "1px solid rgba(245,158,11,0.3)" : "1px solid transparent",
             color: editMode ? "#f59e0b" : "#666",
           }}
-          title={editMode ? "Modo compacto" : "Modo edicion"}
         >
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             {editMode ? <><path d="M12 20h9"/><path d="M16.376 3.622a1 1 0 0 1 3.002 3.002L7.368 18.635a2 2 0 0 1-.855.506l-2.872.838a.5.5 0 0 1-.62-.62l.838-2.872a2 2 0 0 1 .506-.855z"/></> : <><path d="M12 20h9"/><path d="M16.376 3.622a1 1 0 0 1 3.002 3.002L7.368 18.635a2 2 0 0 1-.855.506l-2.872.838a.5.5 0 0 1-.62-.62l.838-2.872a2 2 0 0 1 .506-.855z"/></>}
           </svg>
           {editMode ? "Editar" : "Edit"}
         </button>
+        </Tooltip>
 
         {/* ═══ EDIT MODE TOOLS ═══ */}
         {editMode && <>
@@ -2273,28 +2275,33 @@ export default function LeafletMapView({
 
         {/* Node/Edge controls */}
         <div className="flex items-center gap-0.5">
+          <Tooltip content="Agregar nodo">
           <button onClick={() => {
             if (!mapRef.current) return;
             const center = mapRef.current.getCenter();
             const id = `node-${Date.now()}`;
             nodesRef.current = [...nodesRef.current, { id, kuma_monitor_id: null, label: "Nuevo equipo", x: center.lat, y: center.lng, icon: "server" }];
             if (LRef.current) renderNodes(LRef.current, mapRef.current);
-          }} title="Agregar nodo"
+          }}
             className="group flex items-center gap-1 rounded-xl px-2 py-1.5 text-[#888] hover:text-[#ededed] hover:bg-white/[0.06] transition-all">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
             <span className="text-[10px] font-semibold hidden xl:inline">Nodo</span>
           </button>
+          </Tooltip>
+          <Tooltip content="Agregar etiqueta">
           <button onClick={() => {
             if (!mapRef.current) return;
             const center = mapRef.current.getCenter();
             const id = `label-${Date.now()}`;
             nodesRef.current = [...nodesRef.current, { id, kuma_monitor_id: null, label: "Etiqueta", x: center.lat, y: center.lng, icon: "_textLabel" }];
             if (LRef.current) renderNodes(LRef.current, mapRef.current);
-          }} title="Agregar etiqueta"
+          }}
             className="group flex items-center gap-1 rounded-xl px-2 py-1.5 text-[#888] hover:text-[#ededed] hover:bg-white/[0.06] transition-all">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" x2="15" y1="20" y2="20"/><line x1="12" x2="12" y1="4" y2="20"/></svg>
             <span className="text-[10px] font-semibold hidden xl:inline">Etiqueta</span>
           </button>
+          </Tooltip>
+          <Tooltip content="Agregar cámara con campo de visión">
           <button onClick={() => {
             if (!mapRef.current) return;
             const center = mapRef.current.getCenter();
@@ -2302,16 +2309,18 @@ export default function LeafletMapView({
             nodesRef.current = [...nodesRef.current, { id, kuma_monitor_id: null, label: "Camara", x: center.lat, y: center.lng, icon: "_camera", custom_data: JSON.stringify({ type: "camera", rotation: 0, fov: 60, fovRange: 0.002 }) }];
             if (LRef.current) renderNodes(LRef.current, mapRef.current);
             toast.success("Camara agregada — clic derecho para rotar");
-          }} title="Agregar camara con campo de vision"
+          }}
             className="group flex items-center gap-1 rounded-xl px-2 py-1.5 text-[#888] hover:text-[#ededed] hover:bg-white/[0.06] transition-all">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m16.24 7.76-1.804 5.412a2 2 0 0 1-1.265 1.265L7.76 16.24l1.804-5.412a2 2 0 0 1 1.265-1.265z"/><circle cx="12" cy="12" r="10"/></svg>
             <span className="text-[10px] font-semibold hidden xl:inline">Camara</span>
           </button>
+          </Tooltip>
           {/* Submap button removed — use right-click → Asignar mapa on any node */}
           {/* ─── Importar mapa ─── */}
           {availableMaps.length > 0 && (
             <div className="relative">
-              <button onClick={() => setImportMapPickerOpen(v => !v)} title="Importar nodos de otro mapa"
+              <Tooltip content="Importar nodos de otro mapa">
+              <button onClick={() => setImportMapPickerOpen(v => !v)}
                 disabled={importingMapId !== null}
                 className="group flex items-center gap-1 rounded-xl px-2 py-1.5 transition-all"
                 style={{ color: importMapPickerOpen ? "#34d399" : "#888", background: importMapPickerOpen ? "rgba(52,211,153,0.1)" : "transparent" }}
@@ -2322,6 +2331,7 @@ export default function LeafletMapView({
                 </svg>
                 <span className="text-[10px] font-semibold hidden xl:inline">{importingMapId ? "Importando..." : "Importar"}</span>
               </button>
+              </Tooltip>
               {importMapPickerOpen && (
                 <div className="fixed inset-0 z-[99998]" onClick={() => setImportMapPickerOpen(false)} />
               )}
@@ -2382,6 +2392,7 @@ export default function LeafletMapView({
         {/* ─── Drawing tools separator ─── */}
         <div className="h-5 w-px mx-0.5" style={{ background: "rgba(255,255,255,0.06)" }} />
         <div className="flex items-center gap-0.5" style={{ background: "rgba(255,255,255,0.02)", borderRadius: "12px", padding: "2px" }}>
+          <Tooltip content="Waypoint para curvar links">
           <button onClick={() => {
             if (!mapRef.current) return;
             const center = mapRef.current.getCenter();
@@ -2389,21 +2400,25 @@ export default function LeafletMapView({
             nodesRef.current = [...nodesRef.current, { id, kuma_monitor_id: null, label: "", x: center.lat, y: center.lng, icon: "_waypoint" }];
             if (LRef.current) renderNodes(LRef.current, mapRef.current);
             toast.success("Punto de ruta agregado");
-          }} title="Waypoint para curvar links"
+          }}
             className="group flex items-center gap-1 rounded-xl px-2 py-1.5 text-[#888] hover:text-[#ededed] hover:bg-white/[0.06] transition-all">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/></svg>
             <span className="text-[10px] font-semibold hidden xl:inline">Punto</span>
           </button>
+          </Tooltip>
+          <Tooltip content={linkSource ? "Cancelar link" : "Crear link entre nodos"}>
           <button onClick={() => {
             if (linkSource) { cancelLinkCreation(); return; }
             if (nodesRef.current.length === 0) { toast.error("Agrega nodos primero"); return; }
             toast.info("Clic derecho en un nodo → Nuevo link", { duration: 4000 });
-          }} title={linkSource ? "Cancelar link" : "Crear link entre nodos"}
+          }}
             className={`group flex items-center gap-1 rounded-xl px-2 py-1.5 transition-all ${linkSource ? "text-[#60a5fa]" : "text-[#888] hover:text-[#ededed] hover:bg-white/[0.06]"}`}
             style={linkSource ? { background: "rgba(59,130,246,0.15)", border: "1px solid rgba(59,130,246,0.35)" } : {}}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
             <span className="text-[10px] font-semibold hidden xl:inline">Link</span>
           </button>
+          </Tooltip>
+          <Tooltip content={polygonMode ? "Terminar polígono (doble clic)" : "Dibujar zona/polígono"}>
           <button
             data-polygon-active={polygonMode || undefined}
             onClick={() => {
@@ -2415,13 +2430,13 @@ export default function LeafletMapView({
                 toast.info("Clic en el mapa para agregar puntos. Doble clic para terminar.", { duration: 5000 });
               }
             }}
-            title={polygonMode ? "Terminar poligono (doble clic)" : "Dibujar zona/poligono"}
             className={`group flex items-center gap-1 rounded-xl px-2 py-1.5 transition-all ${polygonMode ? "text-[#4ade80]" : "text-[#888] hover:text-[#ededed] hover:bg-white/[0.06]"}`}
             style={polygonMode ? { background: "rgba(34,197,94,0.15)", border: "1px solid rgba(34,197,94,0.35)" } : {}}
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3h18v18H3z"/></svg>
             <span className="text-[10px] font-semibold hidden xl:inline">{polygonMode ? "Listo" : "Zona"}</span>
           </button>
+          </Tooltip>
         </div>
 
         {/* Link mode indicator */}
@@ -2469,16 +2484,17 @@ export default function LeafletMapView({
             </button>
           </div>
         ) : (
+          <Tooltip content="Buscar dirección">
           <button
             onClick={() => setSearchVisible(true)}
             className="rounded-xl p-1.5 transition-all"
             style={{ color: "#888" }}
             onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.06)"; (e.currentTarget as HTMLElement).style.color = "#ededed"; }}
             onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; (e.currentTarget as HTMLElement).style.color = "#888"; }}
-            title="Buscar direccion"
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
           </button>
+          </Tooltip>
         )}
 
         {/* ═══ EDIT MODE: Map controls ═══ */}
@@ -2516,7 +2532,6 @@ export default function LeafletMapView({
             onChange={(e) => setOverlayOpacity(parseFloat(e.target.value))}
             className="w-14 h-1 rounded-full appearance-none cursor-pointer"
             style={{ background: `linear-gradient(to right, #3b82f6 ${(overlayOpacity / 0.7) * 100}%, #333 0%)` }}
-            title={`Oscuridad: ${Math.round(overlayOpacity * 100)}%`}
           />
         </div>
 
@@ -2526,7 +2541,7 @@ export default function LeafletMapView({
           <input type="range" min="-180" max="180" step="5" value={mapRotation}
             onChange={(e) => setMapRotation(parseInt(e.target.value))}
             onDoubleClick={() => setMapRotation(0)}
-            className="w-12 h-1 rounded-full appearance-none cursor-pointer" title={`Rotacion: ${mapRotation}°`}
+            className="w-12 h-1 rounded-full appearance-none cursor-pointer"
             style={{ background: `linear-gradient(to right, #333 0%, #3b82f6 ${((mapRotation + 180) / 360) * 100}%, #333 100%)` }}
           />
           {mapRotation !== 0 && <span className="text-[9px] text-[#666] font-mono">{mapRotation}°</span>}
@@ -2537,11 +2552,12 @@ export default function LeafletMapView({
         <div className="h-5 w-px mx-0.5" style={{ background: "rgba(255,255,255,0.06)" }} />
 
         {/* Straight/Curved edges toggle */}
+        <Tooltip content={straightEdges ? "Links rectos (clic para curvas)" : "Links curvos (clic para rectas)"}>
         <button onClick={() => {
           setStraightEdges(v => !v);
           // Re-render edges immediately
           setTimeout(() => { if (LRef.current && mapRef.current) renderEdges(LRef.current, mapRef.current); }, 0);
-        }} title={straightEdges ? "Links rectos (clic para curvas)" : "Links curvos (clic para rectas)"}
+        }}
           className="rounded-lg p-1.5 transition-all"
           style={{ color: straightEdges ? "#f59e0b" : "#555" }}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -2550,15 +2566,18 @@ export default function LeafletMapView({
               : <path d="M4 20 C 10 20, 14 4, 20 4" />}
           </svg>
         </button>
+        </Tooltip>
 
         {/* Auto-save toggle */}
-        <button onClick={() => setAutoSaveEnabled(v => !v)} title={autoSaveEnabled ? "Auto-save ON (clic para desactivar)" : "Auto-save OFF (clic para activar)"}
+        <Tooltip content={autoSaveEnabled ? "Auto-save ON (clic para desactivar)" : "Auto-save OFF (clic para activar)"}>
+        <button onClick={() => setAutoSaveEnabled(v => !v)}
           className="rounded-lg p-1.5 transition-all"
           style={{ color: autoSaveEnabled ? "#4ade80" : "#555" }}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             {autoSaveEnabled ? <><path d="M12 2v4"/><path d="m16.2 7.8 2.9-2.9"/><path d="M18 12h4"/><path d="m16.2 16.2 2.9 2.9"/><path d="M12 18v4"/><path d="m4.9 19.1 2.9-2.9"/><path d="M2 12h4"/><path d="m4.9 4.9 2.9 2.9"/></> : <><circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/></>}
           </svg>
         </button>
+        </Tooltip>
 
         {/* Save */}
         <button
@@ -2614,51 +2633,62 @@ export default function LeafletMapView({
             transition: "right 0.3s ease",
           }}>
           {/* Zoom & View Group */}
-          <button onClick={() => mapRef.current?.zoomIn()} title="Acercar (Zoom In)"
-            className="h-9 w-9 flex items-center justify-center rounded-xl text-[#ededed] hover:bg-white/10 transition-all">
-            <Plus className="h-5 w-5" />
-          </button>
-          <button onClick={() => mapRef.current?.zoomOut()} title="Alejar (Zoom Out)"
-            className="h-9 w-9 flex items-center justify-center rounded-xl text-[#ededed] hover:bg-white/10 transition-all">
-            <svg width="14" height="2" viewBox="0 0 24 2" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round"><line x1="2" y1="1" x2="22" y2="1"/></svg>
-          </button>
-          <button onClick={() => {
-            if (mapRef.current && nodesRef.current.length > 0 && LRef.current) {
-              const bounds = nodesRef.current.map((n) => [n.x, n.y] as [number, number]);
-              mapRef.current.fitBounds(LRef.current.latLngBounds(bounds), { padding: [50, 50] });
-            }
-          }} title="Ajustar vista a todos los nodos"
-            className="h-9 w-9 flex items-center justify-center rounded-xl text-[#888] hover:text-[#ededed] hover:bg-white/10 transition-all">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M15 3h6v6"/><path d="M9 21H3v-6"/><path d="m21 3-7 7"/><path d="m3 21 7-7"/></svg>
-          </button>
+          <Tooltip content="Acercar" placement="left">
+            <button onClick={() => mapRef.current?.zoomIn()}
+              className="h-9 w-9 flex items-center justify-center rounded-xl text-[#ededed] hover:bg-white/10 transition-all">
+              <Plus className="h-5 w-5" />
+            </button>
+          </Tooltip>
+          <Tooltip content="Alejar" placement="left">
+            <button onClick={() => mapRef.current?.zoomOut()}
+              className="h-9 w-9 flex items-center justify-center rounded-xl text-[#ededed] hover:bg-white/10 transition-all">
+              <svg width="14" height="2" viewBox="0 0 24 2" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round"><line x1="2" y1="1" x2="22" y2="1"/></svg>
+            </button>
+          </Tooltip>
+          <Tooltip content="Ajustar a nodos" placement="left">
+            <button onClick={() => {
+              if (mapRef.current && nodesRef.current.length > 0 && LRef.current) {
+                const bounds = nodesRef.current.map((n) => [n.x, n.y] as [number, number]);
+                mapRef.current.fitBounds(LRef.current.latLngBounds(bounds), { padding: [50, 50] });
+              }
+            }} className="h-9 w-9 flex items-center justify-center rounded-xl text-[#888] hover:text-[#ededed] hover:bg-white/10 transition-all">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M15 3h6v6"/><path d="M9 21H3v-6"/><path d="m21 3-7 7"/><path d="m3 21 7-7"/></svg>
+            </button>
+          </Tooltip>
 
           <div className="mx-1.5 h-px bg-white/10 my-0.5" />
 
-          {/* Visibility Visibility Group */}
-          <button onClick={() => setShowNodes(v => !v)} title={showNodes ? "Ocultar nodos" : "Mostrar nodos"}
-            className="h-9 w-9 flex items-center justify-center rounded-xl transition-all hover:bg-white/10" style={{ color: showNodes ? "#22c55e" : "#888" }}>
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/></svg>
-          </button>
-
-          <button onClick={() => setShowLinks(v => !v)} title={showLinks ? "Ocultar links" : "Mostrar links"}
-            className="h-9 w-9 flex items-center justify-center rounded-xl transition-all hover:bg-white/10" style={{ color: showLinks ? "#3b82f6" : "#888" }}>
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
-          </button>
-
-          <button onClick={() => setShowCameras(v => !v)} title={showCameras ? "Ocultar camaras" : "Mostrar camaras"}
-            className="h-9 w-9 flex items-center justify-center rounded-xl transition-all hover:bg-white/10" style={{ color: showCameras ? "#f59e0b" : "#888" }}>
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m16.24 7.76-1.804 5.412a2 2 0 0 1-1.265 1.265L7.76 16.24l1.804-5.412a2 2 0 0 1 1.265-1.265z"/><circle cx="12" cy="12" r="10"/></svg>
-          </button>
-
-          <button onClick={() => setShowLabels(v => !v)} title={showLabels ? "Ocultar etiquetas" : "Mostrar etiquetas"}
-            className="h-9 w-9 flex items-center justify-center rounded-xl transition-all hover:bg-white/10" style={{ color: showLabels ? "#e2e8f0" : "#888" }}>
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" x2="15" y1="20" y2="20"/><line x1="12" x2="12" y1="4" y2="20"/></svg>
-          </button>
-
-          <button onClick={() => setShowFOV(v => !v)} title={showFOV ? "Ocultar areas de cobertura" : "Mostrar areas de cobertura"}
-            className="h-9 w-9 flex items-center justify-center rounded-xl transition-all hover:bg-white/10" style={{ color: showFOV ? "#8b5cf6" : "#888" }}>
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
-          </button>
+          {/* Visibility Group */}
+          <Tooltip content={showNodes ? "Ocultar nodos" : "Mostrar nodos"} placement="left">
+            <button onClick={() => setShowNodes(v => !v)}
+              className="h-9 w-9 flex items-center justify-center rounded-xl transition-all hover:bg-white/10" style={{ color: showNodes ? "#22c55e" : "#888" }}>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/></svg>
+            </button>
+          </Tooltip>
+          <Tooltip content={showLinks ? "Ocultar links" : "Mostrar links"} placement="left">
+            <button onClick={() => setShowLinks(v => !v)}
+              className="h-9 w-9 flex items-center justify-center rounded-xl transition-all hover:bg-white/10" style={{ color: showLinks ? "#3b82f6" : "#888" }}>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+            </button>
+          </Tooltip>
+          <Tooltip content={showCameras ? "Ocultar cámaras" : "Mostrar cámaras"} placement="left">
+            <button onClick={() => setShowCameras(v => !v)}
+              className="h-9 w-9 flex items-center justify-center rounded-xl transition-all hover:bg-white/10" style={{ color: showCameras ? "#f59e0b" : "#888" }}>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m16.24 7.76-1.804 5.412a2 2 0 0 1-1.265 1.265L7.76 16.24l1.804-5.412a2 2 0 0 1 1.265-1.265z"/><circle cx="12" cy="12" r="10"/></svg>
+            </button>
+          </Tooltip>
+          <Tooltip content={showLabels ? "Ocultar etiquetas" : "Mostrar etiquetas"} placement="left">
+            <button onClick={() => setShowLabels(v => !v)}
+              className="h-9 w-9 flex items-center justify-center rounded-xl transition-all hover:bg-white/10" style={{ color: showLabels ? "#e2e8f0" : "#888" }}>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" x2="15" y1="20" y2="20"/><line x1="12" x2="12" y1="4" y2="20"/></svg>
+            </button>
+          </Tooltip>
+          <Tooltip content={showFOV ? "Ocultar cobertura" : "Mostrar cobertura"} placement="left">
+            <button onClick={() => setShowFOV(v => !v)}
+              className="h-9 w-9 flex items-center justify-center rounded-xl transition-all hover:bg-white/10" style={{ color: showFOV ? "#8b5cf6" : "#888" }}>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+            </button>
+          </Tooltip>
         </div>
       )}
 
@@ -2784,7 +2814,8 @@ export default function LeafletMapView({
                   <label className="text-[10px] font-bold uppercase tracking-wider text-[#666] block mb-2">Color del nodo</label>
                   <div className="flex flex-wrap gap-2">
                     {nodeColors.map((c) => (
-                      <button key={c.color} type="button" onClick={() => setEditNodeColor(c.color)} title={c.name}
+                      <Tooltip key={c.color} content={c.name}>
+                      <button type="button" onClick={() => setEditNodeColor(c.color)}
                         className="relative h-7 w-7 rounded-lg transition-all hover:scale-110"
                         style={{
                           background: c.color || "rgba(255,255,255,0.08)",
@@ -2793,6 +2824,7 @@ export default function LeafletMapView({
                         }}>
                         {!c.color && <span className="text-[8px] font-bold text-[#888] flex items-center justify-center h-full">AUTO</span>}
                       </button>
+                      </Tooltip>
                     ))}
                   </div>
                 </div>
@@ -2978,7 +3010,8 @@ export default function LeafletMapView({
                 <div className="text-[10px] text-[#666] font-bold uppercase tracking-wider mb-2">Color del area</div>
                 <div className="grid grid-cols-6 gap-2">
                   {colorOptions.map((c) => (
-                    <button key={c.color} onClick={() => applyChange(c.color)} title={c.name}
+                    <Tooltip key={c.color} content={c.name}>
+                    <button onClick={() => applyChange(c.color)}
                       className="w-10 h-10 rounded-xl transition-all hover:scale-110"
                       style={{
                         background: c.color,
@@ -2986,6 +3019,7 @@ export default function LeafletMapView({
                         boxShadow: currentColor === c.color ? `0 0 12px ${c.color}88` : "none",
                       }}
                     />
+                    </Tooltip>
                   ))}
                 </div>
               </div>
@@ -3560,15 +3594,19 @@ export default function LeafletMapView({
                     style={{ background: "rgba(99,102,241,0.06)", border: "1px solid rgba(99,102,241,0.12)" }}>
                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#818cf8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
                     <span className="flex-1 text-xs font-semibold text-[#a5b4fc] truncate">{lm.name}</span>
+                    <Tooltip content="Abrir mapa en kiosco">
                     <a href={apiUrl(`/view/${lm.id}`)} target="_blank" rel="noopener noreferrer"
                       className="rounded-lg px-2 py-1 text-[10px] font-semibold text-[#60a5fa] hover:bg-blue-500/10 transition-all"
-                      title="Abrir mapa en kiosco" onClick={(e) => e.stopPropagation()}>
+                      onClick={(e) => e.stopPropagation()}>
                       <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" x2="21" y1="14" y2="3"/></svg>
                     </a>
-                    <button onClick={() => removeLinkedMap(lm.id)} title="Desvincular"
+                    </Tooltip>
+                    <Tooltip content="Desvincular">
+                    <button onClick={() => removeLinkedMap(lm.id)}
                       className="rounded-lg p-1 text-[#555] hover:text-red-400 transition-all opacity-0 group-hover:opacity-100">
                       <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" x2="6" y1="6" y2="18"/><line x1="6" x2="18" y1="6" y2="18"/></svg>
                     </button>
+                    </Tooltip>
                   </div>
                 ))}
               </div>

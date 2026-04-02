@@ -27,6 +27,7 @@ import type { KumaMonitor } from "@/components/network-map/MonitorPanel";
 import NetworkMapEditor from "@/components/network-map/NetworkMapEditor";
 import LoginPage from "@/components/LoginPage";
 import { apiUrl } from "@/lib/api";
+import Tooltip from "@/components/network-map/Tooltip";
 
 interface MapSummary {
   id: string;
@@ -359,16 +360,17 @@ function MapListView({
         </div>
         <div className="flex items-center gap-2">
           {/* Export All */}
+          <Tooltip content="Exportar todos los mapas como un solo archivo">
           <button
             onClick={exportAllMaps}
             disabled={exportingAll || maps.length === 0}
-            title="Exportar todos los mapas como un solo archivo"
             className="flex items-center gap-2 rounded-xl px-3 py-2.5 text-sm font-semibold transition-all disabled:opacity-40"
             style={{ background: "rgba(99,102,241,0.1)", border: "1px solid rgba(99,102,241,0.25)", color: "#818cf8" }}
           >
             <Layers className="h-4 w-4" />
             {exportingAll ? "Exportando..." : "Exportar Todo"}
           </button>
+          </Tooltip>
           {/* Import */}
           <label
             className="flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition-all cursor-pointer"
@@ -385,6 +387,7 @@ function MapListView({
           >
             <Plus className="h-4 w-4" /> Nuevo Mapa
           </button>
+          <Tooltip content="Cerrar sesión">
           <button
             onClick={() => {
               localStorage.removeItem("kumamap_user");
@@ -393,10 +396,10 @@ function MapListView({
             }}
             className="flex items-center gap-1.5 rounded-xl px-3 py-2.5 text-sm font-semibold transition-all"
             style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)", color: "#666" }}
-            title="Cerrar sesion"
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></svg>
           </button>
+          </Tooltip>
         </div>
       </div>
 
@@ -519,6 +522,7 @@ function MapListView({
               {/* Name */}
               <div className="flex items-center gap-2 min-w-0">
                 {/* Expand/collapse submaps */}
+                <Tooltip content={isExpanded ? "Colapsar submaps" : `${children.length} submap(s)`}>
                 <button onClick={(e) => {
                   e.stopPropagation();
                   setExpandedMaps(prev => {
@@ -526,7 +530,7 @@ function MapListView({
                     if (next.has(map.id)) next.delete(map.id); else next.add(map.id);
                     return next;
                   });
-                }} title={isExpanded ? "Colapsar submaps" : `${children.length} submap(s)`}
+                }}
                   className="shrink-0 rounded-lg p-0.5 transition-all"
                   style={{ color: children.length > 0 ? "#6366f1" : "transparent", cursor: children.length > 0 ? "pointer" : "default" }}>
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
@@ -534,6 +538,7 @@ function MapListView({
                     <path d="m9 18 6-6-6-6"/>
                   </svg>
                 </button>
+                </Tooltip>
                 <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl"
                   style={{ background: "rgba(59,130,246,0.08)", border: "1px solid rgba(59,130,246,0.15)" }}>
                   <MapIcon className="h-4 w-4 text-blue-400" />
@@ -610,21 +615,25 @@ function MapListView({
 
               {/* View URL */}
               <div className="flex items-center gap-1">
+                <Tooltip content="Abrir vista fullscreen">
                 <a href={apiUrl(`/view/${map.id}`)} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}
                   className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[10px] font-semibold transition-all hover:bg-blue-500/10"
-                  style={{ color: "#60a5fa", border: "1px solid rgba(59,130,246,0.15)" }}
-                  title="Abrir vista fullscreen">
+                  style={{ color: "#60a5fa", border: "1px solid rgba(59,130,246,0.15)" }}>
                   <ExternalLink className="h-3 w-3" />
                 </a>
+                </Tooltip>
               </div>
 
               {/* Actions */}
               <div className="flex items-center justify-end gap-1">
-                <button onClick={(e) => { e.stopPropagation(); setCreatingSubmapFor(creatingSubmapFor === map.id ? null : map.id); setNewSubmapName(""); }} title="Nuevo submap"
+                <Tooltip content="Nuevo submap">
+                <button onClick={(e) => { e.stopPropagation(); setCreatingSubmapFor(creatingSubmapFor === map.id ? null : map.id); setNewSubmapName(""); }}
                   className="rounded-lg p-1.5 transition-all opacity-0 group-hover/row:opacity-100"
                   style={{ color: creatingSubmapFor === map.id ? "#818cf8" : "#6366f1" }}>
                   <Plus className="h-3.5 w-3.5" />
                 </button>
+                </Tooltip>
+                <Tooltip content="Copiar ubicación y coordenadas">
                 <button onClick={async (e) => {
                   e.stopPropagation();
                   try {
@@ -658,26 +667,35 @@ function MapListView({
                   } catch {
                     toast.error("No se pudo copiar la ubicación");
                   }
-                }} title="Copiar ubicación y coordenadas"
+                }}
                   className="rounded-lg p-1.5 text-emerald-400 hover:bg-emerald-500/10 transition-all opacity-0 group-hover/row:opacity-100">
                   <Crosshair className="h-3.5 w-3.5" />
                 </button>
-                <button onClick={(e) => { e.stopPropagation(); setEditingId(map.id); setEditValue(map.name); }} title="Renombrar"
+                </Tooltip>
+                <Tooltip content="Renombrar">
+                <button onClick={(e) => { e.stopPropagation(); setEditingId(map.id); setEditValue(map.name); }}
                   className="rounded-lg p-1.5 text-[#888] hover:text-[#ededed] hover:bg-white/5 transition-all opacity-0 group-hover/row:opacity-100">
                   <Pencil className="h-3.5 w-3.5" />
                 </button>
-                <button onClick={(e) => { e.stopPropagation(); window.open(apiUrl(`/api/maps/${map.id}/export`), "_blank"); }} title="Exportar JSON"
+                </Tooltip>
+                <Tooltip content="Exportar JSON">
+                <button onClick={(e) => { e.stopPropagation(); window.open(apiUrl(`/api/maps/${map.id}/export`), "_blank"); }}
                   className="rounded-lg p-1.5 text-[#888] hover:text-emerald-400 hover:bg-emerald-500/10 transition-all opacity-0 group-hover/row:opacity-100">
                   <Download className="h-3.5 w-3.5" />
                 </button>
-                <button onClick={(e) => { e.stopPropagation(); cloneMap(map); }} title="Clonar mapa"
+                </Tooltip>
+                <Tooltip content="Clonar mapa">
+                <button onClick={(e) => { e.stopPropagation(); cloneMap(map); }}
                   className="rounded-lg p-1.5 text-[#888] hover:text-amber-400 hover:bg-amber-500/10 transition-all opacity-0 group-hover/row:opacity-100">
                   <Copy className="h-3.5 w-3.5" />
                 </button>
-                <button onClick={(e) => { e.stopPropagation(); confirm(`Eliminar "${map.name}"?`) && deleteMap(map.id, map.name); }} title="Eliminar"
+                </Tooltip>
+                <Tooltip content="Eliminar">
+                <button onClick={(e) => { e.stopPropagation(); confirm(`Eliminar "${map.name}"?`) && deleteMap(map.id, map.name); }}
                   className="rounded-lg p-1.5 text-[#888] hover:text-red-400 hover:bg-red-500/10 transition-all opacity-0 group-hover/row:opacity-100">
                   <Trash2 className="h-3.5 w-3.5" />
                 </button>
+                </Tooltip>
               </div>
             </div>
 
@@ -754,14 +772,18 @@ function MapListView({
                   </div>
                   {/* Actions */}
                   <div className="flex items-center justify-end gap-1">
-                    <button onClick={(e) => { e.stopPropagation(); setEditingId(child.id); setEditValue(child.name); }} title="Renombrar"
+                    <Tooltip content="Renombrar">
+                    <button onClick={(e) => { e.stopPropagation(); setEditingId(child.id); setEditValue(child.name); }}
                       className="rounded-lg p-1.5 text-[#888] hover:text-[#ededed] hover:bg-white/5 transition-all opacity-0 group-hover/child:opacity-100">
                       <Pencil className="h-3.5 w-3.5" />
                     </button>
-                    <button onClick={(e) => { e.stopPropagation(); confirm(`Eliminar "${child.name}"?`) && deleteMap(child.id, child.name); }} title="Eliminar submap"
+                    </Tooltip>
+                    <Tooltip content="Eliminar submap">
+                    <button onClick={(e) => { e.stopPropagation(); confirm(`Eliminar "${child.name}"?`) && deleteMap(child.id, child.name); }}
                       className="rounded-lg p-1.5 text-[#888] hover:text-red-400 hover:bg-red-500/10 transition-all opacity-0 group-hover/child:opacity-100">
                       <Trash2 className="h-3.5 w-3.5" />
                     </button>
+                    </Tooltip>
                   </div>
                 </div>
               );

@@ -301,12 +301,26 @@ function MapListView({
     return { up, down, pending, total: monitorIds.length };
   };
 
-  // Filter & sort — solo mapas raíz en la lista principal (submapas aparecen anidados)
+  // Submapas por parent
+  const submapsOf = useMemo(() => {
+    const m: Record<string, MapSummary[]> = {};
+    maps.filter(x => x.parent_id).forEach(x => {
+      if (!m[x.parent_id!]) m[x.parent_id!] = [];
+      m[x.parent_id!].push(x);
+    });
+    return m;
+  }, [maps]);
+
+  // Filter & sort — solo mapas raíz; cuando hay búsqueda también filtra por submapas
   const filtered = useMemo(() => {
     let result = maps.filter((m) => !m.parent_id); // Solo raíz
     if (search) {
       const q = search.toLowerCase();
-      result = result.filter((m) => m.name.toLowerCase().includes(q) || getGroupName(m.kuma_group_id)?.toLowerCase().includes(q));
+      result = result.filter((m) => {
+        const nameMatch = m.name.toLowerCase().includes(q) || getGroupName(m.kuma_group_id)?.toLowerCase().includes(q);
+        const childMatch = (submapsOf[m.id] || []).some(c => c.name.toLowerCase().includes(q));
+        return nameMatch || childMatch;
+      });
     }
     if (filterType !== "all") result = result.filter((m) => m.background_type === filterType);
     result = [...result].sort((a, b) => {
@@ -317,17 +331,7 @@ function MapListView({
       return sortDir === "asc" ? cmp : -cmp;
     });
     return result;
-  }, [maps, search, filterType, sortBy, sortDir]);
-
-  // Submapas por parent
-  const submapsOf = useMemo(() => {
-    const m: Record<string, MapSummary[]> = {};
-    maps.filter(x => x.parent_id).forEach(x => {
-      if (!m[x.parent_id!]) m[x.parent_id!] = [];
-      m[x.parent_id!].push(x);
-    });
-    return m;
-  }, [maps]);
+  }, [maps, search, filterType, sortBy, sortDir, submapsOf]);
 
   const toggleSort = (col: "name" | "updated" | "type") => {
     if (sortBy === col) setSortDir((d) => d === "asc" ? "desc" : "asc");
@@ -479,8 +483,12 @@ function MapListView({
         {filtered.map((map) => {
           const groupName = getGroupName(map.kuma_group_id);
           const { up, down, pending, total } = getMapStatus(map);
-          const children = submapsOf[map.id] || [];
-          const isExpanded = expandedMaps.has(map.id);
+          const allChildren = submapsOf[map.id] || [];
+          // When searching, filter children to matching names and auto-expand
+          const children = search
+            ? allChildren.filter(c => c.name.toLowerCase().includes(search.toLowerCase()))
+            : allChildren;
+          const isExpanded = search ? children.length > 0 : expandedMaps.has(map.id);
           return (
             <div key={map.id}>
             <div

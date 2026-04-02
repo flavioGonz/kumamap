@@ -1086,9 +1086,11 @@ function CanvasInner({
               </button>
             )}
           </div>
+          </>}
+
           <div className="h-5 w-px mx-0.5" style={{ background: "rgba(255,255,255,0.06)" }} />
 
-          {/* Background controls */}
+          {/* Background controls — always visible */}
           <div className="flex items-center gap-0.5 rounded-xl p-0.5" style={{ background: "rgba(255,255,255,0.02)" }}>
             <button onClick={handleUploadBg} title="Subir imagen" className="rounded-xl p-1.5 text-[#888] hover:text-[#ededed] hover:bg-white/[0.06] transition-all">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>
@@ -1102,8 +1104,8 @@ function CanvasInner({
             </button>
           </div>
 
-          {/* Image scale */}
-          {bgType === "image" && (
+          {/* Image scale — only when editing */}
+          {editMode && bgType === "image" && (
             <>
               <div className="h-5 w-px mx-0.5" style={{ background: "rgba(255,255,255,0.06)" }} />
               <div className="flex items-center gap-0.5">
@@ -1121,7 +1123,6 @@ function CanvasInner({
               </div>
             </>
           )}
-          </>}
 
           <div className="h-5 w-px mx-0.5" style={{ background: "rgba(255,255,255,0.06)" }} />
 

@@ -20,7 +20,6 @@ import {
   Clock,
   Filter,
   ExternalLink,
-  Copy,
   Download,
   Upload,
 } from "lucide-react";
@@ -545,15 +544,6 @@ function MapListView({
                   title="Abrir vista fullscreen">
                   <ExternalLink className="h-3 w-3" />
                 </a>
-                <button onClick={(e) => {
-                  e.stopPropagation();
-                  const url = `${window.location.origin}${apiUrl(`/view/${map.id}`)}`;
-                  navigator.clipboard.writeText(url);
-                  toast.success("URL copiada", { description: url });
-                }} title="Copiar URL"
-                  className="rounded-lg p-1 text-[#666] hover:text-[#ededed] hover:bg-white/5 transition-all">
-                  <Copy className="h-3 w-3" />
-                </button>
               </div>
 
               {/* Actions */}

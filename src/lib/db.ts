@@ -63,10 +63,9 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_edges_map ON network_map_edges(map_id);
 `);
 
-// Migration: add view_state column if it doesn't exist
-try {
-  db.exec(`ALTER TABLE network_maps ADD COLUMN view_state TEXT`);
-} catch { /* column already exists */ }
+// Migrations
+try { db.exec(`ALTER TABLE network_maps ADD COLUMN view_state TEXT`); } catch { /* already exists */ }
+try { db.exec(`ALTER TABLE network_maps ADD COLUMN parent_id TEXT REFERENCES network_maps(id) ON DELETE SET NULL`); } catch { /* already exists */ }
 
 function genId() {
   return crypto.randomUUID();
@@ -81,6 +80,7 @@ export interface NetworkMap {
   background_offset_x: number;
   background_offset_y: number;
   kuma_group_id: number | null;
+  parent_id: string | null;
   width: number;
   height: number;
   created_at: string;
@@ -129,21 +129,35 @@ export const mapsDb = {
     name: string;
     background_type?: string;
     kuma_group_id?: number | null;
+    parent_id?: string | null;
     width?: number;
     height?: number;
   }): NetworkMap {
     const id = genId();
     db.prepare(
-      `INSERT INTO network_maps (id, name, background_type, kuma_group_id, width, height) VALUES (?, ?, ?, ?, ?, ?)`
+      `INSERT INTO network_maps (id, name, background_type, kuma_group_id, parent_id, width, height) VALUES (?, ?, ?, ?, ?, ?, ?)`
     ).run(
       id,
       data.name,
-      data.background_type || "grid",
+      data.background_type || "livemap",
       data.kuma_group_id ?? null,
+      data.parent_id ?? null,
       data.width || 1920,
       data.height || 1080
     );
     return this.getById(id)!;
+  },
+
+  getChildren(parentId: string): NetworkMap[] {
+    return db
+      .prepare("SELECT * FROM network_maps WHERE parent_id = ? ORDER BY name ASC")
+      .all(parentId) as NetworkMap[];
+  },
+
+  getRoots(): NetworkMap[] {
+    return db
+      .prepare("SELECT * FROM network_maps WHERE parent_id IS NULL ORDER BY updated_at DESC")
+      .all() as NetworkMap[];
   },
 
   update(

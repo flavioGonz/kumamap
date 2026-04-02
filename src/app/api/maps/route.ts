@@ -27,6 +27,7 @@ export async function POST(req: NextRequest) {
     name: body.name,
     background_type: body.background_type,
     kuma_group_id: body.kuma_group_id,
+    parent_id: body.parent_id ?? null,
     width: body.width,
     height: body.height,
   });

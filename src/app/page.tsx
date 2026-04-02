@@ -7,7 +7,7 @@ import {
   Network,
   Trash2,
   Pencil,
-  FolderOpen,
+  Crosshair,
   Sparkles,
   MapIcon,
   Tag,
@@ -553,9 +553,30 @@ function MapListView({
                   style={{ color: creatingSubmapFor === map.id ? "#818cf8" : "#6366f1" }}>
                   <Plus className="h-3.5 w-3.5" />
                 </button>
-                <button onClick={(e) => { e.stopPropagation(); onOpenMap(map.id); }} title="Abrir"
-                  className="rounded-lg p-1.5 text-blue-400 hover:bg-blue-500/10 transition-all opacity-0 group-hover/row:opacity-100">
-                  <FolderOpen className="h-3.5 w-3.5" />
+                <button onClick={async (e) => {
+                  e.stopPropagation();
+                  try {
+                    const res = await fetch(apiUrl(`/api/maps/${map.id}/export`));
+                    const data = await res.json();
+                    const vs = data.map?.view_state ? JSON.parse(data.map.view_state) : null;
+                    const lines: string[] = [`📍 ${data.map?.name || map.name}`];
+                    if (vs?.center) lines.push(`Centro: ${vs.center[0].toFixed(5)}, ${vs.center[1].toFixed(5)}  zoom: ${vs.zoom ?? "?"}`);
+                    if (data.nodes?.length) {
+                      lines.push(`\nNodos (${data.nodes.length}):`);
+                      data.nodes
+                        .filter((n: any) => n.icon !== "_textLabel" && n.icon !== "_waypoint" && n.icon !== "_polygon")
+                        .forEach((n: any) => {
+                          lines.push(`  ${n.label || n.id}: ${Number(n.x).toFixed(5)}, ${Number(n.y).toFixed(5)}`);
+                        });
+                    }
+                    await navigator.clipboard.writeText(lines.join("\n"));
+                    toast.success("Ubicación copiada", { description: `${data.nodes?.length ?? 0} nodos` });
+                  } catch {
+                    toast.error("No se pudo copiar la ubicación");
+                  }
+                }} title="Copiar ubicación y coordenadas"
+                  className="rounded-lg p-1.5 text-emerald-400 hover:bg-emerald-500/10 transition-all opacity-0 group-hover/row:opacity-100">
+                  <Crosshair className="h-3.5 w-3.5" />
                 </button>
                 <button onClick={(e) => { e.stopPropagation(); setEditingId(map.id); setEditValue(map.name); }} title="Renombrar"
                   className="rounded-lg p-1.5 text-[#888] hover:text-[#ededed] hover:bg-white/5 transition-all opacity-0 group-hover/row:opacity-100">
@@ -591,7 +612,15 @@ function MapListView({
                         <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
                       </svg>
                     </div>
-                    <span className="text-xs font-semibold text-[#a5b4fc] truncate">{child.name}</span>
+                    {editingId === child.id ? (
+                      <input autoFocus value={editValue} onChange={(e) => setEditValue(e.target.value)}
+                        onBlur={() => editValue.trim() ? renameMap(child.id, editValue.trim()) : setEditingId(null)}
+                        onKeyDown={(e) => { if (e.key === "Enter" && editValue.trim()) renameMap(child.id, editValue.trim()); if (e.key === "Escape") setEditingId(null); }}
+                        className="text-xs font-semibold bg-transparent border-b border-indigo-500 focus:outline-none text-[#a5b4fc] w-full"
+                        onClick={(e) => e.stopPropagation()} />
+                    ) : (
+                      <span className="text-xs font-semibold text-[#a5b4fc] truncate">{child.name}</span>
+                    )}
                   </div>
                   {/* Type */}
                   <div className="flex items-center gap-1.5">

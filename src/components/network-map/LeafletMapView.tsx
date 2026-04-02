@@ -266,6 +266,8 @@ export default function LeafletMapView({
   const polygonLayersRef = useRef<Map<string, any>>(new Map());
   const edgeUpdateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [submapPickerOpen, setSubmapPickerOpen] = useState(false);
+  const [importMapPickerOpen, setImportMapPickerOpen] = useState(false);
+  const [importingMapId, setImportingMapId] = useState<string | null>(null);
   const [timeMachineOpen, setTimeMachineOpen] = useState(false);
   const [timeMachineTime, setTimeMachineTime] = useState<Date | null>(null);
   const [tmFocusMonitorId, setTmFocusMonitorId] = useState<number | null>(null);
@@ -2341,6 +2343,75 @@ export default function LeafletMapView({
                       onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "rgba(99,102,241,0.1)"; (e.currentTarget as HTMLElement).style.color = "#ededed"; }}
                       onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; (e.currentTarget as HTMLElement).style.color = "#a0a0a0"; }}>
                       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#818cf8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                      <span className="truncate">{m.name}</span>
+                    </button>
+                  ))}
+                  {availableMaps.filter(m => m.id !== mapId).length === 0 && (
+                    <div className="px-3 py-2 text-[10px] text-[#555]">No hay otros mapas disponibles</div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+          {/* ─── Importar mapa ─── */}
+          {availableMaps.length > 0 && (
+            <div className="relative">
+              <button onClick={() => setImportMapPickerOpen(v => !v)} title="Importar nodos de otro mapa"
+                disabled={importingMapId !== null}
+                className="group flex items-center gap-1 rounded-xl px-2 py-1.5 transition-all"
+                style={{ color: importMapPickerOpen ? "#34d399" : "#888", background: importMapPickerOpen ? "rgba(52,211,153,0.1)" : "transparent" }}
+                onMouseEnter={(e) => { if (!importMapPickerOpen) { (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.06)"; (e.currentTarget as HTMLElement).style.color = "#ededed"; }}}
+                onMouseLeave={(e) => { if (!importMapPickerOpen) { (e.currentTarget as HTMLElement).style.background = "transparent"; (e.currentTarget as HTMLElement).style.color = "#888"; }}}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/>
+                </svg>
+                <span className="text-[10px] font-semibold hidden xl:inline">{importingMapId ? "Importando..." : "Importar"}</span>
+              </button>
+              {importMapPickerOpen && (
+                <div className="fixed inset-0 z-[99998]" onClick={() => setImportMapPickerOpen(false)} />
+              )}
+              {importMapPickerOpen && (
+                <div className="absolute top-full left-0 mt-1 rounded-xl shadow-2xl py-1 z-[99999] min-w-[200px]"
+                  style={{ background: "rgba(12,12,12,0.98)", border: "1px solid rgba(52,211,153,0.25)", backdropFilter: "blur(20px)" }}>
+                  <div className="px-3 py-1 text-[9px] font-bold uppercase tracking-wider text-[#555]">Importar nodos de</div>
+                  {availableMaps.filter(m => m.id !== mapId).map(m => (
+                    <button key={m.id} onClick={async () => {
+                      setImportMapPickerOpen(false);
+                      setImportingMapId(m.id);
+                      try {
+                        const res = await fetch(`/api/maps/${m.id}/export`);
+                        const data = await res.json();
+                        const ts = Date.now();
+                        // Remap node IDs to avoid collisions
+                        const idMap: Record<string, string> = {};
+                        const importedNodes = (data.nodes || []).map((n: any) => {
+                          const newId = `imp-${ts}-${n.id}`;
+                          idMap[n.id] = newId;
+                          return { ...n, id: newId };
+                        });
+                        const importedEdges = (data.edges || []).map((e: any) => ({
+                          ...e,
+                          id: `imp-${ts}-${e.id}`,
+                          source_node_id: idMap[e.source_node_id] || e.source_node_id,
+                          target_node_id: idMap[e.target_node_id] || e.target_node_id,
+                        }));
+                        nodesRef.current = [...nodesRef.current, ...importedNodes];
+                        edgesRef.current = [...edgesRef.current, ...importedEdges];
+                        if (LRef.current && mapRef.current) {
+                          renderNodes(LRef.current, mapRef.current);
+                          renderEdges(LRef.current, mapRef.current);
+                        }
+                        toast.success(`Mapa "${m.name}" importado`, { description: `${importedNodes.length} nodos, ${importedEdges.length} links` });
+                      } catch {
+                        toast.error("Error al importar el mapa");
+                      } finally {
+                        setImportingMapId(null);
+                      }
+                    }}
+                      className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-[#a0a0a0] transition-all"
+                      onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "rgba(52,211,153,0.08)"; (e.currentTarget as HTMLElement).style.color = "#ededed"; }}
+                      onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; (e.currentTarget as HTMLElement).style.color = "#a0a0a0"; }}>
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#34d399" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>
                       <span className="truncate">{m.name}</span>
                     </button>
                   ))}

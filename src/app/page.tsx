@@ -103,6 +103,7 @@ function MapListView({
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [newMapName, setNewMapName] = useState("");
   const [newMapGroup, setNewMapGroup] = useState<number | "">("");
+  const [newMapBgType, setNewMapBgType] = useState<"livemap" | "image">("livemap");
   const [showCreate, setShowCreate] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
@@ -132,11 +133,11 @@ function MapListView({
     const res = await fetch(apiUrl("/api/maps"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, kuma_group_id: newMapGroup || null }),
+      body: JSON.stringify({ name, kuma_group_id: newMapGroup || null, background_type: newMapBgType }),
     });
     const map = await res.json();
     toast.success("Mapa creado", { description: name });
-    setNewMapName(""); setNewMapGroup(""); setShowCreate(false);
+    setNewMapName(""); setNewMapGroup(""); setNewMapBgType("livemap"); setShowCreate(false);
     onOpenMap(map.id);
   };
 
@@ -427,6 +428,32 @@ function MapListView({
               style={{ background: "rgba(59,130,246,0.2)", border: "1px solid rgba(59,130,246,0.35)", color: "#60a5fa" }}>
               Crear
             </button>
+          </div>
+          {/* Background type selector */}
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] text-[#555] uppercase tracking-wider font-semibold">Tipo</span>
+            <div className="flex items-center gap-1 rounded-xl p-0.5" style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)" }}>
+              <button onClick={() => setNewMapBgType("livemap")}
+                className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-semibold transition-all"
+                style={{
+                  background: newMapBgType === "livemap" ? "rgba(16,185,129,0.12)" : "transparent",
+                  color: newMapBgType === "livemap" ? "#34d399" : "#555",
+                  border: newMapBgType === "livemap" ? "1px solid rgba(16,185,129,0.25)" : "1px solid transparent",
+                }}>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>
+                Mapa real
+              </button>
+              <button onClick={() => setNewMapBgType("image")}
+                className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-semibold transition-all"
+                style={{
+                  background: newMapBgType === "image" ? "rgba(168,85,247,0.12)" : "transparent",
+                  color: newMapBgType === "image" ? "#c084fc" : "#555",
+                  border: newMapBgType === "image" ? "1px solid rgba(168,85,247,0.25)" : "1px solid transparent",
+                }}>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>
+                Foto / imagen
+              </button>
+            </div>
           </div>
         </div>
       )}

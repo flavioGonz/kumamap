@@ -21,6 +21,7 @@ import {
   ExternalLink,
   Download,
   Upload,
+  Copy,
 } from "lucide-react";
 import type { KumaMonitor } from "@/components/network-map/MonitorPanel";
 import NetworkMapEditor from "@/components/network-map/NetworkMapEditor";
@@ -110,6 +111,9 @@ function MapListView({
   const [expandedMaps, setExpandedMaps] = useState<Set<string>>(new Set());
   const [creatingSubmapFor, setCreatingSubmapFor] = useState<string | null>(null);
   const [newSubmapName, setNewSubmapName] = useState("");
+  // Drag-and-drop reparenting
+  const [draggingMapId, setDraggingMapId] = useState<string | null>(null);
+  const [dragOverMapId, setDragOverMapId] = useState<string | null>(null);
 
   const kumaGroups = useMemo(
     () => kumaMonitors.filter((m) => m.type === "group"),
@@ -161,6 +165,47 @@ function MapListView({
     await fetch(apiUrl(`/api/maps/${id}`), { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) });
     setEditingId(null);
     fetchMaps();
+  };
+
+  // ── Reparent map (drag-and-drop) ──
+  const reparentMap = async (draggedId: string, newParentId: string | null) => {
+    if (draggedId === newParentId) return;
+    await fetch(apiUrl(`/api/maps/${draggedId}`), {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ parent_id: newParentId }),
+    });
+    fetchMaps();
+    if (newParentId) {
+      setExpandedMaps(prev => new Set([...prev, newParentId]));
+      const draggedName = maps.find(m => m.id === draggedId)?.name || "";
+      const parentName = maps.find(m => m.id === newParentId)?.name || "";
+      toast.success("Mapa reubicado", { description: `"${draggedName}" ahora es submap de "${parentName}"` });
+    } else {
+      const draggedName = maps.find(m => m.id === draggedId)?.name || "";
+      toast.success("Mapa movido a raíz", { description: draggedName });
+    }
+  };
+
+  // ── Clone map ──
+  const cloneMap = async (map: MapSummary) => {
+    try {
+      const res = await fetch(apiUrl(`/api/maps/${map.id}/export`));
+      const data = await res.json();
+      const cloneRes = await fetch(apiUrl("/api/maps/import"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...data, map: { ...data.map, name: `${data.map?.name || map.name} (copia)` } }),
+      });
+      if (cloneRes.ok) {
+        toast.success("Mapa clonado", { description: `${map.name} (copia)` });
+        fetchMaps();
+      } else {
+        toast.error("Error al clonar mapa");
+      }
+    } catch {
+      toast.error("Error al clonar mapa");
+    }
   };
 
   // ── Export all maps ──
@@ -436,10 +481,39 @@ function MapListView({
           return (
             <div key={map.id}>
             <div
+              draggable
               className="grid grid-cols-[1fr_90px_90px_100px_120px_130px_70px_90px] gap-2 items-center px-5 py-3 transition-all cursor-pointer group/row"
-              style={{ borderBottom: "1px solid rgba(255,255,255,0.03)" }}
-              onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "rgba(59,130,246,0.04)"; }}
-              onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}
+              style={{
+                borderBottom: "1px solid rgba(255,255,255,0.03)",
+                background: dragOverMapId === map.id && draggingMapId !== map.id ? "rgba(99,102,241,0.12)" : "transparent",
+                outline: dragOverMapId === map.id && draggingMapId !== map.id ? "1px solid rgba(99,102,241,0.4)" : "none",
+                opacity: draggingMapId === map.id ? 0.5 : 1,
+              }}
+              onMouseEnter={(e) => { if (dragOverMapId !== map.id) (e.currentTarget as HTMLElement).style.background = "rgba(59,130,246,0.04)"; }}
+              onMouseLeave={(e) => { if (dragOverMapId !== map.id) (e.currentTarget as HTMLElement).style.background = "transparent"; }}
+              onDragStart={(e) => {
+                setDraggingMapId(map.id);
+                e.dataTransfer.effectAllowed = "move";
+                e.dataTransfer.setData("text/plain", map.id);
+              }}
+              onDragEnd={() => { setDraggingMapId(null); setDragOverMapId(null); }}
+              onDragOver={(e) => {
+                if (draggingMapId && draggingMapId !== map.id) {
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = "move";
+                  setDragOverMapId(map.id);
+                }
+              }}
+              onDragLeave={() => { setDragOverMapId(null); }}
+              onDrop={(e) => {
+                e.preventDefault();
+                const draggedId = e.dataTransfer.getData("text/plain");
+                if (draggedId && draggedId !== map.id) {
+                  reparentMap(draggedId, map.id);
+                }
+                setDraggingMapId(null);
+                setDragOverMapId(null);
+              }}
               onClick={() => onOpenMap(map.id)}
             >
               {/* Name */}
@@ -584,6 +658,10 @@ function MapListView({
                   className="rounded-lg p-1.5 text-[#888] hover:text-emerald-400 hover:bg-emerald-500/10 transition-all opacity-0 group-hover/row:opacity-100">
                   <Download className="h-3.5 w-3.5" />
                 </button>
+                <button onClick={(e) => { e.stopPropagation(); cloneMap(map); }} title="Clonar mapa"
+                  className="rounded-lg p-1.5 text-[#888] hover:text-amber-400 hover:bg-amber-500/10 transition-all opacity-0 group-hover/row:opacity-100">
+                  <Copy className="h-3.5 w-3.5" />
+                </button>
                 <button onClick={(e) => { e.stopPropagation(); confirm(`Eliminar "${map.name}"?`) && deleteMap(map.id, map.name); }} title="Eliminar"
                   className="rounded-lg p-1.5 text-[#888] hover:text-red-400 hover:bg-red-500/10 transition-all opacity-0 group-hover/row:opacity-100">
                   <Trash2 className="h-3.5 w-3.5" />
@@ -596,10 +674,23 @@ function MapListView({
               const childStatus = getMapStatus(child);
               return (
                 <div key={child.id}
+                  draggable
                   className="grid grid-cols-[1fr_90px_90px_100px_120px_130px_70px_90px] gap-2 items-center py-2 cursor-pointer group/child"
-                  style={{ borderBottom: "1px solid rgba(255,255,255,0.02)", paddingLeft: "72px", paddingRight: "20px", background: "rgba(99,102,241,0.025)" }}
+                  style={{
+                    borderBottom: "1px solid rgba(255,255,255,0.02)",
+                    paddingLeft: "72px", paddingRight: "20px",
+                    background: "rgba(99,102,241,0.025)",
+                    opacity: draggingMapId === child.id ? 0.5 : 1,
+                  }}
                   onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "rgba(99,102,241,0.06)"; }}
                   onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "rgba(99,102,241,0.025)"; }}
+                  onDragStart={(e) => {
+                    setDraggingMapId(child.id);
+                    e.dataTransfer.effectAllowed = "move";
+                    e.dataTransfer.setData("text/plain", child.id);
+                    e.stopPropagation();
+                  }}
+                  onDragEnd={() => { setDraggingMapId(null); setDragOverMapId(null); }}
                   onClick={() => onOpenMap(child.id)}
                 >
                   {/* Submap name */}
@@ -698,6 +789,31 @@ function MapListView({
           );
         })}
 
+        {/* Drop zone: move to root level (only visible when dragging a child map) */}
+        {draggingMapId && maps.find(m => m.id === draggingMapId)?.parent_id && (
+          <div
+            className="flex items-center justify-center gap-2 py-3 transition-all"
+            style={{
+              borderBottom: "1px solid rgba(255,255,255,0.04)",
+              background: dragOverMapId === "__root__" ? "rgba(59,130,246,0.12)" : "rgba(255,255,255,0.01)",
+              outline: dragOverMapId === "__root__" ? "1px dashed rgba(59,130,246,0.4)" : "1px dashed rgba(255,255,255,0.08)",
+            }}
+            onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; setDragOverMapId("__root__"); }}
+            onDragLeave={() => setDragOverMapId(null)}
+            onDrop={(e) => {
+              e.preventDefault();
+              const draggedId = e.dataTransfer.getData("text/plain");
+              if (draggedId) reparentMap(draggedId, null);
+              setDraggingMapId(null);
+              setDragOverMapId(null);
+            }}
+          >
+            <span className="text-[10px] text-[#555]" style={{ color: dragOverMapId === "__root__" ? "#60a5fa" : "#555" }}>
+              Soltar aquí para mover a raíz
+            </span>
+          </div>
+        )}
+
         {/* Empty state */}
         {filtered.length === 0 && (
           <div className="flex flex-col items-center py-16 text-[#555]">
@@ -719,7 +835,7 @@ function MapListView({
       {/* Footer stats */}
       <div className="mt-3 flex items-center justify-between text-[10px] text-[#555]">
         <span>{filtered.length} de {maps.length} mapa{maps.length !== 1 ? "s" : ""}</span>
-        <span>Click para abrir · Hover para acciones</span>
+        <span>Click para abrir · Hover para acciones · Arrastrar para reubicar</span>
       </div>
 
       {/* ═══ Import Preview Modal ═══ */}

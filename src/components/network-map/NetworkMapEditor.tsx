@@ -1165,7 +1165,17 @@ function CanvasInner({
       ) : null}
 
       <div className="h-full" style={{ isolation: "isolate" }}>
-        {bgType === "livemap" ? (
+        {!mapData ? (
+          /* Loading state — CRITICAL: do NOT mount LeafletMapView or ReactFlow until mapData is ready.
+             LeafletMapView stores initialNodes/initialEdges in useRef (set only once at mount),
+             so mounting before data arrives causes nodes to be permanently empty. */
+          <div className="h-full flex items-center justify-center" style={{ background: "#0a0a0a" }}>
+            <div className="flex flex-col items-center gap-3">
+              <div className="h-8 w-8 rounded-full border-2 border-blue-500/30 border-t-blue-500 animate-spin" />
+              <span className="text-[12px] text-[#555]">Cargando mapa...</span>
+            </div>
+          </div>
+        ) : bgType === "livemap" ? (
           <LeafletMapView
             mapId={mapId}
             mapName={mapData?.name}

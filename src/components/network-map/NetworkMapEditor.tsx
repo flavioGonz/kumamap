@@ -140,7 +140,7 @@ const edgeTypes: EdgeTypes = { interface: InterfaceEdge as any };
 interface MapData {
   id: string;
   name: string;
-  background_type: "grid" | "image" | "livemap";
+  background_type: "image" | "livemap";
   background_image: string | null;
   background_scale: number;
   kuma_group_id: number | null;
@@ -862,15 +862,7 @@ function CanvasInner({
     e.target.value = "";
   }, [mapId]);
 
-  const handleSetGrid = useCallback(async () => {
-    await fetch(apiUrl(`/api/maps/${mapId}`), {
-      method: "PUT", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ background_type: "grid", background_image: null }),
-    });
-    const res = await fetch(apiUrl(`/api/maps/${mapId}`));
-    setMapData(await res.json());
-    toast.success("Fondo: grilla");
-  }, [mapId]);
+  // handleSetGrid removed — grid type no longer supported
 
   const handleSetLiveMap = useCallback(async () => {
     await fetch(apiUrl(`/api/maps/${mapId}`), {
@@ -915,7 +907,7 @@ function CanvasInner({
 
   const hasSelection = nodes.some((n) => n.selected) || edges.some((e) => e.selected);
 
-  const bgType = mapData?.background_type || "grid";
+  const bgType = mapData?.background_type || "livemap";
   const bgImage = bgType === "image" && mapData?.background_image
     ? apiUrl(`/api/uploads/network-maps/${mapData.background_image}`) : null;
   const bgScale = mapData?.background_scale || 1.0;
@@ -1252,7 +1244,7 @@ function CanvasInner({
                 opacity: 0.4,
               }} />
             )}
-            {bgType === "grid" && (
+            {bgType !== "image" && bgType !== "livemap" && (
               <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="#1a1a1a" />
             )}
             <Controls className="!bottom-4 !left-4" />

@@ -13,7 +13,6 @@ import {
   Tag,
   Layers,
   Search,
-  Grid3X3,
   Globe,
   Image,
   ArrowUpDown,
@@ -237,10 +236,10 @@ function MapListView({
   const bgTypeIcon = (t: string) => {
     if (t === "livemap") return <Globe className="h-3.5 w-3.5 text-emerald-400" />;
     if (t === "image") return <Image className="h-3.5 w-3.5 text-purple-400" />;
-    return <Grid3X3 className="h-3.5 w-3.5 text-[#888]" />;
+    return <Globe className="h-3.5 w-3.5 text-[#888]" />;
   };
 
-  const bgTypeLabel = (t: string) => t === "livemap" ? "Mapa real" : t === "image" ? "Imagen" : "Grilla";
+  const bgTypeLabel = (t: string) => t === "livemap" ? "Mapa real" : t === "image" ? "Imagen" : "Mapa";
 
   // Compute live UP/DOWN per map using kumaMonitors
   const getMapStatus = (map: MapSummary) => {
@@ -391,8 +390,7 @@ function MapListView({
         <div className="flex items-center gap-1 rounded-xl p-0.5" style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.04)" }}>
           {[
             { key: "all", label: "Todos", icon: <Filter className="h-3 w-3" /> },
-            { key: "grid", label: "Grilla", icon: <Grid3X3 className="h-3 w-3" /> },
-            { key: "image", label: "Imagen", icon: <Image className="h-3 w-3" /> },
+              { key: "image", label: "Imagen", icon: <Image className="h-3 w-3" /> },
             { key: "livemap", label: "Mapa", icon: <Globe className="h-3 w-3" /> },
           ].map(({ key, label, icon }) => (
             <button key={key} onClick={() => setFilterType(key)}

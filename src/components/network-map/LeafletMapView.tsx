@@ -268,6 +268,7 @@ export default function LeafletMapView({
   const [submapPickerOpen, setSubmapPickerOpen] = useState(false);
   const [importMapPickerOpen, setImportMapPickerOpen] = useState(false);
   const [importingMapId, setImportingMapId] = useState<string | null>(null);
+  const [nodeMapModalNodeId, setNodeMapModalNodeId] = useState<string | null>(null);
   const [timeMachineOpen, setTimeMachineOpen] = useState(false);
   const [timeMachineTime, setTimeMachineTime] = useState<Date | null>(null);
   const [tmFocusMonitorId, setTmFocusMonitorId] = useState<number | null>(null);
@@ -963,10 +964,21 @@ export default function LeafletMapView({
             }
           }
         } else if (!isWaypoint) {
-          // For monitor/equipment nodes, open the full edit modal
+          // If node has linked maps, open modal (or first map in kiosk mode)
           const cd = node.custom_data ? (() => { try { return JSON.parse(node.custom_data!); } catch { return {}; } })() : {};
-          setInputModalConfig({ nodeId: node.id, initial: node.label, mac: cd.mac || "", ip: cd.ip || "", credUser: cd.credUser || "", credPass: cd.credPass || "", labelHidden: cd.labelHidden ?? false, labelSize: cd.labelSize ?? 12, nodeColor: cd.nodeColor || "" });
-          setInputModalOpen(true);
+          const linked: { id: string; name: string }[] = cd.linkedMaps || [];
+          if (linked.length > 0) {
+            if (readonly) {
+              // In kiosk mode, open first linked map directly
+              window.open(apiUrl(`/view/${linked[0].id}`), "_blank");
+            } else {
+              setNodeMapModalNodeId(node.id);
+            }
+          } else if (!readonly) {
+            // Normal edit modal
+            setInputModalConfig({ nodeId: node.id, initial: node.label, mac: cd.mac || "", ip: cd.ip || "", credUser: cd.credUser || "", credPass: cd.credPass || "", labelHidden: cd.labelHidden ?? false, labelSize: cd.labelSize ?? 12, nodeColor: cd.nodeColor || "" });
+            setInputModalOpen(true);
+          }
         }
       });
 
@@ -1943,6 +1955,13 @@ export default function LeafletMapView({
           setTimeMachineOpen(true);
         },
       }] : []),
+      // Linked maps for this node
+      {
+        label: "Mapas",
+        icon: menuIcons.FolderOpen,
+        divider: true,
+        onClick: () => setNodeMapModalNodeId(nodeId),
+      },
       {
         label: "Eliminar nodo",
         icon: menuIcons.Trash2,
@@ -3543,6 +3562,105 @@ export default function LeafletMapView({
             }}
             onClose={() => setSizePickerNodeId(null)}
           />
+        );
+      })()}
+
+      {/* ═══ Linked Maps Modal ═══ */}
+      {nodeMapModalNodeId && (() => {
+        const node = nodesRef.current.find(n => n.id === nodeMapModalNodeId);
+        if (!node) { setNodeMapModalNodeId(null); return null; }
+        const cd = node.custom_data ? (() => { try { return JSON.parse(node.custom_data!); } catch { return {}; } })() : {};
+        const linkedMaps: { id: string; name: string }[] = cd.linkedMaps || [];
+        const addLinkedMap = (mapId: string, mapName: string) => {
+          const idx = nodesRef.current.findIndex(n => n.id === nodeMapModalNodeId);
+          if (idx < 0) return;
+          const ncd = nodesRef.current[idx].custom_data ? JSON.parse(nodesRef.current[idx].custom_data!) : {};
+          const existing: { id: string; name: string }[] = ncd.linkedMaps || [];
+          if (existing.some(m => m.id === mapId)) { toast("Este mapa ya está vinculado"); return; }
+          ncd.linkedMaps = [...existing, { id: mapId, name: mapName }];
+          nodesRef.current[idx] = { ...nodesRef.current[idx], custom_data: JSON.stringify(ncd) };
+          if (LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current);
+          toast.success("Mapa vinculado", { description: mapName });
+          setNodeMapModalNodeId(null);
+        };
+        const removeLinkedMap = (mapId: string) => {
+          const idx = nodesRef.current.findIndex(n => n.id === nodeMapModalNodeId);
+          if (idx < 0) return;
+          const ncd = nodesRef.current[idx].custom_data ? JSON.parse(nodesRef.current[idx].custom_data!) : {};
+          ncd.linkedMaps = (ncd.linkedMaps || []).filter((m: any) => m.id !== mapId);
+          nodesRef.current[idx] = { ...nodesRef.current[idx], custom_data: JSON.stringify(ncd) };
+          if (LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current);
+          toast.success("Mapa desvinculado");
+        };
+        const unlinkedMaps = availableMaps.filter(m => m.id !== mapId && !linkedMaps.some(lm => lm.id === m.id));
+        return (
+          <div className="fixed inset-0 z-[9999] flex items-center justify-center" style={{ background: "rgba(0,0,0,0.7)", backdropFilter: "blur(8px)" }}>
+            <div className="w-full max-w-md rounded-2xl shadow-2xl" style={{ background: "rgba(14,14,14,0.99)", border: "1px solid rgba(99,102,241,0.25)" }}>
+              {/* Header */}
+              <div className="flex items-center gap-3 px-5 py-4" style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+                <div className="flex h-9 w-9 items-center justify-center rounded-xl" style={{ background: "rgba(99,102,241,0.12)", border: "1px solid rgba(99,102,241,0.25)" }}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#818cf8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-[#ededed]">Mapas del nodo</h3>
+                  <p className="text-[10px] text-[#666]">{node.label}</p>
+                </div>
+                <button onClick={() => setNodeMapModalNodeId(null)} className="ml-auto text-[#555] hover:text-[#ededed] text-xl leading-none">&times;</button>
+              </div>
+
+              {/* Linked maps list */}
+              <div className="px-5 py-3 space-y-1.5" style={{ minHeight: "80px" }}>
+                {linkedMaps.length === 0 ? (
+                  <div className="flex flex-col items-center py-6 text-[#555]">
+                    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="mb-2 opacity-30"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                    <p className="text-[11px]">Sin mapas vinculados</p>
+                    <p className="text-[10px] text-[#444] mt-0.5">Seleccioná un mapa abajo para vincular</p>
+                  </div>
+                ) : linkedMaps.map(lm => (
+                  <div key={lm.id} className="flex items-center gap-3 rounded-xl px-3 py-2.5 group"
+                    style={{ background: "rgba(99,102,241,0.06)", border: "1px solid rgba(99,102,241,0.12)" }}>
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#818cf8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                    <span className="flex-1 text-xs font-semibold text-[#a5b4fc] truncate">{lm.name}</span>
+                    <a href={apiUrl(`/view/${lm.id}`)} target="_blank" rel="noopener noreferrer"
+                      className="rounded-lg px-2 py-1 text-[10px] font-semibold text-[#60a5fa] hover:bg-blue-500/10 transition-all"
+                      title="Abrir mapa en kiosco" onClick={(e) => e.stopPropagation()}>
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" x2="21" y1="14" y2="3"/></svg>
+                    </a>
+                    <button onClick={() => removeLinkedMap(lm.id)} title="Desvincular"
+                      className="rounded-lg p-1 text-[#555] hover:text-red-400 transition-all opacity-0 group-hover:opacity-100">
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" x2="6" y1="6" y2="18"/><line x1="6" x2="18" y1="6" y2="18"/></svg>
+                    </button>
+                  </div>
+                ))}
+              </div>
+
+              {/* Add map section */}
+              {unlinkedMaps.length > 0 && (
+                <div className="px-5 pb-4" style={{ borderTop: "1px solid rgba(255,255,255,0.05)" }}>
+                  <p className="text-[9px] font-bold uppercase tracking-wider text-[#555] pt-3 pb-2">Vincular mapa</p>
+                  <div className="space-y-1 max-h-[180px] overflow-y-auto">
+                    {unlinkedMaps.map(m => (
+                      <button key={m.id} onClick={() => addLinkedMap(m.id, m.name)}
+                        className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-xs text-[#888] transition-all"
+                        onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "rgba(99,102,241,0.08)"; (e.currentTarget as HTMLElement).style.color = "#ededed"; }}
+                        onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; (e.currentTarget as HTMLElement).style.color = "#888"; }}>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#6366f1" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="16"/><line x1="8" x2="16" y1="12" y2="12"/></svg>
+                        <span className="flex-1 text-left truncate">{m.name}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Close */}
+              <div className="px-5 py-3" style={{ borderTop: "1px solid rgba(255,255,255,0.06)" }}>
+                <button onClick={() => setNodeMapModalNodeId(null)}
+                  className="w-full rounded-xl py-2 text-xs font-semibold text-[#888] transition-all hover:bg-white/5">
+                  Cerrar
+                </button>
+              </div>
+            </div>
+          </div>
         );
       })()}
 

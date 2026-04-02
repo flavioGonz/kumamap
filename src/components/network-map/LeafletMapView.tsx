@@ -7,7 +7,7 @@ import type { KumaMonitor } from "./MonitorPanel";
 import ContextMenu, { menuIcons } from "./ContextMenu";
 import LinkModal, { type LinkFormData } from "./LinkModal";
 import InputModal from "./InputModal";
-import { Pencil, Signal } from "lucide-react";
+import { Pencil, Signal, Plus } from "lucide-react";
 import TimeMachine from "./TimeMachine";
 import EventReportModal from "./EventReportModal";
 import CameraStreamConfigModal, { type CameraStreamConfig } from "./CameraStreamConfigModal";
@@ -2124,10 +2124,16 @@ export default function LeafletMapView({
         </div>
       )}
 
-      {/* ── Dark Overlay: CSS filter on tile pane only ── */}
+      {/* ── Global Map styles ── */}
       <style>{`
         .leaflet-tile-pane { filter: brightness(${1 - overlayOpacity}); transition: filter 0.3s; }
-        ${!showLabels ? `.leaflet-tooltip.leaflet-label-dark { display: none !important; }` : ""}
+        /* Ocultar etiquetas globales */
+        ${!showLabels ? `.leaflet-tooltip, .leaflet-tooltip-pane, .leaflet-label-dark, .interface-label, .traffic-label, .polygon-label { display: none !important; }` : ""}
+        
+        /* Custom scrollbar for some UI elements */
+        .custom-scroll::-webkit-scrollbar { width: 4px; }
+        .custom-scroll::-webkit-scrollbar-track { background: transparent; }
+        .custom-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 10px; }
       `}</style>
 
       {/* ── Floating Top Bar ── */}
@@ -2380,32 +2386,6 @@ export default function LeafletMapView({
           />
         </div>
 
-        <div className="h-5 w-px mx-0.5" style={{ background: "rgba(255,255,255,0.06)" }} />
-
-        {/* Visibility toggles */}
-        <div className="flex items-center gap-0.5 rounded-xl p-0.5" style={{ background: "rgba(255,255,255,0.02)" }}>
-          <button onClick={() => setShowNodes(v => !v)} title={showNodes ? "Ocultar nodos" : "Mostrar nodos"}
-            className="rounded-lg p-1.5 transition-all" style={{ color: showNodes ? "#22c55e" : "#333" }}>
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/></svg>
-          </button>
-          <button onClick={() => setShowLinks(v => !v)} title={showLinks ? "Ocultar links" : "Mostrar links"}
-            className="rounded-lg p-1.5 transition-all" style={{ color: showLinks ? "#3b82f6" : "#333" }}>
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
-          </button>
-          <button onClick={() => setShowCameras(v => !v)} title={showCameras ? "Ocultar camaras" : "Mostrar camaras"}
-            className="rounded-lg p-1.5 transition-all" style={{ color: showCameras ? "#f59e0b" : "#333" }}>
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m16.24 7.76-1.804 5.412a2 2 0 0 1-1.265 1.265L7.76 16.24l1.804-5.412a2 2 0 0 1 1.265-1.265z"/><circle cx="12" cy="12" r="10"/></svg>
-          </button>
-          <button onClick={() => setShowFOV(v => !v)} title={showFOV ? "Ocultar areas de cobertura" : "Mostrar areas de cobertura"}
-            className="rounded-lg p-1.5 transition-all" style={{ color: showFOV ? "#8b5cf6" : "#333" }}>
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
-          </button>
-          <button onClick={() => setShowLabels(v => !v)} title={showLabels ? "Ocultar etiquetas de nodos" : "Mostrar etiquetas de nodos"}
-            className="rounded-lg p-1.5 transition-all" style={{ color: showLabels ? "#e2e8f0" : "#333" }}>
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" x2="15" y1="20" y2="20"/><line x1="12" x2="12" y1="4" y2="20"/></svg>
-          </button>
-        </div>
-
         {/* Rotation */}
         <div className="flex items-center gap-1 rounded-xl px-2 py-1" style={{ background: "rgba(255,255,255,0.02)" }}>
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={mapRotation !== 0 ? "#60a5fa" : "#555"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>
@@ -2485,6 +2465,64 @@ export default function LeafletMapView({
           }
           onClose={() => setCtxMenu(null)}
         />
+      )}
+
+      {/* ── VERTICAL SIDEBAR CONTROLS (Right Side) ── */}
+      {!readonly && (
+        <div className="fixed bottom-24 right-5 flex flex-col gap-2 rounded-2xl p-1.5 shadow-2xl backdrop-blur-3xl shrink-0" 
+          style={{ 
+            zIndex: 10000, 
+            background: "rgba(10,10,10,0.85)", 
+            border: "1px solid rgba(255,255,255,0.08)",
+            boxShadow: "0 12px 40px rgba(0,0,0,0.5)"
+          }}>
+          {/* Zoom & View Group */}
+          <button onClick={() => mapRef.current?.zoomIn()} title="Acercar (Zoom In)"
+            className="h-9 w-9 flex items-center justify-center rounded-xl text-[#ededed] hover:bg-white/10 transition-all">
+            <Plus className="h-5 w-5" />
+          </button>
+          <button onClick={() => mapRef.current?.zoomOut()} title="Alejar (Zoom Out)"
+            className="h-9 w-9 flex items-center justify-center rounded-xl text-[#ededed] hover:bg-white/10 transition-all">
+            <svg width="14" height="2" viewBox="0 0 24 2" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round"><line x1="2" y1="1" x2="22" y2="1"/></svg>
+          </button>
+          <button onClick={() => {
+            if (mapRef.current && nodesRef.current.length > 0 && LRef.current) {
+              const bounds = nodesRef.current.map((n) => [n.x, n.y] as [number, number]);
+              mapRef.current.fitBounds(LRef.current.latLngBounds(bounds), { padding: [50, 50] });
+            }
+          }} title="Ajustar vista a todos los nodos"
+            className="h-9 w-9 flex items-center justify-center rounded-xl text-[#888] hover:text-[#ededed] hover:bg-white/10 transition-all">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M15 3h6v6"/><path d="M9 21H3v-6"/><path d="m21 3-7 7"/><path d="m3 21 7-7"/></svg>
+          </button>
+
+          <div className="mx-1.5 h-px bg-white/10 my-0.5" />
+
+          {/* Visibility Visibility Group */}
+          <button onClick={() => setShowNodes(v => !v)} title={showNodes ? "Ocultar nodos" : "Mostrar nodos"}
+            className="h-9 w-9 flex items-center justify-center rounded-xl transition-all hover:bg-white/10" style={{ color: showNodes ? "#22c55e" : "#888" }}>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/></svg>
+          </button>
+
+          <button onClick={() => setShowLinks(v => !v)} title={showLinks ? "Ocultar links" : "Mostrar links"}
+            className="h-9 w-9 flex items-center justify-center rounded-xl transition-all hover:bg-white/10" style={{ color: showLinks ? "#3b82f6" : "#888" }}>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+          </button>
+
+          <button onClick={() => setShowCameras(v => !v)} title={showCameras ? "Ocultar camaras" : "Mostrar camaras"}
+            className="h-9 w-9 flex items-center justify-center rounded-xl transition-all hover:bg-white/10" style={{ color: showCameras ? "#f59e0b" : "#888" }}>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m16.24 7.76-1.804 5.412a2 2 0 0 1-1.265 1.265L7.76 16.24l1.804-5.412a2 2 0 0 1 1.265-1.265z"/><circle cx="12" cy="12" r="10"/></svg>
+          </button>
+
+          <button onClick={() => setShowLabels(v => !v)} title={showLabels ? "Ocultar etiquetas" : "Mostrar etiquetas"}
+            className="h-9 w-9 flex items-center justify-center rounded-xl transition-all hover:bg-white/10" style={{ color: showLabels ? "#e2e8f0" : "#888" }}>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" x2="15" y1="20" y2="20"/><line x1="12" x2="12" y1="4" y2="20"/></svg>
+          </button>
+
+          <button onClick={() => setShowFOV(v => !v)} title={showFOV ? "Ocultar areas de cobertura" : "Mostrar areas de cobertura"}
+            className="h-9 w-9 flex items-center justify-center rounded-xl transition-all hover:bg-white/10" style={{ color: showFOV ? "#8b5cf6" : "#888" }}>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+          </button>
+        </div>
       )}
 
       {/* Link Modal */}
@@ -2954,27 +2992,6 @@ export default function LeafletMapView({
         );
       })()}
 
-      {/* ── Zoom controls bottom-right ── */}
-      <div className="absolute bottom-14 right-3 z-[10000] flex flex-col gap-1 rounded-2xl p-1"
-        style={{ background: "rgba(10,10,10,0.85)", border: "1px solid rgba(255,255,255,0.06)", backdropFilter: "blur(16px)", boxShadow: "0 4px 20px rgba(0,0,0,0.4)" }}>
-        <button onClick={() => mapRef.current?.zoomIn()} title="Zoom In"
-          className="flex items-center justify-center h-8 w-8 rounded-xl text-[#888] hover:text-[#ededed] hover:bg-white/[0.06] transition-all">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
-        </button>
-        <button onClick={() => mapRef.current?.zoomOut()} title="Zoom Out"
-          className="flex items-center justify-center h-8 w-8 rounded-xl text-[#888] hover:text-[#ededed] hover:bg-white/[0.06] transition-all">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M5 12h14"/></svg>
-        </button>
-        <button onClick={() => {
-          if (mapRef.current && nodesRef.current.length > 0 && LRef.current) {
-            const bounds = nodesRef.current.map((n) => [n.x, n.y] as [number, number]);
-            mapRef.current.fitBounds(LRef.current.latLngBounds(bounds), { padding: [50, 50] });
-          }
-        }} title="Ajustar vista"
-          className="flex items-center justify-center h-8 w-8 rounded-xl text-[#888] hover:text-[#ededed] hover:bg-white/[0.06] transition-all">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M15 3h6v6"/><path d="M9 21H3v-6"/><path d="m21 3-7 7"/><path d="m3 21 7-7"/></svg>
-        </button>
-      </div>
 
       {/* ── Map Clock ── */}
       <MapClock timeMachineTime={timeMachineTime} timeMachineOpen={timeMachineOpen} />

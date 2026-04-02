@@ -35,26 +35,30 @@ export interface KumaHeartbeat {
 
 /**
  * Fetch heartbeats directly from Uptime Kuma's MySQL database.
- * This is much faster than the Socket.IO API for large history requests.
  */
-export async function fetchHeartbeatsFromDb(monitorIds: number[], hours: number = 24): Promise<KumaHeartbeat[]> {
+export async function fetchHeartbeatsFromDb(monitorIds: number[], hours: number = 24, untilDate?: string): Promise<KumaHeartbeat[]> {
   if (!monitorIds || monitorIds.length === 0) {
     return [];
   }
 
   const db = getKumaDb();
   
-  // Convert hours to a date string Kuma understands
-  const since = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString().replace('T', ' ').substring(0, 19);
+  // If untilDate is provided, we calculate 'since' relative to that date or absolute.
+  // Actually, let's use absolute timestamps for better precision.
+  const now = untilDate ? new Date(untilDate).getTime() : Date.now();
+  const sinceMs = now - hours * 60 * 60 * 1000;
+  const since = new Date(sinceMs).toISOString().replace('T', ' ').substring(0, 19);
+  const until = new Date(now).toISOString().replace('T', ' ').substring(0, 19);
   
   const query = `
     SELECT monitor_id as monitorID, status, time, msg, ping, duration 
     FROM heartbeat 
     WHERE monitor_id IN (?) 
     AND time >= ?
+    AND time <= ?
     ORDER BY time ASC
   `;
 
-  const [rows] = await db.query(query, [monitorIds, since]);
+  const [rows] = await db.query(query, [monitorIds, since, until]);
   return rows as KumaHeartbeat[];
 }

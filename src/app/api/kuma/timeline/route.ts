@@ -36,7 +36,8 @@ export async function GET(req: NextRequest) {
   
   try {
     const { fetchHeartbeatsFromDb } = await import("@/lib/kuma-db");
-    const beatsArray = await fetchHeartbeatsFromDb(activeMonitorIds, Math.min(hours, 2160)); // Up to 90 days via MySQL
+    // Pass toParam to fix historical selection range
+    const beatsArray = await fetchHeartbeatsFromDb(activeMonitorIds, Math.min(hours, 2160), toParam || undefined); 
     
     // Group by monitorId
     for (const b of beatsArray) {

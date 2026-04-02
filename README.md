@@ -102,11 +102,10 @@ Ambos modos comparten la misma barra de herramientas, menu contextual, tipos de 
 - **Estadisticas detalladas** — rango de ping, conteo de checks, duracion de caidas
 - **Tags del monitor** desde Kuma
 
-### Gestion de Mapas
-- **Multiples mapas** por instancia con busqueda, filtros, y ordenamiento
-- **Tipos de mapa**: Mapa satelital real, imagen subida (planos de piso), o grilla abstracta
-- **Exportar/Importar** mapas como JSON para backup y migracion entre instancias
-- **Modo Kiosco/Vista** — URL readonly fullscreen por mapa (para pantallas NOC)
+- **Barra lateral de controles**: Nueva barra vertical a la derecha con Zoom y botones de visibilidad (Nodos, Links, Cámaras, FOV, Etiquetas)
+- **Estatus de Salud en Vivo**: El listado de mapas muestra el conteo de nodos UP/DOWN en tiempo real
+- **Backup Masivo**: Exportar e Importar todos los mapas de una sola vez con ventana de previsualización
+- **Gestion Unificada de Nodos**: Modal único para configurar Nombre, MAC, IP, Credenciales, Color y visibilidad de etiquetas
 - **Superposicion oscura** con opacidad ajustable sobre imagenes satelitales
 - **Selector de estilo**: Oscuro, Satelite, Calles
 - **Rotacion de mapa** con slider (-180 a +180 grados)
@@ -175,9 +174,8 @@ npm install
 # Configurar
 cat > .env.local << 'EOF'
 KUMA_URL=http://127.0.0.1:3001
-KUMA_USER=admin
-KUMA_PASS=tu_contraseña
-NEXT_PUBLIC_BASE_PATH=
+KUMA_USER=usuario_kuma
+KUMA_PASS=password_kuma
 EOF
 
 # Compilar y ejecutar
@@ -547,6 +545,24 @@ NEXT_PUBLIC_BASE_PATH=/maps
 ---
 
 ## Changelog
+
+### v1.4.0 (2026-03-31) - Estable
+
+**Interfaz y Controles**
+- **Barra Lateral de Controles**: Se movieron los controles de visibilidad y zoom a una barra vertical en la parte inferior derecha (estilo Google Maps) para liberar espacio en el TopBar.
+- **Ocultacion Total**: El toggle de etiquetas ahora oculta no solo los nombres de nodos, sino también etiquetas de interfaces, tráfico SNMP y polígonos.
+- **Modal Unificado**: Se integró la edición de Nombre, IP, MAC y Credenciales (custom_data) en una sola ventana de edición de nodo.
+- **Selector de Color**: Posibilidad de asignar colores personalizados a cada nodo individualmente.
+
+**Gestion de Mapas y Backup**
+- **Dashboard de Estatus**: La lista principal de mapas ahora muestra una columna de "Estado" con el conteo en vivo de nodos UP/DOWN/PENDING (calculado mediante monitorIds).
+- **Importacion Masiva con Preview**: Nuevo modal de importación que detecta si el archivo es un mapa individual o un backup masivo, mostrando un resumen de lo que se va a importar antes de confirmar.
+- **Exportacion Masiva**: Botón para bajar todos los mapas de la instancia en un único archivo JSON.
+
+**Estabilidad y Produccion**
+- **Ruta Raiz por Defecto**: Se restauró la compatibilidad con el acceso desde la raíz (`/`) desactivando el prefijo `/maps` por defecto en builds de producción.
+- **Fix Credentials**: Corrección de bugs en la cadena de autenticación Socket.IO que fallaba con ciertos caracteres especiales.
+- **Build Typescript**: Correcciones de tipos en `LeafletMapView.tsx` para asegurar despliegues limpios en CI/CD.
 
 ### v1.3.0 (2026-03-31)
 

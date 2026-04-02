@@ -183,6 +183,7 @@ function CanvasInner({
   const [saving, setSaving] = useState(false);
   const [panelCollapsed, setPanelCollapsed] = useState(true);
   const [mapData, setMapData] = useState<MapData | null>(null);
+  const [allMaps, setAllMaps] = useState<{ id: string; name: string }[]>([]);
   const [mapNavMode, setMapNavMode] = useState(false);
   const [editMode, setEditMode] = useState(true);
   const [autoSaveEnabled, setAutoSaveEnabled] = useState(false);
@@ -203,6 +204,13 @@ function CanvasInner({
   const [linkModalData, setLinkModalData] = useState<{ connection?: Connection; edgeId?: string; initial?: Partial<LinkFormData>; srcName?: string; tgtName?: string }>({});
   const [inputModalOpen, setInputModalOpen] = useState(false);
   const [inputModalConfig, setInputModalConfig] = useState<{ nodeId: string; initial: string; type: "name" | "label" }>({ nodeId: "", initial: "", type: "name" });
+
+  // Load all maps (for submap picker)
+  useEffect(() => {
+    fetch(apiUrl("/api/maps")).then(r => r.json()).then((data: any[]) => {
+      setAllMaps(data.map(m => ({ id: m.id, name: m.name })));
+    }).catch(() => {});
+  }, []);
 
   // Load map
   useEffect(() => {
@@ -1173,6 +1181,7 @@ function CanvasInner({
             kumaConnected={kumaConnected}
             onBack={onBack}
             panelCollapsed={panelCollapsed}
+            availableMaps={allMaps}
             initialNodes={(mapData?.nodes || []).map((n: any) => ({
               id: n.id,
               kuma_monitor_id: n.kuma_monitor_id,

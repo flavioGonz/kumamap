@@ -54,6 +54,7 @@ interface LeafletMapViewProps {
   initialViewState?: MapViewState;
   readonly?: boolean;
   panelCollapsed?: boolean;
+  availableMaps?: { id: string; name: string }[];
 }
 
 function MapClock({ timeMachineTime, timeMachineOpen }: { timeMachineTime: Date | null; timeMachineOpen: boolean }) {
@@ -195,6 +196,7 @@ export default function LeafletMapView({
   initialViewState,
   readonly = false,
   panelCollapsed = false,
+  availableMaps = [],
 }: LeafletMapViewProps) {
   const sidebarWidth = readonly ? 0 : panelCollapsed ? 40 : 320;
   const containerRef = useRef<HTMLDivElement>(null);
@@ -263,6 +265,7 @@ export default function LeafletMapView({
   const polygonPreviewRef = useRef<any>(null);
   const polygonLayersRef = useRef<Map<string, any>>(new Map());
   const edgeUpdateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [submapPickerOpen, setSubmapPickerOpen] = useState(false);
   const [timeMachineOpen, setTimeMachineOpen] = useState(false);
   const [timeMachineTime, setTimeMachineTime] = useState<Date | null>(null);
   const [tmFocusMonitorId, setTmFocusMonitorId] = useState<number | null>(null);
@@ -317,7 +320,11 @@ export default function LeafletMapView({
       if (isCamera) {
         if (showCameras) marker.getElement()?.style.setProperty("display", "");
         else marker.getElement()?.style.setProperty("display", "none");
-      } else if (!isLabel && !isWaypoint) {
+      } else if (isWaypoint) {
+        // Waypoints son nodos intermedios sin monitor — no tienen sentido sin los links
+        if (showLinks) marker.getElement()?.style.setProperty("display", "");
+        else marker.getElement()?.style.setProperty("display", "none");
+      } else if (!isLabel) {
         if (showNodes) marker.getElement()?.style.setProperty("display", "");
         else marker.getElement()?.style.setProperty("display", "none");
       }
@@ -698,6 +705,7 @@ export default function LeafletMapView({
       const isCamera = node.icon === "_camera";
       const isWaypoint = node.icon === "_waypoint";
       const isPolygon = node.icon === "_polygon";
+      const isSubmap = node.icon === "_submap";
       const cd = node.custom_data ? JSON.parse(node.custom_data) : {};
       const color = getStatusColor(node.kuma_monitor_id);
       const m = getMonitorData(node.kuma_monitor_id);
@@ -756,6 +764,21 @@ export default function LeafletMapView({
           html: `<div style="width:10px;height:10px;border-radius:50%;background:${isSource ? "#60a5fa" : "rgba(255,255,255,0.25)"};border:2px solid ${isSource ? "#60a5fa" : "rgba(255,255,255,0.4)"};cursor:move;box-shadow:0 0 6px ${isSource ? "#60a5fa88" : "rgba(255,255,255,0.15)"};transition:all 0.15s;"></div>`,
           iconSize: [10, 10],
           iconAnchor: [5, 5],
+        });
+      } else if (isSubmap) {
+        const sz = Math.round(38 * nodeScale);
+        const ico = Math.round(18 * nodeScale);
+        const submapName = cd.submapName || node.label || "Submap";
+        nodeIcon = L.divIcon({
+          className: "submap-marker",
+          html: `<div style="display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer;">
+            <div style="width:${sz}px;height:${sz}px;border-radius:10px;background:rgba(99,102,241,0.15);border:2px solid ${isSource ? "#60a5fa" : "rgba(99,102,241,0.7)"};display:flex;align-items:center;justify-content:center;box-shadow:0 0 14px rgba(99,102,241,0.35);transition:all 0.15s;">
+              <svg width="${ico}" height="${ico}" viewBox="0 0 24 24" fill="none" stroke="rgba(165,180,252,0.95)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6l3-3h12l3 3"/><path d="M3 6h18v14a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6z"/><path d="M9 11h6"/></svg>
+            </div>
+            <span style="color:#a5b4fc;font-size:${Math.round(9*nodeScale)}px;font-weight:600;white-space:nowrap;text-shadow:0 1px 4px rgba(0,0,0,0.8);max-width:80px;overflow:hidden;text-overflow:ellipsis;">${submapName}</span>
+          </div>`,
+          iconSize: [sz, sz + 16],
+          iconAnchor: [sz / 2, sz / 2],
         });
       } else if (isCamera) {
         const camSize = Math.round(22 * nodeScale);
@@ -921,7 +944,13 @@ export default function LeafletMapView({
       // Double-click opens the unified edit modal (not a browser prompt)
       marker.on("dblclick", (e: any) => {
         L.DomEvent.stopPropagation(e);
-        if (isLabel) {
+        if (isSubmap) {
+          // Navigate to submap on double-click
+          const submapCd = node.custom_data ? (() => { try { return JSON.parse(node.custom_data!); } catch { return {}; } })() : {};
+          if (submapCd.submapId) {
+            window.open(apiUrl(`/view/${submapCd.submapId}`), "_blank");
+          }
+        } else if (isLabel) {
           // For text labels, still allow quick inline rename
           const newText = prompt("Texto de la etiqueta:", node.label);
           if (newText?.trim()) {
@@ -957,7 +986,7 @@ export default function LeafletMapView({
 
       // Click — open popup or stream viewer for cameras
       marker.on("click", () => {
-        if (isLabel || isWaypoint || isPolygon) return;
+        if (isLabel || isWaypoint || isPolygon || isSubmap) return;
         // Camera click: open stream viewer if configured
         if (isCamera) {
           const camCd = node.custom_data ? JSON.parse(node.custom_data) : {};
@@ -1374,7 +1403,7 @@ export default function LeafletMapView({
 
     nodesRef.current.forEach((node) => {
       // Skip special node types — they have their own rendering in renderNodes
-      if (node.icon === "_textLabel" || node.icon === "_waypoint" || node.icon === "_camera" || node.icon === "_polygon") return;
+      if (node.icon === "_textLabel" || node.icon === "_waypoint" || node.icon === "_camera" || node.icon === "_polygon" || node.icon === "_submap") return;
 
       const marker = markersRef.current.get(node.id);
       if (!marker) return;
@@ -1565,6 +1594,40 @@ export default function LeafletMapView({
     const isLabel = node?.icon === "_textLabel";
     const isWaypoint = node?.icon === "_waypoint";
 
+    // Submap nodes: open, rename, delete
+    if (node?.icon === "_submap") {
+      const submapCd = node.custom_data ? (() => { try { return JSON.parse(node.custom_data!); } catch { return {}; } })() : {};
+      return [
+        {
+          label: "Abrir submap",
+          icon: menuIcons.ExternalLink,
+          onClick: () => {
+            if (submapCd.submapId) window.open(apiUrl(`/view/${submapCd.submapId}`), "_blank");
+            else toast.error("Este nodo no tiene un submap asignado");
+          },
+        },
+        {
+          label: "Editar en editor",
+          icon: menuIcons.Pencil,
+          onClick: () => {
+            if (submapCd.submapId) window.location.href = `/?map=${submapCd.submapId}`;
+          },
+        },
+        {
+          label: "Eliminar nodo",
+          icon: menuIcons.Trash2,
+          danger: true,
+          divider: true,
+          onClick: () => {
+            pushUndo();
+            nodesRef.current = nodesRef.current.filter((n) => n.id !== nodeId);
+            edgesRef.current = edgesRef.current.filter((e) => e.source_node_id !== nodeId && e.target_node_id !== nodeId);
+            if (LRef.current && mapRef.current) { renderNodes(LRef.current, mapRef.current); renderEdges(LRef.current, mapRef.current); }
+            toast.success("Nodo eliminado");
+          },
+        },
+      ];
+    }
 
     // Polygons: rename, color, delete
     const isPolygon = node?.icon === "_polygon";
@@ -2243,6 +2306,51 @@ export default function LeafletMapView({
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m16.24 7.76-1.804 5.412a2 2 0 0 1-1.265 1.265L7.76 16.24l1.804-5.412a2 2 0 0 1 1.265-1.265z"/><circle cx="12" cy="12" r="10"/></svg>
             <span className="text-[10px] font-semibold hidden xl:inline">Camara</span>
           </button>
+          {/* ─── Submap button ─── */}
+          {availableMaps.length > 0 && (
+            <div className="relative">
+              <button onClick={() => setSubmapPickerOpen(v => !v)} title="Agregar nodo submap"
+                className="group flex items-center gap-1 rounded-xl px-2 py-1.5 transition-all"
+                style={{ color: submapPickerOpen ? "#818cf8" : "#888", background: submapPickerOpen ? "rgba(99,102,241,0.12)" : "transparent" }}
+                onMouseEnter={(e) => { if (!submapPickerOpen) { (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.06)"; (e.currentTarget as HTMLElement).style.color = "#ededed"; }}}
+                onMouseLeave={(e) => { if (!submapPickerOpen) { (e.currentTarget as HTMLElement).style.background = "transparent"; (e.currentTarget as HTMLElement).style.color = "#888"; }}}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                <span className="text-[10px] font-semibold hidden xl:inline">Submap</span>
+              </button>
+              {submapPickerOpen && (
+                <div className="fixed inset-0 z-[99998]" onClick={() => setSubmapPickerOpen(false)} />
+              )}
+              {submapPickerOpen && (
+                <div className="absolute top-full left-0 mt-1 rounded-xl shadow-2xl py-1 z-[99999] min-w-[180px]"
+                  style={{ background: "rgba(12,12,12,0.98)", border: "1px solid rgba(99,102,241,0.25)", backdropFilter: "blur(20px)" }}>
+                  <div className="px-3 py-1 text-[9px] font-bold uppercase tracking-wider text-[#555]">Seleccionar submap</div>
+                  {availableMaps.filter(m => m.id !== mapId).map(m => (
+                    <button key={m.id} onClick={() => {
+                      if (!mapRef.current) return;
+                      const center = mapRef.current.getCenter();
+                      const id = `sub-${Date.now()}`;
+                      nodesRef.current = [...nodesRef.current, {
+                        id, kuma_monitor_id: null, label: m.name, x: center.lat, y: center.lng,
+                        icon: "_submap", custom_data: JSON.stringify({ submapId: m.id, submapName: m.name }),
+                      }];
+                      if (LRef.current) renderNodes(LRef.current, mapRef.current);
+                      setSubmapPickerOpen(false);
+                      toast.success(`Submap "${m.name}" agregado`);
+                    }}
+                      className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-[#a0a0a0] transition-all"
+                      onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "rgba(99,102,241,0.1)"; (e.currentTarget as HTMLElement).style.color = "#ededed"; }}
+                      onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; (e.currentTarget as HTMLElement).style.color = "#a0a0a0"; }}>
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#818cf8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                      <span className="truncate">{m.name}</span>
+                    </button>
+                  ))}
+                  {availableMaps.filter(m => m.id !== mapId).length === 0 && (
+                    <div className="px-3 py-2 text-[10px] text-[#555]">No hay otros mapas disponibles</div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* ─── Drawing tools separator ─── */}

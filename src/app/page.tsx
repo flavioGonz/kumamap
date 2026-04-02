@@ -34,6 +34,7 @@ interface MapSummary {
   name: string;
   background_type: string;
   kuma_group_id: number | null;
+  parent_id: string | null;
   updated_at: string;
   node_count: number;
   edge_count: number;
@@ -108,6 +109,9 @@ function MapListView({
   const [importPreview, setImportPreview] = useState<{ maps: any[]; isBulk: boolean } | null>(null);
   const [importing, setImporting] = useState(false);
   const [exportingAll, setExportingAll] = useState(false);
+  const [expandedMaps, setExpandedMaps] = useState<Set<string>>(new Set());
+  const [creatingSubmapFor, setCreatingSubmapFor] = useState<string | null>(null);
+  const [newSubmapName, setNewSubmapName] = useState("");
 
   const kumaGroups = useMemo(
     () => kumaMonitors.filter((m) => m.type === "group"),
@@ -130,6 +134,22 @@ function MapListView({
     const map = await res.json();
     toast.success("Mapa creado", { description: name });
     setNewMapName(""); setNewMapGroup(""); setShowCreate(false);
+    onOpenMap(map.id);
+  };
+
+  const createSubmap = async (parentId: string, name: string) => {
+    if (!name.trim()) return;
+    const res = await fetch(apiUrl("/api/maps"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: name.trim(), parent_id: parentId, background_type: "livemap" }),
+    });
+    const map = await res.json();
+    toast.success("Submap creado", { description: name.trim() });
+    setCreatingSubmapFor(null);
+    setNewSubmapName("");
+    setExpandedMaps(prev => new Set([...prev, parentId]));
+    fetchMaps();
     onOpenMap(map.id);
   };
 
@@ -237,9 +257,9 @@ function MapListView({
     return { up, down, pending, total: monitorIds.length };
   };
 
-  // Filter & sort
+  // Filter & sort — solo mapas raíz en la lista principal (submapas aparecen anidados)
   const filtered = useMemo(() => {
-    let result = maps;
+    let result = maps.filter((m) => !m.parent_id); // Solo raíz
     if (search) {
       const q = search.toLowerCase();
       result = result.filter((m) => m.name.toLowerCase().includes(q) || getGroupName(m.kuma_group_id)?.toLowerCase().includes(q));
@@ -254,6 +274,16 @@ function MapListView({
     });
     return result;
   }, [maps, search, filterType, sortBy, sortDir]);
+
+  // Submapas por parent
+  const submapsOf = useMemo(() => {
+    const m: Record<string, MapSummary[]> = {};
+    maps.filter(x => x.parent_id).forEach(x => {
+      if (!m[x.parent_id!]) m[x.parent_id!] = [];
+      m[x.parent_id!].push(x);
+    });
+    return m;
+  }, [maps]);
 
   const toggleSort = (col: "name" | "updated" | "type") => {
     if (sortBy === col) setSortDir((d) => d === "asc" ? "desc" : "asc");
@@ -404,8 +434,11 @@ function MapListView({
         {filtered.map((map) => {
           const groupName = getGroupName(map.kuma_group_id);
           const { up, down, pending, total } = getMapStatus(map);
+          const children = submapsOf[map.id] || [];
+          const isExpanded = expandedMaps.has(map.id);
           return (
-            <div key={map.id}
+            <div key={map.id}>
+            <div
               className="grid grid-cols-[1fr_90px_90px_100px_120px_130px_70px_90px] gap-2 items-center px-5 py-3 transition-all cursor-pointer group/row"
               style={{ borderBottom: "1px solid rgba(255,255,255,0.03)" }}
               onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "rgba(59,130,246,0.04)"; }}
@@ -413,7 +446,23 @@ function MapListView({
               onClick={() => onOpenMap(map.id)}
             >
               {/* Name */}
-              <div className="flex items-center gap-3 min-w-0">
+              <div className="flex items-center gap-2 min-w-0">
+                {/* Expand/collapse submaps */}
+                <button onClick={(e) => {
+                  e.stopPropagation();
+                  setExpandedMaps(prev => {
+                    const next = new Set(prev);
+                    if (next.has(map.id)) next.delete(map.id); else next.add(map.id);
+                    return next;
+                  });
+                }} title={isExpanded ? "Colapsar submaps" : `${children.length} submap(s)`}
+                  className="shrink-0 rounded-lg p-0.5 transition-all"
+                  style={{ color: children.length > 0 ? "#6366f1" : "transparent", cursor: children.length > 0 ? "pointer" : "default" }}>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+                    style={{ transform: isExpanded ? "rotate(90deg)" : "rotate(0deg)", transition: "transform 0.15s" }}>
+                    <path d="m9 18 6-6-6-6"/>
+                  </svg>
+                </button>
                 <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl"
                   style={{ background: "rgba(59,130,246,0.08)", border: "1px solid rgba(59,130,246,0.15)" }}>
                   <MapIcon className="h-4 w-4 text-blue-400" />
@@ -490,7 +539,7 @@ function MapListView({
 
               {/* View URL */}
               <div className="flex items-center gap-1">
-                <a href={`/maps/view/${map.id}`} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}
+                <a href={apiUrl(`/view/${map.id}`)} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}
                   className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[10px] font-semibold transition-all hover:bg-blue-500/10"
                   style={{ color: "#60a5fa", border: "1px solid rgba(59,130,246,0.15)" }}
                   title="Abrir vista fullscreen">
@@ -498,7 +547,7 @@ function MapListView({
                 </a>
                 <button onClick={(e) => {
                   e.stopPropagation();
-                  const url = `${window.location.origin}/maps/view/${map.id}`;
+                  const url = `${window.location.origin}${apiUrl(`/view/${map.id}`)}`;
                   navigator.clipboard.writeText(url);
                   toast.success("URL copiada", { description: url });
                 }} title="Copiar URL"
@@ -509,6 +558,11 @@ function MapListView({
 
               {/* Actions */}
               <div className="flex items-center justify-end gap-1">
+                <button onClick={(e) => { e.stopPropagation(); setCreatingSubmapFor(creatingSubmapFor === map.id ? null : map.id); setNewSubmapName(""); }} title="Nuevo submap"
+                  className="rounded-lg p-1.5 transition-all opacity-0 group-hover/row:opacity-100"
+                  style={{ color: creatingSubmapFor === map.id ? "#818cf8" : "#6366f1" }}>
+                  <Plus className="h-3.5 w-3.5" />
+                </button>
                 <button onClick={(e) => { e.stopPropagation(); onOpenMap(map.id); }} title="Abrir"
                   className="rounded-lg p-1.5 text-blue-400 hover:bg-blue-500/10 transition-all opacity-0 group-hover/row:opacity-100">
                   <FolderOpen className="h-3.5 w-3.5" />
@@ -526,6 +580,103 @@ function MapListView({
                   <Trash2 className="h-3.5 w-3.5" />
                 </button>
               </div>
+            </div>
+
+            {/* ─── Child submaps (expandidas) ─── */}
+            {isExpanded && children.map((child) => {
+              const childStatus = getMapStatus(child);
+              return (
+                <div key={child.id}
+                  className="grid grid-cols-[1fr_90px_90px_100px_120px_130px_70px_90px] gap-2 items-center py-2 cursor-pointer group/child"
+                  style={{ borderBottom: "1px solid rgba(255,255,255,0.02)", paddingLeft: "72px", paddingRight: "20px", background: "rgba(99,102,241,0.025)" }}
+                  onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "rgba(99,102,241,0.06)"; }}
+                  onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "rgba(99,102,241,0.025)"; }}
+                  onClick={() => onOpenMap(child.id)}
+                >
+                  {/* Submap name */}
+                  <div className="flex items-center gap-2 min-w-0">
+                    <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg"
+                      style={{ background: "rgba(99,102,241,0.12)", border: "1px solid rgba(99,102,241,0.25)" }}>
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#818cf8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+                      </svg>
+                    </div>
+                    <span className="text-xs font-semibold text-[#a5b4fc] truncate">{child.name}</span>
+                  </div>
+                  {/* Type */}
+                  <div className="flex items-center gap-1.5">
+                    {bgTypeIcon(child.background_type)}
+                    <span className="text-[10px] text-[#888]">{bgTypeLabel(child.background_type)}</span>
+                  </div>
+                  {/* Nodes */}
+                  <div className="text-[10px] text-[#777]">{child.node_count} <span className="text-[#555]">/ {child.edge_count}L</span></div>
+                  {/* Status */}
+                  <div className="flex items-center gap-1">
+                    {childStatus.total === 0 ? <span className="text-[10px] text-[#444]">—</span> : (
+                      <>
+                        {childStatus.up > 0 && <span className="flex items-center gap-0.5 text-[9px] font-bold text-emerald-400"><span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />{childStatus.up}</span>}
+                        {childStatus.down > 0 && <span className="flex items-center gap-0.5 text-[9px] font-bold text-red-400"><span className="h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse" />{childStatus.down}</span>}
+                        {childStatus.pending > 0 && <span className="flex items-center gap-0.5 text-[9px] font-bold text-amber-400"><span className="h-1.5 w-1.5 rounded-full bg-amber-500" />{childStatus.pending}</span>}
+                      </>
+                    )}
+                  </div>
+                  {/* Group (empty for submaps) */}
+                  <div />
+                  {/* Updated */}
+                  <div className="text-[10px] text-[#666]">{new Date(child.updated_at).toLocaleDateString()}</div>
+                  {/* View */}
+                  <div className="flex items-center gap-1">
+                    <a href={apiUrl(`/view/${child.id}`)} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}
+                      className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[10px] font-semibold transition-all hover:bg-indigo-500/10"
+                      style={{ color: "#818cf8", border: "1px solid rgba(99,102,241,0.2)" }}>
+                      <ExternalLink className="h-3 w-3" />
+                    </a>
+                  </div>
+                  {/* Actions */}
+                  <div className="flex items-center justify-end gap-1">
+                    <button onClick={(e) => { e.stopPropagation(); setEditingId(child.id); setEditValue(child.name); }} title="Renombrar"
+                      className="rounded-lg p-1.5 text-[#888] hover:text-[#ededed] hover:bg-white/5 transition-all opacity-0 group-hover/child:opacity-100">
+                      <Pencil className="h-3.5 w-3.5" />
+                    </button>
+                    <button onClick={(e) => { e.stopPropagation(); confirm(`Eliminar "${child.name}"?`) && deleteMap(child.id, child.name); }} title="Eliminar submap"
+                      className="rounded-lg p-1.5 text-[#888] hover:text-red-400 hover:bg-red-500/10 transition-all opacity-0 group-hover/child:opacity-100">
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+
+            {/* ─── Inline create submap form ─── */}
+            {creatingSubmapFor === map.id && (
+              <div className="flex items-center gap-2 py-2"
+                style={{ paddingLeft: "72px", paddingRight: "20px", background: "rgba(99,102,241,0.04)", borderBottom: "1px solid rgba(99,102,241,0.1)" }}>
+                <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg"
+                  style={{ background: "rgba(99,102,241,0.1)", border: "1px solid rgba(99,102,241,0.2)" }}>
+                  <Plus className="h-3.5 w-3.5 text-indigo-400" />
+                </div>
+                <input autoFocus
+                  value={newSubmapName}
+                  onChange={(e) => setNewSubmapName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") createSubmap(map.id, newSubmapName);
+                    if (e.key === "Escape") { setCreatingSubmapFor(null); setNewSubmapName(""); }
+                  }}
+                  placeholder="Nombre del submap..."
+                  className="flex-1 rounded-lg px-3 py-1.5 text-xs text-[#ededed] placeholder:text-[#555] focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
+                  style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(99,102,241,0.2)" }}
+                />
+                <button onClick={() => createSubmap(map.id, newSubmapName)} disabled={!newSubmapName.trim()}
+                  className="rounded-lg px-3 py-1.5 text-xs font-bold transition-all disabled:opacity-30"
+                  style={{ background: "rgba(99,102,241,0.15)", border: "1px solid rgba(99,102,241,0.3)", color: "#818cf8" }}>
+                  Crear
+                </button>
+                <button onClick={() => { setCreatingSubmapFor(null); setNewSubmapName(""); }}
+                  className="rounded-lg px-2 py-1.5 text-xs text-[#555] hover:text-[#888] transition-all">
+                  Cancelar
+                </button>
+              </div>
+            )}
             </div>
           );
         })}

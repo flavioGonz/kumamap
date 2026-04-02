@@ -55,6 +55,7 @@ interface LeafletMapViewProps {
   initialViewState?: MapViewState;
   readonly?: boolean;
   panelCollapsed?: boolean;
+  onTogglePanel?: () => void;
   availableMaps?: { id: string; name: string }[];
 }
 
@@ -197,6 +198,7 @@ export default function LeafletMapView({
   initialViewState,
   readonly = false,
   panelCollapsed = false,
+  onTogglePanel,
   availableMaps = [],
 }: LeafletMapViewProps) {
   const sidebarWidth = readonly ? 0 : panelCollapsed ? 40 : 320;
@@ -2684,6 +2686,19 @@ export default function LeafletMapView({
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
             </button>
           </Tooltip>
+
+          {onTogglePanel && (
+            <>
+              <div className="mx-1 h-px bg-white/10 my-0.5" />
+              <Tooltip content={panelCollapsed ? "Mostrar monitores" : "Ocultar monitores"} placement="left">
+                <button onClick={onTogglePanel}
+                  className="h-7 w-7 flex items-center justify-center rounded-lg transition-all hover:bg-white/10"
+                  style={{ color: !panelCollapsed ? "#60a5fa" : "#888" }}>
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/></svg>
+                </button>
+              </Tooltip>
+            </>
+          )}
         </div>
       )}
 

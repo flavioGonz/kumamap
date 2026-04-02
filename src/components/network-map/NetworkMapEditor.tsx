@@ -1184,6 +1184,7 @@ function CanvasInner({
             kumaConnected={kumaConnected}
             onBack={onBack}
             panelCollapsed={panelCollapsed}
+            onTogglePanel={() => setPanelCollapsed(v => !v)}
             availableMaps={allMaps}
             initialNodes={(mapData?.nodes || []).map((n: any) => ({
               id: n.id,
@@ -1270,6 +1271,7 @@ function CanvasInner({
         onToggleCollapse={() => setPanelCollapsed((v) => !v)}
         groupName={mapData?.kuma_group_id ? kumaMonitors.find(m => m.id === mapData.kuma_group_id)?.name : undefined}
         onAutoImport={mapData?.kuma_group_id ? handleAutoImport : undefined}
+        hideCollapsedButton={bgType === "livemap"}
       />
 
       {/* Context Menu */}

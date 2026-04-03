@@ -42,6 +42,7 @@ interface MonitorPanelProps {
   onToggleCollapse: () => void;
   groupName?: string;
   onAutoImport?: () => void;
+  hideCollapsedButton?: boolean;
 }
 
 const typeIcons: Record<string, React.ComponentType<{ className?: string; style?: React.CSSProperties }>> = {
@@ -83,6 +84,7 @@ export default function MonitorPanel({
   onToggleCollapse,
   groupName,
   onAutoImport,
+  hideCollapsedButton = false,
 }: MonitorPanelProps) {
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState<number | null>(null);
@@ -123,6 +125,7 @@ export default function MonitorPanel({
   };
 
   if (collapsed) {
+    if (hideCollapsedButton) return null;
     return (
       <div className="absolute right-3 top-1/2 -translate-y-1/2 z-20">
         <button

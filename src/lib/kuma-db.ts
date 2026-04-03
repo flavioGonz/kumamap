@@ -1,28 +1,26 @@
-import mysql from 'mysql2/promise';
+/**
+ * KumaMap - Direct Uptime Kuma Database Access
+ *
+ * Supports two modes, auto-detected from environment variables:
+ *
+ *  SQLite mode (Uptime Kuma v1.x — most common):
+ *    KUMA_DB_PATH=/path/to/kuma.db
+ *    (read-only access to the SQLite file)
+ *
+ *  MySQL/MariaDB mode (Uptime Kuma 2.0 embedded MariaDB or external):
+ *    KUMA_DB_HOST=127.0.0.1
+ *    KUMA_DB_USER=kumamap_reader
+ *    KUMA_DB_PASSWORD=yourpassword
+ *    KUMA_DB_NAME=kuma        (default: kuma)
+ *    KUMA_DB_PORT=3306        (default: 3306)
+ *
+ *  Disabled (neither env set):
+ *    App works via Socket.IO only; historical timeline shows limited data.
+ *
+ * To set up, run: npm run setup-db
+ */
 
-let pool: mysql.Pool | null = null;
-
-export function getKumaDb() {
-  if (!pool) {
-    const host = process.env.KUMA_DB_HOST || '192.168.99.122';
-    const user = process.env.KUMA_DB_USER || 'kumamap_reader';
-    const password = process.env.KUMA_DB_PASSWORD || 'KumaMapReader2026*';
-    const database = process.env.KUMA_DB_NAME || 'kuma';
-
-    console.log(`[MySQL] Connecting to Kuma DB at ${host}...`);
-
-    pool = mysql.createPool({
-      host,
-      user,
-      password,
-      database,
-      waitForConnections: true,
-      connectionLimit: 10,
-      queueLimit: 0
-    });
-  }
-  return pool;
-}
+import mysql from "mysql2/promise";
 
 export interface KumaHeartbeat {
   monitorID: number;
@@ -33,32 +31,236 @@ export interface KumaHeartbeat {
   duration: number;
 }
 
-/**
- * Fetch heartbeats directly from Uptime Kuma's MySQL database.
- */
-export async function fetchHeartbeatsFromDb(monitorIds: number[], hours: number = 24, untilDate?: string): Promise<KumaHeartbeat[]> {
-  if (!monitorIds || monitorIds.length === 0) {
-    return [];
+// ─────────────────────────────────────────────
+// Mode detection
+// ─────────────────────────────────────────────
+
+type DbMode = "sqlite" | "mysql" | "disabled";
+
+function detectMode(): DbMode {
+  if (process.env.KUMA_DB_PATH) return "sqlite";
+  if (process.env.KUMA_DB_HOST) return "mysql";
+  return "disabled";
+}
+
+// ─────────────────────────────────────────────
+// SQLite implementation
+// ─────────────────────────────────────────────
+
+let sqliteDb: import("better-sqlite3").Database | null = null;
+
+function getSqliteDb(): import("better-sqlite3").Database {
+  if (!sqliteDb) {
+    // Dynamic require so the module doesn't crash on machines without the .node binding
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const Database = require("better-sqlite3");
+    const dbPath = process.env.KUMA_DB_PATH!;
+    console.log(`[KumaDB] SQLite mode — opening ${dbPath}`);
+    sqliteDb = new Database(dbPath, { readonly: true, fileMustExist: true });
+  }
+  return sqliteDb!;
+}
+
+function fetchHeartbeatsFromSqlite(
+  monitorIds: number[],
+  hours: number,
+  untilDate?: string
+): KumaHeartbeat[] {
+  const db = getSqliteDb();
+
+  const now = untilDate ? new Date(untilDate).getTime() : Date.now();
+  const sinceMs = now - hours * 3_600_000;
+
+  // SQLite stores time as ISO-8601 string in UTC
+  const since = new Date(sinceMs).toISOString().replace("T", " ").substring(0, 19);
+  const until = new Date(now).toISOString().replace("T", " ").substring(0, 19);
+
+  const placeholders = monitorIds.map(() => "?").join(",");
+  const stmt = db.prepare(`
+    SELECT monitor_id as monitorID, status, time, msg, ping, duration
+    FROM heartbeat
+    WHERE monitor_id IN (${placeholders})
+      AND time >= ?
+      AND time <= ?
+    ORDER BY time ASC
+  `);
+
+  return stmt.all(...monitorIds, since, until) as KumaHeartbeat[];
+}
+
+function fetchBadDatesSqlite(monitorIds: number[]): string[] {
+  const db = getSqliteDb();
+
+  const cutoff = new Date(Date.now() - 90 * 86_400_000)
+    .toISOString()
+    .replace("T", " ")
+    .substring(0, 19);
+
+  const placeholders = monitorIds.map(() => "?").join(",");
+  const stmt = db.prepare(`
+    SELECT DISTINCT DATE(time) as eventDate
+    FROM heartbeat
+    WHERE monitor_id IN (${placeholders})
+      AND status = 0
+      AND time >= ?
+  `);
+
+  const rows = stmt.all(...monitorIds, cutoff) as { eventDate: string }[];
+  return rows.map((r) => r.eventDate);
+}
+
+// ─────────────────────────────────────────────
+// MySQL implementation
+// ─────────────────────────────────────────────
+
+let mysqlPool: mysql.Pool | null = null;
+
+export function getKumaDb(): mysql.Pool {
+  if (detectMode() !== "mysql") {
+    throw new Error(
+      "[KumaDB] MySQL mode requires KUMA_DB_HOST to be set in the environment. " +
+        "Set KUMA_DB_PATH for SQLite mode, or leave both unset to use Socket.IO only."
+    );
   }
 
-  const db = getKumaDb();
-  
-  // If untilDate is provided, we calculate 'since' relative to that date or absolute.
-  // Actually, let's use absolute timestamps for better precision.
-  const now = untilDate ? new Date(untilDate).getTime() : Date.now();
-  const sinceMs = now - hours * 60 * 60 * 1000;
-  const since = new Date(sinceMs).toISOString().replace('T', ' ').substring(0, 19);
-  const until = new Date(now).toISOString().replace('T', ' ').substring(0, 19);
-  
-  const query = `
-    SELECT monitor_id as monitorID, status, time, msg, ping, duration 
-    FROM heartbeat 
-    WHERE monitor_id IN (?) 
-    AND time >= ?
-    AND time <= ?
-    ORDER BY time ASC
-  `;
+  if (!mysqlPool) {
+    const host = process.env.KUMA_DB_HOST!;
+    const user = process.env.KUMA_DB_USER || "kumamap_reader";
+    const password = process.env.KUMA_DB_PASSWORD;
+    const database = process.env.KUMA_DB_NAME || "kuma";
+    const port = parseInt(process.env.KUMA_DB_PORT || "3306", 10);
 
-  const [rows] = await db.query(query, [monitorIds, since, until]);
+    if (!password) {
+      throw new Error(
+        "[KumaDB] KUMA_DB_PASSWORD is required when KUMA_DB_HOST is set. " +
+          "Run `npm run setup-db` to create the read-only user and get the connection settings."
+      );
+    }
+
+    console.log(`[KumaDB] MySQL mode — connecting to ${user}@${host}:${port}/${database}`);
+
+    mysqlPool = mysql.createPool({
+      host,
+      port,
+      user,
+      password,
+      database,
+      waitForConnections: true,
+      connectionLimit: 5,
+      queueLimit: 0,
+      connectTimeout: 10_000,
+    });
+  }
+
+  return mysqlPool;
+}
+
+async function fetchHeartbeatsFromMysql(
+  monitorIds: number[],
+  hours: number,
+  untilDate?: string
+): Promise<KumaHeartbeat[]> {
+  const db = getKumaDb();
+
+  const now = untilDate ? new Date(untilDate).getTime() : Date.now();
+  const sinceMs = now - hours * 3_600_000;
+  const since = new Date(sinceMs).toISOString().replace("T", " ").substring(0, 19);
+  const until = new Date(now).toISOString().replace("T", " ").substring(0, 19);
+
+  const [rows] = await db.query(
+    `SELECT monitor_id as monitorID, status, time, msg, ping, duration
+     FROM heartbeat
+     WHERE monitor_id IN (?)
+       AND time >= ?
+       AND time <= ?
+     ORDER BY time ASC`,
+    [monitorIds, since, until]
+  );
+
   return rows as KumaHeartbeat[];
+}
+
+async function fetchBadDatesMysql(monitorIds: number[]): Promise<string[]> {
+  const db = getKumaDb();
+
+  const [rows] = await db.query(
+    `SELECT DISTINCT DATE(time) as eventDate
+     FROM heartbeat
+     WHERE monitor_id IN (?)
+       AND status = 0
+       AND time >= DATE_SUB(NOW(), INTERVAL 90 DAY)`,
+    [monitorIds]
+  );
+
+  return (rows as { eventDate: Date | string }[]).map((r) => {
+    const d = new Date(r.eventDate);
+    return d.toISOString().split("T")[0];
+  });
+}
+
+// ─────────────────────────────────────────────
+// Public unified API
+// ─────────────────────────────────────────────
+
+/**
+ * Fetch heartbeats for the given monitor IDs over the specified time window.
+ * Automatically uses SQLite or MySQL depending on environment configuration.
+ * Throws if neither KUMA_DB_PATH nor KUMA_DB_HOST is set (disabled mode).
+ */
+export async function fetchHeartbeatsFromDb(
+  monitorIds: number[],
+  hours: number = 24,
+  untilDate?: string
+): Promise<KumaHeartbeat[]> {
+  if (!monitorIds || monitorIds.length === 0) return [];
+
+  const mode = detectMode();
+
+  if (mode === "sqlite") {
+    return fetchHeartbeatsFromSqlite(monitorIds, Math.min(hours, 2160), untilDate);
+  }
+
+  if (mode === "mysql") {
+    return fetchHeartbeatsFromMysql(monitorIds, Math.min(hours, 2160), untilDate);
+  }
+
+  throw new Error(
+    "[KumaDB] No database configured. Set KUMA_DB_PATH (SQLite) or KUMA_DB_HOST (MySQL) " +
+      "to enable historical timeline. Run `npm run setup-db` for guided setup."
+  );
+}
+
+/**
+ * Fetch the list of calendar dates (last 90 days) that had at least one DOWN event.
+ * Used by the timeline calendar heatmap. Returns [] if DB is not configured.
+ */
+export async function fetchBadDatesFromDb(monitorIds: number[]): Promise<string[]> {
+  if (!monitorIds || monitorIds.length === 0) return [];
+
+  const mode = detectMode();
+
+  if (mode === "sqlite") {
+    return fetchBadDatesSqlite(monitorIds);
+  }
+
+  if (mode === "mysql") {
+    return fetchBadDatesMysql(monitorIds);
+  }
+
+  throw new Error("[KumaDB] No database configured.");
+}
+
+/**
+ * Returns a human-readable description of the current DB mode.
+ * Useful for status/health endpoints.
+ */
+export function getDbMode(): { mode: DbMode; detail: string } {
+  const mode = detectMode();
+  if (mode === "sqlite") return { mode, detail: `SQLite: ${process.env.KUMA_DB_PATH}` };
+  if (mode === "mysql")
+    return {
+      mode,
+      detail: `MySQL: ${process.env.KUMA_DB_USER || "kumamap_reader"}@${process.env.KUMA_DB_HOST}:${process.env.KUMA_DB_PORT || 3306}/${process.env.KUMA_DB_NAME || "kuma"}`,
+    };
+  return { mode: "disabled", detail: "No DB configured — using Socket.IO only" };
 }

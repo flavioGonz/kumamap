@@ -45,7 +45,11 @@ export async function GET(req: NextRequest) {
       allBeatsMap.get(b.monitorID)!.push(b);
     }
   } catch (error) {
-    console.warn("[Timeline] MySQL direct fetch failed, falling back to Kuma API:", error);
+    const msg = error instanceof Error ? error.message : String(error);
+    // Only log unexpected errors; "No database configured" is normal when DB is not set up
+    if (!msg.includes("No database configured")) {
+      console.warn("[Timeline] DB direct fetch failed, falling back to Socket.IO API:", msg);
+    }
     allBeatsMap = await kuma.getAllBeats(activeMonitorIds, Math.min(hours, 720));
   }
 

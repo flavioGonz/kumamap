@@ -165,7 +165,7 @@ export const mapsDb = {
     data: Partial<
       Pick<
         NetworkMap,
-        "name" | "background_type" | "background_image" | "width" | "height"
+        "name" | "background_type" | "background_image" | "width" | "height" | "parent_id"
       >
     >
   ): NetworkMap | undefined {

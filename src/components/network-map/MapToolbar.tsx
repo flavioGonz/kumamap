@@ -3,7 +3,6 @@
 import {
   Save,
   Image,
-  Grid3X3,
   ZoomIn,
   ZoomOut,
   Maximize2,
@@ -24,7 +23,6 @@ interface MapToolbarProps {
   mapName: string;
   onSave: () => void;
   onUploadBackground: () => void;
-  onSetGrid: () => void;
   onSetLiveMap: () => void;
   onZoomIn: () => void;
   onZoomOut: () => void;
@@ -106,7 +104,6 @@ export default function MapToolbar({
   mapName,
   onSave,
   onUploadBackground,
-  onSetGrid,
   onSetLiveMap,
   onZoomIn,
   onZoomOut,
@@ -260,9 +257,6 @@ export default function MapToolbar({
       <div className="flex items-center gap-0.5">
         <ToolButton onClick={onUploadBackground} title="Subir imagen de fondo">
           <Image className="h-3.5 w-3.5" />
-        </ToolButton>
-        <ToolButton onClick={onSetGrid} title="Fondo grilla">
-          <Grid3X3 className="h-3.5 w-3.5" />
         </ToolButton>
         <ToolButton onClick={onSetLiveMap} title="Mapa real (OpenStreetMap)">
           <Globe className="h-3.5 w-3.5" />

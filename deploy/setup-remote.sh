@@ -129,14 +129,36 @@ setup_host() {
 # KumaMap - Configuración de instancia
 # Editá estos valores para tu Uptime Kuma local
 
+# ── Conexión a Uptime Kuma (Socket.IO) ─────────────────────────
 KUMA_URL=http://localhost:3001
 KUMA_USER=admin
 KUMA_PASS=changeme
 NEXT_PUBLIC_BASE_PATH=
 PORT=3000
+
+# ── Acceso directo a la base de datos de Kuma (opcional) ───────
+# Habilita el historial de uptime y el calendario de incidentes.
+# Elegí UNA opción según tu instalación de Uptime Kuma:
+#
+# Opción A — SQLite (Kuma v1.x — lo más común):
+#   KUMA_DB_PATH=/opt/uptime-kuma/data/kuma.db
+#
+# Opción B — MariaDB embebida (Docker Kuma 2.0) o MySQL externo:
+#   KUMA_DB_HOST=127.0.0.1
+#   KUMA_DB_PORT=3306
+#   KUMA_DB_USER=kumamap_reader
+#   KUMA_DB_PASSWORD=
+#   KUMA_DB_NAME=kuma
+#
+# Si no configurás ninguna opción, KumaMap funciona igual pero
+# sin historial extendido (usa solo los datos del Socket.IO).
+#
+# Para configurar automáticamente, ejecutá:
+#   npm run setup-db
 ENVTEMPLATE
       echo "⚠ Archivo .env creado con valores por defecto"
       echo "  IMPORTANTE: editá $REMOTE_PATH/.env con tus credenciales de Kuma!"
+      echo "  Para configurar acceso a la DB: npm run setup-db"
     else
       echo "Archivo de entorno ya existe"
     fi

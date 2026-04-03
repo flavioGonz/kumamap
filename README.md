@@ -1,5 +1,5 @@
 
-<img width="1906" height="941" alt="image" src="https://github.com/user-attachments/assets/46acd159-3d74-4c5a-a788-f4b4ef759555" />
+<!-- screenshot: vista principal del mapa con nodos y links -->
 
 <p align="center">
   <img src="https://img.shields.io/badge/KumaMap-Visualizaci%C3%B3n%20de%20Red-3b82f6?style=for-the-badge&logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+PGNpcmNsZSBjeD0iMTYiIGN5PSIxNiIgcj0iMTQiIGZpbGw9IiMzYjgyZjYiLz48Y2lyY2xlIGN4PSIxNiIgY3k9IjE2IiByPSI2IiBmaWxsPSIjMGEwYTBhIi8+PGNpcmNsZSBjeD0iMTYiIGN5PSIxNiIgcj0iMyIgZmlsbD0iIzYwYTVmYSIvPjwvc3ZnPg==&logoColor=white" alt="KumaMap" />
@@ -42,18 +42,19 @@
 
 Construido para **equipos NOC**, **MSPs**, **ISPs** e **ingenieros de infraestructura** que necesitan topologia visual de red con monitoreo de estado en vivo.
 
-### Dos modos de visualizacion
+<!-- screenshot: lista de mapas con estado UP/DOWN en tiempo real -->
 
-KumaMap ofrece dos vistas completamente integradas con el mismo estilo visual:
+KumaMap ofrece mapas geolocalizados interactivos con soporte de **jerarquia de mapas** (mapa principal con submapas por sitio):
 
 - **Mapa Dinamico (Leaflet)** — Nodos geolocalizados sobre mapas satelitales/oscuros/calles reales. Ideal para despliegues geograficos, tendidos de fibra, y cobertura de camaras.
-- **Mapa Grilla (ReactFlow)** — Diagrama de topologia abstracto con fondo de grilla, imagen personalizada, o mapa en vivo. Ideal para diagramas logicos de red, racks, y esquemas internos.
-
-Ambos modos comparten la misma barra de herramientas, menu contextual, tipos de enlace, iconos, y sistema de auto-guardado.
+- **Submapas por sitio** — Cada nodo del mapa principal puede tener uno o varios mapas vinculados. Doble clic sobre el nodo abre el mapa del sitio directamente.
+- **Vista Kiosco** — URL de solo lectura para pantallas NOC, con navegacion entre submapas integrada.
 
 ---
 
 ## Funcionalidades
+
+<!-- screenshot: mapa con nodos UP/DOWN pulsando, links de colores -->
 
 ### Visualizacion de Red en Tiempo Real
 - **Mapas satelitales en vivo** (OpenStreetMap / ArcGIS / CartoDB Dark) con superposicion oscura ajustable
@@ -85,6 +86,8 @@ Ambos modos comparten la misma barra de herramientas, menu contextual, tipos de 
 - **Auto-guardado** con toggle en la barra superior
 - **Modo edicion** — toggle para ocultar/mostrar herramientas de edicion
 
+<!-- screenshot: time machine abierto con eventos DOWN en la línea de tiempo -->
+
 ### Time Machine
 - **Linea de tiempo vertical** con eventos historicos reales de la base de datos de Kuma
 - **Filtrado por mapa** — solo muestra eventos de los monitores ubicados en el mapa actual (no de otros mapas)
@@ -94,6 +97,8 @@ Ambos modos comparten la misma barra de herramientas, menu contextual, tipos de 
 - **Zoom al nodo afectado** al hacer clic en un evento
 - **Efecto visual de blur** durante el scrubbing de tiempo
 - **Rango configurable**: 1h, 2h, 6h, 12h, 24h, 48h, 72h, 7d con velocidad de reproduccion 1x/2x/4x/8x/16x/32x
+
+<!-- screenshot: modal de reporte de eventos con barra de uptime -->
 
 ### Reporte de Eventos
 - **Modal profesional** con barra de uptime de 48 slots mostrando periodos UP/DOWN
@@ -459,12 +464,15 @@ Todos los endpoints estan bajo `/api/` (o `/maps/api/` si usas basePath).
 
 ---
 
+<!-- screenshot: menu contextual de un nodo mostrando la opcion Mapas -->
+
 ## Tipos de Nodos
 
 | Tipo | Icono | Descripcion |
 |------|-------|-------------|
 | **Nodo Monitor** | Circulo con pulso | Vinculado a un monitor Kuma, muestra estado en vivo |
 | **Nodo Camara** | Cuadrado con compas | Camara de seguridad con cono FOV, rotacion, lente, y stream |
+| **Nodo Submap** | Carpeta indigo | Enlace a submap; doble clic navega al mapa vinculado |
 | **Waypoint** | Punto gris pequeno | Punto de enrutamiento para enlaces (transparente al estado) |
 | **Etiqueta Texto** | Texto flotante | Anotacion, nombre de area, o descripcion |
 | **Poligono/Zona** | Area coloreada | Zona delimitada con color y opacidad personalizable |
@@ -545,6 +553,25 @@ NEXT_PUBLIC_BASE_PATH=/maps
 ---
 
 ## Changelog
+
+### v1.5.0 (2026-04-02)
+
+**Jerarquia de Mapas**
+- **Submapas**: cada mapa puede tener submapas hijos. La lista principal muestra jerarquia con expand/collapse.
+- **Mapas vinculados a nodos**: cualquier nodo puede tener uno o varios mapas asociados. Clic derecho → "Mapas" abre el modal de gestion. Doble clic navega directamente al mapa del sitio (en kiosco, abre el primero vinculado).
+- **Nodo Submap**: nuevo tipo de nodo especial `_submap` con icono de carpeta para vincular submapas visualmente en el mapa.
+- **Boton Submap** en toolbar: inserta un nodo _submap eligiendo un mapa existente del picker.
+
+**Gestion de Mapas**
+- **Importar mapa en editor**: boton "Importar" en toolbar copia nodos y links de otro mapa al mapa actual (IDs remapeados para evitar colisiones).
+- **Copiar ubicacion**: reemplaza el boton "Abrir" en la lista. Copia al portapapeles el centro geografico y las coordenadas de todos los nodos del mapa.
+- **Se eliminaron los mapas tipo Grilla**: solo se soportan mapas tipo Mapa (Leaflet) e Imagen.
+
+**Correcciones**
+- Fix: boton editar nombre de submaps anidados no funcionaba (input inline ahora aparece correctamente en filas hijas).
+- Fix: URL kiosko ahora usa `apiUrl()` correctamente sin prefijo `/maps/` hardcodeado.
+
+<!-- screenshot: modal de mapas vinculados a un nodo -->
 
 ### v1.4.0 (2026-03-31) - Estable
 

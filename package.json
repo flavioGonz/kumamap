@@ -6,7 +6,8 @@
     "dev": "npx tsx server.ts",
     "build": "next build",
     "start": "npx tsx server.ts",
-    "lint": "next lint"
+    "lint": "next lint",
+    "setup-db": "bash scripts/setup-db-user.sh"
   },
   "dependencies": {
     "@tailwindcss/postcss": "^4.2.2",

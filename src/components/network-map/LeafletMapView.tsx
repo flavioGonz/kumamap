@@ -8,6 +8,7 @@ import ContextMenu, { menuIcons } from "./ContextMenu";
 import LinkModal, { type LinkFormData } from "./LinkModal";
 import InputModal from "./InputModal";
 import { Pencil, Signal, Plus } from "lucide-react";
+import Tooltip from "./Tooltip";
 import TimeMachine from "./TimeMachine";
 import EventReportModal from "./EventReportModal";
 import CameraStreamConfigModal, { type CameraStreamConfig } from "./CameraStreamConfigModal";
@@ -54,7 +55,14 @@ interface LeafletMapViewProps {
   initialViewState?: MapViewState;
   readonly?: boolean;
   panelCollapsed?: boolean;
+  onTogglePanel?: () => void;
   availableMaps?: { id: string; name: string }[];
+  /** Image-type map: URL of the background photo */
+  imageBackground?: string | null;
+  /** Triggered when user wants to upload a new background image */
+  onUploadBackground?: () => void;
+  /** Triggered when user wants to switch map type to livemap */
+  onSetLiveMap?: () => void;
 }
 
 function MapClock({ timeMachineTime, timeMachineOpen }: { timeMachineTime: Date | null; timeMachineOpen: boolean }) {
@@ -196,8 +204,13 @@ export default function LeafletMapView({
   initialViewState,
   readonly = false,
   panelCollapsed = false,
+  onTogglePanel,
   availableMaps = [],
+  imageBackground = null,
+  onUploadBackground,
+  onSetLiveMap,
 }: LeafletMapViewProps) {
+  const isImageMode = !!imageBackground;
   const sidebarWidth = readonly ? 0 : panelCollapsed ? 40 : 320;
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<any>(null);
@@ -214,6 +227,7 @@ export default function LeafletMapView({
   const LRef = useRef<any>(null);
   const [searchVisible, setSearchVisible] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [exportMenuOpen, setExportMenuOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const [eventDetail, setEventDetail] = useState<{ nodeLabel: string; monitorId: number; msg: string; time: Date; type: string; ping: number | null; status: number } | null>(null);
@@ -265,7 +279,9 @@ export default function LeafletMapView({
   const polygonPreviewRef = useRef<any>(null);
   const polygonLayersRef = useRef<Map<string, any>>(new Map());
   const edgeUpdateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [submapPickerOpen, setSubmapPickerOpen] = useState(false);
+  const [importMapPickerOpen, setImportMapPickerOpen] = useState(false);
+  const [importingMapId, setImportingMapId] = useState<string | null>(null);
+  const [nodeMapModalNodeId, setNodeMapModalNodeId] = useState<string | null>(null);
   const [timeMachineOpen, setTimeMachineOpen] = useState(false);
   const [timeMachineTime, setTimeMachineTime] = useState<Date | null>(null);
   const [tmFocusMonitorId, setTmFocusMonitorId] = useState<number | null>(null);
@@ -356,7 +372,7 @@ export default function LeafletMapView({
     });
   }, [showNodes, showLinks, showCameras, showFOV]);
 
-  // Map rotation
+  // Map rotation — applies to both livemap and image mode
   useEffect(() => {
     if (containerRef.current) {
       containerRef.current.style.transform = mapRotation ? `rotate(${mapRotation}deg)` : "";
@@ -431,49 +447,125 @@ export default function LeafletMapView({
         mapRef.current = null;
       }
 
-      map = L.map(containerRef.current, {
-        center: initialViewState?.center || [-34.85, -56.05],
-        zoom: initialViewState?.zoom || 12,
-        maxZoom: 22,
-        zoomControl: false,
-        attributionControl: false,
-      });
+      if (imageBackground) {
+        // ── IMAGE MODE: Leaflet CRS.Simple with photo background ──
+        map = L.map(containerRef.current, {
+          crs: L.CRS.Simple,
+          minZoom: -10,   // temporary low value; overridden after image loads
+          maxZoom: 5,
+          zoomControl: false,
+          attributionControl: false,
+          maxBoundsViscosity: 1.0, // hard clamp — no rubber-band outside image
+        });
+        mapRef.current = map;
 
-      const initStyle = initialViewState?.mapStyle || "dark";
-      tileLayerRef.current = L.tileLayer(tileUrls[initStyle].url, {
-        maxZoom: tileUrls[initStyle].maxZoom,
-        maxNativeZoom: tileUrls[initStyle].maxNativeZoom,
-      }).addTo(map);
+        const fitImageToContainer = (m: any, bounds: [[number,number],[number,number]]) => {
+          // Recalculate size then fit — must happen in this order
+          m.invalidateSize({ animate: false });
+          m.fitBounds(bounds, { padding: [0, 0], animate: false });
+          // Lock min zoom so user can never zoom out past the full-image view
+          const fitZoom = m.getZoom();
+          m.setMinZoom(fitZoom);
+        };
 
-      mapRef.current = map;
+        const img = new window.Image();
+        img.onload = () => {
+          const w = img.naturalWidth;
+          const h = img.naturalHeight;
+          // bounds: top-left=[−h,0], bottom-right=[0,w] (y negated so top is y=0)
+          const imgBounds: [[number,number],[number,number]] = [[-h, 0], [0, w]];
+          L.imageOverlay(imageBackground, imgBounds, { opacity: 1 }).addTo(map);
+          map.setMaxBounds(imgBounds);
 
-      // General map click handler (for polygon drawing)
-      map.on("click", (e: any) => {
-        if (polygonPointsRef.current !== undefined && document.querySelector("[data-polygon-active]")) {
-          handlePolygonClick(e.latlng);
-        }
-      });
-      map.on("dblclick", (e: any) => {
-        if (polygonPointsRef.current.length >= 3 && document.querySelector("[data-polygon-active]")) {
-          e.originalEvent?.preventDefault?.();
-          finishPolygon();
-        }
-      });
+          map.on("click", (e: any) => {
+            if (polygonPointsRef.current !== undefined && document.querySelector("[data-polygon-active]")) {
+              handlePolygonClick(e.latlng);
+            }
+          });
+          map.on("dblclick", (e: any) => {
+            if (polygonPointsRef.current.length >= 3 && document.querySelector("[data-polygon-active]")) {
+              e.originalEvent?.preventDefault?.();
+              finishPolygon();
+            }
+          });
 
-      // Render initial nodes after map is ready
-      map.whenReady(() => {
-        // Delay render slightly to ensure map is fully settled (fixes label scatter bug)
-        setTimeout(() => {
-          if (mapRef.current !== map) return;
-          map.invalidateSize();
-          renderNodes(L, map);
-          renderEdges(L, map);
-          if (initialNodes.length > 0) {
-            const bounds = initialNodes.map((n) => [n.x, n.y] as [number, number]);
-            if (bounds.length > 0) map.fitBounds(bounds, { padding: [50, 50] });
+          // First fit — container may not have final size yet, so do it twice
+          fitImageToContainer(map, imgBounds);
+
+          setTimeout(() => {
+            if (mapRef.current !== map) return;
+            // Restore saved view OR refit to image after container settles
+            if (initialViewState?.center && initialViewState?.zoom !== undefined) {
+              map.invalidateSize({ animate: false });
+              map.setView(initialViewState.center as [number, number], initialViewState.zoom, { animate: false });
+              // Still recalculate minZoom in case container size changed
+              const tmpFit = map.getBoundsZoom(imgBounds, false);
+              map.setMinZoom(tmpFit);
+            } else {
+              fitImageToContainer(map, imgBounds);
+            }
+            renderNodes(L, map);
+            renderEdges(L, map);
+          }, 200);
+        };
+        img.onerror = () => {
+          // Fallback — image missing; show dark canvas at default size
+          const imgBounds: [[number,number],[number,number]] = [[-1080, 0], [0, 1920]];
+          map.setMaxBounds(imgBounds);
+          setTimeout(() => {
+            if (mapRef.current !== map) return;
+            fitImageToContainer(map, imgBounds);
+            renderNodes(L, map);
+            renderEdges(L, map);
+          }, 200);
+        };
+        img.src = imageBackground;
+      } else {
+        // ── LIVEMAP MODE: OSM tiles ──
+        map = L.map(containerRef.current, {
+          center: initialViewState?.center || [-34.85, -56.05],
+          zoom: initialViewState?.zoom || 12,
+          maxZoom: 22,
+          zoomControl: false,
+          attributionControl: false,
+        });
+
+        const initStyle = initialViewState?.mapStyle || "dark";
+        tileLayerRef.current = L.tileLayer(tileUrls[initStyle].url, {
+          maxZoom: tileUrls[initStyle].maxZoom,
+          maxNativeZoom: tileUrls[initStyle].maxNativeZoom,
+        }).addTo(map);
+
+        mapRef.current = map;
+
+        // General map click handler (for polygon drawing)
+        map.on("click", (e: any) => {
+          if (polygonPointsRef.current !== undefined && document.querySelector("[data-polygon-active]")) {
+            handlePolygonClick(e.latlng);
           }
-        }, 300);
-      });
+        });
+        map.on("dblclick", (e: any) => {
+          if (polygonPointsRef.current.length >= 3 && document.querySelector("[data-polygon-active]")) {
+            e.originalEvent?.preventDefault?.();
+            finishPolygon();
+          }
+        });
+
+        // Render initial nodes after map is ready
+        map.whenReady(() => {
+          // Delay render slightly to ensure map is fully settled (fixes label scatter bug)
+          setTimeout(() => {
+            if (mapRef.current !== map) return;
+            map.invalidateSize();
+            renderNodes(L, map);
+            renderEdges(L, map);
+            if (initialNodes.length > 0) {
+              const bounds = initialNodes.map((n) => [n.x, n.y] as [number, number]);
+              if (bounds.length > 0) map.fitBounds(bounds, { padding: [50, 50] });
+            }
+          }, 300);
+        });
+      }
     });
 
     return () => {
@@ -484,8 +576,9 @@ export default function LeafletMapView({
     };
   }, []);
 
-  // Switch tile layer
+  // Switch tile layer (livemap mode only)
   useEffect(() => {
+    if (isImageMode) return;
     if (!mapRef.current || !LRef.current || !tileLayerRef.current) return;
     const tile = tileUrls[mapStyle];
     mapRef.current.removeLayer(tileLayerRef.current);
@@ -585,13 +678,17 @@ export default function LeafletMapView({
     return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${paths}</svg>`;
   }
 
-  function createMarkerIcon(L: any, color: string, pulse: boolean, isLinkSource: boolean = false, scale: number = 1.0, iconName: string = "server") {
+  function createMarkerIcon(L: any, color: string, pulse: boolean, isLinkSource: boolean = false, scale: number = 1.0, iconName: string = "server", hasLinkedMap: boolean = false) {
     const dotSize = Math.round(18 * scale);
     const containerSize = Math.round(28 * scale);
     const pulseSize = Math.round(28 * scale);
     const iconSvgSize = Math.round(12 * scale);
     const ring = isLinkSource ? `border:3px solid #60a5fa;` : `border:2px solid ${color};`;
     const svgHtml = getIconSvg(iconName, iconSvgSize);
+    const badgeSize = Math.max(7, Math.round(8 * scale));
+    const linkedMapBadge = hasLinkedMap
+      ? `<div style="position:absolute;top:-3px;right:-3px;width:${badgeSize}px;height:${badgeSize}px;border-radius:50%;background:#818cf8;border:1.5px solid rgba(0,0,0,0.6);box-shadow:0 0 5px rgba(99,102,241,0.7);z-index:10;" title="Tiene mapa vinculado"></div>`
+      : "";
     const innerContent = svgHtml
       ? `<div style="width:${dotSize}px;height:${dotSize}px;border-radius:50%;background:${color};${ring}box-shadow:0 0 14px ${color}88, 0 0 4px ${color};cursor:pointer;display:flex;align-items:center;justify-content:center;">${svgHtml}</div>`
       : `<div style="width:${dotSize}px;height:${dotSize}px;border-radius:50%;background:${color};${ring}box-shadow:0 0 14px ${color}88, 0 0 4px ${color};cursor:pointer;"></div>`;
@@ -601,6 +698,7 @@ export default function LeafletMapView({
         <div style="position:relative;display:flex;align-items:center;justify-content:center;">
           ${pulse ? `<div style="position:absolute;width:${pulseSize}px;height:${pulseSize}px;border-radius:50%;background:${color}30;animation:ping 1.5s cubic-bezier(0,0,0.2,1) infinite;"></div>` : ""}
           ${innerContent}
+          ${linkedMapBadge}
         </div>
       `,
       iconSize: [containerSize, containerSize],
@@ -700,12 +798,23 @@ export default function LeafletMapView({
     polygonLayersRef.current.forEach((l) => { try { map.removeLayer(l); } catch {} });
     polygonLayersRef.current.clear();
 
+    // Migrate legacy _submap nodes → regular server nodes with linkedMaps
+    if (nodesRef.current.some(n => n.icon === "_submap")) {
+      nodesRef.current = nodesRef.current.map(n => {
+        if (n.icon !== "_submap") return n;
+        const mcd = n.custom_data ? (() => { try { return JSON.parse(n.custom_data!); } catch { return {}; } })() : {};
+        if (mcd.submapId && !(mcd.linkedMaps?.length)) {
+          mcd.linkedMaps = [{ id: mcd.submapId, name: mcd.submapName || n.label || "Submap" }];
+        }
+        return { ...n, icon: "server", custom_data: JSON.stringify(mcd) };
+      });
+    }
+
     nodesRef.current.forEach((node) => {
       const isLabel = node.icon === "_textLabel";
       const isCamera = node.icon === "_camera";
       const isWaypoint = node.icon === "_waypoint";
       const isPolygon = node.icon === "_polygon";
-      const isSubmap = node.icon === "_submap";
       const cd = node.custom_data ? JSON.parse(node.custom_data) : {};
       const color = getStatusColor(node.kuma_monitor_id);
       const m = getMonitorData(node.kuma_monitor_id);
@@ -745,16 +854,19 @@ export default function LeafletMapView({
 
       const rotation = cd.rotation || 0;
       const fov = cd.fov || 60;
-      const fovRange = cd.fovRange || 0.002; // ~200m at this lat
+      // In image mode (CRS.Simple) coords are pixels; geo default 0.002° ≈ 200m → scale to 200px
+      const rawFovRange = cd.fovRange || (isImageMode ? 200 : 0.002);
+      const fovRange = isImageMode && rawFovRange < 1 ? rawFovRange * 100000 : rawFovRange;
 
       let nodeIcon;
       if (isLabel) {
         const labelFontSize = cd.fontSize || 13;
         const labelColor = cd.color || "#ededed";
         const bgEnabled = cd.bgEnabled !== false;
+        const labelRotation = cd.rotation || 0;
         nodeIcon = L.divIcon({
           className: "text-label-marker",
-          html: `<span style="color:${labelColor};font-size:${labelFontSize}px;font-weight:600;white-space:nowrap;text-shadow:0 1px 6px rgba(0,0,0,0.9),0 0 12px rgba(0,0,0,0.6);cursor:move;pointer-events:auto;user-select:none;${bgEnabled ? `background:rgba(0,0,0,0.45);padding:2px 8px;border-radius:6px;` : ""}">${node.label}</span>`,
+          html: `<span style="display:inline-block;transform:rotate(${labelRotation}deg);transform-origin:center center;color:${labelColor};font-size:${labelFontSize}px;font-weight:600;white-space:nowrap;text-shadow:0 1px 6px rgba(0,0,0,0.9),0 0 12px rgba(0,0,0,0.6);cursor:move;pointer-events:auto;user-select:none;${bgEnabled ? `background:rgba(0,0,0,0.45);padding:2px 8px;border-radius:6px;` : ""}">${node.label}</span>`,
           iconSize: [0, 0],
           iconAnchor: [0, Math.round(labelFontSize / 2)],
         });
@@ -764,21 +876,6 @@ export default function LeafletMapView({
           html: `<div style="width:10px;height:10px;border-radius:50%;background:${isSource ? "#60a5fa" : "rgba(255,255,255,0.25)"};border:2px solid ${isSource ? "#60a5fa" : "rgba(255,255,255,0.4)"};cursor:move;box-shadow:0 0 6px ${isSource ? "#60a5fa88" : "rgba(255,255,255,0.15)"};transition:all 0.15s;"></div>`,
           iconSize: [10, 10],
           iconAnchor: [5, 5],
-        });
-      } else if (isSubmap) {
-        const sz = Math.round(38 * nodeScale);
-        const ico = Math.round(18 * nodeScale);
-        const submapName = cd.submapName || node.label || "Submap";
-        nodeIcon = L.divIcon({
-          className: "submap-marker",
-          html: `<div style="display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer;">
-            <div style="width:${sz}px;height:${sz}px;border-radius:10px;background:rgba(99,102,241,0.15);border:2px solid ${isSource ? "#60a5fa" : "rgba(99,102,241,0.7)"};display:flex;align-items:center;justify-content:center;box-shadow:0 0 14px rgba(99,102,241,0.35);transition:all 0.15s;">
-              <svg width="${ico}" height="${ico}" viewBox="0 0 24 24" fill="none" stroke="rgba(165,180,252,0.95)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6l3-3h12l3 3"/><path d="M3 6h18v14a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6z"/><path d="M9 11h6"/></svg>
-            </div>
-            <span style="color:#a5b4fc;font-size:${Math.round(9*nodeScale)}px;font-weight:600;white-space:nowrap;text-shadow:0 1px 4px rgba(0,0,0,0.8);max-width:80px;overflow:hidden;text-overflow:ellipsis;">${submapName}</span>
-          </div>`,
-          iconSize: [sz, sz + 16],
-          iconAnchor: [sz / 2, sz / 2],
         });
       } else if (isCamera) {
         const camSize = Math.round(22 * nodeScale);
@@ -794,7 +891,8 @@ export default function LeafletMapView({
           iconAnchor: [camSize / 2, camSize / 2],
         });
       } else {
-        nodeIcon = createMarkerIcon(L, color, pulse, isSource, nodeScale, node.icon || "server");
+        const hasLinkedMap = Array.isArray(cd.linkedMaps) && cd.linkedMaps.length > 0;
+        nodeIcon = createMarkerIcon(L, color, pulse, isSource, nodeScale, node.icon || "server", hasLinkedMap);
       }
 
       const marker = L.marker([node.x, node.y], {
@@ -920,6 +1018,50 @@ export default function LeafletMapView({
         camHandlesRef.current.set(node.id + "-fov", fovHandle);
       }
 
+      // ── Label rotation handle (◆ above the label, drag to rotate) ──
+      if (isLabel && !readonly) {
+        const labelRotation = cd.rotation || 0;
+        const radConst2 = Math.PI / 180;
+        const handleOffset = 0.0003; // geo offset; scaled for image mode below
+        const scaledOffset = isImageMode ? 30 : handleOffset;
+        // Place handle directly above the label (90° = up in screen space)
+        const handleLat = node.x + scaledOffset * Math.cos((labelRotation - 90) * radConst2);
+        const handleLng = node.y + scaledOffset * Math.sin((labelRotation - 90) * radConst2);
+        const rotHandle = L.marker([handleLat, handleLng], {
+          icon: L.divIcon({
+            className: "cam-handle",
+            html: `<div style="width:10px;height:10px;border-radius:50%;background:rgba(167,139,250,0.85);border:2px solid #a78bfa;box-shadow:0 0 8px rgba(167,139,250,0.5);cursor:grab;"></div>`,
+            iconSize: [10, 10], iconAnchor: [5, 5],
+          }),
+          draggable: true,
+        });
+        rotHandle.bindTooltip("Rotar etiqueta", { direction: "top", offset: [0, -10], className: "leaflet-label-dark" });
+        rotHandle.on("drag", () => {
+          const hp = rotHandle.getLatLng();
+          const mp = marker.getLatLng();
+          // Angle from label to handle → add 90° because handle is "above"
+          const angleRad = Math.atan2(hp.lng - mp.lng, hp.lat - mp.lat);
+          const newRotation = Math.round(((angleRad * 180 / Math.PI) + 90 + 360) % 360);
+          const idx = nodesRef.current.findIndex((n) => n.id === node.id);
+          if (idx >= 0) {
+            const ncd = nodesRef.current[idx].custom_data ? JSON.parse(nodesRef.current[idx].custom_data!) : {};
+            ncd.rotation = newRotation;
+            nodesRef.current[idx] = { ...nodesRef.current[idx], custom_data: JSON.stringify(ncd) };
+            // Update the label span rotation live without full re-render
+            const el = marker.getElement()?.querySelector("span") as HTMLElement | null;
+            if (el) el.style.transform = `rotate(${newRotation}deg)`;
+            // Keep handle above the label
+            const rr = newRotation - 90;
+            rotHandle.setLatLng([
+              mp.lat + scaledOffset * Math.cos(rr * radConst2),
+              mp.lng + scaledOffset * Math.sin(rr * radConst2),
+            ]);
+          }
+        });
+        rotHandle.addTo(map);
+        camHandlesRef.current.set(node.id + "-labelrot", rotHandle);
+      }
+
       // Label tooltip (always visible) — only for non-label/camera nodes
       if (!isLabel && !isWaypoint) {
         const cd_label = node.custom_data ? (() => { try { return JSON.parse(node.custom_data!); } catch { return {}; } })() : {};
@@ -944,13 +1086,7 @@ export default function LeafletMapView({
       // Double-click opens the unified edit modal (not a browser prompt)
       marker.on("dblclick", (e: any) => {
         L.DomEvent.stopPropagation(e);
-        if (isSubmap) {
-          // Navigate to submap on double-click
-          const submapCd = node.custom_data ? (() => { try { return JSON.parse(node.custom_data!); } catch { return {}; } })() : {};
-          if (submapCd.submapId) {
-            window.open(apiUrl(`/view/${submapCd.submapId}`), "_blank");
-          }
-        } else if (isLabel) {
+        if (isLabel) {
           // For text labels, still allow quick inline rename
           const newText = prompt("Texto de la etiqueta:", node.label);
           if (newText?.trim()) {
@@ -961,10 +1097,21 @@ export default function LeafletMapView({
             }
           }
         } else if (!isWaypoint) {
-          // For monitor/equipment nodes, open the full edit modal
+          // If node has linked maps, open modal (or first map in kiosk mode)
           const cd = node.custom_data ? (() => { try { return JSON.parse(node.custom_data!); } catch { return {}; } })() : {};
-          setInputModalConfig({ nodeId: node.id, initial: node.label, mac: cd.mac || "", ip: cd.ip || "", credUser: cd.credUser || "", credPass: cd.credPass || "", labelHidden: cd.labelHidden ?? false, labelSize: cd.labelSize ?? 12, nodeColor: cd.nodeColor || "" });
-          setInputModalOpen(true);
+          const linked: { id: string; name: string }[] = cd.linkedMaps || [];
+          if (linked.length > 0) {
+            if (readonly) {
+              // In kiosk mode, open first linked map directly
+              window.open(apiUrl(`/view/${linked[0].id}`), "_blank");
+            } else {
+              setNodeMapModalNodeId(node.id);
+            }
+          } else if (!readonly) {
+            // Normal edit modal
+            setInputModalConfig({ nodeId: node.id, initial: node.label, mac: cd.mac || "", ip: cd.ip || "", credUser: cd.credUser || "", credPass: cd.credPass || "", labelHidden: cd.labelHidden ?? false, labelSize: cd.labelSize ?? 12, nodeColor: cd.nodeColor || "" });
+            setInputModalOpen(true);
+          }
         }
       });
 
@@ -986,7 +1133,7 @@ export default function LeafletMapView({
 
       // Click — open popup or stream viewer for cameras
       marker.on("click", () => {
-        if (isLabel || isWaypoint || isPolygon || isSubmap) return;
+        if (isLabel || isWaypoint || isPolygon) return;
         // Camera click: open stream viewer if configured
         if (isCamera) {
           const camCd = node.custom_data ? JSON.parse(node.custom_data) : {};
@@ -1022,7 +1169,8 @@ export default function LeafletMapView({
         if (isCamera) {
           const cd2 = nodesRef.current[idx]?.custom_data ? JSON.parse(nodesRef.current[idx].custom_data!) : {};
           const rot = cd2.rotation ?? 0;
-          const range = cd2.fovRange ?? 0.003;
+          const rawRange2 = cd2.fovRange ?? (isImageMode ? 200 : 0.003);
+          const range = isImageMode && rawRange2 < 1 ? rawRange2 * 100000 : rawRange2;
           const fovAngle = cd2.fov ?? 60;
           const radConst = Math.PI / 180;
 
@@ -1310,74 +1458,97 @@ export default function LeafletMapView({
   }
 
   // Update downtime counter labels on the map (called every second)
+  // Counters appear ABOVE the DOWN node, not on the link.
   function updateDowntimeCounters() {
     if (!LRef.current || !mapRef.current) return;
     const L = LRef.current;
     const map = mapRef.current;
     const now = Date.now();
 
-    // Remove counters for edges that are no longer down
-    downtimeMarkersRef.current.forEach((marker, edgeId) => {
-      const edge = edgesRef.current.find(e => e.id === edgeId);
-      if (!edge) { try { map.removeLayer(marker); } catch {} downtimeMarkersRef.current.delete(edgeId); return; }
-      const { srcStatus, tgtStatus } = findRealEndpoints(edgeId);
-      const isDown = srcStatus === 0 || tgtStatus === 0;
-      if (!isDown) {
-        try { map.removeLayer(marker); } catch {}
-        downtimeMarkersRef.current.delete(edgeId);
+    // Build set of currently-down node IDs
+    const downNodeIds = new Set<string>();
+    nodesRef.current.forEach((node) => {
+      if (!node.kuma_monitor_id) return;
+      if (node.icon === "_textLabel" || node.icon === "_waypoint" || node.icon === "_camera" || node.icon === "_polygon") return;
+      const mon = getMonitorData(node.kuma_monitor_id);
+      if (mon?.status === 0) downNodeIds.add(node.id);
+    });
+
+    // Remove counters for nodes no longer down
+    downtimeMarkersRef.current.forEach((marker, nodeId) => {
+      if (!downNodeIds.has(nodeId)) {
+        try { map.removeLayer(marker); } catch { /* ignore */ }
+        downtimeMarkersRef.current.delete(nodeId);
       }
     });
 
-    // Add/update counters for down edges
-    edgesRef.current.forEach((edge) => {
-      const { srcStatus, tgtStatus } = findRealEndpoints(edge.id);
-      const isDown = srcStatus === 0 || tgtStatus === 0;
-      if (!isDown) return;
+    // Add / update counters for each down node
+    nodesRef.current.forEach((node) => {
+      if (!downNodeIds.has(node.id)) return;
 
-      // Find which monitor is down and get its downSince timestamp
-      const srcNode = nodesRef.current.find(n => n.id === edge.source_node_id);
-      const tgtNode = nodesRef.current.find(n => n.id === edge.target_node_id);
-      if (!srcNode || !tgtNode) return;
-
-      // Get earliest downSince among the down endpoints
-      let earliest = now;
-      [srcNode, tgtNode].forEach(n => {
-        if (n.kuma_monitor_id) {
-          const mon = getMonitorData(n.kuma_monitor_id);
-          if (mon?.status === 0) {
-            const ds = downSinceRef.current.get(n.kuma_monitor_id);
-            if (ds && ds < earliest) earliest = ds;
-          }
-        }
-      });
-
-      const elapsed = now - earliest;
+      const ds = downSinceRef.current.get(node.kuma_monitor_id!);
+      const elapsed = ds ? now - ds : 0;
       const label = formatDowntime(elapsed);
-      const midLat = (srcNode.x + tgtNode.x) / 2;
-      const midLng = (srcNode.y + tgtNode.y) / 2;
 
-      const existing = downtimeMarkersRef.current.get(edge.id);
+      // Node visual size (to anchor the badge above it)
+      const cd = node.custom_data ? (() => { try { return JSON.parse(node.custom_data!); } catch { return {}; } })() : {};
+      const scale: number = cd.nodeSize || 1.0;
+      const containerPx = Math.round(28 * scale); // matches createMarkerIcon
+      // iconAnchor Y offset = half container + badge height + gap
+      const anchorY = Math.round(containerPx / 2) + 28;
+
+      const existing = downtimeMarkersRef.current.get(node.id);
       if (existing) {
-        // Update label content
+        // Update label text only — avoid re-creating the marker every second
         const el = existing.getElement();
         if (el) {
           const span = el.querySelector(".dt-val");
           if (span) span.textContent = label;
         }
       } else {
-        // Create new counter marker
+        // Create badge marker above the node
         const icon = L.divIcon({
           className: "downtime-counter",
-          html: `<div style="background:rgba(153,27,27,0.92);border:1px solid #ef4444;border-radius:8px;padding:2px 8px;display:flex;align-items:center;gap:4px;box-shadow:0 2px 12px rgba(239,68,68,0.4);white-space:nowrap;pointer-events:none;">
-            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#fca5a5" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-            <span class="dt-val" style="font-size:10px;font-weight:800;color:#fca5a5;font-family:monospace;letter-spacing:0.5px;">${label}</span>
+          html: `<div style="
+            display:flex;flex-direction:column;align-items:center;gap:2px;pointer-events:none;
+          ">
+            <!-- Exclamation badge -->
+            <div style="
+              background:rgba(239,68,68,0.95);
+              border:1.5px solid #fca5a5;
+              border-radius:50%;
+              width:18px;height:18px;
+              display:flex;align-items:center;justify-content:center;
+              box-shadow:0 0 10px rgba(239,68,68,0.7),0 0 20px rgba(239,68,68,0.3);
+              animation:ping-badge 1.8s ease-in-out infinite;
+            ">
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="12" y1="4" x2="12" y2="14"/><circle cx="12" cy="19" r="1.5" fill="#fff" stroke="none"/>
+              </svg>
+            </div>
+            <!-- Time counter pill -->
+            <div style="
+              background:rgba(127,29,29,0.95);
+              border:1px solid #ef4444;
+              border-radius:6px;
+              padding:1px 6px;
+              display:flex;align-items:center;gap:3px;
+              box-shadow:0 2px 8px rgba(239,68,68,0.4);
+              white-space:nowrap;
+            ">
+              <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="#fca5a5" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+              </svg>
+              <span class="dt-val" style="font-size:9px;font-weight:800;color:#fca5a5;font-family:monospace;letter-spacing:0.3px;">${label}</span>
+            </div>
           </div>`,
           iconSize: [0, 0],
-          iconAnchor: [0, 0],
+          // Center horizontally, anchor bottom of badge at top of node
+          iconAnchor: [0, anchorY],
         });
-        const marker = L.marker([midLat, midLng], { icon, interactive: false, zIndexOffset: 5000 });
+        const marker = L.marker([node.x, node.y], { icon, interactive: false, zIndexOffset: 6000 });
         marker.addTo(map);
-        downtimeMarkersRef.current.set(edge.id, marker);
+        downtimeMarkersRef.current.set(node.id, marker);
       }
     });
   }
@@ -1403,7 +1574,7 @@ export default function LeafletMapView({
 
     nodesRef.current.forEach((node) => {
       // Skip special node types — they have their own rendering in renderNodes
-      if (node.icon === "_textLabel" || node.icon === "_waypoint" || node.icon === "_camera" || node.icon === "_polygon" || node.icon === "_submap") return;
+      if (node.icon === "_textLabel" || node.icon === "_waypoint" || node.icon === "_camera" || node.icon === "_polygon") return;
 
       const marker = markersRef.current.get(node.id);
       if (!marker) return;
@@ -1414,7 +1585,8 @@ export default function LeafletMapView({
       const cd = node.custom_data ? JSON.parse(node.custom_data) : {};
       const ns: number = cd.nodeSize || 1.0;
 
-      marker.setIcon(createMarkerIcon(L, color, pulse, linkSource === node.id, ns, node.icon || "server"));
+      const hasLinkedMapRefresh = Array.isArray(cd.linkedMaps) && cd.linkedMaps.length > 0;
+      marker.setIcon(createMarkerIcon(L, color, pulse, linkSource === node.id, ns, node.icon || "server", hasLinkedMapRefresh));
       marker.setPopupContent(createPopupContent(node));
     });
 
@@ -1594,41 +1766,6 @@ export default function LeafletMapView({
     const isLabel = node?.icon === "_textLabel";
     const isWaypoint = node?.icon === "_waypoint";
 
-    // Submap nodes: open, rename, delete
-    if (node?.icon === "_submap") {
-      const submapCd = node.custom_data ? (() => { try { return JSON.parse(node.custom_data!); } catch { return {}; } })() : {};
-      return [
-        {
-          label: "Abrir submap",
-          icon: menuIcons.ExternalLink,
-          onClick: () => {
-            if (submapCd.submapId) window.open(apiUrl(`/view/${submapCd.submapId}`), "_blank");
-            else toast.error("Este nodo no tiene un submap asignado");
-          },
-        },
-        {
-          label: "Editar en editor",
-          icon: menuIcons.Pencil,
-          onClick: () => {
-            if (submapCd.submapId) window.location.href = `/?map=${submapCd.submapId}`;
-          },
-        },
-        {
-          label: "Eliminar nodo",
-          icon: menuIcons.Trash2,
-          danger: true,
-          divider: true,
-          onClick: () => {
-            pushUndo();
-            nodesRef.current = nodesRef.current.filter((n) => n.id !== nodeId);
-            edgesRef.current = edgesRef.current.filter((e) => e.source_node_id !== nodeId && e.target_node_id !== nodeId);
-            if (LRef.current && mapRef.current) { renderNodes(LRef.current, mapRef.current); renderEdges(LRef.current, mapRef.current); }
-            toast.success("Nodo eliminado");
-          },
-        },
-      ];
-    }
-
     // Polygons: rename, color, delete
     const isPolygon = node?.icon === "_polygon";
     if (isPolygon) {
@@ -1759,6 +1896,21 @@ export default function LeafletMapView({
             }
           },
         })),
+        // Reset rotation if rotated
+        ...(cd.rotation ? [{
+          label: "Restablecer rotación",
+          icon: menuIcons.Pencil,
+          onClick: () => {
+            const idx = nodesRef.current.findIndex((n) => n.id === nodeId);
+            if (idx >= 0) {
+              const prev = nodesRef.current[idx];
+              const prevCd = prev.custom_data ? JSON.parse(prev.custom_data) : {};
+              delete prevCd.rotation;
+              nodesRef.current[idx] = { ...prev, custom_data: JSON.stringify(prevCd) };
+              if (LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current);
+            }
+          },
+        }] : []),
         {
           label: "Eliminar etiqueta",
           icon: menuIcons.Trash2,
@@ -1860,22 +2012,42 @@ export default function LeafletMapView({
           },
         },
         {
-          label: "Distancia focal",
+          label: isImageMode ? "Alcance (píxeles)" : "Distancia focal",
           icon: menuIcons.Maximize2,
           onClick: () => {
             const camCd = node?.custom_data ? JSON.parse(node.custom_data) : {};
-            const current = camCd.fovRange || 0.002;
-            const input = prompt("Distancia focal (metros aprox):\n• 50 = muy cerca\n• 200 = normal\n• 500 = lejos\n• 1000+ = muy lejos", String(Math.round(current * 100000)));
-            if (input) {
-              const meters = parseFloat(input);
-              if (!isNaN(meters) && meters > 0) {
-                const newRange = Math.max(0.00005, meters / 100000);
-                const idx = nodesRef.current.findIndex((n) => n.id === nodeId);
-                if (idx >= 0) {
-                  const ncd = nodesRef.current[idx].custom_data ? JSON.parse(nodesRef.current[idx].custom_data!) : {};
-                  ncd.fovRange = parseFloat(newRange.toFixed(6));
-                  nodesRef.current[idx] = { ...nodesRef.current[idx], custom_data: JSON.stringify(ncd) };
-                  if (LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current);
+            if (isImageMode) {
+              // Image mode: fovRange stored in pixels
+              const rawR = camCd.fovRange ?? 200;
+              const currentPx = rawR < 1 ? Math.round(rawR * 100000) : Math.round(rawR);
+              const input = prompt("Alcance de la cámara (píxeles):\n• 50 = muy cerca\n• 200 = normal\n• 500 = lejos", String(currentPx));
+              if (input) {
+                const px = parseFloat(input);
+                if (!isNaN(px) && px > 0) {
+                  const idx = nodesRef.current.findIndex((n) => n.id === nodeId);
+                  if (idx >= 0) {
+                    const ncd = nodesRef.current[idx].custom_data ? JSON.parse(nodesRef.current[idx].custom_data!) : {};
+                    ncd.fovRange = px;
+                    nodesRef.current[idx] = { ...nodesRef.current[idx], custom_data: JSON.stringify(ncd) };
+                    if (LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current);
+                  }
+                }
+              }
+            } else {
+              // Livemap mode: fovRange in degrees (~0.002 = 200m)
+              const current = camCd.fovRange || 0.002;
+              const input = prompt("Distancia focal (metros aprox):\n• 50 = muy cerca\n• 200 = normal\n• 500 = lejos\n• 1000+ = muy lejos", String(Math.round(current * 100000)));
+              if (input) {
+                const meters = parseFloat(input);
+                if (!isNaN(meters) && meters > 0) {
+                  const newRange = Math.max(0.00005, meters / 100000);
+                  const idx = nodesRef.current.findIndex((n) => n.id === nodeId);
+                  if (idx >= 0) {
+                    const ncd = nodesRef.current[idx].custom_data ? JSON.parse(nodesRef.current[idx].custom_data!) : {};
+                    ncd.fovRange = parseFloat(newRange.toFixed(6));
+                    nodesRef.current[idx] = { ...nodesRef.current[idx], custom_data: JSON.stringify(ncd) };
+                    if (LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current);
+                  }
                 }
               }
             }
@@ -1941,6 +2113,32 @@ export default function LeafletMapView({
           setTimeMachineOpen(true);
         },
       }] : []),
+      // Linked maps for this node — show quick-open entries + manage option
+      ...(() => {
+        const ncd = node?.custom_data ? (() => { try { return JSON.parse(node.custom_data!); } catch { return {}; } })() : {};
+        const linked: { id: string; name: string }[] = ncd.linkedMaps || [];
+        const items: any[] = [];
+        // Quick-open each linked map
+        linked.forEach(lm => {
+          items.push({
+            label: `Abrir: ${lm.name}`,
+            icon: menuIcons.ExternalLink,
+            divider: items.length === 0, // divider before first map item
+            onClick: () => {
+              if (readonly) window.location.href = `/?map=${lm.id}`;
+              else window.open(apiUrl(`/view/${lm.id}`), "_blank");
+            },
+          });
+        });
+        // Manage maps option
+        items.push({
+          label: linked.length > 0 ? "Gestionar mapas" : "Asignar mapa",
+          icon: menuIcons.FolderOpen,
+          divider: linked.length === 0, // divider if no maps yet
+          onClick: () => setNodeMapModalNodeId(nodeId),
+        });
+        return items;
+      })(),
       {
         label: "Eliminar nodo",
         icon: menuIcons.Trash2,
@@ -2078,9 +2276,29 @@ export default function LeafletMapView({
     return () => clearInterval(interval);
   }, [handleSave, autoSaveEnabled]);
 
-  // Search address (geocoding via Nominatim)
+  // Node search — used by both image mode and livemap (nodes take priority over geocoding)
+  const handleNodeSearch = useCallback((): boolean => {
+    if (!searchQuery.trim() || !mapRef.current) return false;
+    const q = searchQuery.toLowerCase();
+    const match = nodesRef.current.find(n =>
+      n.label?.toLowerCase().includes(q) ||
+      (() => { try { const cd = JSON.parse(n.custom_data || "{}"); return cd.ip?.includes(q) || cd.mac?.toLowerCase().includes(q); } catch { return false; } })()
+    );
+    if (match) {
+      mapRef.current.setView([match.x, match.y], Math.max(mapRef.current.getZoom(), isImageMode ? mapRef.current.getZoom() : 16), { animate: true });
+      toast.success("Nodo encontrado", { description: match.label });
+      return true;
+    }
+    return false;
+  }, [searchQuery, isImageMode]);
+
+  // Search: nodes first, then geocoding (livemap only)
   const handleSearch = useCallback(async () => {
     if (!searchQuery.trim() || !mapRef.current) return;
+    // Always try node search first (works in both modes)
+    if (handleNodeSearch()) return;
+    // Livemap only: fall back to Nominatim geocoding
+    if (isImageMode) { toast.error("No se encontró ningún nodo con ese nombre"); return; }
     try {
       const res = await fetch(
         `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchQuery)}&limit=1`,
@@ -2092,15 +2310,185 @@ export default function LeafletMapView({
         mapRef.current.setView([parseFloat(lat), parseFloat(lon)], 16, { animate: true });
         toast.success("Ubicacion encontrada", { description: display_name.substring(0, 60) });
       } else {
-        toast.error("No se encontro la direccion");
+        toast.error("No se encontro la direccion ni nodo con ese nombre");
       }
     } catch {
-      toast.error("Error buscando direccion");
+      toast.error("Error buscando");
     }
-  }, [searchQuery]);
+  }, [searchQuery, handleNodeSearch, isImageMode]);
+
+  // ── Export as PNG (html2canvas) ──
+  const handleExportPng = useCallback(async () => {
+    if (!containerRef.current) return;
+    toast.info("Generando imagen...", { duration: 2000 });
+    try {
+      const h2c = (await import("html2canvas")).default;
+      const canvas = await h2c(containerRef.current, {
+        useCORS: true,
+        allowTaint: true,
+        scale: 2,
+        backgroundColor: "#0a0a0a",
+        logging: false,
+      });
+      const link = document.createElement("a");
+      link.download = `${mapName || "kumamap"}-${new Date().toISOString().slice(0, 10)}.png`;
+      link.href = canvas.toDataURL("image/png");
+      link.click();
+      toast.success("Imagen exportada");
+    } catch (err) {
+      toast.error("Error al exportar imagen");
+      console.error(err);
+    }
+  }, [mapName]);
+
+  // ── Print map ──
+  // Before printing: fit all nodes in view, then trigger window.print()
+  const handlePrint = useCallback(() => {
+    const map = mapRef.current;
+    if (!map || nodesRef.current.length === 0) { window.print(); return; }
+
+    const nodes = nodesRef.current.filter(n => n.icon !== "_polygon");
+    if (nodes.length === 0) { window.print(); return; }
+
+    // Compute bounding box of all node positions
+    const lats = nodes.map(n => n.x);
+    const lngs = nodes.map(n => n.y);
+    const minLat = Math.min(...lats);
+    const maxLat = Math.max(...lats);
+    const minLng = Math.min(...lngs);
+    const maxLng = Math.max(...lngs);
+
+    try {
+      const bounds = L.latLngBounds([[minLat, minLng], [maxLat, maxLng]]);
+      map.fitBounds(bounds, { padding: [40, 40], animate: false, maxZoom: isImageMode ? map.getZoom() : 17 });
+    } catch { /* ignore fitBounds errors */ }
+
+    // Give Leaflet a moment to settle tiles/markers, then print
+    setTimeout(() => window.print(), 400);
+  }, [isImageMode]);
+
+  // ── Export node list as styled XLSX ──
+  const handleExportCsv = useCallback(async () => {
+    const XLSX = (await import("xlsx")).default;
+
+    // ── Collect rows ──
+    interface NodeRow { Nombre: string; Tipo: string; IP: string; MAC: string; "Monitor Kuma": string; Estado: string; "Ping (ms)": string; "Uptime 24h": string; URL: string; }
+    const dataRows: NodeRow[] = [];
+    for (const node of nodesRef.current) {
+      if (node.icon === "_textLabel" || node.icon === "_waypoint" || node.icon === "_polygon") continue;
+      let cd: Record<string, unknown> = {};
+      try { cd = JSON.parse(node.custom_data || "{}"); } catch { /* ignore */ }
+      const monitor = node.kuma_monitor_id ? kumaMonitors.find(m => m.id === node.kuma_monitor_id) : null;
+      const status = monitor ? (monitor.status === 1 ? "UP" : monitor.status === 0 ? "DOWN" : "Pendiente") : "";
+      dataRows.push({
+        Nombre: node.label || "",
+        Tipo: node.icon || "",
+        IP: String(cd.ip || ""),
+        MAC: String(cd.mac || ""),
+        "Monitor Kuma": monitor?.name || "",
+        Estado: status,
+        "Ping (ms)": monitor?.ping != null ? String(monitor.ping) : "",
+        "Uptime 24h": monitor?.uptime24 != null ? `${monitor.uptime24.toFixed(1)}%` : "",
+        URL: monitor?.url || "",
+      });
+    }
+
+    // ── Build workbook ──
+    const wb = XLSX.utils.book_new();
+    const headers = ["Nombre", "Tipo", "IP", "MAC", "Monitor Kuma", "Estado", "Ping (ms)", "Uptime 24h", "URL"];
+    const wsData = [headers, ...dataRows.map(r => headers.map(h => r[h as keyof NodeRow]))];
+    const ws = XLSX.utils.aoa_to_sheet(wsData);
+
+    // ── Column widths ──
+    ws["!cols"] = [{ wch: 28 }, { wch: 16 }, { wch: 18 }, { wch: 20 }, { wch: 28 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 38 }];
+
+    // ── Auto-filter on entire data range ──
+    ws["!autofilter"] = { ref: `A1:${XLSX.utils.encode_col(headers.length - 1)}1` };
+
+    // ── Header styles (xlsx supports basic cell styling via !type + s fields) ──
+    // Apply bold + colored background to header row
+    const headerColors: Record<string, string> = {
+      Nombre: "1e293b", Tipo: "1e293b", IP: "0f3460", MAC: "0f3460",
+      "Monitor Kuma": "0f3460", Estado: "0f3460", "Ping (ms)": "0f3460",
+      "Uptime 24h": "0f3460", URL: "1e293b",
+    };
+    headers.forEach((h, ci) => {
+      const cellAddr = XLSX.utils.encode_cell({ r: 0, c: ci });
+      if (!ws[cellAddr]) ws[cellAddr] = { v: h, t: "s" };
+      ws[cellAddr].s = {
+        font: { bold: true, color: { rgb: "E2E8F0" }, sz: 11, name: "Calibri" },
+        fill: { fgColor: { rgb: headerColors[h] || "1e293b" }, patternType: "solid" },
+        alignment: { horizontal: "center", vertical: "center", wrapText: false },
+        border: {
+          bottom: { style: "medium", color: { rgb: "6366F1" } },
+          right: { style: "thin", color: { rgb: "334155" } },
+        },
+      };
+    });
+
+    // ── Data row styles: alternating dark rows, status color ──
+    dataRows.forEach((row, ri) => {
+      const even = ri % 2 === 0;
+      const rowBg = even ? "0F172A" : "1E293B";
+      headers.forEach((h, ci) => {
+        const cellAddr = XLSX.utils.encode_cell({ r: ri + 1, c: ci });
+        if (!ws[cellAddr]) ws[cellAddr] = { v: row[h as keyof NodeRow] || "", t: "s" };
+        let fontColor = "CBD5E1";
+        if (h === "Estado") {
+          const v = row["Estado"];
+          fontColor = v === "UP" ? "4ADE80" : v === "DOWN" ? "F87171" : "FCD34D";
+        } else if (h === "IP" || h === "MAC") {
+          fontColor = "93C5FD";
+        } else if (h === "Nombre") {
+          fontColor = "F1F5F9";
+        } else if (h === "Uptime 24h") {
+          const pct = parseFloat(row["Uptime 24h"]);
+          fontColor = isNaN(pct) ? "CBD5E1" : pct >= 99 ? "4ADE80" : pct >= 95 ? "FCD34D" : "F87171";
+        }
+        ws[cellAddr].s = {
+          font: { color: { rgb: fontColor }, sz: 10, name: "Calibri", bold: h === "Estado" || h === "Nombre" },
+          fill: { fgColor: { rgb: rowBg }, patternType: "solid" },
+          alignment: { vertical: "center", horizontal: h === "Estado" || h === "Ping (ms)" || h === "Uptime 24h" ? "center" : "left" },
+          border: {
+            bottom: { style: "thin", color: { rgb: "1E293B" } },
+            right: { style: "thin", color: { rgb: "334155" } },
+          },
+        };
+      });
+    });
+
+    // ── Summary sheet ──
+    const total = dataRows.length;
+    const up = dataRows.filter(r => r["Estado"] === "UP").length;
+    const down = dataRows.filter(r => r["Estado"] === "DOWN").length;
+    const noMonitor = dataRows.filter(r => !r["Monitor Kuma"]).length;
+    const summaryData = [
+      ["KumaMap — Resumen de nodos", ""],
+      ["Mapa", mapName || "Sin nombre"],
+      ["Generado", new Date().toLocaleString("es-UY")],
+      ["", ""],
+      ["Total nodos", total],
+      ["UP", up],
+      ["DOWN", down],
+      ["Sin monitor", noMonitor],
+      ["Uptime global", total > 0 ? `${((up / (total - noMonitor || 1)) * 100).toFixed(1)}%` : "—"],
+    ];
+    const wsSummary = XLSX.utils.aoa_to_sheet(summaryData);
+    wsSummary["!cols"] = [{ wch: 22 }, { wch: 30 }];
+    // Style summary header
+    if (wsSummary["A1"]) wsSummary["A1"].s = { font: { bold: true, sz: 13, color: { rgb: "A78BFA" }, name: "Calibri" }, fill: { fgColor: { rgb: "0F0F1A" }, patternType: "solid" } };
+
+    XLSX.utils.book_append_sheet(wb, wsSummary, "Resumen");
+    XLSX.utils.book_append_sheet(wb, ws, "Nodos");
+
+    // ── Download ──
+    const filename = `${(mapName || "kumamap").replace(/[^a-zA-Z0-9_\-]/g, "_")}-nodos-${new Date().toISOString().slice(0, 10)}.xlsx`;
+    XLSX.writeFile(wb, filename, { bookType: "xlsx", compression: true });
+    toast.success(`${dataRows.length} nodos exportados como XLSX`);
+  }, [mapName, kumaMonitors]);
 
   return (
-    <div className="relative h-full w-full transition-all duration-300" style={{ marginRight: `${sidebarWidth}px` }}>
+    <div className="relative h-full w-full transition-all duration-300 kumamap-print-area" style={{ marginRight: `${sidebarWidth}px` }}>
       <div
         ref={containerRef}
         className="absolute inset-0"
@@ -2189,7 +2577,41 @@ export default function LeafletMapView({
 
       {/* ── Global Map styles ── */}
       <style>{`
-        .leaflet-tile-pane { filter: brightness(${1 - overlayOpacity}); transition: filter 0.3s; }
+        ${!isImageMode ? `.leaflet-tile-pane { filter: brightness(${1 - overlayOpacity}); transition: filter 0.3s; }` : `.leaflet-image-layer { filter: brightness(${1 - overlayOpacity}); transition: filter 0.3s; }`}
+        @media print {
+          @page { margin: 0; size: landscape; }
+          html, body { background: #0a0a0a !important; margin: 0 !important; padding: 0 !important; }
+          body * { visibility: hidden !important; }
+          .kumamap-print-area, .kumamap-print-area * { visibility: visible !important; }
+          .kumamap-print-area {
+            position: fixed !important;
+            inset: 0 !important;
+            width: 100vw !important;
+            height: 100vh !important;
+            margin: 0 !important;
+            z-index: 99999 !important;
+            background: #0a0a0a !important;
+          }
+          /* Hide ALL UI controls — toolbar, sidebar, overlays, tooltips on hover, context menus */
+          .kumamap-no-print,
+          .kumamap-toolbar,
+          [class*="toolbar"],
+          [class*="sidebar"],
+          [class*="panel"],
+          [class*="overlay"],
+          [class*="ctx-menu"],
+          [class*="export-menu"],
+          [class*="search"],
+          .leaflet-control-container,
+          .leaflet-top,
+          .leaflet-bottom { display: none !important; }
+          /* Keep tiles dark — prevent browser from overriding with white */
+          .leaflet-tile-pane { filter: none !important; }
+          /* Ensure node labels and markers render */
+          .leaflet-marker-pane,
+          .leaflet-overlay-pane,
+          .leaflet-tooltip-pane { visibility: visible !important; }
+        }
         /* Ocultar etiquetas globales */
         ${!showLabels ? `.leaflet-tooltip, .leaflet-tooltip-pane, .leaflet-label-dark, .interface-label, .traffic-label, .polygon-label { display: none !important; }` : ""}
         
@@ -2201,7 +2623,7 @@ export default function LeafletMapView({
 
       {/* ── Floating Top Bar ── */}
       {!readonly && <div
-        className="absolute top-3 left-1/2 -translate-x-1/2 flex items-center gap-1.5 rounded-2xl px-2.5 py-1.5"
+        className="absolute top-3 left-1/2 -translate-x-1/2 flex items-center gap-1.5 rounded-2xl px-2.5 py-1.5 kumamap-no-print"
         id="leaflet-toolbar"
         style={{
           zIndex: 10000,
@@ -2249,113 +2671,56 @@ export default function LeafletMapView({
 
         <div className="h-5 w-px mx-0.5" style={{ background: "rgba(255,255,255,0.06)" }} />
 
-        {/* Edit mode toggle */}
-        <button
-          onClick={() => setEditMode(v => !v)}
-          className="flex items-center gap-1 rounded-xl px-2 py-1.5 text-[10px] font-bold uppercase tracking-wider transition-all"
-          style={{
-            background: editMode ? "rgba(245,158,11,0.15)" : "transparent",
-            border: editMode ? "1px solid rgba(245,158,11,0.3)" : "1px solid transparent",
-            color: editMode ? "#f59e0b" : "#666",
-          }}
-          title={editMode ? "Modo compacto" : "Modo edicion"}
-        >
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            {editMode ? <><path d="M12 20h9"/><path d="M16.376 3.622a1 1 0 0 1 3.002 3.002L7.368 18.635a2 2 0 0 1-.855.506l-2.872.838a.5.5 0 0 1-.62-.62l.838-2.872a2 2 0 0 1 .506-.855z"/></> : <><path d="M12 20h9"/><path d="M16.376 3.622a1 1 0 0 1 3.002 3.002L7.368 18.635a2 2 0 0 1-.855.506l-2.872.838a.5.5 0 0 1-.62-.62l.838-2.872a2 2 0 0 1 .506-.855z"/></>}
-          </svg>
-          {editMode ? "Editar" : "Edit"}
-        </button>
-
         {/* ═══ EDIT MODE TOOLS ═══ */}
         {editMode && <>
         <div className="h-5 w-px mx-0.5" style={{ background: "rgba(255,255,255,0.06)" }} />
 
         {/* Node/Edge controls */}
         <div className="flex items-center gap-0.5">
+          <Tooltip content="Agregar nodo" placement="bottom">
           <button onClick={() => {
             if (!mapRef.current) return;
             const center = mapRef.current.getCenter();
             const id = `node-${Date.now()}`;
             nodesRef.current = [...nodesRef.current, { id, kuma_monitor_id: null, label: "Nuevo equipo", x: center.lat, y: center.lng, icon: "server" }];
             if (LRef.current) renderNodes(LRef.current, mapRef.current);
-          }} title="Agregar nodo"
+          }}
             className="group flex items-center gap-1 rounded-xl px-2 py-1.5 text-[#888] hover:text-[#ededed] hover:bg-white/[0.06] transition-all">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
             <span className="text-[10px] font-semibold hidden xl:inline">Nodo</span>
           </button>
+          </Tooltip>
+          <Tooltip content="Agregar etiqueta" placement="bottom">
           <button onClick={() => {
             if (!mapRef.current) return;
             const center = mapRef.current.getCenter();
             const id = `label-${Date.now()}`;
             nodesRef.current = [...nodesRef.current, { id, kuma_monitor_id: null, label: "Etiqueta", x: center.lat, y: center.lng, icon: "_textLabel" }];
             if (LRef.current) renderNodes(LRef.current, mapRef.current);
-          }} title="Agregar etiqueta"
-            className="group flex items-center gap-1 rounded-xl px-2 py-1.5 text-[#888] hover:text-[#ededed] hover:bg-white/[0.06] transition-all">
+          }}
+            className="group flex items-center justify-center rounded-xl p-2 text-[#888] hover:text-[#ededed] hover:bg-white/[0.06] transition-all">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" x2="15" y1="20" y2="20"/><line x1="12" x2="12" y1="4" y2="20"/></svg>
-            <span className="text-[10px] font-semibold hidden xl:inline">Etiqueta</span>
           </button>
+          </Tooltip>
+          <Tooltip content="Agregar cámara con campo de visión" placement="bottom">
           <button onClick={() => {
             if (!mapRef.current) return;
             const center = mapRef.current.getCenter();
             const id = `cam-${Date.now()}`;
-            nodesRef.current = [...nodesRef.current, { id, kuma_monitor_id: null, label: "Camara", x: center.lat, y: center.lng, icon: "_camera", custom_data: JSON.stringify({ type: "camera", rotation: 0, fov: 60, fovRange: 0.002 }) }];
+            nodesRef.current = [...nodesRef.current, { id, kuma_monitor_id: null, label: "Camara", x: center.lat, y: center.lng, icon: "_camera", custom_data: JSON.stringify({ type: "camera", rotation: 0, fov: 60, fovRange: isImageMode ? 200 : 0.002 }) }];
             if (LRef.current) renderNodes(LRef.current, mapRef.current);
             toast.success("Camara agregada — clic derecho para rotar");
-          }} title="Agregar camara con campo de vision"
-            className="group flex items-center gap-1 rounded-xl px-2 py-1.5 text-[#888] hover:text-[#ededed] hover:bg-white/[0.06] transition-all">
+          }}
+            className="group flex items-center justify-center rounded-xl p-2 text-[#888] hover:text-[#ededed] hover:bg-white/[0.06] transition-all">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m16.24 7.76-1.804 5.412a2 2 0 0 1-1.265 1.265L7.76 16.24l1.804-5.412a2 2 0 0 1 1.265-1.265z"/><circle cx="12" cy="12" r="10"/></svg>
-            <span className="text-[10px] font-semibold hidden xl:inline">Camara</span>
           </button>
-          {/* ─── Submap button ─── */}
-          {availableMaps.length > 0 && (
-            <div className="relative">
-              <button onClick={() => setSubmapPickerOpen(v => !v)} title="Agregar nodo submap"
-                className="group flex items-center gap-1 rounded-xl px-2 py-1.5 transition-all"
-                style={{ color: submapPickerOpen ? "#818cf8" : "#888", background: submapPickerOpen ? "rgba(99,102,241,0.12)" : "transparent" }}
-                onMouseEnter={(e) => { if (!submapPickerOpen) { (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.06)"; (e.currentTarget as HTMLElement).style.color = "#ededed"; }}}
-                onMouseLeave={(e) => { if (!submapPickerOpen) { (e.currentTarget as HTMLElement).style.background = "transparent"; (e.currentTarget as HTMLElement).style.color = "#888"; }}}>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
-                <span className="text-[10px] font-semibold hidden xl:inline">Submap</span>
-              </button>
-              {submapPickerOpen && (
-                <div className="fixed inset-0 z-[99998]" onClick={() => setSubmapPickerOpen(false)} />
-              )}
-              {submapPickerOpen && (
-                <div className="absolute top-full left-0 mt-1 rounded-xl shadow-2xl py-1 z-[99999] min-w-[180px]"
-                  style={{ background: "rgba(12,12,12,0.98)", border: "1px solid rgba(99,102,241,0.25)", backdropFilter: "blur(20px)" }}>
-                  <div className="px-3 py-1 text-[9px] font-bold uppercase tracking-wider text-[#555]">Seleccionar submap</div>
-                  {availableMaps.filter(m => m.id !== mapId).map(m => (
-                    <button key={m.id} onClick={() => {
-                      if (!mapRef.current) return;
-                      const center = mapRef.current.getCenter();
-                      const id = `sub-${Date.now()}`;
-                      nodesRef.current = [...nodesRef.current, {
-                        id, kuma_monitor_id: null, label: m.name, x: center.lat, y: center.lng,
-                        icon: "_submap", custom_data: JSON.stringify({ submapId: m.id, submapName: m.name }),
-                      }];
-                      if (LRef.current) renderNodes(LRef.current, mapRef.current);
-                      setSubmapPickerOpen(false);
-                      toast.success(`Submap "${m.name}" agregado`);
-                    }}
-                      className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-[#a0a0a0] transition-all"
-                      onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "rgba(99,102,241,0.1)"; (e.currentTarget as HTMLElement).style.color = "#ededed"; }}
-                      onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; (e.currentTarget as HTMLElement).style.color = "#a0a0a0"; }}>
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#818cf8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
-                      <span className="truncate">{m.name}</span>
-                    </button>
-                  ))}
-                  {availableMaps.filter(m => m.id !== mapId).length === 0 && (
-                    <div className="px-3 py-2 text-[10px] text-[#555]">No hay otros mapas disponibles</div>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
+          </Tooltip>
         </div>
 
         {/* ─── Drawing tools separator ─── */}
         <div className="h-5 w-px mx-0.5" style={{ background: "rgba(255,255,255,0.06)" }} />
         <div className="flex items-center gap-0.5" style={{ background: "rgba(255,255,255,0.02)", borderRadius: "12px", padding: "2px" }}>
+          <Tooltip content="Waypoint para curvar links" placement="bottom">
           <button onClick={() => {
             if (!mapRef.current) return;
             const center = mapRef.current.getCenter();
@@ -2363,21 +2728,25 @@ export default function LeafletMapView({
             nodesRef.current = [...nodesRef.current, { id, kuma_monitor_id: null, label: "", x: center.lat, y: center.lng, icon: "_waypoint" }];
             if (LRef.current) renderNodes(LRef.current, mapRef.current);
             toast.success("Punto de ruta agregado");
-          }} title="Waypoint para curvar links"
+          }}
             className="group flex items-center gap-1 rounded-xl px-2 py-1.5 text-[#888] hover:text-[#ededed] hover:bg-white/[0.06] transition-all">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/></svg>
             <span className="text-[10px] font-semibold hidden xl:inline">Punto</span>
           </button>
+          </Tooltip>
+          <Tooltip content={linkSource ? "Cancelar link" : "Crear link entre nodos"} placement="bottom">
           <button onClick={() => {
             if (linkSource) { cancelLinkCreation(); return; }
             if (nodesRef.current.length === 0) { toast.error("Agrega nodos primero"); return; }
             toast.info("Clic derecho en un nodo → Nuevo link", { duration: 4000 });
-          }} title={linkSource ? "Cancelar link" : "Crear link entre nodos"}
+          }}
             className={`group flex items-center gap-1 rounded-xl px-2 py-1.5 transition-all ${linkSource ? "text-[#60a5fa]" : "text-[#888] hover:text-[#ededed] hover:bg-white/[0.06]"}`}
             style={linkSource ? { background: "rgba(59,130,246,0.15)", border: "1px solid rgba(59,130,246,0.35)" } : {}}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
             <span className="text-[10px] font-semibold hidden xl:inline">Link</span>
           </button>
+          </Tooltip>
+          <Tooltip content={polygonMode ? "Terminar polígono (doble clic)" : "Dibujar zona/polígono"} placement="bottom">
           <button
             data-polygon-active={polygonMode || undefined}
             onClick={() => {
@@ -2389,13 +2758,13 @@ export default function LeafletMapView({
                 toast.info("Clic en el mapa para agregar puntos. Doble clic para terminar.", { duration: 5000 });
               }
             }}
-            title={polygonMode ? "Terminar poligono (doble clic)" : "Dibujar zona/poligono"}
             className={`group flex items-center gap-1 rounded-xl px-2 py-1.5 transition-all ${polygonMode ? "text-[#4ade80]" : "text-[#888] hover:text-[#ededed] hover:bg-white/[0.06]"}`}
             style={polygonMode ? { background: "rgba(34,197,94,0.15)", border: "1px solid rgba(34,197,94,0.35)" } : {}}
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3h18v18H3z"/></svg>
             <span className="text-[10px] font-semibold hidden xl:inline">{polygonMode ? "Listo" : "Zona"}</span>
           </button>
+          </Tooltip>
         </div>
 
         {/* Link mode indicator */}
@@ -2411,52 +2780,143 @@ export default function LeafletMapView({
 
         {/* ═══ RIGHT SIDE ═══ */}
 
-        {/* Search */}
-        {searchVisible ? (
-          <div className="flex items-center gap-1">
-            <input
-              autoFocus
-              type="text"
-              placeholder="Buscar direccion..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") handleSearch();
-                if (e.key === "Escape") { setSearchVisible(false); setSearchQuery(""); }
-              }}
-              className="h-7 w-48 rounded-lg px-3 py-1 text-[11px] text-[#ededed] placeholder:text-[#555] focus:outline-none"
-              style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)" }}
+        {isImageMode ? (
+          /* ── Image-mode right controls ── */
+          <>
+          <div className="h-5 w-px mx-0.5" style={{ background: "rgba(255,255,255,0.06)" }} />
+
+          {/* Node search */}
+          {searchVisible ? (
+            <div className="flex items-center gap-1">
+              <input
+                autoFocus
+                type="text"
+                placeholder="Buscar nodo..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") handleNodeSearch();
+                  if (e.key === "Escape") { setSearchVisible(false); setSearchQuery(""); }
+                }}
+                className="h-7 w-44 rounded-lg px-3 py-1 text-[11px] text-[#ededed] placeholder:text-[#555] focus:outline-none"
+                style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)" }}
+              />
+              <button onClick={handleNodeSearch} className="rounded-lg p-1 transition-all text-[#60a5fa]"
+                onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "rgba(59,130,246,0.12)"; }}
+                onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+              </button>
+              <button onClick={() => { setSearchVisible(false); setSearchQuery(""); }}
+                className="rounded-lg p-1 text-[#555] hover:text-[#ededed] transition-all">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+              </button>
+            </div>
+          ) : (
+            <Tooltip content="Buscar nodo" placement="bottom">
+            <button onClick={() => setSearchVisible(true)} className="rounded-xl p-1.5 transition-all"
+              style={{ color: "#888" }}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.06)"; (e.currentTarget as HTMLElement).style.color = "#ededed"; }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; (e.currentTarget as HTMLElement).style.color = "#888"; }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+            </button>
+            </Tooltip>
+          )}
+
+          {/* Brightness + Rotation (only in edit mode) */}
+          {editMode && <>
+          <div className="h-5 w-px mx-0.5" style={{ background: "rgba(255,255,255,0.06)" }} />
+          {/* Brightness slider */}
+          <Tooltip content="Oscurecer imagen de fondo" placement="bottom">
+          <div className="flex items-center gap-1.5 rounded-xl px-2 py-1" style={{ background: "rgba(255,255,255,0.02)" }}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={overlayOpacity > 0 ? "#60a5fa" : "#555"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>
+            <input type="range" min="0" max="0.85" step="0.05" value={overlayOpacity}
+              onChange={(e) => setOverlayOpacity(parseFloat(e.target.value))}
+              className="w-14 h-1 rounded-full appearance-none cursor-pointer"
+              style={{ background: `linear-gradient(to right, #3b82f6 ${(overlayOpacity / 0.85) * 100}%, #333 0%)` }}
             />
+          </div>
+          </Tooltip>
+          {/* Rotation slider */}
+          <Tooltip content="Rotar mapa (doble clic = resetear)" placement="bottom">
+          <div className="flex items-center gap-1 rounded-xl px-2 py-1" style={{ background: "rgba(255,255,255,0.02)" }}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={mapRotation !== 0 ? "#60a5fa" : "#555"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>
+            <input type="range" min="-180" max="180" step="5" value={mapRotation}
+              onChange={(e) => setMapRotation(parseInt(e.target.value))}
+              onDoubleClick={() => setMapRotation(0)}
+              className="w-12 h-1 rounded-full appearance-none cursor-pointer"
+              style={{ background: `linear-gradient(to right, #333 0%, #3b82f6 ${((mapRotation + 180) / 360) * 100}%, #333 100%)` }}
+            />
+            {mapRotation !== 0 && <span className="text-[9px] text-[#666] font-mono">{mapRotation}°</span>}
+          </div>
+          </Tooltip>
+          </>}
+
+          <div className="h-5 w-px mx-0.5" style={{ background: "rgba(255,255,255,0.06)" }} />
+          {/* Upload + switch to livemap */}
+          <div className="flex items-center gap-0.5 rounded-xl p-0.5" style={{ background: "rgba(255,255,255,0.02)" }}>
+            <Tooltip content="Cambiar imagen de fondo" placement="bottom">
+            <button onClick={onUploadBackground}
+              className="rounded-xl p-1.5 text-[#888] hover:text-[#ededed] hover:bg-white/[0.06] transition-all">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>
+            </button>
+            </Tooltip>
+            <Tooltip content="Cambiar a mapa real" placement="bottom">
+            <button onClick={onSetLiveMap}
+              className="rounded-xl p-1.5 text-[#888] hover:text-[#ededed] hover:bg-white/[0.06] transition-all">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>
+            </button>
+            </Tooltip>
+          </div>
+          </>
+        ) : (
+          /* ── Livemap search ── */
+          searchVisible ? (
+            <div className="flex items-center gap-1">
+              <input
+                autoFocus
+                type="text"
+                placeholder="Buscar direccion..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") handleSearch();
+                  if (e.key === "Escape") { setSearchVisible(false); setSearchQuery(""); }
+                }}
+                className="h-7 w-48 rounded-lg px-3 py-1 text-[11px] text-[#ededed] placeholder:text-[#555] focus:outline-none"
+                style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)" }}
+              />
+              <button
+                onClick={handleSearch}
+                className="rounded-lg p-1 transition-all text-[#60a5fa]"
+                onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "rgba(59,130,246,0.12)"; }}
+                onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+              </button>
+              <button
+                onClick={() => { setSearchVisible(false); setSearchQuery(""); }}
+                className="rounded-lg p-1 text-[#555] hover:text-[#ededed] transition-all"
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+              </button>
+            </div>
+          ) : (
+            <Tooltip content="Buscar dirección" placement="bottom">
             <button
-              onClick={handleSearch}
-              className="rounded-lg p-1 transition-all text-[#60a5fa]"
-              onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "rgba(59,130,246,0.12)"; }}
-              onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}
+              onClick={() => setSearchVisible(true)}
+              className="rounded-xl p-1.5 transition-all"
+              style={{ color: "#888" }}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.06)"; (e.currentTarget as HTMLElement).style.color = "#ededed"; }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; (e.currentTarget as HTMLElement).style.color = "#888"; }}
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
             </button>
-            <button
-              onClick={() => { setSearchVisible(false); setSearchQuery(""); }}
-              className="rounded-lg p-1 text-[#555] hover:text-[#ededed] transition-all"
-            >
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
-            </button>
-          </div>
-        ) : (
-          <button
-            onClick={() => setSearchVisible(true)}
-            className="rounded-xl p-1.5 transition-all"
-            style={{ color: "#888" }}
-            onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.06)"; (e.currentTarget as HTMLElement).style.color = "#ededed"; }}
-            onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; (e.currentTarget as HTMLElement).style.color = "#888"; }}
-            title="Buscar direccion"
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
-          </button>
+            </Tooltip>
+          )
         )}
 
-        {/* ═══ EDIT MODE: Map controls ═══ */}
-        {editMode && <>
+        {/* ═══ EDIT MODE: Map controls (livemap only) ═══ */}
+        {editMode && !isImageMode && <>
         <div className="h-5 w-px mx-0.5" style={{ background: "rgba(255,255,255,0.06)" }} />
 
         {/* Map style pills */}
@@ -2490,7 +2950,6 @@ export default function LeafletMapView({
             onChange={(e) => setOverlayOpacity(parseFloat(e.target.value))}
             className="w-14 h-1 rounded-full appearance-none cursor-pointer"
             style={{ background: `linear-gradient(to right, #3b82f6 ${(overlayOpacity / 0.7) * 100}%, #333 0%)` }}
-            title={`Oscuridad: ${Math.round(overlayOpacity * 100)}%`}
           />
         </div>
 
@@ -2500,7 +2959,7 @@ export default function LeafletMapView({
           <input type="range" min="-180" max="180" step="5" value={mapRotation}
             onChange={(e) => setMapRotation(parseInt(e.target.value))}
             onDoubleClick={() => setMapRotation(0)}
-            className="w-12 h-1 rounded-full appearance-none cursor-pointer" title={`Rotacion: ${mapRotation}°`}
+            className="w-12 h-1 rounded-full appearance-none cursor-pointer"
             style={{ background: `linear-gradient(to right, #333 0%, #3b82f6 ${((mapRotation + 180) / 360) * 100}%, #333 100%)` }}
           />
           {mapRotation !== 0 && <span className="text-[9px] text-[#666] font-mono">{mapRotation}°</span>}
@@ -2511,11 +2970,12 @@ export default function LeafletMapView({
         <div className="h-5 w-px mx-0.5" style={{ background: "rgba(255,255,255,0.06)" }} />
 
         {/* Straight/Curved edges toggle */}
+        <Tooltip content={straightEdges ? "Links rectos (clic para curvas)" : "Links curvos (clic para rectas)"} placement="bottom">
         <button onClick={() => {
           setStraightEdges(v => !v);
           // Re-render edges immediately
           setTimeout(() => { if (LRef.current && mapRef.current) renderEdges(LRef.current, mapRef.current); }, 0);
-        }} title={straightEdges ? "Links rectos (clic para curvas)" : "Links curvos (clic para rectas)"}
+        }}
           className="rounded-lg p-1.5 transition-all"
           style={{ color: straightEdges ? "#f59e0b" : "#555" }}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -2524,15 +2984,150 @@ export default function LeafletMapView({
               : <path d="M4 20 C 10 20, 14 4, 20 4" />}
           </svg>
         </button>
+        </Tooltip>
 
         {/* Auto-save toggle */}
-        <button onClick={() => setAutoSaveEnabled(v => !v)} title={autoSaveEnabled ? "Auto-save ON (clic para desactivar)" : "Auto-save OFF (clic para activar)"}
+        <Tooltip content={autoSaveEnabled ? "Auto-save ON (clic para desactivar)" : "Auto-save OFF (clic para activar)"} placement="bottom">
+        <button onClick={() => setAutoSaveEnabled(v => !v)}
           className="rounded-lg p-1.5 transition-all"
           style={{ color: autoSaveEnabled ? "#4ade80" : "#555" }}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             {autoSaveEnabled ? <><path d="M12 2v4"/><path d="m16.2 7.8 2.9-2.9"/><path d="M18 12h4"/><path d="m16.2 16.2 2.9 2.9"/><path d="M12 18v4"/><path d="m4.9 19.1 2.9-2.9"/><path d="M2 12h4"/><path d="m4.9 4.9 2.9 2.9"/></> : <><circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/></>}
           </svg>
         </button>
+        </Tooltip>
+
+        {/* ─── Import (icon only) – only in edit mode, near Save ─── */}
+        {editMode && availableMaps.length > 0 && (
+          <div className="relative">
+            <Tooltip content="Importar nodos de otro mapa" placement="bottom">
+            <button onClick={() => setImportMapPickerOpen(v => !v)}
+              disabled={importingMapId !== null}
+              className="rounded-xl p-2 transition-all"
+              style={{ color: importMapPickerOpen ? "#34d399" : "#888", background: importMapPickerOpen ? "rgba(52,211,153,0.1)" : "transparent" }}
+              onMouseEnter={(e) => { if (!importMapPickerOpen) { (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.06)"; (e.currentTarget as HTMLElement).style.color = "#ededed"; }}}
+              onMouseLeave={(e) => { if (!importMapPickerOpen) { (e.currentTarget as HTMLElement).style.background = "transparent"; (e.currentTarget as HTMLElement).style.color = "#888"; }}}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/>
+              </svg>
+            </button>
+            </Tooltip>
+            {importMapPickerOpen && (
+              <div className="fixed inset-0 z-[99998]" onClick={() => setImportMapPickerOpen(false)} />
+            )}
+            {importMapPickerOpen && (
+              <div className="absolute top-full right-0 mt-1 rounded-xl shadow-2xl py-1 z-[99999] min-w-[200px]"
+                style={{ background: "rgba(12,12,12,0.98)", border: "1px solid rgba(52,211,153,0.25)", backdropFilter: "blur(20px)" }}>
+                <div className="px-3 py-1 text-[9px] font-bold uppercase tracking-wider text-[#555]">Importar nodos de</div>
+                {availableMaps.filter(m => m.id !== mapId).map(m => (
+                  <button key={m.id} onClick={async () => {
+                    setImportMapPickerOpen(false);
+                    setImportingMapId(m.id);
+                    try {
+                      const res = await fetch(`/api/maps/${m.id}/export`);
+                      const data = await res.json();
+                      const ts = Date.now();
+                      const idMap: Record<string, string> = {};
+                      const importedNodes = (data.nodes || []).map((n: any) => {
+                        const newId = `imp-${ts}-${n.id}`;
+                        idMap[n.id] = newId;
+                        return { ...n, id: newId };
+                      });
+                      const importedEdges = (data.edges || []).map((e: any) => ({
+                        ...e,
+                        id: `imp-${ts}-${e.id}`,
+                        source_node_id: idMap[e.source_node_id] || e.source_node_id,
+                        target_node_id: idMap[e.target_node_id] || e.target_node_id,
+                      }));
+                      nodesRef.current = [...nodesRef.current, ...importedNodes];
+                      edgesRef.current = [...edgesRef.current, ...importedEdges];
+                      if (LRef.current && mapRef.current) {
+                        renderNodes(LRef.current, mapRef.current);
+                        renderEdges(LRef.current, mapRef.current);
+                      }
+                      toast.success(`Mapa "${m.name}" importado`, { description: `${importedNodes.length} nodos, ${importedEdges.length} links` });
+                    } catch {
+                      toast.error("Error al importar el mapa");
+                    } finally {
+                      setImportingMapId(null);
+                    }
+                  }}
+                    className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-[#a0a0a0] transition-all"
+                    onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "rgba(52,211,153,0.08)"; (e.currentTarget as HTMLElement).style.color = "#ededed"; }}
+                    onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; (e.currentTarget as HTMLElement).style.color = "#a0a0a0"; }}>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#34d399" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>
+                    <span className="truncate">{m.name}</span>
+                  </button>
+                ))}
+                {availableMaps.filter(m => m.id !== mapId).length === 0 && (
+                  <div className="px-3 py-2 text-[10px] text-[#555]">No hay otros mapas disponibles</div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Edit mode toggle – moved to near Save */}
+        <Tooltip content={editMode ? "Salir de edición" : "Modo edición"} placement="bottom">
+        <button
+          onClick={() => setEditMode(v => !v)}
+          className="flex items-center gap-1 rounded-xl px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wider transition-all"
+          style={{
+            background: editMode ? "rgba(245,158,11,0.15)" : "transparent",
+            border: editMode ? "1px solid rgba(245,158,11,0.3)" : "1px solid rgba(255,255,255,0.08)",
+            color: editMode ? "#f59e0b" : "#555",
+          }}
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 20h9"/><path d="M16.376 3.622a1 1 0 0 1 3.002 3.002L7.368 18.635a2 2 0 0 1-.855.506l-2.872.838a.5.5 0 0 1-.62-.62l.838-2.872a2 2 0 0 1 .506-.855z"/>
+          </svg>
+          {editMode ? "Editar" : "Edit"}
+        </button>
+        </Tooltip>
+
+        {/* Export dropdown */}
+        <div className="relative">
+          <Tooltip content="Exportar mapa" placement="bottom">
+          <button
+            onClick={() => setExportMenuOpen(v => !v)}
+            className="flex items-center justify-center rounded-xl p-1.5 transition-all"
+            style={{ color: exportMenuOpen ? "#ededed" : "#888", background: exportMenuOpen ? "rgba(255,255,255,0.08)" : "transparent" }}
+            onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.06)"; (e.currentTarget as HTMLElement).style.color = "#ededed"; }}
+            onMouseLeave={(e) => { if (!exportMenuOpen) { (e.currentTarget as HTMLElement).style.background = "transparent"; (e.currentTarget as HTMLElement).style.color = "#888"; } }}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
+          </button>
+          </Tooltip>
+          {exportMenuOpen && (
+            <div
+              className="absolute top-full mt-2 right-0 rounded-xl overflow-hidden shadow-2xl"
+              style={{ background: "rgba(12,12,12,0.98)", border: "1px solid rgba(255,255,255,0.1)", zIndex: 99999, minWidth: "190px", backdropFilter: "blur(20px)" }}
+              onMouseLeave={() => setExportMenuOpen(false)}
+            >
+              <button onClick={() => { setExportMenuOpen(false); handleExportPng(); }}
+                className="flex items-center gap-2.5 w-full px-4 py-2.5 text-[11px] text-left transition-all hover:bg-white/[0.05]"
+                style={{ color: "#ccc" }}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#60a5fa" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>
+                Exportar como PNG
+              </button>
+              <button onClick={() => { setExportMenuOpen(false); handlePrint(); }}
+                className="flex items-center gap-2.5 w-full px-4 py-2.5 text-[11px] text-left transition-all hover:bg-white/[0.05]"
+                style={{ color: "#ccc" }}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect width="12" height="8" x="6" y="14"/></svg>
+                Imprimir mapa
+              </button>
+              <div style={{ height: "1px", background: "rgba(255,255,255,0.06)", margin: "2px 0" }} />
+              <button onClick={() => { setExportMenuOpen(false); handleExportCsv(); }}
+                className="flex items-center gap-2.5 w-full px-4 py-2.5 text-[11px] text-left transition-all hover:bg-white/[0.05]"
+                style={{ color: "#ccc" }}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#34d399" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><line x1="8" x2="16" y1="13" y2="13"/><line x1="8" x2="16" y1="17" y2="17"/><line x1="8" x2="11" y1="9" y2="9"/></svg>
+                Exportar lista de nodos (XLSX)
+              </button>
+            </div>
+          )}
+        </div>
+
+        <div className="h-5 w-px mx-0.5" style={{ background: "rgba(255,255,255,0.06)" }} />
 
         {/* Save */}
         <button
@@ -2577,59 +3172,85 @@ export default function LeafletMapView({
 
       {/* ── VERTICAL SIDEBAR CONTROLS (Right Side) ── */}
       {!readonly && (
-        <div className="fixed bottom-24 right-5 flex flex-col gap-2 rounded-2xl p-1.5 shadow-2xl backdrop-blur-3xl shrink-0" 
-          style={{ 
-            zIndex: 10000, 
-            background: "rgba(10,10,10,0.85)", 
+        <div className="fixed top-1/2 -translate-y-1/2 flex flex-col gap-1 rounded-xl p-1 shadow-2xl backdrop-blur-3xl shrink-0"
+          style={{
+            zIndex: 10000,
+            right: sidebarWidth + 12,
+            background: "rgba(10,10,10,0.85)",
             border: "1px solid rgba(255,255,255,0.08)",
-            boxShadow: "0 12px 40px rgba(0,0,0,0.5)"
+            boxShadow: "0 12px 40px rgba(0,0,0,0.5)",
+            transition: "right 0.3s ease",
           }}>
           {/* Zoom & View Group */}
-          <button onClick={() => mapRef.current?.zoomIn()} title="Acercar (Zoom In)"
-            className="h-9 w-9 flex items-center justify-center rounded-xl text-[#ededed] hover:bg-white/10 transition-all">
-            <Plus className="h-5 w-5" />
-          </button>
-          <button onClick={() => mapRef.current?.zoomOut()} title="Alejar (Zoom Out)"
-            className="h-9 w-9 flex items-center justify-center rounded-xl text-[#ededed] hover:bg-white/10 transition-all">
-            <svg width="14" height="2" viewBox="0 0 24 2" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round"><line x1="2" y1="1" x2="22" y2="1"/></svg>
-          </button>
-          <button onClick={() => {
-            if (mapRef.current && nodesRef.current.length > 0 && LRef.current) {
-              const bounds = nodesRef.current.map((n) => [n.x, n.y] as [number, number]);
-              mapRef.current.fitBounds(LRef.current.latLngBounds(bounds), { padding: [50, 50] });
-            }
-          }} title="Ajustar vista a todos los nodos"
-            className="h-9 w-9 flex items-center justify-center rounded-xl text-[#888] hover:text-[#ededed] hover:bg-white/10 transition-all">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M15 3h6v6"/><path d="M9 21H3v-6"/><path d="m21 3-7 7"/><path d="m3 21 7-7"/></svg>
-          </button>
+          <Tooltip content="Acercar" placement="left">
+            <button onClick={() => mapRef.current?.zoomIn()}
+              className="h-8 w-8 flex items-center justify-center rounded-lg text-[#ededed] hover:bg-white/10 transition-all">
+              <Plus className="h-4 w-4" />
+            </button>
+          </Tooltip>
+          <Tooltip content="Alejar" placement="left">
+            <button onClick={() => mapRef.current?.zoomOut()}
+              className="h-8 w-8 flex items-center justify-center rounded-lg text-[#ededed] hover:bg-white/10 transition-all">
+              <svg width="12" height="2" viewBox="0 0 24 2" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round"><line x1="2" y1="1" x2="22" y2="1"/></svg>
+            </button>
+          </Tooltip>
+          <Tooltip content="Ajustar a nodos" placement="left">
+            <button onClick={() => {
+              if (mapRef.current && nodesRef.current.length > 0 && LRef.current) {
+                const bounds = nodesRef.current.map((n) => [n.x, n.y] as [number, number]);
+                mapRef.current.fitBounds(LRef.current.latLngBounds(bounds), { padding: [50, 50] });
+              }
+            }} className="h-8 w-8 flex items-center justify-center rounded-lg text-[#888] hover:text-[#ededed] hover:bg-white/10 transition-all">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M15 3h6v6"/><path d="M9 21H3v-6"/><path d="m21 3-7 7"/><path d="m3 21 7-7"/></svg>
+            </button>
+          </Tooltip>
 
-          <div className="mx-1.5 h-px bg-white/10 my-0.5" />
+          <div className="mx-1 h-px bg-white/10 my-0.5" />
 
-          {/* Visibility Visibility Group */}
-          <button onClick={() => setShowNodes(v => !v)} title={showNodes ? "Ocultar nodos" : "Mostrar nodos"}
-            className="h-9 w-9 flex items-center justify-center rounded-xl transition-all hover:bg-white/10" style={{ color: showNodes ? "#22c55e" : "#888" }}>
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/></svg>
-          </button>
+          {/* Visibility Group */}
+          <Tooltip content={showNodes ? "Ocultar nodos" : "Mostrar nodos"} placement="left">
+            <button onClick={() => setShowNodes(v => !v)}
+              className="h-7 w-7 flex items-center justify-center rounded-lg transition-all hover:bg-white/10" style={{ color: showNodes ? "#22c55e" : "#888" }}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/></svg>
+            </button>
+          </Tooltip>
+          <Tooltip content={showLinks ? "Ocultar links" : "Mostrar links"} placement="left">
+            <button onClick={() => setShowLinks(v => !v)}
+              className="h-7 w-7 flex items-center justify-center rounded-lg transition-all hover:bg-white/10" style={{ color: showLinks ? "#3b82f6" : "#888" }}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+            </button>
+          </Tooltip>
+          <Tooltip content={showCameras ? "Ocultar cámaras" : "Mostrar cámaras"} placement="left">
+            <button onClick={() => setShowCameras(v => !v)}
+              className="h-7 w-7 flex items-center justify-center rounded-lg transition-all hover:bg-white/10" style={{ color: showCameras ? "#f59e0b" : "#888" }}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m16.24 7.76-1.804 5.412a2 2 0 0 1-1.265 1.265L7.76 16.24l1.804-5.412a2 2 0 0 1 1.265-1.265z"/><circle cx="12" cy="12" r="10"/></svg>
+            </button>
+          </Tooltip>
+          <Tooltip content={showLabels ? "Ocultar etiquetas" : "Mostrar etiquetas"} placement="left">
+            <button onClick={() => setShowLabels(v => !v)}
+              className="h-7 w-7 flex items-center justify-center rounded-lg transition-all hover:bg-white/10" style={{ color: showLabels ? "#e2e8f0" : "#888" }}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" x2="15" y1="20" y2="20"/><line x1="12" x2="12" y1="4" y2="20"/></svg>
+            </button>
+          </Tooltip>
+          <Tooltip content={showFOV ? "Ocultar cobertura" : "Mostrar cobertura"} placement="left">
+            <button onClick={() => setShowFOV(v => !v)}
+              className="h-7 w-7 flex items-center justify-center rounded-lg transition-all hover:bg-white/10" style={{ color: showFOV ? "#8b5cf6" : "#888" }}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+            </button>
+          </Tooltip>
 
-          <button onClick={() => setShowLinks(v => !v)} title={showLinks ? "Ocultar links" : "Mostrar links"}
-            className="h-9 w-9 flex items-center justify-center rounded-xl transition-all hover:bg-white/10" style={{ color: showLinks ? "#3b82f6" : "#888" }}>
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
-          </button>
-
-          <button onClick={() => setShowCameras(v => !v)} title={showCameras ? "Ocultar camaras" : "Mostrar camaras"}
-            className="h-9 w-9 flex items-center justify-center rounded-xl transition-all hover:bg-white/10" style={{ color: showCameras ? "#f59e0b" : "#888" }}>
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m16.24 7.76-1.804 5.412a2 2 0 0 1-1.265 1.265L7.76 16.24l1.804-5.412a2 2 0 0 1 1.265-1.265z"/><circle cx="12" cy="12" r="10"/></svg>
-          </button>
-
-          <button onClick={() => setShowLabels(v => !v)} title={showLabels ? "Ocultar etiquetas" : "Mostrar etiquetas"}
-            className="h-9 w-9 flex items-center justify-center rounded-xl transition-all hover:bg-white/10" style={{ color: showLabels ? "#e2e8f0" : "#888" }}>
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" x2="15" y1="20" y2="20"/><line x1="12" x2="12" y1="4" y2="20"/></svg>
-          </button>
-
-          <button onClick={() => setShowFOV(v => !v)} title={showFOV ? "Ocultar areas de cobertura" : "Mostrar areas de cobertura"}
-            className="h-9 w-9 flex items-center justify-center rounded-xl transition-all hover:bg-white/10" style={{ color: showFOV ? "#8b5cf6" : "#888" }}>
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
-          </button>
+          {onTogglePanel && (
+            <>
+              <div className="mx-1 h-px bg-white/10 my-0.5" />
+              <Tooltip content={panelCollapsed ? "Mostrar monitores" : "Ocultar monitores"} placement="left">
+                <button onClick={onTogglePanel}
+                  className="h-7 w-7 flex items-center justify-center rounded-lg transition-all hover:bg-white/10"
+                  style={{ color: !panelCollapsed ? "#60a5fa" : "#888" }}>
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/></svg>
+                </button>
+              </Tooltip>
+            </>
+          )}
         </div>
       )}
 
@@ -2755,7 +3376,8 @@ export default function LeafletMapView({
                   <label className="text-[10px] font-bold uppercase tracking-wider text-[#666] block mb-2">Color del nodo</label>
                   <div className="flex flex-wrap gap-2">
                     {nodeColors.map((c) => (
-                      <button key={c.color} type="button" onClick={() => setEditNodeColor(c.color)} title={c.name}
+                      <Tooltip key={c.color} content={c.name}>
+                      <button type="button" onClick={() => setEditNodeColor(c.color)}
                         className="relative h-7 w-7 rounded-lg transition-all hover:scale-110"
                         style={{
                           background: c.color || "rgba(255,255,255,0.08)",
@@ -2764,6 +3386,7 @@ export default function LeafletMapView({
                         }}>
                         {!c.color && <span className="text-[8px] font-bold text-[#888] flex items-center justify-center h-full">AUTO</span>}
                       </button>
+                      </Tooltip>
                     ))}
                   </div>
                 </div>
@@ -2949,7 +3572,8 @@ export default function LeafletMapView({
                 <div className="text-[10px] text-[#666] font-bold uppercase tracking-wider mb-2">Color del area</div>
                 <div className="grid grid-cols-6 gap-2">
                   {colorOptions.map((c) => (
-                    <button key={c.color} onClick={() => applyChange(c.color)} title={c.name}
+                    <Tooltip key={c.color} content={c.name}>
+                    <button onClick={() => applyChange(c.color)}
                       className="w-10 h-10 rounded-xl transition-all hover:scale-110"
                       style={{
                         background: c.color,
@@ -2957,6 +3581,7 @@ export default function LeafletMapView({
                         boxShadow: currentColor === c.color ? `0 0 12px ${c.color}88` : "none",
                       }}
                     />
+                    </Tooltip>
                   ))}
                 </div>
               </div>
@@ -3111,7 +3736,7 @@ export default function LeafletMapView({
         const down = nodesRef.current.filter(n => { const m = getMonitorData(n.kuma_monitor_id); return m?.status === 0; }).length;
         const pending = total - up - down;
         return (
-          <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-[10000] flex items-center gap-3 rounded-2xl px-4 py-1.5"
+          <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-[10000] flex items-center gap-3 rounded-2xl px-4 py-1.5 kumamap-no-print"
             style={{ background: "rgba(10,10,10,0.8)", border: "1px solid rgba(255,255,255,0.06)", backdropFilter: "blur(16px)" }}>
             <span className="text-[10px] font-bold text-[#888]">{nodesRef.current.filter(n => n.icon !== "_textLabel" && n.icon !== "_waypoint").length} nodos</span>
             <span className="text-[10px] text-[#555]">|</span>
@@ -3475,6 +4100,109 @@ export default function LeafletMapView({
         );
       })()}
 
+      {/* ═══ Linked Maps Modal ═══ */}
+      {nodeMapModalNodeId && (() => {
+        const node = nodesRef.current.find(n => n.id === nodeMapModalNodeId);
+        if (!node) { setNodeMapModalNodeId(null); return null; }
+        const cd = node.custom_data ? (() => { try { return JSON.parse(node.custom_data!); } catch { return {}; } })() : {};
+        const linkedMaps: { id: string; name: string }[] = cd.linkedMaps || [];
+        const addLinkedMap = (mapId: string, mapName: string) => {
+          const idx = nodesRef.current.findIndex(n => n.id === nodeMapModalNodeId);
+          if (idx < 0) return;
+          const ncd = nodesRef.current[idx].custom_data ? JSON.parse(nodesRef.current[idx].custom_data!) : {};
+          const existing: { id: string; name: string }[] = ncd.linkedMaps || [];
+          if (existing.some(m => m.id === mapId)) { toast("Este mapa ya está vinculado"); return; }
+          ncd.linkedMaps = [...existing, { id: mapId, name: mapName }];
+          nodesRef.current[idx] = { ...nodesRef.current[idx], custom_data: JSON.stringify(ncd) };
+          if (LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current);
+          toast.success("Mapa vinculado", { description: mapName });
+          setNodeMapModalNodeId(null);
+        };
+        const removeLinkedMap = (mapId: string) => {
+          const idx = nodesRef.current.findIndex(n => n.id === nodeMapModalNodeId);
+          if (idx < 0) return;
+          const ncd = nodesRef.current[idx].custom_data ? JSON.parse(nodesRef.current[idx].custom_data!) : {};
+          ncd.linkedMaps = (ncd.linkedMaps || []).filter((m: any) => m.id !== mapId);
+          nodesRef.current[idx] = { ...nodesRef.current[idx], custom_data: JSON.stringify(ncd) };
+          if (LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current);
+          toast.success("Mapa desvinculado");
+        };
+        const unlinkedMaps = availableMaps.filter(m => m.id !== mapId && !linkedMaps.some(lm => lm.id === m.id));
+        return (
+          <div className="fixed inset-0 z-[9999] flex items-center justify-center" style={{ background: "rgba(0,0,0,0.7)", backdropFilter: "blur(8px)" }}>
+            <div className="w-full max-w-md rounded-2xl shadow-2xl" style={{ background: "rgba(14,14,14,0.99)", border: "1px solid rgba(99,102,241,0.25)" }}>
+              {/* Header */}
+              <div className="flex items-center gap-3 px-5 py-4" style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+                <div className="flex h-9 w-9 items-center justify-center rounded-xl" style={{ background: "rgba(99,102,241,0.12)", border: "1px solid rgba(99,102,241,0.25)" }}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#818cf8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-[#ededed]">Mapas del nodo</h3>
+                  <p className="text-[10px] text-[#666]">{node.label}</p>
+                </div>
+                <button onClick={() => setNodeMapModalNodeId(null)} className="ml-auto text-[#555] hover:text-[#ededed] text-xl leading-none">&times;</button>
+              </div>
+
+              {/* Linked maps list */}
+              <div className="px-5 py-3 space-y-1.5" style={{ minHeight: "80px" }}>
+                {linkedMaps.length === 0 ? (
+                  <div className="flex flex-col items-center py-6 text-[#555]">
+                    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="mb-2 opacity-30"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                    <p className="text-[11px]">Sin mapas vinculados</p>
+                    <p className="text-[10px] text-[#444] mt-0.5">Seleccioná un mapa abajo para vincular</p>
+                  </div>
+                ) : linkedMaps.map(lm => (
+                  <div key={lm.id} className="flex items-center gap-3 rounded-xl px-3 py-2.5 group"
+                    style={{ background: "rgba(99,102,241,0.06)", border: "1px solid rgba(99,102,241,0.12)" }}>
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#818cf8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                    <span className="flex-1 text-xs font-semibold text-[#a5b4fc] truncate">{lm.name}</span>
+                    <Tooltip content="Abrir mapa en kiosco">
+                    <a href={apiUrl(`/view/${lm.id}`)} target="_blank" rel="noopener noreferrer"
+                      className="rounded-lg px-2 py-1 text-[10px] font-semibold text-[#60a5fa] hover:bg-blue-500/10 transition-all"
+                      onClick={(e) => e.stopPropagation()}>
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" x2="21" y1="14" y2="3"/></svg>
+                    </a>
+                    </Tooltip>
+                    <Tooltip content="Desvincular">
+                    <button onClick={() => removeLinkedMap(lm.id)}
+                      className="rounded-lg p-1 text-[#555] hover:text-red-400 transition-all opacity-0 group-hover:opacity-100">
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" x2="6" y1="6" y2="18"/><line x1="6" x2="18" y1="6" y2="18"/></svg>
+                    </button>
+                    </Tooltip>
+                  </div>
+                ))}
+              </div>
+
+              {/* Add map section */}
+              {unlinkedMaps.length > 0 && (
+                <div className="px-5 pb-4" style={{ borderTop: "1px solid rgba(255,255,255,0.05)" }}>
+                  <p className="text-[9px] font-bold uppercase tracking-wider text-[#555] pt-3 pb-2">Vincular mapa</p>
+                  <div className="space-y-1 max-h-[180px] overflow-y-auto">
+                    {unlinkedMaps.map(m => (
+                      <button key={m.id} onClick={() => addLinkedMap(m.id, m.name)}
+                        className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-xs text-[#888] transition-all"
+                        onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "rgba(99,102,241,0.08)"; (e.currentTarget as HTMLElement).style.color = "#ededed"; }}
+                        onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; (e.currentTarget as HTMLElement).style.color = "#888"; }}>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#6366f1" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="16"/><line x1="8" x2="16" y1="12" y2="12"/></svg>
+                        <span className="flex-1 text-left truncate">{m.name}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Close */}
+              <div className="px-5 py-3" style={{ borderTop: "1px solid rgba(255,255,255,0.06)" }}>
+                <button onClick={() => setNodeMapModalNodeId(null)}
+                  className="w-full rounded-xl py-2 text-xs font-semibold text-[#888] transition-all hover:bg-white/5">
+                  Cerrar
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Custom CSS */}
       <style>{`
         .leaflet-label-dark {
@@ -3581,6 +4309,12 @@ export default function LeafletMapView({
           0%, 100% { transform: scale(1); opacity: 1; }
           50% { transform: scale(1.15); opacity: 0.8; }
         }
+        @keyframes ping-badge {
+          0%, 100% { transform: scale(1); box-shadow: 0 0 10px rgba(239,68,68,0.7), 0 0 20px rgba(239,68,68,0.3); }
+          50% { transform: scale(1.18); box-shadow: 0 0 16px rgba(239,68,68,0.9), 0 0 32px rgba(239,68,68,0.5); }
+        }
+        /* Make sure downtime counter sits above all other layers */
+        .downtime-counter { z-index: 6000 !important; }
       `}</style>
     </div>
   );

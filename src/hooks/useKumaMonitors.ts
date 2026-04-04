@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { toast } from "sonner";
+import { sileo } from "sileo";
 import type { KumaMonitor } from "@/components/network-map/MonitorPanel";
 import { getLastMonitorsPayload } from "@/lib/socket";
 
@@ -23,9 +23,9 @@ export function useKumaMonitors() {
           const prev = prevStatusRef.current.get(m.id);
           if (prev !== undefined && prev !== m.status) {
             if (m.status === 0) {
-              toast.error(`${m.name} DOWN`, { description: m.msg || "Monitor caido", duration: 8000 });
+              sileo.error({ title: `${m.name} DOWN`, description: m.msg || "Monitor caido", duration: 8000 });
             } else if (m.status === 1 && prev === 0) {
-              toast.success(`${m.name} UP`, { description: `${m.ping ?? "?"}ms`, duration: 5000 });
+              sileo.success({ title: `${m.name} UP`, description: `${m.ping ?? "?"}ms`, duration: 5000 });
             }
           }
           prevStatusRef.current.set(m.id, m.status ?? 2);

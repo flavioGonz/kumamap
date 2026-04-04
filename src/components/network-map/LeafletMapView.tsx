@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { apiUrl } from "@/lib/api";
-import { toast } from "sonner";
+import { sileo } from "sileo";
 import type { KumaMonitor } from "./MonitorPanel";
 import ContextMenu, { menuIcons } from "./ContextMenu";
 import LinkModal, { type LinkFormData } from "./LinkModal";
@@ -195,14 +195,14 @@ export default function LeafletMapView({
 
   function performUndo() {
     const prev = undoStackRef.current.pop();
-    if (!prev) { toast.info("Nada que deshacer"); return; }
+    if (!prev) { sileo.info({ title: "Nada que deshacer" }); return; }
     nodesRef.current = prev.nodes;
     edgesRef.current = prev.edges;
     if (LRef.current && mapRef.current) {
       renderNodes(LRef.current, mapRef.current);
       renderEdges(LRef.current, mapRef.current);
     }
-    toast.success("Deshecho");
+    sileo.success({ title: "Deshecho" });
   }
 
   // Keep ref in sync with state for closures
@@ -1355,18 +1355,28 @@ export default function LeafletMapView({
     });
   }
 
-  // Format downtime duration as HH:MM:SS or Xd HH:MM
-  function formatDowntime(ms: number): string {
+  // Format downtime: shows elapsed time + start date/time
+  function formatDowntime(ms: number, startTimestamp?: number): string {
+    if (ms < 0) ms = 0;
     const totalSec = Math.floor(ms / 1000);
     const h = Math.floor(totalSec / 3600);
     const m = Math.floor((totalSec % 3600) / 60);
     const s = totalSec % 60;
+    let elapsed: string;
     if (h >= 24) {
       const d = Math.floor(h / 24);
       const rh = h % 24;
-      return `${d}d ${String(rh).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+      elapsed = `${d}d ${String(rh).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+    } else {
+      elapsed = `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
     }
-    return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+    if (startTimestamp) {
+      const dt = new Date(startTimestamp);
+      const day = dt.toLocaleDateString("es-UY", { day: "2-digit", month: "short" });
+      const time = dt.toLocaleTimeString("es-UY", { hour: "2-digit", minute: "2-digit", hour12: false });
+      return `${elapsed} (${day} ${time})`;
+    }
+    return elapsed;
   }
 
   // Update downtime counter labels on the map (called every second)
@@ -1401,7 +1411,7 @@ export default function LeafletMapView({
       const mon = getMonitorData(node.kuma_monitor_id);
       const downTimestamp = mon?.downTime ? new Date(mon.downTime).getTime() : (downSinceRef.current.get(node.kuma_monitor_id!) ?? now);
       const elapsed = now - downTimestamp;
-      const label = formatDowntime(elapsed);
+      const label = formatDowntime(elapsed, downTimestamp);
 
       // Node visual size (to anchor the badge above it)
       const cd = node.custom_data ? (() => { try { return JSON.parse(node.custom_data!); } catch { return {}; } })() : {};
@@ -1521,7 +1531,8 @@ export default function LeafletMapView({
     linkSourceRef.current = nodeId;
     setLinkSource(nodeId);
     const node = nodesRef.current.find((n) => n.id === nodeId);
-    toast.info(`Haz clic en el nodo destino`, {
+    sileo.info({
+      title: `Haz clic en el nodo destino`,
       description: `Origen: ${node?.label || nodeId}`,
       duration: 4000,
     });
@@ -1542,7 +1553,7 @@ export default function LeafletMapView({
 
     // Prevent self-link
     if (linkSource === targetId) {
-      toast.error("No se puede conectar un nodo consigo mismo");
+      sileo.error({ title: "No se puede conectar un nodo consigo mismo" });
       cancelLinkCreation();
       return;
     }
@@ -1569,7 +1580,7 @@ export default function LeafletMapView({
           custom_data: JSON.stringify(customData),
         };
       }
-      toast.success("Conexion actualizada");
+      sileo.success({ title: "Conexion actualizada" });
     } else {
       pushUndo();
       const newEdge: SavedEdge = {
@@ -1584,7 +1595,7 @@ export default function LeafletMapView({
 
       const srcName = nodesRef.current.find((n) => n.id === sourceId)?.label;
       const tgtName = nodesRef.current.find((n) => n.id === targetId)?.label;
-      toast.success("Conexion creada", { description: `${srcName} → ${tgtName}` });
+      sileo.success({ title: "Conexion creada", description: `${srcName} → ${tgtName}` });
     }
 
     setLinkModalOpen(false);
@@ -1631,7 +1642,7 @@ export default function LeafletMapView({
 
   function finishPolygon() {
     if (polygonPointsRef.current.length < 3) {
-      toast.error("Se necesitan al menos 3 puntos");
+      sileo.error({ title: "Se necesitan al menos 3 puntos" });
       cancelPolygon();
       return;
     }
@@ -1661,7 +1672,7 @@ export default function LeafletMapView({
       renderNodes(LRef.current, mapRef.current);
       renderEdges(LRef.current, mapRef.current);
     }
-    toast.success("Zona creada — doble clic para renombrar");
+    sileo.success({ title: "Zona creada — doble clic para renombrar" });
   }
 
   function cancelPolygon() {
@@ -1713,7 +1724,7 @@ export default function LeafletMapView({
             pushUndo();
             nodesRef.current = nodesRef.current.filter((n) => n.id !== nodeId);
             if (LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current);
-            toast.success("Zona eliminada");
+            sileo.success({ title: "Zona eliminada" });
           },
         },
       ];
@@ -1737,7 +1748,7 @@ export default function LeafletMapView({
             nodesRef.current = nodesRef.current.filter((n) => n.id !== nodeId);
             edgesRef.current = edgesRef.current.filter((e) => e.source_node_id !== nodeId && e.target_node_id !== nodeId);
             if (LRef.current && mapRef.current) { renderNodes(LRef.current, mapRef.current); renderEdges(LRef.current, mapRef.current); }
-            toast.success("Punto eliminado");
+            sileo.success({ title: "Punto eliminado" });
           },
         },
       ];
@@ -1832,7 +1843,7 @@ export default function LeafletMapView({
             pushUndo();
             nodesRef.current = nodesRef.current.filter((n) => n.id !== nodeId);
             if (LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current);
-            toast.success("Etiqueta eliminada");
+            sileo.success({ title: "Etiqueta eliminada" });
           },
         },
       ];
@@ -1878,7 +1889,7 @@ export default function LeafletMapView({
               renderNodes(LRef.current, mapRef.current);
               renderEdges(LRef.current, mapRef.current);
             }
-            toast.success("Monitor desasignado");
+            sileo.success({ title: "Monitor desasignado" });
           }
         },
       }] : []),
@@ -1990,7 +2001,7 @@ export default function LeafletMapView({
               custom_data: JSON.stringify({ ...cd }),
             }];
             if (LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current);
-            toast.success("Camara duplicada");
+            sileo.success({ title: "Camara duplicada" });
           },
         },
       ] : []),
@@ -2012,7 +2023,7 @@ export default function LeafletMapView({
             custom_data: node?.custom_data || null,
           }];
           if (LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current);
-          toast.success("Nodo duplicado");
+          sileo.success({ title: "Nodo duplicado" });
         },
       }] : []),
       // TimeMachine: open pre-filtered to this sensor
@@ -2066,7 +2077,7 @@ export default function LeafletMapView({
             renderNodes(LRef.current, mapRef.current);
             renderEdges(LRef.current, mapRef.current);
           }
-          toast.success("Nodo eliminado");
+          sileo.success({ title: "Nodo eliminado" });
         },
       },
     ];
@@ -2106,7 +2117,7 @@ export default function LeafletMapView({
             oldCd.linkType = t.type;
             edgesRef.current[idx] = { ...edgesRef.current[idx], custom_data: JSON.stringify(oldCd) };
             if (LRef.current && mapRef.current) renderEdges(LRef.current, mapRef.current);
-            toast.success(`Enlace: ${t.label}`);
+            sileo.success({ title: `Enlace: ${t.label}` });
           }
         },
       })),
@@ -2119,7 +2130,7 @@ export default function LeafletMapView({
           pushUndo();
           edgesRef.current = edgesRef.current.filter((e) => e.id !== edgeId);
           if (LRef.current && mapRef.current) renderEdges(LRef.current, mapRef.current);
-          toast.success("Conexion eliminada");
+          sileo.success({ title: "Conexion eliminada" });
         },
       },
     ];
@@ -2135,7 +2146,7 @@ export default function LeafletMapView({
 
     // Prevent duplicates
     if (nodesRef.current.some((n) => n.kuma_monitor_id === monitor.id)) {
-      toast.error("Monitor duplicado", { description: `"${monitor.name}" ya existe en este mapa` });
+      sileo.error({ title: "Monitor duplicado", description: `"${monitor.name}" ya existe en este mapa` });
       return;
     }
 
@@ -2157,7 +2168,7 @@ export default function LeafletMapView({
     nodesRef.current = [...nodesRef.current, newNode];
     renderNodes(LRef.current, mapRef.current);
     renderEdges(LRef.current, mapRef.current);
-    toast.success("Monitor agregado", { description: monitor.name });
+    sileo.success({ title: "Monitor agregado", description: monitor.name });
   }, [kumaMonitors]);
 
   const handleDragOver = useCallback((event: React.DragEvent) => {
@@ -2200,7 +2211,7 @@ export default function LeafletMapView({
     );
     if (match) {
       mapRef.current.setView([match.x, match.y], Math.max(mapRef.current.getZoom(), isImageMode ? mapRef.current.getZoom() : 16), { animate: true });
-      toast.success("Nodo encontrado", { description: match.label });
+      sileo.success({ title: "Nodo encontrado", description: match.label });
       return true;
     }
     return false;
@@ -2212,7 +2223,7 @@ export default function LeafletMapView({
     // Always try node search first (works in both modes)
     if (handleNodeSearch()) return;
     // Livemap only: fall back to Nominatim geocoding
-    if (isImageMode) { toast.error("No se encontró ningún nodo con ese nombre"); return; }
+    if (isImageMode) { sileo.error({ title: "No se encontró ningún nodo con ese nombre" }); return; }
     try {
       const res = await fetch(
         `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchQuery)}&limit=1`,
@@ -2222,19 +2233,19 @@ export default function LeafletMapView({
       if (results.length > 0) {
         const { lat, lon, display_name } = results[0];
         mapRef.current.setView([parseFloat(lat), parseFloat(lon)], 16, { animate: true });
-        toast.success("Ubicacion encontrada", { description: display_name.substring(0, 60) });
+        sileo.success({ title: "Ubicacion encontrada", description: display_name.substring(0, 60) });
       } else {
-        toast.error("No se encontro la direccion ni nodo con ese nombre");
+        sileo.error({ title: "No se encontro la direccion ni nodo con ese nombre" });
       }
     } catch {
-      toast.error("Error buscando");
+      sileo.error({ title: "Error buscando" });
     }
   }, [searchQuery, handleNodeSearch, isImageMode]);
 
   // ── Export as PNG (html2canvas) ──
   const handleExportPng = useCallback(async () => {
     if (!containerRef.current) return;
-    toast.info("Generando imagen...", { duration: 2000 });
+    sileo.info({ title: "Generando imagen...", duration: 2000 });
     try {
       const h2c = (await import("html2canvas")).default;
       const canvas = await h2c(containerRef.current, {
@@ -2248,9 +2259,9 @@ export default function LeafletMapView({
       link.download = `${mapName || "kumamap"}-${new Date().toISOString().slice(0, 10)}.png`;
       link.href = canvas.toDataURL("image/png");
       link.click();
-      toast.success("Imagen exportada");
+      sileo.success({ title: "Imagen exportada" });
     } catch (err) {
-      toast.error("Error al exportar imagen");
+      sileo.error({ title: "Error al exportar imagen" });
       console.error(err);
     }
   }, [mapName]);
@@ -2401,7 +2412,7 @@ export default function LeafletMapView({
     // ── Download ──
     const filename = `${(mapName || "kumamap").replace(/[^a-zA-Z0-9_\-]/g, "_")}-nodos-${new Date().toISOString().slice(0, 10)}.xlsx`;
     XLSX.writeFile(wb, filename, { bookType: "xlsx", compression: true });
-    toast.success(`${dataRows.length} nodos exportados como XLSX`);
+    sileo.success({ title: `${dataRows.length} nodos exportados como XLSX` });
   }, [mapName, kumaMonitors]);
 
   return (
@@ -2625,7 +2636,7 @@ export default function LeafletMapView({
             const id = `cam-${Date.now()}`;
             nodesRef.current = [...nodesRef.current, { id, kuma_monitor_id: null, label: "Camara", x: center.lat, y: center.lng, icon: "_camera", custom_data: JSON.stringify({ type: "camera", rotation: 0, fov: 60, fovRange: isImageMode ? 200 : 0.002 }) }];
             if (LRef.current) renderNodes(LRef.current, mapRef.current);
-            toast.success("Camara agregada — clic derecho para rotar");
+            sileo.success({ title: "Camara agregada — clic derecho para rotar" });
           }}
             className="group flex items-center justify-center rounded-xl p-2 text-[#888] hover:text-[#ededed] hover:bg-white/[0.06] transition-all">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m16.24 7.76-1.804 5.412a2 2 0 0 1-1.265 1.265L7.76 16.24l1.804-5.412a2 2 0 0 1 1.265-1.265z"/><circle cx="12" cy="12" r="10"/></svg>
@@ -2643,7 +2654,7 @@ export default function LeafletMapView({
             const id = `wp-${Date.now()}`;
             nodesRef.current = [...nodesRef.current, { id, kuma_monitor_id: null, label: "", x: center.lat, y: center.lng, icon: "_waypoint" }];
             if (LRef.current) renderNodes(LRef.current, mapRef.current);
-            toast.success("Punto de ruta agregado");
+            sileo.success({ title: "Punto de ruta agregado" });
           }}
             className="group flex items-center gap-1 rounded-xl px-2 py-1.5 text-[#888] hover:text-[#ededed] hover:bg-white/[0.06] transition-all">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/></svg>
@@ -2653,8 +2664,8 @@ export default function LeafletMapView({
           <Tooltip content={linkSource ? "Cancelar link" : "Crear link entre nodos"} placement="bottom">
           <button onClick={() => {
             if (linkSource) { cancelLinkCreation(); return; }
-            if (nodesRef.current.length === 0) { toast.error("Agrega nodos primero"); return; }
-            toast.info("Clic derecho en un nodo → Nuevo link", { duration: 4000 });
+            if (nodesRef.current.length === 0) { sileo.error({ title: "Agrega nodos primero" }); return; }
+            sileo.info({ title: "Clic derecho en un nodo → Nuevo link", duration: 4000 });
           }}
             className={`group flex items-center gap-1 rounded-xl px-2 py-1.5 transition-all ${linkSource ? "text-[#60a5fa]" : "text-[#888] hover:text-[#ededed] hover:bg-white/[0.06]"}`}
             style={linkSource ? { background: "rgba(59,130,246,0.15)", border: "1px solid rgba(59,130,246,0.35)" } : {}}>
@@ -2671,7 +2682,7 @@ export default function LeafletMapView({
                 else { cancelPolygon(); setPolygonMode(false); }
               } else {
                 setPolygonMode(true);
-                toast.info("Clic en el mapa para agregar puntos. Doble clic para terminar.", { duration: 5000 });
+                sileo.info({ title: "Clic en el mapa para agregar puntos. Doble clic para terminar.", duration: 5000 });
               }
             }}
             className={`group flex items-center gap-1 rounded-xl px-2 py-1.5 transition-all ${polygonMode ? "text-[#4ade80]" : "text-[#888] hover:text-[#ededed] hover:bg-white/[0.06]"}`}
@@ -2961,9 +2972,9 @@ export default function LeafletMapView({
                         renderNodes(LRef.current, mapRef.current);
                         renderEdges(LRef.current, mapRef.current);
                       }
-                      toast.success(`Mapa "${m.name}" importado`, { description: `${importedNodes.length} nodos, ${importedEdges.length} links` });
+                      sileo.success({ title: `Mapa "${m.name}" importado`, description: `${importedNodes.length} nodos, ${importedEdges.length} links` });
                     } catch {
-                      toast.error("Error al importar el mapa");
+                      sileo.error({ title: "Error al importar el mapa" });
                     } finally {
                       setImportingMapId(null);
                     }
@@ -3408,7 +3419,7 @@ export default function LeafletMapView({
                             renderNodes(LRef.current, mapRef.current);
                             renderEdges(LRef.current, mapRef.current);
                           }
-                          toast.success("Monitor asignado", { description: m.name });
+                          sileo.success({ title: "Monitor asignado", description: m.name });
                         }
                         setAssignModalOpen(false);
                       }}
@@ -3575,7 +3586,7 @@ export default function LeafletMapView({
                         onClick={() => {
                           if (!isCustom) {
                             applyLens(lens.fov);
-                            toast.success(`Lente: ${lens.name}`, { description: `${lens.fov}° (${lens.mm})` });
+                            sileo.success({ title: `Lente: ${lens.name}`, description: `${lens.fov}° (${lens.mm})` });
                           }
                         }}
                         className="w-full flex items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-all"
@@ -3961,7 +3972,7 @@ export default function LeafletMapView({
                 };
               }
               setStreamConfigNodeId(null);
-              toast.success(config.streamUrl ? "Stream configurado" : "Stream eliminado");
+              sileo.success({ title: config.streamUrl ? "Stream configurado" : "Stream eliminado" });
             }}
             onClose={() => setStreamConfigNodeId(null)}
           />
@@ -4045,11 +4056,11 @@ export default function LeafletMapView({
           if (idx < 0) return;
           const ncd = nodesRef.current[idx].custom_data ? JSON.parse(nodesRef.current[idx].custom_data!) : {};
           const existing: { id: string; name: string }[] = ncd.linkedMaps || [];
-          if (existing.some(m => m.id === mapId)) { toast("Este mapa ya está vinculado"); return; }
+          if (existing.some(m => m.id === mapId)) { sileo.info({ title: "Este mapa ya está vinculado" }); return; }
           ncd.linkedMaps = [...existing, { id: mapId, name: mapName }];
           nodesRef.current[idx] = { ...nodesRef.current[idx], custom_data: JSON.stringify(ncd) };
           if (LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current);
-          toast.success("Mapa vinculado", { description: mapName });
+          sileo.success({ title: "Mapa vinculado", description: mapName });
           setNodeMapModalNodeId(null);
         };
         const removeLinkedMap = (mapId: string) => {
@@ -4059,7 +4070,7 @@ export default function LeafletMapView({
           ncd.linkedMaps = (ncd.linkedMaps || []).filter((m: any) => m.id !== mapId);
           nodesRef.current[idx] = { ...nodesRef.current[idx], custom_data: JSON.stringify(ncd) };
           if (LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current);
-          toast.success("Mapa desvinculado");
+          sileo.success({ title: "Mapa desvinculado" });
         };
         const unlinkedMaps = availableMaps.filter(m => m.id !== mapId && !linkedMaps.some(lm => lm.id === m.id));
         return (

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useEffect, useRef } from "react";
-import { Toaster } from "sonner";
+import { Toaster } from "sileo";
 import NetworkMapEditor from "@/components/network-map/NetworkMapEditor";
 import LoginPage from "@/components/LoginPage";
 import MapListView from "@/components/MapListView";
@@ -74,14 +74,6 @@ export default function Page() {
       <Toaster
         position="bottom-left"
         theme="dark"
-        toastOptions={{
-          style: {
-            background: "rgba(20,20,20,0.95)",
-            border: "1px solid rgba(255,255,255,0.08)",
-            backdropFilter: "blur(12px)",
-            color: "#ededed",
-          },
-        }}
       />
       <div style={viewStyle}>
         {selectedMapId ? (

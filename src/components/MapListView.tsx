@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
-import { toast } from "sonner";
+import { sileo } from "sileo";
 import {
   Plus,
   Network,
@@ -91,7 +91,7 @@ export default function MapListView({
       body: JSON.stringify({ name, kuma_group_id: newMapGroup || null, background_type: newMapBgType }),
     });
     const map = await res.json();
-    toast.success("Mapa creado", { description: name });
+    sileo.success({ title: "Mapa creado", description: name });
     setNewMapName(""); setNewMapGroup(""); setNewMapBgType("livemap");
     onOpenMap(map.id);
   };
@@ -104,7 +104,7 @@ export default function MapListView({
       body: JSON.stringify({ name: name.trim(), parent_id: parentId, background_type: bgType }),
     });
     const map = await res.json();
-    toast.success("Submap creado", { description: name.trim() });
+    sileo.success({ title: "Submap creado", description: name.trim() });
     setExpandedMaps(prev => new Set([...prev, parentId]));
     fetchMaps();
     onOpenMap(map.id);
@@ -135,7 +135,7 @@ export default function MapListView({
 
   const deleteMap = async (id: string, name: string) => {
     await fetch(apiUrl(`/api/maps/${id}`), { method: "DELETE" });
-    toast.success("Mapa eliminado", { description: name });
+    sileo.success({ title: "Mapa eliminado", description: name });
     fetchMaps();
   };
 
@@ -158,10 +158,10 @@ export default function MapListView({
       setExpandedMaps(prev => new Set([...prev, newParentId]));
       const draggedName = maps.find(m => m.id === draggedId)?.name || "";
       const parentName = maps.find(m => m.id === newParentId)?.name || "";
-      toast.success("Mapa reubicado", { description: `"${draggedName}" ahora es submap de "${parentName}"` });
+      sileo.success({ title: "Mapa reubicado", description: `"${draggedName}" ahora es submap de "${parentName}"` });
     } else {
       const draggedName = maps.find(m => m.id === draggedId)?.name || "";
-      toast.success("Mapa movido a raíz", { description: draggedName });
+      sileo.success({ title: "Mapa movido a raíz", description: draggedName });
     }
   };
 
@@ -176,13 +176,13 @@ export default function MapListView({
         body: JSON.stringify({ ...data, map: { ...data.map, name: `${data.map?.name || map.name} (copia)` } }),
       });
       if (cloneRes.ok) {
-        toast.success("Mapa clonado", { description: `${map.name} (copia)` });
+        sileo.success({ title: "Mapa clonado", description: `${map.name} (copia)` });
         fetchMaps();
       } else {
-        toast.error("Error al clonar mapa");
+        sileo.error({ title: "Error al clonar mapa" });
       }
     } catch {
-      toast.error("Error al clonar mapa");
+      sileo.error({ title: "Error al clonar mapa" });
     }
   };
 
@@ -203,9 +203,9 @@ export default function MapListView({
       a.download = `kumamap-backup-${new Date().toISOString().slice(0, 10)}.json`;
       a.click();
       URL.revokeObjectURL(url);
-      toast.success("Exportación completa", { description: `${maps.length} mapas exportados` });
+      sileo.success({ title: "Exportación completa", description: `${maps.length} mapas exportados` });
     } catch {
-      toast.error("Error al exportar todos los mapas");
+      sileo.error({ title: "Error al exportar todos los mapas" });
     } finally {
       setExportingAll(false);
     }
@@ -222,7 +222,7 @@ export default function MapListView({
       const mapsToImport = isBulk ? data : [data];
       setImportPreview({ maps: mapsToImport, isBulk });
     } catch {
-      toast.error("Archivo inválido — asegurate de seleccionar un JSON exportado de KumaMap");
+      sileo.error({ title: "Archivo inválido — asegurate de seleccionar un JSON exportado de KumaMap" });
     }
     e.target.value = "";
   };
@@ -247,8 +247,8 @@ export default function MapListView({
     setImporting(false);
     setImportPreview(null);
     fetchMaps();
-    if (failed === 0) toast.success("Importación completa", { description: `${ok} mapa${ok !== 1 ? "s" : ""} importado${ok !== 1 ? "s" : ""}` });
-    else toast.warning(`${ok} importados, ${failed} fallaron`);
+    if (failed === 0) sileo.success({ title: "Importación completa", description: `${ok} mapa${ok !== 1 ? "s" : ""} importado${ok !== 1 ? "s" : ""}` });
+    else sileo.warning({ title: `${ok} importados, ${failed} fallaron` });
   };
 
   const getGroupName = (groupId: number | null) => {
@@ -647,9 +647,9 @@ export default function MapListView({
                       document.execCommand("copy");
                       document.body.removeChild(el);
                     }
-                    toast.success("Ubicación copiada", { description: `${data.nodes?.length ?? 0} nodos` });
+                    sileo.success({ title: "Ubicación copiada", description: `${data.nodes?.length ?? 0} nodos` });
                   } catch {
-                    toast.error("No se pudo copiar la ubicación");
+                    sileo.error({ title: "No se pudo copiar la ubicación" });
                   }
                 }}
                   className="rounded-lg p-1.5 text-emerald-400 hover:bg-emerald-500/10 transition-all opacity-0 group-hover/row:opacity-100">

@@ -6,7 +6,7 @@ export function formatTraffic(bytes: number): string {
 }
 
 export function formatDowntime(ms: number): string {
-  if (ms < 0) return "0s";
+  if (ms < 0) ms = 0;
   const totalSec = Math.floor(ms / 1000);
   const days = Math.floor(totalSec / 86400);
   const hours = Math.floor((totalSec % 86400) / 3600);

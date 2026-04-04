@@ -380,6 +380,7 @@ function CanvasInner({
   // Link creation via context menu — simplified two-click flow
   const [linkSource, setLinkSource] = useState<string | null>(null);
   const linkSourceRef = useRef<string | null>(null);
+  const linkToastIdRef = useRef<string | null>(null);
 
   // Keep ref in sync
   useEffect(() => { linkSourceRef.current = linkSource; }, [linkSource]);
@@ -388,11 +389,10 @@ function CanvasInner({
     setLinkSource(nodeId);
     linkSourceRef.current = nodeId;
     const node = nodes.find((n) => n.id === nodeId);
-    sileo.info({
+    linkToastIdRef.current = sileo.info({
       title: `Enlazando desde "${node?.data.label || nodeId}"`,
       description: "Haz clic en el nodo destino, o ESC para cancelar",
       duration: 8000,
-      id: "link-mode",
     });
   };
 
@@ -403,7 +403,7 @@ function CanvasInner({
       if (e.key === "Escape") {
         setLinkSource(null);
         linkSourceRef.current = null;
-        sileo.dismiss("link-mode");
+        (() => { if (linkToastIdRef.current) { sileo.dismiss(linkToastIdRef.current); linkToastIdRef.current = null; } })();
       }
     };
     window.addEventListener("keydown", handler);
@@ -428,7 +428,7 @@ function CanvasInner({
       sileo.error({ title: "Ya existe una conexion entre estos nodos" });
       setLinkSource(null);
       linkSourceRef.current = null;
-      sileo.dismiss("link-mode");
+      (() => { if (linkToastIdRef.current) { sileo.dismiss(linkToastIdRef.current); linkToastIdRef.current = null; } })();
       return;
     }
     const srcNode = nodes.find((n) => n.id === src);
@@ -440,7 +440,7 @@ function CanvasInner({
     setLinkModalOpen(true);
     setLinkSource(null);
     linkSourceRef.current = null;
-    sileo.dismiss("link-mode");
+    (() => { if (linkToastIdRef.current) { sileo.dismiss(linkToastIdRef.current); linkToastIdRef.current = null; } })();
   }, [edges, nodes]);
 
   // Find nearby unconnected nodes for quick link submenu
@@ -538,7 +538,7 @@ function CanvasInner({
       label: linkSource ? "Cancelar enlace" : "Nuevo link...",
       icon: menuIcons.Link2,
       onClick: () => {
-        if (linkSource) { setLinkSource(null); sileo.dismiss("link-mode"); }
+        if (linkSource) { setLinkSource(null); (() => { if (linkToastIdRef.current) { sileo.dismiss(linkToastIdRef.current); linkToastIdRef.current = null; } })(); }
         else startLinkCreation(nodeId);
       },
     });
@@ -1350,7 +1350,7 @@ function CanvasInner({
                 <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
               </svg>
               <span className="text-[10px] font-semibold text-blue-300 hidden xl:inline">Enlazando...</span>
-              <button onClick={() => { setLinkSource(null); sileo.dismiss("link-mode"); }}
+              <button onClick={() => { setLinkSource(null); (() => { if (linkToastIdRef.current) { sileo.dismiss(linkToastIdRef.current); linkToastIdRef.current = null; } })(); }}
                 className="rounded-md px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider transition-all"
                 style={{ background: "rgba(255,255,255,0.06)", color: "#888" }}>ESC</button>
             </div>

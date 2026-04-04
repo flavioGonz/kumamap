@@ -30,7 +30,6 @@
     "sileo": "^0.1.5",
     "socket.io": "^4.8.3",
     "socket.io-client": "^4.8.3",
-    "sonner": "^2.0.7",
     "tailwindcss": "^4.2.2",
     "tsx": "^4.21.0",
     "typescript": "^6.0.2",

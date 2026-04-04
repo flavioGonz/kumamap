@@ -7,7 +7,7 @@ import type { KumaMonitor } from "./MonitorPanel";
 import ContextMenu, { menuIcons } from "./ContextMenu";
 import LinkModal, { type LinkFormData } from "./LinkModal";
 import InputModal from "./InputModal";
-import { Pencil, Signal, Plus } from "lucide-react";
+import { Pencil, Signal } from "lucide-react";
 import Tooltip from "./Tooltip";
 import TimeMachine from "./TimeMachine";
 import EventReportModal from "./EventReportModal";
@@ -18,7 +18,11 @@ import NodeSizeModal from "./NodeSizeModal";
 import { formatTraffic } from "@/utils/format";
 import { statusColors, getStatusColor as _getStatusColor, getMonitorData as _getMonitorData } from "@/utils/status";
 import { iconSvgPaths, getIconSvg, createMarkerIcon } from "@/utils/map-icons";
+import { exportMapPng, printMap, exportNodesXlsx } from "@/utils/map-export";
 import MapClock from "./MapClock";
+import VisualizationPanel from "./VisualizationPanel";
+import FOVColorPickerModal from "./FOVColorPickerModal";
+import LensPickerModal from "./LensPickerModal";
 
 interface SavedNode {
   id: string;
@@ -2243,176 +2247,18 @@ export default function LeafletMapView({
   }, [searchQuery, handleNodeSearch, isImageMode]);
 
   // ── Export as PNG (html2canvas) ──
-  const handleExportPng = useCallback(async () => {
-    if (!containerRef.current) return;
-    sileo.info({ title: "Generando imagen...", duration: 2000 });
-    try {
-      const h2c = (await import("html2canvas")).default;
-      const canvas = await h2c(containerRef.current, {
-        useCORS: true,
-        allowTaint: true,
-        scale: 2,
-        backgroundColor: "#0a0a0a",
-        logging: false,
-      } as any);
-      const link = document.createElement("a");
-      link.download = `${mapName || "kumamap"}-${new Date().toISOString().slice(0, 10)}.png`;
-      link.href = canvas.toDataURL("image/png");
-      link.click();
-      sileo.success({ title: "Imagen exportada" });
-    } catch (err) {
-      sileo.error({ title: "Error al exportar imagen" });
-      console.error(err);
-    }
+  const handleExportPng = useCallback(() => {
+    if (containerRef.current) exportMapPng(containerRef.current, mapName || "kumamap");
   }, [mapName]);
 
   // ── Print map ──
-  // Before printing: fit all nodes in view, then trigger window.print()
   const handlePrint = useCallback(() => {
-    const map = mapRef.current;
-    if (!map || nodesRef.current.length === 0) { window.print(); return; }
-
-    const nodes = nodesRef.current.filter(n => n.icon !== "_polygon");
-    if (nodes.length === 0) { window.print(); return; }
-
-    // Compute bounding box of all node positions
-    const lats = nodes.map(n => n.x);
-    const lngs = nodes.map(n => n.y);
-    const minLat = Math.min(...lats);
-    const maxLat = Math.max(...lats);
-    const minLng = Math.min(...lngs);
-    const maxLng = Math.max(...lngs);
-
-    try {
-      const Leaflet = LRef.current;
-      if (Leaflet) {
-        const bounds = Leaflet.latLngBounds([[minLat, minLng], [maxLat, maxLng]]);
-        map.fitBounds(bounds, { padding: [40, 40], animate: false, maxZoom: isImageMode ? map.getZoom() : 17 });
-      }
-    } catch { /* ignore fitBounds errors */ }
-
-    // Give Leaflet a moment to settle tiles/markers, then print
-    setTimeout(() => window.print(), 400);
+    printMap(mapRef.current, LRef.current, nodesRef.current, isImageMode);
   }, [isImageMode]);
 
   // ── Export node list as styled XLSX ──
-  const handleExportCsv = useCallback(async () => {
-    const XLSX = (await import("xlsx")).default;
-
-    // ── Collect rows ──
-    interface NodeRow { Nombre: string; Tipo: string; IP: string; MAC: string; "Monitor Kuma": string; Estado: string; "Ping (ms)": string; "Uptime 24h": string; URL: string; }
-    const dataRows: NodeRow[] = [];
-    for (const node of nodesRef.current) {
-      if (node.icon === "_textLabel" || node.icon === "_waypoint" || node.icon === "_polygon") continue;
-      let cd: Record<string, unknown> = {};
-      try { cd = JSON.parse(node.custom_data || "{}"); } catch { /* ignore */ }
-      const monitor = node.kuma_monitor_id ? kumaMonitors.find(m => m.id === node.kuma_monitor_id) : null;
-      const status = monitor ? (monitor.status === 1 ? "UP" : monitor.status === 0 ? "DOWN" : "Pendiente") : "";
-      dataRows.push({
-        Nombre: node.label || "",
-        Tipo: node.icon || "",
-        IP: String(cd.ip || ""),
-        MAC: String(cd.mac || ""),
-        "Monitor Kuma": monitor?.name || "",
-        Estado: status,
-        "Ping (ms)": monitor?.ping != null ? String(monitor.ping) : "",
-        "Uptime 24h": monitor?.uptime24 != null ? `${monitor.uptime24.toFixed(1)}%` : "",
-        URL: monitor?.url || "",
-      });
-    }
-
-    // ── Build workbook ──
-    const wb = XLSX.utils.book_new();
-    const headers = ["Nombre", "Tipo", "IP", "MAC", "Monitor Kuma", "Estado", "Ping (ms)", "Uptime 24h", "URL"];
-    const wsData = [headers, ...dataRows.map(r => headers.map(h => r[h as keyof NodeRow]))];
-    const ws = XLSX.utils.aoa_to_sheet(wsData);
-
-    // ── Column widths ──
-    ws["!cols"] = [{ wch: 28 }, { wch: 16 }, { wch: 18 }, { wch: 20 }, { wch: 28 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 38 }];
-
-    // ── Auto-filter on entire data range ──
-    ws["!autofilter"] = { ref: `A1:${XLSX.utils.encode_col(headers.length - 1)}1` };
-
-    // ── Header styles (xlsx supports basic cell styling via !type + s fields) ──
-    // Apply bold + colored background to header row
-    const headerColors: Record<string, string> = {
-      Nombre: "1e293b", Tipo: "1e293b", IP: "0f3460", MAC: "0f3460",
-      "Monitor Kuma": "0f3460", Estado: "0f3460", "Ping (ms)": "0f3460",
-      "Uptime 24h": "0f3460", URL: "1e293b",
-    };
-    headers.forEach((h, ci) => {
-      const cellAddr = XLSX.utils.encode_cell({ r: 0, c: ci });
-      if (!ws[cellAddr]) ws[cellAddr] = { v: h, t: "s" };
-      ws[cellAddr].s = {
-        font: { bold: true, color: { rgb: "E2E8F0" }, sz: 11, name: "Calibri" },
-        fill: { fgColor: { rgb: headerColors[h] || "1e293b" }, patternType: "solid" },
-        alignment: { horizontal: "center", vertical: "center", wrapText: false },
-        border: {
-          bottom: { style: "medium", color: { rgb: "6366F1" } },
-          right: { style: "thin", color: { rgb: "334155" } },
-        },
-      };
-    });
-
-    // ── Data row styles: alternating dark rows, status color ──
-    dataRows.forEach((row, ri) => {
-      const even = ri % 2 === 0;
-      const rowBg = even ? "0F172A" : "1E293B";
-      headers.forEach((h, ci) => {
-        const cellAddr = XLSX.utils.encode_cell({ r: ri + 1, c: ci });
-        if (!ws[cellAddr]) ws[cellAddr] = { v: row[h as keyof NodeRow] || "", t: "s" };
-        let fontColor = "CBD5E1";
-        if (h === "Estado") {
-          const v = row["Estado"];
-          fontColor = v === "UP" ? "4ADE80" : v === "DOWN" ? "F87171" : "FCD34D";
-        } else if (h === "IP" || h === "MAC") {
-          fontColor = "93C5FD";
-        } else if (h === "Nombre") {
-          fontColor = "F1F5F9";
-        } else if (h === "Uptime 24h") {
-          const pct = parseFloat(row["Uptime 24h"]);
-          fontColor = isNaN(pct) ? "CBD5E1" : pct >= 99 ? "4ADE80" : pct >= 95 ? "FCD34D" : "F87171";
-        }
-        ws[cellAddr].s = {
-          font: { color: { rgb: fontColor }, sz: 10, name: "Calibri", bold: h === "Estado" || h === "Nombre" },
-          fill: { fgColor: { rgb: rowBg }, patternType: "solid" },
-          alignment: { vertical: "center", horizontal: h === "Estado" || h === "Ping (ms)" || h === "Uptime 24h" ? "center" : "left" },
-          border: {
-            bottom: { style: "thin", color: { rgb: "1E293B" } },
-            right: { style: "thin", color: { rgb: "334155" } },
-          },
-        };
-      });
-    });
-
-    // ── Summary sheet ──
-    const total = dataRows.length;
-    const up = dataRows.filter(r => r["Estado"] === "UP").length;
-    const down = dataRows.filter(r => r["Estado"] === "DOWN").length;
-    const noMonitor = dataRows.filter(r => !r["Monitor Kuma"]).length;
-    const summaryData = [
-      ["KumaMap — Resumen de nodos", ""],
-      ["Mapa", mapName || "Sin nombre"],
-      ["Generado", new Date().toLocaleString("es-UY")],
-      ["", ""],
-      ["Total nodos", total],
-      ["UP", up],
-      ["DOWN", down],
-      ["Sin monitor", noMonitor],
-      ["Uptime global", total > 0 ? `${((up / (total - noMonitor || 1)) * 100).toFixed(1)}%` : "—"],
-    ];
-    const wsSummary = XLSX.utils.aoa_to_sheet(summaryData);
-    wsSummary["!cols"] = [{ wch: 22 }, { wch: 30 }];
-    // Style summary header
-    if (wsSummary["A1"]) wsSummary["A1"].s = { font: { bold: true, sz: 13, color: { rgb: "A78BFA" }, name: "Calibri" }, fill: { fgColor: { rgb: "0F0F1A" }, patternType: "solid" } };
-
-    XLSX.utils.book_append_sheet(wb, wsSummary, "Resumen");
-    XLSX.utils.book_append_sheet(wb, ws, "Nodos");
-
-    // ── Download ──
-    const filename = `${(mapName || "kumamap").replace(/[^a-zA-Z0-9_\-]/g, "_")}-nodos-${new Date().toISOString().slice(0, 10)}.xlsx`;
-    XLSX.writeFile(wb, filename, { bookType: "xlsx", compression: true });
-    sileo.success({ title: `${dataRows.length} nodos exportados como XLSX` });
+  const handleExportCsv = useCallback(() => {
+    exportNodesXlsx(nodesRef.current, kumaMonitors, mapName || "kumamap");
   }, [mapName, kumaMonitors]);
 
   return (
@@ -3099,86 +2945,24 @@ export default function LeafletMapView({
 
       {/* ── VERTICAL SIDEBAR CONTROLS (Right Side) ── */}
       {!readonly && (
-        <div className="fixed top-1/2 -translate-y-1/2 flex flex-col gap-1 rounded-xl p-1 shadow-2xl backdrop-blur-3xl shrink-0"
-          style={{
-            zIndex: 10000,
-            right: sidebarWidth + 12,
-            background: "rgba(10,10,10,0.85)",
-            border: "1px solid rgba(255,255,255,0.08)",
-            boxShadow: "0 12px 40px rgba(0,0,0,0.5)",
-            transition: "right 0.3s ease",
-          }}>
-          {/* Zoom & View Group */}
-          <Tooltip content="Acercar" placement="left">
-            <button onClick={() => mapRef.current?.zoomIn()}
-              className="h-8 w-8 flex items-center justify-center rounded-lg text-[#ededed] hover:bg-white/10 transition-all">
-              <Plus className="h-4 w-4" />
-            </button>
-          </Tooltip>
-          <Tooltip content="Alejar" placement="left">
-            <button onClick={() => mapRef.current?.zoomOut()}
-              className="h-8 w-8 flex items-center justify-center rounded-lg text-[#ededed] hover:bg-white/10 transition-all">
-              <svg width="12" height="2" viewBox="0 0 24 2" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round"><line x1="2" y1="1" x2="22" y2="1"/></svg>
-            </button>
-          </Tooltip>
-          <Tooltip content="Ajustar a nodos" placement="left">
-            <button onClick={() => {
-              if (mapRef.current && nodesRef.current.length > 0 && LRef.current) {
-                const bounds = nodesRef.current.map((n) => [n.x, n.y] as [number, number]);
-                mapRef.current.fitBounds(LRef.current.latLngBounds(bounds), { padding: [50, 50] });
-              }
-            }} className="h-8 w-8 flex items-center justify-center rounded-lg text-[#888] hover:text-[#ededed] hover:bg-white/10 transition-all">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M15 3h6v6"/><path d="M9 21H3v-6"/><path d="m21 3-7 7"/><path d="m3 21 7-7"/></svg>
-            </button>
-          </Tooltip>
-
-          <div className="mx-1 h-px bg-white/10 my-0.5" />
-
-          {/* Visibility Group */}
-          <Tooltip content={showNodes ? "Ocultar nodos" : "Mostrar nodos"} placement="left">
-            <button onClick={() => setShowNodes(v => !v)}
-              className="h-7 w-7 flex items-center justify-center rounded-lg transition-all hover:bg-white/10" style={{ color: showNodes ? "#22c55e" : "#888" }}>
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/></svg>
-            </button>
-          </Tooltip>
-          <Tooltip content={showLinks ? "Ocultar links" : "Mostrar links"} placement="left">
-            <button onClick={() => setShowLinks(v => !v)}
-              className="h-7 w-7 flex items-center justify-center rounded-lg transition-all hover:bg-white/10" style={{ color: showLinks ? "#3b82f6" : "#888" }}>
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
-            </button>
-          </Tooltip>
-          <Tooltip content={showCameras ? "Ocultar cámaras" : "Mostrar cámaras"} placement="left">
-            <button onClick={() => setShowCameras(v => !v)}
-              className="h-7 w-7 flex items-center justify-center rounded-lg transition-all hover:bg-white/10" style={{ color: showCameras ? "#f59e0b" : "#888" }}>
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m16.24 7.76-1.804 5.412a2 2 0 0 1-1.265 1.265L7.76 16.24l1.804-5.412a2 2 0 0 1 1.265-1.265z"/><circle cx="12" cy="12" r="10"/></svg>
-            </button>
-          </Tooltip>
-          <Tooltip content={showLabels ? "Ocultar etiquetas" : "Mostrar etiquetas"} placement="left">
-            <button onClick={() => setShowLabels(v => !v)}
-              className="h-7 w-7 flex items-center justify-center rounded-lg transition-all hover:bg-white/10" style={{ color: showLabels ? "#e2e8f0" : "#888" }}>
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" x2="15" y1="20" y2="20"/><line x1="12" x2="12" y1="4" y2="20"/></svg>
-            </button>
-          </Tooltip>
-          <Tooltip content={showFOV ? "Ocultar cobertura" : "Mostrar cobertura"} placement="left">
-            <button onClick={() => setShowFOV(v => !v)}
-              className="h-7 w-7 flex items-center justify-center rounded-lg transition-all hover:bg-white/10" style={{ color: showFOV ? "#8b5cf6" : "#888" }}>
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
-            </button>
-          </Tooltip>
-
-          {onTogglePanel && (
-            <>
-              <div className="mx-1 h-px bg-white/10 my-0.5" />
-              <Tooltip content={panelCollapsed ? "Mostrar monitores" : "Ocultar monitores"} placement="left">
-                <button onClick={onTogglePanel}
-                  className="h-7 w-7 flex items-center justify-center rounded-lg transition-all hover:bg-white/10"
-                  style={{ color: !panelCollapsed ? "#60a5fa" : "#888" }}>
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/></svg>
-                </button>
-              </Tooltip>
-            </>
-          )}
-        </div>
+        <VisualizationPanel
+          mapRef={mapRef}
+          nodesRef={nodesRef}
+          LRef={LRef}
+          sidebarWidth={sidebarWidth}
+          showNodes={showNodes}
+          setShowNodes={setShowNodes}
+          showLinks={showLinks}
+          setShowLinks={setShowLinks}
+          showCameras={showCameras}
+          setShowCameras={setShowCameras}
+          showFOV={showFOV}
+          setShowFOV={setShowFOV}
+          showLabels={showLabels}
+          setShowLabels={setShowLabels}
+          panelCollapsed={panelCollapsed}
+          onTogglePanel={onTogglePanel}
+        />
       )}
 
       {/* Link Modal */}
@@ -3443,118 +3227,37 @@ export default function LeafletMapView({
       )}
 
       {/* Color Picker Modal */}
-      {colorPickerOpen && (() => {
-        const cpNode = nodesRef.current.find((n) => n.id === colorPickerNodeId);
-        const cpCd = cpNode?.custom_data ? JSON.parse(cpNode.custom_data) : {};
-        const currentColor = cpCd.fovColor || "#22c55e";
-        const currentOpacity = cpCd.fovOpacity ?? 0.18;
-
-        const colorOptions = [
-          { color: "#22c55e", name: "Verde" },
-          { color: "#3b82f6", name: "Azul" },
-          { color: "#ef4444", name: "Rojo" },
-          { color: "#f59e0b", name: "Naranja" },
-          { color: "#8b5cf6", name: "Violeta" },
-          { color: "#ec4899", name: "Rosa" },
-          { color: "#06b6d4", name: "Cyan" },
-          { color: "#f97316", name: "Naranja fuerte" },
-          { color: "#14b8a6", name: "Teal" },
-          { color: "#a855f7", name: "Purpura" },
-          { color: "#ffffff", name: "Blanco" },
-          { color: "#facc15", name: "Amarillo" },
-        ];
-
-        const opacityOptions = [
-          { value: 0.08, name: "Sutil" },
-          { value: 0.15, name: "Suave" },
-          { value: 0.25, name: "Medio" },
-          { value: 0.40, name: "Visible" },
-          { value: 0.60, name: "Fuerte" },
-          { value: 0.80, name: "Intenso" },
-        ];
-
-        const applyChange = (fovColor?: string, fovOpacity?: number) => {
+      <FOVColorPickerModal
+        open={colorPickerOpen}
+        onClose={() => setColorPickerOpen(false)}
+        currentColor={(() => { const n = nodesRef.current.find(n => n.id === colorPickerNodeId); const cd = n?.custom_data ? JSON.parse(n.custom_data) : {}; return cd.fovColor || "#22c55e"; })()}
+        currentOpacity={(() => { const n = nodesRef.current.find(n => n.id === colorPickerNodeId); const cd = n?.custom_data ? JSON.parse(n.custom_data) : {}; return cd.fovOpacity ?? 0.18; })()}
+        onChangeColor={(color) => {
           const idx = nodesRef.current.findIndex((n) => n.id === colorPickerNodeId);
           if (idx >= 0) {
             const ncd = nodesRef.current[idx].custom_data ? JSON.parse(nodesRef.current[idx].custom_data!) : {};
-            if (fovColor !== undefined) ncd.fovColor = fovColor;
-            if (fovOpacity !== undefined) ncd.fovOpacity = fovOpacity;
+            ncd.fovColor = color;
             nodesRef.current[idx] = { ...nodesRef.current[idx], custom_data: JSON.stringify(ncd) };
             if (LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current);
           }
-        };
-
-        return (
-          <div className="fixed inset-0 z-[99999] flex items-center justify-center" style={{ background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }}
-            onClick={() => setColorPickerOpen(false)}>
-            <div className="rounded-2xl w-[340px] overflow-hidden" onClick={(e) => e.stopPropagation()}
-              style={{ background: "rgba(16,16,16,0.98)", border: "1px solid rgba(255,255,255,0.08)", boxShadow: "0 20px 60px rgba(0,0,0,0.7)" }}>
-              <div className="px-4 py-3 flex items-center gap-2" style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
-                <div className="h-4 w-4 rounded" style={{ background: currentColor, opacity: currentOpacity + 0.3 }} />
-                <span className="text-sm font-bold text-[#ededed]">Color y Transparencia</span>
-                <button onClick={() => setColorPickerOpen(false)} className="ml-auto text-[#555] hover:text-[#ededed] text-lg leading-none">&times;</button>
-              </div>
-
-              {/* Colors */}
-              <div className="px-4 py-3" style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
-                <div className="text-[10px] text-[#666] font-bold uppercase tracking-wider mb-2">Color del area</div>
-                <div className="grid grid-cols-6 gap-2">
-                  {colorOptions.map((c) => (
-                    <Tooltip key={c.color} content={c.name}>
-                    <button onClick={() => applyChange(c.color)}
-                      className="w-10 h-10 rounded-xl transition-all hover:scale-110"
-                      style={{
-                        background: c.color,
-                        border: currentColor === c.color ? "3px solid #fff" : "2px solid rgba(255,255,255,0.1)",
-                        boxShadow: currentColor === c.color ? `0 0 12px ${c.color}88` : "none",
-                      }}
-                    />
-                    </Tooltip>
-                  ))}
-                </div>
-              </div>
-
-              {/* Opacity */}
-              <div className="px-4 py-3">
-                <div className="text-[10px] text-[#666] font-bold uppercase tracking-wider mb-2">Transparencia</div>
-                <div className="grid grid-cols-3 gap-2">
-                  {opacityOptions.map((o) => (
-                    <button key={o.value} onClick={() => applyChange(undefined, o.value)}
-                      className="rounded-xl px-3 py-2 text-xs font-semibold transition-all"
-                      style={{
-                        background: currentOpacity === o.value ? `${currentColor}33` : "rgba(255,255,255,0.03)",
-                        border: `1px solid ${currentOpacity === o.value ? currentColor + "66" : "rgba(255,255,255,0.06)"}`,
-                        color: currentOpacity === o.value ? currentColor : "#888",
-                      }}>
-                      <div className="h-3 rounded mb-1" style={{ background: currentColor, opacity: o.value }} />
-                      {o.name}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </div>
-        );
-      })()}
+        }}
+        onChangeOpacity={(opacity) => {
+          const idx = nodesRef.current.findIndex((n) => n.id === colorPickerNodeId);
+          if (idx >= 0) {
+            const ncd = nodesRef.current[idx].custom_data ? JSON.parse(nodesRef.current[idx].custom_data!) : {};
+            ncd.fovOpacity = opacity;
+            nodesRef.current[idx] = { ...nodesRef.current[idx], custom_data: JSON.stringify(ncd) };
+            if (LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current);
+          }
+        }}
+      />
 
       {/* Lens Picker Modal */}
-      {lensPickerOpen && (() => {
-        const lpNode = nodesRef.current.find((n) => n.id === lensPickerNodeId);
-        const lpCd = lpNode?.custom_data ? JSON.parse(lpNode.custom_data) : {};
-        const currentFov = lpCd.fov || 60;
-
-        const lensPresets = [
-          { name: "Ojo de pez", fov: 180, mm: "1.2mm", desc: "Vista 180° panoramica" },
-          { name: "Super gran angular", fov: 120, mm: "2.8mm", desc: "Cobertura amplia 120°" },
-          { name: "Gran angular", fov: 90, mm: "3.6mm", desc: "Estandar de vigilancia 90°" },
-          { name: "Normal", fov: 60, mm: "6mm", desc: "Angulo medio 60°" },
-          { name: "Teleobjetivo", fov: 35, mm: "12mm", desc: "Enfoque selectivo 35°" },
-          { name: "Tele largo", fov: 18, mm: "25mm", desc: "Lectura de placas 18°" },
-          { name: "PTZ Zoom", fov: 8, mm: "50mm", desc: "Detalle maximo 8°" },
-          { name: "Personalizado", fov: currentFov, mm: "custom", desc: "Define tu propio FOV" },
-        ];
-
-        const applyLens = (fov: number) => {
+      <LensPickerModal
+        open={lensPickerOpen}
+        onClose={() => setLensPickerOpen(false)}
+        currentFov={(() => { const n = nodesRef.current.find(n => n.id === lensPickerNodeId); const cd = n?.custom_data ? JSON.parse(n.custom_data) : {}; return cd.fov || 60; })()}
+        onSelectFov={(fov) => {
           const idx = nodesRef.current.findIndex((n) => n.id === lensPickerNodeId);
           if (idx >= 0) {
             const ncd = nodesRef.current[idx].custom_data ? JSON.parse(nodesRef.current[idx].custom_data!) : {};
@@ -3562,96 +3265,8 @@ export default function LeafletMapView({
             nodesRef.current[idx] = { ...nodesRef.current[idx], custom_data: JSON.stringify(ncd) };
             if (LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current);
           }
-        };
-
-        return (
-          <div className="fixed inset-0 z-[99999] flex items-center justify-center" style={{ background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }}
-            onClick={() => setLensPickerOpen(false)}>
-            <div className="rounded-2xl w-[380px] overflow-hidden" onClick={(e) => e.stopPropagation()}
-              style={{ background: "rgba(16,16,16,0.98)", border: "1px solid rgba(255,255,255,0.08)", boxShadow: "0 20px 60px rgba(0,0,0,0.7)" }}>
-              <div className="px-4 py-3 flex items-center gap-2" style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#60a5fa" strokeWidth="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg>
-                <span className="text-sm font-bold text-[#ededed]">Seleccionar Lente</span>
-                <span className="text-[10px] text-[#555] ml-1">Actual: {currentFov}°</span>
-                <button onClick={() => setLensPickerOpen(false)} className="ml-auto text-[#555] hover:text-[#ededed] text-lg leading-none">&times;</button>
-              </div>
-
-              <div className="p-3 space-y-1.5 max-h-[400px] overflow-y-auto">
-                {lensPresets.map((lens) => {
-                  const isActive = currentFov === lens.fov;
-                  const isCustom = lens.mm === "custom";
-                  return (
-                    <div key={lens.name}>
-                      <button
-                        onClick={() => {
-                          if (!isCustom) {
-                            applyLens(lens.fov);
-                            sileo.success({ title: `Lente: ${lens.name}`, description: `${lens.fov}° (${lens.mm})` });
-                          }
-                        }}
-                        className="w-full flex items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-all"
-                        style={{
-                          background: isActive ? "rgba(59,130,246,0.12)" : "rgba(255,255,255,0.02)",
-                          border: `1px solid ${isActive ? "rgba(59,130,246,0.3)" : "rgba(255,255,255,0.04)"}`,
-                        }}
-                      >
-                        {/* FOV visual indicator */}
-                        <div className="relative w-10 h-10 shrink-0 flex items-center justify-center">
-                          <svg width="40" height="40" viewBox="0 0 40 40">
-                            <path
-                              d={(() => {
-                                const cx = 20, cy = 20, r = 16;
-                                const startAngle = -lens.fov / 2;
-                                const endAngle = lens.fov / 2;
-                                const x1 = cx + r * Math.cos(startAngle * Math.PI / 180 - Math.PI / 2);
-                                const y1 = cy + r * Math.sin(startAngle * Math.PI / 180 - Math.PI / 2);
-                                const x2 = cx + r * Math.cos(endAngle * Math.PI / 180 - Math.PI / 2);
-                                const y2 = cy + r * Math.sin(endAngle * Math.PI / 180 - Math.PI / 2);
-                                const largeArc = lens.fov > 180 ? 1 : 0;
-                                return `M ${cx},${cy} L ${x1},${y1} A ${r},${r} 0 ${largeArc},1 ${x2},${y2} Z`;
-                              })()}
-                              fill={isActive ? "rgba(59,130,246,0.3)" : "rgba(255,255,255,0.08)"}
-                              stroke={isActive ? "#60a5fa" : "#555"}
-                              strokeWidth="1"
-                            />
-                            <circle cx="20" cy="20" r="3" fill={isActive ? "#60a5fa" : "#888"} />
-                          </svg>
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2">
-                            <span className="text-[12px] font-bold text-[#ededed]">{lens.name}</span>
-                            {!isCustom && <span className="text-[10px] font-mono text-[#666]">{lens.mm}</span>}
-                          </div>
-                          <div className="text-[10px] text-[#777]">{lens.desc}</div>
-                        </div>
-                        <span className="text-[11px] font-bold tabular-nums" style={{ color: isActive ? "#60a5fa" : "#666" }}>
-                          {lens.fov}°
-                        </span>
-                      </button>
-                      {/* Custom FOV slider */}
-                      {isCustom && (
-                        <div className="mt-2 px-3 pb-1">
-                          <div className="flex items-center gap-3">
-                            <span className="text-[10px] text-[#666] shrink-0">5°</span>
-                            <input
-                              type="range" min="5" max="360" step="1" value={currentFov}
-                              onChange={(e) => applyLens(parseInt(e.target.value))}
-                              className="flex-1 h-1.5 rounded-full appearance-none cursor-pointer"
-                              style={{ background: `linear-gradient(to right, #3b82f6 ${((currentFov - 5) / 355) * 100}%, #333 0%)` }}
-                            />
-                            <span className="text-[10px] text-[#666] shrink-0">360°</span>
-                          </div>
-                          <div className="text-center text-[10px] text-[#888] mt-1 font-mono">{currentFov}°</div>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
-        );
-      })()}
+        }}
+      />
 
 
       {/* ── Map Clock ── */}

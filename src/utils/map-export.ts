@@ -1,4 +1,4 @@
-import { sileo } from "sileo";
+import { toast } from "sonner";
 import type { KumaMonitor } from "@/components/network-map/MonitorPanel";
 
 export interface ExportNode {
@@ -13,7 +13,7 @@ export interface ExportNode {
 
 // ── Export as PNG (html2canvas) ──
 export async function exportMapPng(container: HTMLElement, mapName: string): Promise<void> {
-  sileo.info({ title: "Generando imagen...", duration: 2000 });
+  toast.info("Generando imagen...", { duration: 2000 });
   try {
     const h2c = (await import("html2canvas")).default;
     const canvas = await h2c(container, {
@@ -27,9 +27,9 @@ export async function exportMapPng(container: HTMLElement, mapName: string): Pro
     link.download = `${mapName}-${new Date().toISOString().slice(0, 10)}.png`;
     link.href = canvas.toDataURL("image/png");
     link.click();
-    sileo.success({ title: "Imagen exportada" });
+    toast.success("Imagen exportada");
   } catch (err) {
-    sileo.error({ title: "Error al exportar imagen" });
+    toast.error("Error al exportar imagen");
     console.error(err);
   }
 }
@@ -178,5 +178,5 @@ export async function exportNodesXlsx(nodes: ExportNode[], kumaMonitors: KumaMon
   // ── Download ──
   const filename = `${(mapName || "kumamap").replace(/[^a-zA-Z0-9_\-]/g, "_")}-nodos-${new Date().toISOString().slice(0, 10)}.xlsx`;
   XLSX.writeFile(wb, filename, { bookType: "xlsx", compression: true });
-  sileo.success({ title: `${dataRows.length} nodos exportados como XLSX` });
+  toast.success(`${dataRows.length} nodos exportados como XLSX`);
 }

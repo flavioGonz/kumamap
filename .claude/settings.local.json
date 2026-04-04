@@ -1,0 +1,35 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(head:*)",
+      "WebFetch(domain:192.168.99.122)",
+      "Bash(curl -s --max-time 10 http://192.168.99.122:3000)",
+      "Bash(curl -s --max-time 10 http://192.168.99.122:3000/api/kuma)",
+      "Bash(curl -s --max-time 10 http://192.168.99.122:3000/api/maps)",
+      "Bash(find C:UsersFlavioDocumentsEXPRESSkumamap -type f -name .eslintrc*)",
+      "Bash(ls C:/Users/Flavio/Documents/EXPRESS/kumamap/.eslintrc* C:/Users/Flavio/Documents/EXPRESS/kumamap/eslint.config*)",
+      "Bash(ls C:/Users/Flavio/Documents/EXPRESS/kumamap/next.config*)",
+      "Bash(npm run:*)",
+      "Bash(npx next:*)",
+      "Bash(npx --no-install next build)",
+      "Bash(node_modules/.bin/next --version)",
+      "Bash(npm install:*)",
+      "Bash(npx tsc:*)",
+      "Bash(taskkill //F //IM node.exe)",
+      "Bash(git diff:*)",
+      "Bash(disown)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3000)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(curl -s http://localhost:3000)",
+      "Bash(npm uninstall:*)",
+      "Bash(git push:*)",
+      "Bash(git pull:*)",
+      "Bash(git rebase:*)",
+      "Bash(git merge:*)",
+      "Bash(git checkout:*)",
+      "Bash(ssh:*)",
+      "Bash(grep -oP 'theme.*?dark.*?\\\\{[^}]+\\\\}|dark.*?fill.*?[,;]')"
+    ]
+  }
+}

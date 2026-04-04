@@ -1,6 +1,6 @@
 "use client";
 
-import { sileo } from "sileo";
+import { toast } from "sonner";
 
 interface LensPickerModalProps {
   open: boolean;
@@ -48,7 +48,7 @@ export default function LensPickerModal({ open, onClose, currentFov, onSelectFov
                   onClick={() => {
                     if (!isCustom) {
                       onSelectFov(lens.fov);
-                      sileo.success({ title: `Lente: ${lens.name}`, description: `${lens.fov}° (${lens.mm})` });
+                      toast.success(`Lente: ${lens.name}`, { description: `${lens.fov}° (${lens.mm})` });
                     }
                   }}
                   className="w-full flex items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-all"

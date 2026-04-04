@@ -1,5 +1,4 @@
 @import "tailwindcss";
-@import "sileo/styles.css";
 
 :root {
   --background: #0a0a0a;
@@ -118,12 +117,4 @@ body {
 }
 .link-pulse {
   animation: link-pulse-anim 1.5s ease-in-out infinite;
-}
-
-/* ─── Sileo Toast Overrides (light theme = dark fill background) ─── */
-[data-sileo-viewport] {
-  z-index: 99999 !important;
-}
-[data-sileo-viewport][data-theme="light"] [data-sileo-description] {
-  color: rgba(255, 255, 255, 0.55);
 }

@@ -18,7 +18,7 @@ import {
   BackgroundVariant,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { sileo } from "sileo";
+import { toast } from "sonner";
 
 import KumaMonitorNode, { type KumaNodeData } from "./KumaMonitorNode";
 import TextLabelNode, { type TextLabelData } from "./TextLabelNode";
@@ -269,7 +269,7 @@ function CanvasInner({
   // Link creation via context menu — simplified two-click flow
   const [linkSource, setLinkSource] = useState<string | null>(null);
   const linkSourceRef = useRef<string | null>(null);
-  const linkToastIdRef = useRef<string | null>(null);
+  const linkToastIdRef = useRef<string | number | null>(null);
 
   // Keep ref in sync
   useEffect(() => { linkSourceRef.current = linkSource; }, [linkSource]);
@@ -278,8 +278,7 @@ function CanvasInner({
     setLinkSource(nodeId);
     linkSourceRef.current = nodeId;
     const node = nodes.find((n) => n.id === nodeId);
-    linkToastIdRef.current = sileo.info({
-      title: `Enlazando desde "${node?.data.label || nodeId}"`,
+    linkToastIdRef.current = toast.info(`Enlazando desde "${node?.data.label || nodeId}"`, {
       description: "Haz clic en el nodo destino, o ESC para cancelar",
       duration: 8000,
     });
@@ -292,7 +291,7 @@ function CanvasInner({
       if (e.key === "Escape") {
         setLinkSource(null);
         linkSourceRef.current = null;
-        (() => { if (linkToastIdRef.current) { sileo.dismiss(linkToastIdRef.current); linkToastIdRef.current = null; } })();
+        (() => { if (linkToastIdRef.current) { toast.dismiss(linkToastIdRef.current); linkToastIdRef.current = null; } })();
       }
     };
     window.addEventListener("keydown", handler);
@@ -304,7 +303,7 @@ function CanvasInner({
     const src = linkSourceRef.current;
     if (!src) return;
     if (src === node.id) {
-      sileo.error({ title: "No puedes enlazar un nodo consigo mismo" });
+      toast.error("No puedes enlazar un nodo consigo mismo");
       return;
     }
     // Check duplicate
@@ -314,10 +313,10 @@ function CanvasInner({
         (e.source === node.id && e.target === src)
     );
     if (exists) {
-      sileo.error({ title: "Ya existe una conexion entre estos nodos" });
+      toast.error("Ya existe una conexion entre estos nodos");
       setLinkSource(null);
       linkSourceRef.current = null;
-      (() => { if (linkToastIdRef.current) { sileo.dismiss(linkToastIdRef.current); linkToastIdRef.current = null; } })();
+      (() => { if (linkToastIdRef.current) { toast.dismiss(linkToastIdRef.current); linkToastIdRef.current = null; } })();
       return;
     }
     const srcNode = nodes.find((n) => n.id === src);
@@ -329,7 +328,7 @@ function CanvasInner({
     setLinkModalOpen(true);
     setLinkSource(null);
     linkSourceRef.current = null;
-    (() => { if (linkToastIdRef.current) { sileo.dismiss(linkToastIdRef.current); linkToastIdRef.current = null; } })();
+    (() => { if (linkToastIdRef.current) { toast.dismiss(linkToastIdRef.current); linkToastIdRef.current = null; } })();
   }, [edges, nodes]);
 
   // Find nearby unconnected nodes for quick link submenu
@@ -427,7 +426,7 @@ function CanvasInner({
       label: linkSource ? "Cancelar enlace" : "Nuevo link...",
       icon: menuIcons.Link2,
       onClick: () => {
-        if (linkSource) { setLinkSource(null); (() => { if (linkToastIdRef.current) { sileo.dismiss(linkToastIdRef.current); linkToastIdRef.current = null; } })(); }
+        if (linkSource) { setLinkSource(null); (() => { if (linkToastIdRef.current) { toast.dismiss(linkToastIdRef.current); linkToastIdRef.current = null; } })(); }
         else startLinkCreation(nodeId);
       },
     });
@@ -473,7 +472,7 @@ function CanvasInner({
               } as any,
             };
           }));
-          sileo.success({ title: `Enlace: ${t.label}` });
+          toast.success(`Enlace: ${t.label}`);
         },
       })),
       { label: "Eliminar conexion", icon: menuIcons.Trash2, onClick: () => setEdges((eds) => eds.filter((e) => e.id !== edgeId)), danger: true, divider: true },
@@ -615,7 +614,7 @@ function CanvasInner({
   const onConnect = useCallback((params: Connection) => {
     // Prevent self-link
     if (params.source === params.target) {
-      sileo.error({ title: "No se puede conectar un nodo consigo mismo" });
+      toast.error("No se puede conectar un nodo consigo mismo");
       return;
     }
     const srcNode = nodes.find((n) => n.id === params.source);
@@ -638,7 +637,7 @@ function CanvasInner({
     // ── Prevent duplicate monitors ──
     const alreadyExists = nodes.some((n) => n.data.kumaMonitorId === monitor.id);
     if (alreadyExists) {
-      sileo.error({ title: "Monitor duplicado", description: `"${monitor.name}" ya existe en este mapa` });
+      toast.error("Monitor duplicado", { description: `"${monitor.name}" ya existe en este mapa` });
       return;
     }
 
@@ -654,7 +653,7 @@ function CanvasInner({
         type: monitor.type, url: monitor.url, uptime24: monitor.uptime24,
       } satisfies KumaNodeData,
     }]);
-    sileo.success({ title: "Monitor agregado", description: monitor.name });
+    toast.success("Monitor agregado", { description: monitor.name });
   }, [reactFlow, setNodes, nodes]);
 
   const onDragOver = useCallback((event: React.DragEvent) => {
@@ -732,8 +731,8 @@ function CanvasInner({
         method: "PUT", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ nodes: saveNodes, edges: saveEdges, view_state: viewState }),
       });
-      sileo.success({ title: "Mapa guardado" });
-    } catch { sileo.error({ title: "Error al guardar" }); }
+      toast.success("Mapa guardado");
+    } catch { toast.error("Error al guardar"); }
     finally { setSaving(false); }
   }, [mapId, nodes, edges, straightEdges]);
 
@@ -760,7 +759,7 @@ function CanvasInner({
     await fetch(apiUrl(`/api/maps/${mapId}/background`), { method: "POST", body: fd });
     const res = await fetch(apiUrl(`/api/maps/${mapId}`));
     setMapData(await res.json());
-    sileo.success({ title: "Fondo actualizado" });
+    toast.success("Fondo actualizado");
     e.target.value = "";
   }, [mapId]);
 
@@ -773,7 +772,7 @@ function CanvasInner({
     });
     const res = await fetch(apiUrl(`/api/maps/${mapId}`));
     setMapData(await res.json());
-    sileo.success({ title: "Fondo: mapa real OpenStreetMap" });
+    toast.success("Fondo: mapa real OpenStreetMap");
   }, [mapId]);
 
   // ─── Other toolbar handlers ───────────────────
@@ -869,7 +868,7 @@ function CanvasInner({
     const toImport = nonGroupMonitors.filter(m => !existingIds.has(m.id));
 
     if (toImport.length === 0) {
-      sileo.info({ title: "Todos los monitores del grupo ya estan en el mapa" });
+      toast.info("Todos los monitores del grupo ya estan en el mapa");
       return;
     }
 
@@ -892,7 +891,7 @@ function CanvasInner({
     }));
 
     setNodes((nds) => [...nds, ...newNodes]);
-    sileo.success({ title: `${toImport.length} monitores importados` });
+    toast.success(`${toImport.length} monitores importados`);
     setTimeout(() => reactFlow.fitView({ padding: 0.2 }), 100);
   }, [filteredMonitors, nodes, setNodes, reactFlow]);
 
@@ -989,8 +988,8 @@ function CanvasInner({
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ nodes: savedNodes, edges: savedEdges, view_state: viewState ? JSON.stringify(viewState) : null }),
               });
-              sileo.success({ title: "Mapa guardado" });
-            } catch { sileo.error({ title: "Error al guardar" }); }
+              toast.success("Mapa guardado");
+            } catch { toast.error("Error al guardar"); }
           }}
         />
         <MonitorPanel
@@ -1215,8 +1214,8 @@ function CanvasInner({
                         const importedEdges = (data.edges || []).map((e: any) => ({ ...e, id: `imp-${ts}-${e.id}`, source: idMap[e.source_node_id] || e.source_node_id, target: idMap[e.target_node_id] || e.target_node_id }));
                         setNodes(nds => [...nds, ...importedNodes.map((n: any) => ({ id: n.id, type: "kumaNode", position: { x: n.x || 100, y: n.y || 100 }, data: { label: n.label, kuma_monitor_id: n.kuma_monitor_id, icon: n.icon || "server", status: 2, custom_data: n.custom_data } }))]);
                         setEdges(eds => [...eds, ...importedEdges.map((e: any) => ({ id: e.id, source: e.source, target: e.target, type: "interface" }))]);
-                        sileo.success({ title: `"${m.name}" importado`, description: `${importedNodes.length} nodos` });
-                      } catch { sileo.error({ title: "Error al importar" }); } finally { setImportingMapId(null); }
+                        toast.success(`"${m.name}" importado`, { description: `${importedNodes.length} nodos` });
+                      } catch { toast.error("Error al importar"); } finally { setImportingMapId(null); }
                     }}
                       className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-[#a0a0a0] transition-all"
                       onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "rgba(52,211,153,0.08)"; (e.currentTarget as HTMLElement).style.color = "#ededed"; }}
@@ -1239,7 +1238,7 @@ function CanvasInner({
                 <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
               </svg>
               <span className="text-[10px] font-semibold text-blue-300 hidden xl:inline">Enlazando...</span>
-              <button onClick={() => { setLinkSource(null); (() => { if (linkToastIdRef.current) { sileo.dismiss(linkToastIdRef.current); linkToastIdRef.current = null; } })(); }}
+              <button onClick={() => { setLinkSource(null); (() => { if (linkToastIdRef.current) { toast.dismiss(linkToastIdRef.current); linkToastIdRef.current = null; } })(); }}
                 className="rounded-md px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider transition-all"
                 style={{ background: "rgba(255,255,255,0.06)", color: "#888" }}>ESC</button>
             </div>
@@ -1349,8 +1348,8 @@ function CanvasInner({
                   headers: { "Content-Type": "application/json" },
                   body: JSON.stringify({ nodes: savedNodes, edges: savedEdges, view_state: viewState ? JSON.stringify(viewState) : null }),
                 });
-                sileo.success({ title: "Mapa guardado" });
-              } catch { sileo.error({ title: "Error al guardar" }); }
+                toast.success("Mapa guardado");
+              } catch { toast.error("Error al guardar"); }
               finally { setSaving(false); }
             }}
           />

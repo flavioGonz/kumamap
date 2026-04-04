@@ -73,7 +73,7 @@ export default function Page() {
     <>
       <Toaster
         position="bottom-left"
-        theme="dark"
+        theme="light"
       />
       <div style={viewStyle}>
         {selectedMapId ? (

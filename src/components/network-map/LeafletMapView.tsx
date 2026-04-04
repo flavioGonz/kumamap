@@ -41,6 +41,8 @@ interface MapViewState {
   mapStyle: "dark" | "satellite" | "streets";
   overlayOpacity?: number;
   straightEdges?: boolean;
+  showNodes?: boolean;
+  showLabels?: boolean;
 }
 
 interface LeafletMapViewProps {
@@ -250,6 +252,7 @@ export default function LeafletMapView({
   const [linkModalData, setLinkModalData] = useState<{ sourceId: string; targetId: string; edgeId?: string; initial?: Partial<LinkFormData> }>({ sourceId: "", targetId: "" });
   const [inputModalOpen, setInputModalOpen] = useState(false);
   const [inputModalConfig, setInputModalConfig] = useState<{ nodeId: string; initial: string; mac?: string; ip?: string; credUser?: string; credPass?: string; labelHidden?: boolean; labelSize?: number; nodeColor?: string }>({ nodeId: "", initial: "" });
+  const [showPass, setShowPass] = useState(false);
 
   // Camera stream modals
   const [streamConfigNodeId, setStreamConfigNodeId] = useState<string | null>(null);
@@ -267,11 +270,11 @@ export default function LeafletMapView({
   const [straightEdges, setStraightEdges] = useState(initialViewState?.straightEdges ?? false);
   const straightEdgesRef = useRef(initialViewState?.straightEdges ?? false);
   useEffect(() => { straightEdgesRef.current = straightEdges; }, [straightEdges]);
-  const [showNodes, setShowNodes] = useState(true);
+  const [showNodes, setShowNodes] = useState(initialViewState?.showNodes ?? true);
   const [showLinks, setShowLinks] = useState(true);
   const [showCameras, setShowCameras] = useState(true);
   const [showFOV, setShowFOV] = useState(true);
-  const [showLabels, setShowLabels] = useState(true);
+  const [showLabels, setShowLabels] = useState(initialViewState?.showLabels ?? true);
   const [mapRotation, setMapRotation] = useState(0);
   const [timeDragging, setTimeDragging] = useState(false);
   const [polygonMode, setPolygonMode] = useState(false);
@@ -333,16 +336,26 @@ export default function LeafletMapView({
       const isCamera = node?.icon === "_camera";
       const isLabel = node?.icon === "_textLabel";
       const isWaypoint = node?.icon === "_waypoint";
+
+      const setMarkerVisible = (visible: boolean) => {
+        marker.getElement()?.style.setProperty("display", visible ? "" : "none");
+        // Tooltip sigue la visibilidad del nodo
+        const tooltip = marker.getTooltip();
+        const tooltipEl = tooltip?.getElement?.();
+        if (tooltipEl) tooltipEl.style.setProperty("display", visible ? "" : "none");
+      };
+
       if (isCamera) {
-        if (showCameras) marker.getElement()?.style.setProperty("display", "");
-        else marker.getElement()?.style.setProperty("display", "none");
+        setMarkerVisible(showCameras);
       } else if (isWaypoint) {
         // Waypoints son nodos intermedios sin monitor — no tienen sentido sin los links
-        if (showLinks) marker.getElement()?.style.setProperty("display", "");
-        else marker.getElement()?.style.setProperty("display", "none");
-      } else if (!isLabel) {
-        if (showNodes) marker.getElement()?.style.setProperty("display", "");
-        else marker.getElement()?.style.setProperty("display", "none");
+        setMarkerVisible(showLinks);
+      } else if (isLabel) {
+        // Labels tipo texto: solo se ocultan con el toggle de etiquetas
+        setMarkerVisible(showLabels);
+      } else {
+        // Nodos normales: respetan showNodes; cuando se ocultan, su tooltip también
+        setMarkerVisible(showNodes);
       }
     });
     // FOV polygons
@@ -370,7 +383,7 @@ export default function LeafletMapView({
         try { mapRef.current?.removeLayer(line); } catch {}
       }
     });
-  }, [showNodes, showLinks, showCameras, showFOV]);
+  }, [showNodes, showLinks, showCameras, showFOV, showLabels]);
 
   // Map rotation — applies to both livemap and image mode
   useEffect(() => {
@@ -481,6 +494,13 @@ export default function LeafletMapView({
             if (polygonPointsRef.current !== undefined && document.querySelector("[data-polygon-active]")) {
               handlePolygonClick(e.latlng);
             }
+            // Hide all label rotation handles when clicking on the map
+            camHandlesRef.current.forEach((handle, key) => {
+              if (key.endsWith("-labelrot")) {
+                const el = handle.getElement();
+                if (el) el.style.display = "none";
+              }
+            });
           });
           map.on("dblclick", (e: any) => {
             if (polygonPointsRef.current.length >= 3 && document.querySelector("[data-polygon-active]")) {
@@ -543,6 +563,13 @@ export default function LeafletMapView({
           if (polygonPointsRef.current !== undefined && document.querySelector("[data-polygon-active]")) {
             handlePolygonClick(e.latlng);
           }
+          // Hide all label rotation handles when clicking on the map
+          camHandlesRef.current.forEach((handle, key) => {
+            if (key.endsWith("-labelrot")) {
+              const el = handle.getElement();
+              if (el) el.style.display = "none";
+            }
+          });
         });
         map.on("dblclick", (e: any) => {
           if (polygonPointsRef.current.length >= 3 && document.querySelector("[data-polygon-active]")) {
@@ -922,6 +949,71 @@ export default function LeafletMapView({
         fovPoly.addTo(map);
         fovLayersRef.current.set(node.id, fovPoly);
 
+        // Apply SVG radial gradient: solid at camera origin → transparent at arc edge
+        const applyFovGradient = () => {
+          const path = (fovPoly as any)._path as SVGPathElement | undefined;
+          if (!path) return;
+          const svg = path.closest("svg");
+          if (!svg) return;
+
+          // Camera position in SVG/layer-point space
+          const camPt = map.latLngToLayerPoint([node.x, node.y]);
+          // Arc tip point (center of the arc) to calculate radius
+          const arcTipLat = node.x + fovRange * Math.cos(rotation * radConst);
+          const arcTipLng = node.y + fovRange * Math.sin(rotation * radConst);
+          const arcPt = map.latLngToLayerPoint([arcTipLat, arcTipLng]);
+          const radius = Math.sqrt(Math.pow(arcPt.x - camPt.x, 2) + Math.pow(arcPt.y - camPt.y, 2));
+
+          // Ensure <defs> exists in the SVG
+          let defs: Element | null = svg.querySelector("defs");
+          if (!defs) {
+            defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
+            svg.insertBefore(defs, svg.firstChild);
+          }
+
+          const gradId = `fovGrad-${node.id.replace(/[^a-zA-Z0-9]/g, "_")}`;
+          const existing = defs!.querySelector(`#${gradId}`);
+          if (existing) existing.remove();
+
+          const grad = document.createElementNS("http://www.w3.org/2000/svg", "radialGradient");
+          grad.setAttribute("id", gradId);
+          grad.setAttribute("cx", String(camPt.x));
+          grad.setAttribute("cy", String(camPt.y));
+          grad.setAttribute("r", String(radius));
+          grad.setAttribute("gradientUnits", "userSpaceOnUse");
+
+          const solidOpacity = Math.min(1, fovOpacity * 6); // brighter at the origin
+          const stop1 = document.createElementNS("http://www.w3.org/2000/svg", "stop");
+          stop1.setAttribute("offset", "0%");
+          stop1.setAttribute("stop-color", fovColor);
+          stop1.setAttribute("stop-opacity", String(solidOpacity));
+
+          const stop2 = document.createElementNS("http://www.w3.org/2000/svg", "stop");
+          stop2.setAttribute("offset", "75%");
+          stop2.setAttribute("stop-color", fovColor);
+          stop2.setAttribute("stop-opacity", String(fovOpacity));
+
+          const stop3 = document.createElementNS("http://www.w3.org/2000/svg", "stop");
+          stop3.setAttribute("offset", "100%");
+          stop3.setAttribute("stop-color", fovColor);
+          stop3.setAttribute("stop-opacity", "0");
+
+          grad.appendChild(stop1);
+          grad.appendChild(stop2);
+          grad.appendChild(stop3);
+          defs!.appendChild(grad);
+
+          path.setAttribute("fill", `url(#${gradId})`);
+          path.setAttribute("fill-opacity", "1"); // gradient stops control opacity
+          path.setAttribute("stroke", fovColor);
+          path.setAttribute("stroke-opacity", String(Math.min(1, fovOpacity + 0.15)));
+          path.setAttribute("stroke-width", "1");
+        };
+
+        // Apply after first paint; re-apply after every zoom (layer points change)
+        requestAnimationFrame(applyFovGradient);
+        map.on("zoomend", applyFovGradient);
+
         // ── Rotation handle (◎ at the edge of the cone center direction) ──
         const rotHandleLat = node.x + fovRange * 0.7 * Math.cos(rotation * radConst);
         const rotHandleLng = node.y + fovRange * 0.7 * Math.sin(rotation * radConst);
@@ -1060,6 +1152,11 @@ export default function LeafletMapView({
         });
         rotHandle.addTo(map);
         camHandlesRef.current.set(node.id + "-labelrot", rotHandle);
+        // Hidden by default — only shown when the label is selected (clicked)
+        requestAnimationFrame(() => {
+          const el = rotHandle.getElement();
+          if (el) el.style.display = "none";
+        });
       }
 
       // Label tooltip (always visible) — only for non-label/camera nodes
@@ -1108,9 +1205,14 @@ export default function LeafletMapView({
               setNodeMapModalNodeId(node.id);
             }
           } else if (!readonly) {
-            // Normal edit modal
-            setInputModalConfig({ nodeId: node.id, initial: node.label, mac: cd.mac || "", ip: cd.ip || "", credUser: cd.credUser || "", credPass: cd.credPass || "", labelHidden: cd.labelHidden ?? false, labelSize: cd.labelSize ?? 12, nodeColor: cd.nodeColor || "" });
-            setInputModalOpen(true);
+            if (isCamera) {
+              // Camera: open stream config modal
+              setStreamConfigNodeId(node.id);
+            } else {
+              // Normal edit modal
+              setInputModalConfig({ nodeId: node.id, initial: node.label, mac: cd.mac || "", ip: cd.ip || "", credUser: cd.credUser || "", credPass: cd.credPass || "", labelHidden: cd.labelHidden ?? false, labelSize: cd.labelSize ?? 12, nodeColor: cd.nodeColor || "" });
+              setInputModalOpen(true);
+            }
           }
         }
       });
@@ -1133,7 +1235,25 @@ export default function LeafletMapView({
 
       // Click — open popup or stream viewer for cameras
       marker.on("click", () => {
-        if (isLabel || isWaypoint || isPolygon) return;
+        if (isWaypoint || isPolygon) return;
+        // Label click: show/hide rotation handle for the selected label
+        if (isLabel) {
+          if (readonly) return;
+          // Hide all other rotation handles
+          camHandlesRef.current.forEach((handle, key) => {
+            if (key.endsWith("-labelrot")) {
+              const el = handle.getElement();
+              if (el) el.style.display = "none";
+            }
+          });
+          // Show this label's handle
+          const thisHandle = camHandlesRef.current.get(node.id + "-labelrot");
+          if (thisHandle) {
+            const el = thisHandle.getElement();
+            if (el) el.style.display = "";
+          }
+          return;
+        }
         // Camera click: open stream viewer if configured
         if (isCamera) {
           const camCd = node.custom_data ? JSON.parse(node.custom_data) : {};
@@ -1486,16 +1606,15 @@ export default function LeafletMapView({
     nodesRef.current.forEach((node) => {
       if (!downNodeIds.has(node.id)) return;
 
-      const ds = downSinceRef.current.get(node.kuma_monitor_id!);
-      const elapsed = ds ? now - ds : 0;
+      const mon = getMonitorData(node.kuma_monitor_id);
+      const downTimestamp = mon?.downTime ? new Date(mon.downTime).getTime() : (downSinceRef.current.get(node.kuma_monitor_id!) ?? now);
+      const elapsed = now - downTimestamp;
       const label = formatDowntime(elapsed);
 
       // Node visual size (to anchor the badge above it)
       const cd = node.custom_data ? (() => { try { return JSON.parse(node.custom_data!); } catch { return {}; } })() : {};
       const scale: number = cd.nodeSize || 1.0;
       const containerPx = Math.round(28 * scale); // matches createMarkerIcon
-      // iconAnchor Y offset = half container + badge height + gap
-      const anchorY = Math.round(containerPx / 2) + 28;
 
       const existing = downtimeMarkersRef.current.get(node.id);
       if (existing) {
@@ -1506,45 +1625,45 @@ export default function LeafletMapView({
           if (span) span.textContent = label;
         }
       } else {
-        // Create badge marker above the node
+        // Single horizontal pill: [! icon] [⏱ 00:00:00]
+        // Anchor bottom of pill well above the node center, clearing the permanent label tooltip
+        // label tooltip offset is ~(containerPx/2 + 16 + ~18px label height) above center ≈ 48px
+        // We add a few extra px so the pill clears it
+        const pillH = 20;
+        const clearance = Math.round(containerPx / 2) + 48; // clears node + label tooltip
+        const anchorYFinal = pillH + clearance;
+
         const icon = L.divIcon({
           className: "downtime-counter",
           html: `<div style="
-            display:flex;flex-direction:column;align-items:center;gap:2px;pointer-events:none;
+            display:inline-flex;align-items:center;gap:5px;
+            pointer-events:none;
+            transform:translateX(-50%);
+            background:rgba(127,29,29,0.96);
+            border:1.5px solid #ef4444;
+            border-radius:20px;
+            padding:3px 8px 3px 6px;
+            box-shadow:0 0 12px rgba(239,68,68,0.55), 0 2px 8px rgba(0,0,0,0.6);
+            white-space:nowrap;
+            animation:ping-badge 2s ease-in-out infinite;
           ">
-            <!-- Exclamation badge -->
+            <!-- ! icon circle -->
             <div style="
-              background:rgba(239,68,68,0.95);
-              border:1.5px solid #fca5a5;
-              border-radius:50%;
-              width:18px;height:18px;
+              width:14px;height:14px;border-radius:50%;
+              background:rgba(239,68,68,0.9);
+              border:1px solid #fca5a5;
               display:flex;align-items:center;justify-content:center;
-              box-shadow:0 0 10px rgba(239,68,68,0.7),0 0 20px rgba(239,68,68,0.3);
-              animation:ping-badge 1.8s ease-in-out infinite;
+              flex-shrink:0;
             ">
-              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
-                <line x1="12" y1="4" x2="12" y2="14"/><circle cx="12" cy="19" r="1.5" fill="#fff" stroke="none"/>
+              <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3.5" stroke-linecap="round">
+                <line x1="12" y1="5" x2="12" y2="14"/><circle cx="12" cy="19" r="1.5" fill="#fff" stroke="none"/>
               </svg>
             </div>
-            <!-- Time counter pill -->
-            <div style="
-              background:rgba(127,29,29,0.95);
-              border:1px solid #ef4444;
-              border-radius:6px;
-              padding:1px 6px;
-              display:flex;align-items:center;gap:3px;
-              box-shadow:0 2px 8px rgba(239,68,68,0.4);
-              white-space:nowrap;
-            ">
-              <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="#fca5a5" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
-              </svg>
-              <span class="dt-val" style="font-size:9px;font-weight:800;color:#fca5a5;font-family:monospace;letter-spacing:0.3px;">${label}</span>
-            </div>
+            <!-- timer -->
+            <span class="dt-val" style="font-size:10px;font-weight:800;color:#fca5a5;font-family:monospace;letter-spacing:0.5px;line-height:1;">${label}</span>
           </div>`,
           iconSize: [0, 0],
-          // Center horizontally, anchor bottom of badge at top of node
-          iconAnchor: [0, anchorY],
+          iconAnchor: [0, anchorYFinal],
         });
         const marker = L.marker([node.x, node.y], { icon, interactive: false, zIndexOffset: 6000 });
         marker.addTo(map);
@@ -1557,14 +1676,15 @@ export default function LeafletMapView({
     if (!LRef.current || !mapRef.current) return;
     const L = LRef.current;
 
-    // Track DOWN timestamps
+    // Track DOWN timestamps — prefer real downTime from Uptime Kuma, fallback to now
     nodesRef.current.forEach((node) => {
       if (!node.kuma_monitor_id) return;
       const m = getMonitorData(node.kuma_monitor_id);
       if (m?.status === 0) {
-        // If not already tracked, record now
         if (!downSinceRef.current.has(node.kuma_monitor_id)) {
-          downSinceRef.current.set(node.kuma_monitor_id, Date.now());
+          // Use the real downTime from Kuma if available, otherwise fall back to now
+          const ts = m.downTime ? new Date(m.downTime).getTime() : Date.now();
+          downSinceRef.current.set(node.kuma_monitor_id, ts);
         }
       } else {
         // Recovered — remove tracking
@@ -2262,10 +2382,12 @@ export default function LeafletMapView({
       mapStyle,
       overlayOpacity,
       straightEdges,
+      showNodes,
+      showLabels,
     };
     onSave(nodesRef.current, edgesRef.current, viewState);
     setSaving(false);
-  }, [onSave, mapStyle, overlayOpacity, straightEdges]);
+  }, [onSave, mapStyle, overlayOpacity, straightEdges, showNodes, showLabels]);
 
   // Auto-save every 60s (if enabled)
   useEffect(() => {
@@ -2359,8 +2481,11 @@ export default function LeafletMapView({
     const maxLng = Math.max(...lngs);
 
     try {
-      const bounds = L.latLngBounds([[minLat, minLng], [maxLat, maxLng]]);
-      map.fitBounds(bounds, { padding: [40, 40], animate: false, maxZoom: isImageMode ? map.getZoom() : 17 });
+      const Leaflet = LRef.current;
+      if (Leaflet) {
+        const bounds = Leaflet.latLngBounds([[minLat, minLng], [maxLat, maxLng]]);
+        map.fitBounds(bounds, { padding: [40, 40], animate: false, maxZoom: isImageMode ? map.getZoom() : 17 });
+      }
     } catch { /* ignore fitBounds errors */ }
 
     // Give Leaflet a moment to settle tiles/markers, then print
@@ -2612,8 +2737,7 @@ export default function LeafletMapView({
           .leaflet-overlay-pane,
           .leaflet-tooltip-pane { visibility: visible !important; }
         }
-        /* Ocultar etiquetas globales */
-        ${!showLabels ? `.leaflet-tooltip, .leaflet-tooltip-pane, .leaflet-label-dark, .interface-label, .traffic-label, .polygon-label { display: none !important; }` : ""}
+        /* Etiquetas tipo label se manejan via JS en el effect de visibilidad */
         
         /* Custom scrollbar for some UI elements */
         .custom-scroll::-webkit-scrollbar { width: 4px; }
@@ -3280,7 +3404,6 @@ export default function LeafletMapView({
         const [editLabelHidden, setEditLabelHidden] = [inputModalConfig.labelHidden ?? cd.labelHidden ?? false, (v: boolean) => setInputModalConfig(c => ({ ...c, labelHidden: v }))];
         const [editLabelSize, setEditLabelSize] = [inputModalConfig.labelSize ?? cd.labelSize ?? 12, (v: number) => setInputModalConfig(c => ({ ...c, labelSize: v }))];
         const [editNodeColor, setEditNodeColor] = [inputModalConfig.nodeColor || cd.nodeColor || "", (v: string) => setInputModalConfig(c => ({ ...c, nodeColor: v }))];
-        const [showPass, setShowPass] = useState(false);
 
         const nodeColors = [
           { color: "", name: "Auto" },
@@ -3294,6 +3417,8 @@ export default function LeafletMapView({
           { color: "#facc15", name: "Amarillo" },
           { color: "#ffffff", name: "Blanco" },
         ];
+
+        const closeInputModal = () => { setInputModalOpen(false); setShowPass(false); };
 
         const handleSubmit = () => {
           if (editName.trim()) {
@@ -3314,12 +3439,12 @@ export default function LeafletMapView({
               }
             }
           }
-          setInputModalOpen(false);
+          closeInputModal();
         };
 
         return (
           <div className="fixed inset-0 z-[99999] flex items-center justify-center" style={{ background: "rgba(0,0,0,0.65)", backdropFilter: "blur(6px)" }}
-            onClick={() => setInputModalOpen(false)}>
+            onClick={closeInputModal}>
             <div className="w-full max-w-md rounded-2xl shadow-2xl" onClick={(e) => e.stopPropagation()}
               style={{ background: "linear-gradient(180deg, rgba(18,18,18,0.99), rgba(10,10,10,0.99))", border: "1px solid rgba(255,255,255,0.09)" }}>
 
@@ -3329,7 +3454,7 @@ export default function LeafletMapView({
                   <Pencil className="h-4 w-4 text-blue-400" />
                 </div>
                 <h3 className="text-sm font-bold text-[#ededed] flex-1">Editar Nodo</h3>
-                <button onClick={() => setInputModalOpen(false)} className="text-[#555] hover:text-[#ededed] text-lg">&times;</button>
+                <button onClick={closeInputModal} className="text-[#555] hover:text-[#ededed] text-lg">&times;</button>
               </div>
 
               <form onSubmit={(e) => { e.preventDefault(); handleSubmit(); }} className="px-5 py-4 space-y-4 max-h-[80vh] overflow-y-auto">
@@ -3437,7 +3562,7 @@ export default function LeafletMapView({
 
                 {/* ── Botones ── */}
                 <div className="flex gap-2 pt-1">
-                  <button type="button" onClick={() => setInputModalOpen(false)}
+                  <button type="button" onClick={closeInputModal}
                     className="flex-1 rounded-xl py-2 text-xs font-semibold"
                     style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", color: "#888" }}>Cancelar</button>
                   <button type="submit"
@@ -3751,16 +3876,33 @@ export default function LeafletMapView({
         );
       })()}
 
-      {/* Time travel blur — only during drag */}
-      {!readonly && <div
-        className="absolute inset-0 pointer-events-none"
-        style={{
-          zIndex: 999,
-          backdropFilter: timeDragging ? "blur(3px)" : "none",
-          background: timeDragging ? "rgba(0,10,40,0.15)" : "transparent",
-          transition: timeDragging ? "none" : "backdrop-filter 0.5s ease-out, background 0.5s ease-out",
-        }}
-      />}
+      {/* Time Machine — day/night solar overlay */}
+      {!readonly && (() => {
+        // Calcula oscuridad según hora del día: 0 = mediodía (sin overlay), 1 = medianoche (máximo)
+        const getSkyDarkness = (date: Date): number => {
+          const h = date.getHours() + date.getMinutes() / 60 + date.getSeconds() / 3600;
+          // Curva coseno: 0 en mediodía (h=12), 1 en medianoche (h=0 o h=24)
+          const dark = (1 - Math.cos(Math.PI / 12 * (h - 12))) / 2;
+          return dark * 0.72; // máximo 72% de oscuridad a medianoche
+        };
+
+        const skyOpacity = (timeMachineTime && timeMachineOpen) ? getSkyDarkness(timeMachineTime) : 0;
+
+        // Color de overlay: azul noche oscuro
+        const overlayColor = `rgba(0, 8, 35, ${skyOpacity})`;
+
+        return (
+          <div
+            className="absolute inset-0 pointer-events-none"
+            style={{
+              zIndex: 999,
+              background: overlayColor,
+              // Sin transición al arrastrar (respuesta inmediata), suave al soltar
+              transition: timeDragging ? "none" : "background 1.2s ease-out",
+            }}
+          />
+        );
+      })()}
 
       {/* Time Machine */}
       {!readonly && <TimeMachine

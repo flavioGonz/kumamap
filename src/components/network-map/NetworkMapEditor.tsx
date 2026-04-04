@@ -16,10 +16,6 @@ import {
   type NodeTypes,
   type EdgeTypes,
   BackgroundVariant,
-  EdgeLabelRenderer,
-  BaseEdge,
-  getBezierPath,
-  getStraightPath,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { sileo } from "sileo";
@@ -38,100 +34,9 @@ import LeafletMapView from "./LeafletMapView";
 import { apiUrl } from "@/lib/api";
 import { Pencil, Type, Plus } from "lucide-react";
 import Tooltip from "./Tooltip";
-
-// ─── Custom Edge with interface labels ──────────
-// Module-level edge style setting (avoids prop drilling through ReactFlow)
-let _edgeStyleStraight = false;
-export function setEdgeStyleStraight(v: boolean) { _edgeStyleStraight = v; }
-
-function InterfaceEdge({ id, sourceX, sourceY, targetX, targetY, data, style, selected, markerEnd }: any) {
-  const [edgePath, labelX, labelY] = _edgeStyleStraight
-    ? getStraightPath({ sourceX, sourceY, targetX, targetY })
-    : getBezierPath({ sourceX, sourceY, targetX, targetY });
-
-  // Calculate perpendicular offset to avoid overlapping labels
-  const dx = targetX - sourceX;
-  const dy = targetY - sourceY;
-  const len = Math.sqrt(dx * dx + dy * dy) || 1;
-  const perpX = (-dy / len) * 14; // 14px perpendicular offset
-  const perpY = (dx / len) * 14;
-
-  // Position labels along the edge with perpendicular offset
-  const srcLabelX = sourceX + dx * 0.22 + perpX;
-  const srcLabelY = sourceY + dy * 0.22 + perpY;
-  const tgtLabelX = sourceX + dx * 0.78 + perpX;
-  const tgtLabelY = sourceY + dy * 0.78 + perpY;
-
-  const hasLabels = data?.sourceInterface || data?.targetInterface;
-
-  return (
-    <>
-      <BaseEdge
-        id={id}
-        path={edgePath}
-        markerEnd={markerEnd}
-        style={{
-          ...style,
-          strokeWidth: selected ? 3 : 2,
-          filter: selected ? `drop-shadow(0 0 6px ${style?.stroke || "#4b5563"})` : undefined,
-        }}
-      />
-      <EdgeLabelRenderer>
-        {/* Source interface — blue badge */}
-        {data?.sourceInterface && (
-          <div
-            className="nodrag nopan absolute text-[8px] font-bold rounded px-1.5 py-[1px] cursor-pointer whitespace-nowrap"
-            style={{
-              transform: `translate(-50%, -50%) translate(${srcLabelX}px, ${srcLabelY}px)`,
-              background: "rgba(59,130,246,0.18)",
-              border: "1px solid rgba(59,130,246,0.4)",
-              color: "#60a5fa",
-              pointerEvents: "all",
-              textShadow: "0 1px 3px rgba(0,0,0,0.5)",
-            }}
-            title={`Interfaz origen: ${data.sourceInterface}`}
-          >
-            {data.sourceInterface}
-          </div>
-        )}
-        {/* Target interface — purple badge */}
-        {data?.targetInterface && (
-          <div
-            className="nodrag nopan absolute text-[8px] font-bold rounded px-1.5 py-[1px] cursor-pointer whitespace-nowrap"
-            style={{
-              transform: `translate(-50%, -50%) translate(${tgtLabelX}px, ${tgtLabelY}px)`,
-              background: "rgba(139,92,246,0.18)",
-              border: "1px solid rgba(139,92,246,0.4)",
-              color: "#a78bfa",
-              pointerEvents: "all",
-              textShadow: "0 1px 3px rgba(0,0,0,0.5)",
-            }}
-            title={`Interfaz destino: ${data.targetInterface}`}
-          >
-            {data.targetInterface}
-          </div>
-        )}
-        {/* Center cable label — only if there's a label */}
-        {data?.label && (
-          <div
-            className="nodrag nopan absolute text-[7px] font-semibold rounded px-1.5 py-[1px] uppercase tracking-wider cursor-pointer whitespace-nowrap"
-            style={{
-              transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY + (hasLabels ? -12 : 0)}px)`,
-              background: "rgba(10,10,10,0.9)",
-              border: "1px solid rgba(255,255,255,0.1)",
-              color: "#999",
-              pointerEvents: "all",
-              textShadow: "0 1px 2px rgba(0,0,0,0.5)",
-            }}
-            title={`Cable: ${data.label}`}
-          >
-            {data.label}
-          </div>
-        )}
-      </EdgeLabelRenderer>
-    </>
-  );
-}
+import EditorSidebarControls from "./EditorSidebarControls";
+import InterfaceEdge, { setEdgeStyleStraight } from "./InterfaceEdge";
+import { getIconForType } from "@/utils/get-icon-for-type";
 
 const nodeTypes: NodeTypes = {
   kumaMonitor: KumaMonitorNode as any,
@@ -149,22 +54,6 @@ interface MapData {
   view_state: string | null;
   nodes: any[];
   edges: any[];
-}
-
-function getIconForType(type: string): string {
-  switch (type) {
-    case "http": case "keyword": case "json-query": return "globe";
-    case "ping": case "smtp": return "wifi";
-    case "port": case "steam": case "gamedig": return "server";
-    case "dns": return "database";
-    case "docker": case "tailscale-ping": return "cloud";
-    case "push": case "mqtt": return "signal";
-    case "radius": case "ldap": return "lock";
-    case "snmp": return "router";
-    case "sqlserver": case "postgres": case "mysql": case "mongodb": case "redis": return "database";
-    case "grpc-keyword": return "servercog";
-    default: return "activity";
-  }
 }
 
 // ─── Inner Canvas ───────────────────────────────
@@ -1513,78 +1402,24 @@ function CanvasInner({
 
       {/* ── VERTICAL SIDEBAR CONTROLS – legacy non-livemap/non-image types only ── */}
       {bgType !== "livemap" && bgType !== "image" && (
-        <div className="fixed top-1/2 -translate-y-1/2 flex flex-col gap-1 rounded-xl p-1 shadow-2xl backdrop-blur-3xl shrink-0"
-          style={{
-            zIndex: 10000,
-            right: rfSidebarWidth + 12,
-            background: "rgba(10,10,10,0.85)",
-            border: "1px solid rgba(255,255,255,0.08)",
-            boxShadow: "0 12px 40px rgba(0,0,0,0.5)",
-            transition: "right 0.3s ease",
-          }}>
-          <Tooltip content="Acercar" placement="left">
-            <button onClick={() => reactFlow.zoomIn()}
-              className="h-8 w-8 flex items-center justify-center rounded-lg text-[#ededed] hover:bg-white/10 transition-all">
-              <Plus className="h-4 w-4" />
-            </button>
-          </Tooltip>
-          <Tooltip content="Alejar" placement="left">
-            <button onClick={() => reactFlow.zoomOut()}
-              className="h-8 w-8 flex items-center justify-center rounded-lg text-[#ededed] hover:bg-white/10 transition-all">
-              <svg width="12" height="2" viewBox="0 0 24 2" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round"><line x1="2" y1="1" x2="22" y2="1"/></svg>
-            </button>
-          </Tooltip>
-          <Tooltip content="Ajustar vista" placement="left">
-            <button onClick={() => reactFlow.fitView({ padding: 0.2 })}
-              className="h-8 w-8 flex items-center justify-center rounded-lg text-[#888] hover:text-[#ededed] hover:bg-white/10 transition-all">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M15 3h6v6"/><path d="M9 21H3v-6"/><path d="m21 3-7 7"/><path d="m3 21 7-7"/></svg>
-            </button>
-          </Tooltip>
-
-          <div className="mx-1 h-px bg-white/10 my-0.5" />
-
-          <Tooltip content={rfShowNodes ? "Ocultar nodos" : "Mostrar nodos"} placement="left">
-            <button onClick={() => setRfShowNodes(v => !v)}
-              className="h-7 w-7 flex items-center justify-center rounded-lg transition-all hover:bg-white/10" style={{ color: rfShowNodes ? "#22c55e" : "#888" }}>
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/></svg>
-            </button>
-          </Tooltip>
-          <Tooltip content={rfShowEdges ? "Ocultar links" : "Mostrar links"} placement="left">
-            <button onClick={() => setRfShowEdges(v => !v)}
-              className="h-7 w-7 flex items-center justify-center rounded-lg transition-all hover:bg-white/10" style={{ color: rfShowEdges ? "#3b82f6" : "#888" }}>
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
-            </button>
-          </Tooltip>
-          <Tooltip content={rfShowCameras ? "Ocultar cámaras" : "Mostrar cámaras"} placement="left">
-            <button onClick={() => setRfShowCameras(v => !v)}
-              className="h-7 w-7 flex items-center justify-center rounded-lg transition-all hover:bg-white/10" style={{ color: rfShowCameras ? "#f59e0b" : "#888" }}>
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m16.24 7.76-1.804 5.412a2 2 0 0 1-1.265 1.265L7.76 16.24l1.804-5.412a2 2 0 0 1 1.265-1.265z"/><circle cx="12" cy="12" r="10"/></svg>
-            </button>
-          </Tooltip>
-          <Tooltip content={rfShowLabels ? "Ocultar etiquetas" : "Mostrar etiquetas"} placement="left">
-            <button onClick={() => setRfShowLabels(v => !v)}
-              className="h-7 w-7 flex items-center justify-center rounded-lg transition-all hover:bg-white/10" style={{ color: rfShowLabels ? "#e2e8f0" : "#888" }}>
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" x2="15" y1="20" y2="20"/><line x1="12" x2="12" y1="4" y2="20"/></svg>
-            </button>
-          </Tooltip>
-
-          <div className="mx-1 h-px bg-white/10 my-0.5" />
-
-          <Tooltip content={panelCollapsed ? "Mostrar monitores" : "Ocultar monitores"} placement="left">
-            <button onClick={() => setPanelCollapsed(v => !v)}
-              className="h-7 w-7 flex items-center justify-center rounded-lg transition-all hover:bg-white/10"
-              style={{ color: !panelCollapsed ? "#60a5fa" : "#888" }}>
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/></svg>
-            </button>
-          </Tooltip>
-          <Tooltip content={timeMachineOpen ? "Cerrar TimeMachine" : "Abrir TimeMachine"} placement="left">
-            <button onClick={() => setTimeMachineOpen(v => !v)}
-              className="h-7 w-7 flex items-center justify-center rounded-lg transition-all hover:bg-white/10"
-              style={{ color: timeMachineOpen ? "#a78bfa" : "#888" }}>
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-            </button>
-          </Tooltip>
-        </div>
+        <EditorSidebarControls
+          sidebarWidth={rfSidebarWidth}
+          onZoomIn={() => reactFlow.zoomIn()}
+          onZoomOut={() => reactFlow.zoomOut()}
+          onFitView={() => reactFlow.fitView({ padding: 0.2 })}
+          showNodes={rfShowNodes}
+          setShowNodes={setRfShowNodes}
+          showEdges={rfShowEdges}
+          setShowEdges={setRfShowEdges}
+          showCameras={rfShowCameras}
+          setShowCameras={setRfShowCameras}
+          showLabels={rfShowLabels}
+          setShowLabels={setRfShowLabels}
+          panelCollapsed={panelCollapsed}
+          setPanelCollapsed={setPanelCollapsed}
+          timeMachineOpen={timeMachineOpen}
+          setTimeMachineOpen={setTimeMachineOpen}
+        />
       )}
 
       <MonitorPanel

@@ -1,16 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { mapsDb } from "@/lib/db";
+import { importMapSchema } from "@/lib/validation";
 
 export async function POST(req: NextRequest) {
   try {
-    const data = await req.json();
-
-    if (data._format !== "kumamap-v1") {
+    const raw = await req.json();
+    const parsed = importMapSchema.safeParse(raw);
+    if (!parsed.success) {
       return NextResponse.json(
-        { error: "Formato invalido. Se espera un archivo exportado de KumaMap." },
+        { error: "Datos inválidos", details: parsed.error.flatten() },
         { status: 400 }
       );
     }
+    const data = parsed.data;
 
     // Create the map
     const map = mapsDb.create({

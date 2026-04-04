@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { mapsDb } from "@/lib/db";
+import { saveMapStateSchema } from "@/lib/validation";
 
 export async function PUT(
   req: NextRequest,
@@ -9,14 +10,16 @@ export async function PUT(
   const map = mapsDb.getById(id);
   if (!map) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  const { nodes, edges, view_state } = await req.json();
-  if (!Array.isArray(nodes) || !Array.isArray(edges)) {
+  const body = await req.json();
+  const parsed = saveMapStateSchema.safeParse(body);
+  if (!parsed.success) {
     return NextResponse.json(
-      { error: "nodes and edges arrays required" },
+      { error: "Datos inválidos", details: parsed.error.flatten() },
       { status: 400 }
     );
   }
 
+  const { nodes, edges, view_state } = parsed.data;
   mapsDb.saveState(id, nodes, edges);
   if (view_state !== undefined) {
     mapsDb.update(id, { view_state: typeof view_state === "string" ? view_state : JSON.stringify(view_state) } as any);

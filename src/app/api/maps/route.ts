@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { mapsDb } from "@/lib/db";
+import { createMapSchema } from "@/lib/validation";
 
 export async function GET() {
   const maps = mapsDb.getAll();
@@ -20,16 +21,20 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   const body = await req.json();
-  if (!body.name) {
-    return NextResponse.json({ error: "Name is required" }, { status: 400 });
+  const parsed = createMapSchema.safeParse(body);
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: "Datos inválidos", details: parsed.error.flatten() },
+      { status: 400 }
+    );
   }
   const map = mapsDb.create({
-    name: body.name,
-    background_type: body.background_type,
-    kuma_group_id: body.kuma_group_id,
-    parent_id: body.parent_id ?? null,
-    width: body.width,
-    height: body.height,
+    name: parsed.data.name,
+    background_type: parsed.data.background_type,
+    kuma_group_id: parsed.data.kuma_group_id,
+    parent_id: parsed.data.parent_id ?? null,
+    width: parsed.data.width,
+    height: parsed.data.height,
   });
   return NextResponse.json(map, { status: 201 });
 }

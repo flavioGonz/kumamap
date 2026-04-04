@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { mapsDb } from "@/lib/db";
+import { updateMapSchema } from "@/lib/validation";
 
 export async function GET(
   _req: NextRequest,
@@ -20,7 +21,14 @@ export async function PUT(
 ) {
   const { id } = await params;
   const body = await req.json();
-  const map = mapsDb.update(id, body);
+  const parsed = updateMapSchema.safeParse(body);
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: "Datos inválidos", details: parsed.error.flatten() },
+      { status: 400 }
+    );
+  }
+  const map = mapsDb.update(id, parsed.data);
   if (!map) return NextResponse.json({ error: "Not found" }, { status: 404 });
   return NextResponse.json(map);
 }

@@ -15,6 +15,7 @@ export interface KumaMonitor {
   ping?: number | null;
   msg?: string;
   uptime24?: number;
+  downTime?: string; // ISO timestamp of when this monitor first went DOWN in the current streak
 }
 
 export interface KumaHeartbeat {
@@ -96,6 +97,7 @@ class KumaClient {
           for (const [id, monitor] of Object.entries(data)) {
             const mid = parseInt(id);
             const hb = this.heartbeats.get(mid);
+            const effectiveStatus = hb?.status ?? monitor.status;
             this.monitors.set(mid, {
               id: mid,
               name: monitor.name,
@@ -110,9 +112,11 @@ class KumaClient {
                 name: t.name,
                 color: t.color,
               })),
-              status: hb?.status ?? monitor.status,
+              status: effectiveStatus,
               ping: hb?.ping ?? null,
               msg: hb?.msg ?? "",
+              // If monitor is currently DOWN, seed downTime from the latest heartbeat time
+              downTime: effectiveStatus === 0 && hb?.time ? hb.time : undefined,
             });
           }
         }
@@ -122,9 +126,17 @@ class KumaClient {
         this.heartbeats.set(data.monitorID, data);
         const monitor = this.monitors.get(data.monitorID);
         if (monitor) {
+          const wasDown = monitor.status === 0;
           monitor.status = data.status;
           monitor.ping = data.ping;
           monitor.msg = data.msg;
+          if (data.status === 0) {
+            // DOWN: keep existing downTime (preserve streak start), or seed it now
+            if (!wasDown || !monitor.downTime) monitor.downTime = data.time;
+          } else {
+            // UP / pending / maintenance: clear downtime streak
+            monitor.downTime = undefined;
+          }
         }
         // Store history
         const history = this.heartbeatHistory.get(data.monitorID) || [];
@@ -155,6 +167,8 @@ class KumaClient {
           const mid = parseInt(id);
           if (isNaN(mid)) continue;
           const hb = this.heartbeats.get(mid);
+          const existing = this.monitors.get(mid);
+          const effectiveStatus = hb?.status ?? monitor.status;
           this.monitors.set(mid, {
             id: mid,
             name: monitor.name,
@@ -166,9 +180,11 @@ class KumaClient {
             active: monitor.active !== false,
             parent: monitor.parent ?? null,
             tags: (monitor.tags || []).map((t: any) => ({ name: t.name, color: t.color })),
-            status: hb?.status ?? monitor.status,
+            status: effectiveStatus,
             ping: hb?.ping ?? null,
             msg: hb?.msg ?? "",
+            // Preserve existing downTime if still DOWN, or seed from heartbeat
+            downTime: effectiveStatus === 0 ? (existing?.downTime ?? hb?.time) : undefined,
           });
         }
       });
@@ -189,6 +205,7 @@ class KumaClient {
                 if (isNaN(mid)) continue;
                 const existing = this.monitors.get(mid);
                 const hb = this.heartbeats.get(mid);
+                const effectiveStatus2 = existing?.status ?? hb?.status ?? monitor.status;
                 this.monitors.set(mid, {
                   id: mid,
                   name: monitor.name,
@@ -200,10 +217,12 @@ class KumaClient {
                   active: monitor.active !== false,
                   parent: monitor.parent ?? null,
                   tags: (monitor.tags || []).map((t: any) => ({ name: t.name, color: t.color })),
-                  status: existing?.status ?? hb?.status ?? monitor.status,
+                  status: effectiveStatus2,
                   ping: existing?.ping ?? hb?.ping ?? null,
                   msg: existing?.msg ?? hb?.msg ?? "",
                   uptime24: existing?.uptime24,
+                  // Preserve downTime if still DOWN
+                  downTime: effectiveStatus2 === 0 ? (existing?.downTime ?? hb?.time) : undefined,
                 });
               }
             }

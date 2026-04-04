@@ -33,6 +33,7 @@ export interface KumaMonitor {
   msg?: string;
   uptime24?: number;
   tags?: { name: string; color: string }[];
+  downTime?: string; // ISO timestamp of when this monitor first went DOWN in the current streak
 }
 
 interface MonitorPanelProps {

@@ -4,8 +4,8 @@ import { useState, useEffect } from "react";
 import { useParams } from "next/navigation";
 import { apiUrl } from "@/lib/api";
 import { Network, MapIcon } from "lucide-react";
-import type { KumaMonitor } from "@/components/network-map/MonitorPanel";
 import dynamic from "next/dynamic";
+import { useKumaMonitorsSimple } from "@/hooks/useKumaMonitors";
 
 // Dynamic import to avoid SSR issues with Leaflet
 const LeafletMapView = dynamic(
@@ -27,8 +27,7 @@ export default function MapViewPage() {
   const params = useParams();
   const mapId = params.id as string;
   const [mapData, setMapData] = useState<MapData | null>(null);
-  const [monitors, setMonitors] = useState<KumaMonitor[]>([]);
-  const [connected, setConnected] = useState(false);
+  const { monitors, connected } = useKumaMonitorsSimple();
   const [loading, setLoading] = useState(true);
 
   // Fetch map data
@@ -41,25 +40,6 @@ export default function MapViewPage() {
       })
       .catch(() => setLoading(false));
   }, [mapId]);
-
-  // Socket.IO real-time monitors
-  useEffect(() => {
-    import("@/lib/socket").then(({ getSocket }) => {
-      const socket = getSocket();
-
-      const handleMonitors = (data: { connected: boolean; monitors: KumaMonitor[] }) => {
-        setConnected(data.connected);
-        setMonitors(data.monitors || []);
-      };
-
-      socket.on("kuma:monitors", handleMonitors);
-      socket.on("disconnect", () => setConnected(false));
-
-      return () => {
-        socket.off("kuma:monitors", handleMonitors);
-      };
-    });
-  }, []);
 
   if (loading) {
     return (

@@ -1,10 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
+import { loginSchema } from "@/lib/validation";
 
 export async function POST(req: NextRequest) {
-  const { username, password } = await req.json();
-  if (!username || !password) {
-    return NextResponse.json({ error: "Usuario y contraseña requeridos" }, { status: 400 });
+  const body = await req.json();
+  const parsed = loginSchema.safeParse(body);
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: "Datos inválidos", details: parsed.error.flatten() },
+      { status: 400 }
+    );
   }
+  const { username, password } = parsed.data;
 
   // Validate against KUMA_USER/KUMA_PASS env vars.
   // The main server already authenticates against Kuma on startup via Socket.IO,

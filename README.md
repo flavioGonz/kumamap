@@ -19,6 +19,7 @@
   <img src="https://img.shields.io/badge/Leaflet-Mapas-199900?style=flat-square&logo=leaflet" alt="Leaflet" />
   <img src="https://img.shields.io/badge/ReactFlow-Diagramas-ff0072?style=flat-square" alt="ReactFlow" />
   <img src="https://img.shields.io/badge/SQLite-Base%20de%20Datos-003B57?style=flat-square&logo=sqlite" alt="SQLite" />
+  <img src="https://img.shields.io/badge/Zod-4-3E67B1?style=flat-square&logo=zod" alt="Zod" />
   <img src="https://img.shields.io/badge/Tailwind_CSS-4-06B6D4?style=flat-square&logo=tailwindcss" alt="Tailwind" />
   <img src="https://img.shields.io/badge/Licencia-MIT-green?style=flat-square" alt="MIT License" />
 </p>
@@ -138,6 +139,7 @@ KumaMap ofrece mapas geolocalizados interactivos con soporte de **jerarquia de m
 | **Estilos** | Tailwind CSS 4 | Tema oscuro utility-first |
 | **Tiempo Real** | Socket.IO 4 | WebSocket bidireccional (Kuma <-> Servidor <-> Navegador) |
 | **Base de Datos** | SQLite (better-sqlite3) | Persistencia de mapas/nodos/enlaces |
+| **Validacion** | Zod 4 | Validacion de schemas en API routes |
 | **Notificaciones** | Sonner | Notificaciones toast |
 | **Iconos** | Lucide React | Set de iconos premium (40+ iconos de infra) |
 | **Servidor** | tsx + Socket.IO | Servidor WebSocket junto a Next.js |
@@ -153,12 +155,13 @@ KumaMap ofrece mapas geolocalizados interactivos con soporte de **jerarquia de m
 │   (puerto 3001) │ <================> │  (puerto 3000)   │ <==================> │   App React      │
 │                 │                    │                  │                      │                  │
 │  - Monitores    │                    │  - API REST      │                      │  - LeafletMap    │
-│  - Heartbeats   │                    │  - WebSocket Hub │                      │  - ReactFlow     │
+│  - Heartbeats   │                    │  - WebSocket Hub │                      │  - MapListView   │
 │  - Alertas      │                    │  - Auth Proxy    │                      │  - TimeMachine   │
-└─────────────────┘                    ├──────────────────┤                      │  - MonitorPanel  │
-                                       │  SQLite DB       │                      └─────────────────┘
-                                       │  ├─ maps         │
-                                       │  ├─ map_nodes    │
+└─────────────────┘                    │  - Zod Schemas   │                      │  - MonitorPanel  │
+                                       ├──────────────────┤                      │  - MapClock      │
+                                       │  SQLite DB       │                      │  - useKumaMonitors│
+                                       │  ├─ maps         │                      │  - utils/*       │
+                                       │  ├─ map_nodes    │                      └─────────────────┘
                                        │  ├─ map_edges    │
                                        │  └─ view_state   │
                                        └──────────────────┘
@@ -553,6 +556,20 @@ NEXT_PUBLIC_BASE_PATH=/maps
 ---
 
 ## Changelog
+
+### v1.6.0 (2026-04-04)
+
+**Refactor: Modularizacion del Codigo**
+- **`page.tsx` reducido de ~1200 a ~105 lineas**: la pagina principal ahora solo orquesta autenticacion y navegacion entre vistas.
+- **`MapListView`** (nuevo componente): toda la logica de listado, busqueda, filtrado, creacion y gestion de mapas extraida a `src/components/MapListView.tsx`.
+- **`useKumaMonitors`** (nuevo hook): conexion WebSocket con Kuma y notificaciones toast de cambio de estado extraidas a `src/hooks/useKumaMonitors.ts`.
+- **`MapClock`** (nuevo componente): reloj del mapa con efecto Time Machine extraido a `src/components/network-map/MapClock.tsx`.
+- **Utilidades extraidas a `src/utils/`**: `format.ts` (formateo de trafico/downtime), `status.ts` (colores de estado, lookup de monitor), `map-icons.ts` (40+ SVG icons y fabrica de marcadores Leaflet).
+
+**Validacion de APIs con Zod**
+- Todas las rutas API (`auth`, `maps`, `maps/[id]`, `maps/[id]/state`, `maps/import`) ahora validan el body con schemas Zod.
+- Schemas centralizados en `src/lib/validation.ts` para consistencia y reutilizacion.
+- Respuestas de error mejoradas con detalles de validacion (`details: parsed.error.flatten()`).
 
 ### v1.5.0 (2026-04-02)
 

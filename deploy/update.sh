@@ -118,6 +118,11 @@ update_host() {
 
       echo ""
       echo "=== Build Next.js ==="
+
+      # Limpiar build anterior para evitar errores de chunk stale
+      echo "  Limpiando .next anterior..."
+      rm -rf .next
+
       # Detect basePath from .env.local or .env
       BASE_PATH=""
       for env_file in .env.local .env; do
@@ -142,12 +147,26 @@ update_host() {
     echo ""
     echo "=== Reiniciando servicio ==="
 
+    # Matar procesos zombie que puedan estar ocupando el puerto
+    pkill -f "tsx server.ts" 2>/dev/null || true
+    sleep 1
+
     # Detect process manager: PM2 or systemd
     if command -v pm2 &>/dev/null && pm2 list 2>/dev/null | grep -q "kumamap"; then
       echo "  Modo: PM2"
+      fuser -k 3000/tcp 2>/dev/null || true
+      sleep 1
       pm2 restart kumamap --update-env
-      sleep 3
+      sleep 4
       pm2 list | grep kumamap | head -1
+      # Verificar que no haya EADDRINUSE
+      if pm2 logs kumamap --lines 5 --nostream 2>/dev/null | grep -q "EADDRINUSE"; then
+        echo "  ⚠ Puerto ocupado, forzando liberación..."
+        fuser -k 3000/tcp 2>/dev/null || true
+        sleep 2
+        pm2 restart kumamap --update-env
+        sleep 3
+      fi
     elif systemctl is-enabled kumamap &>/dev/null 2>&1; then
       echo "  Modo: systemd"
       sudo systemctl restart kumamap

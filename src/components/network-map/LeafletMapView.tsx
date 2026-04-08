@@ -119,6 +119,7 @@ function RackDevicePickerModal({
   getMonitorData: (id: number) => any;
 }) {
   const [query, setQuery] = React.useState("");
+  const [selectedDevice, setSelectedDevice] = React.useState<any>(null); // step 2
 
   const TYPE_ICON: Record<string, React.ReactNode> = {
     server:        <Server className="w-3.5 h-3.5" />,
@@ -133,7 +134,8 @@ function RackDevicePickerModal({
   const TYPE_LABEL: Record<string, string> = {
     server: "Servidor", switch: "Switch", patchpanel: "Patch Panel",
     router: "Router", ups: "UPS", pdu: "PDU",
-    "tray-fiber": "Fibra", "tray-1u": "Bandeja", "tray-2u": "Bandeja", other: "Otro",
+    "tray-fiber": "Fibra", "tray-1u": "Bandeja", "tray-2u": "Bandeja",
+    "cable-organizer": "Org. Cable", other: "Otro",
   };
   const TYPE_COLOR: Record<string, string> = {
     server: "#3b82f6", switch: "#22c55e", patchpanel: "#f59e0b",
@@ -145,8 +147,109 @@ function RackDevicePickerModal({
     !query || d.label?.toLowerCase().includes(query.toLowerCase()) || TYPE_LABEL[d.type]?.toLowerCase().includes(query.toLowerCase())
   );
 
-  const buildHint = (d: any) => `${d.label} (U${d.unit}${d.sizeUnits > 1 ? `-${d.unit + d.sizeUnits - 1}` : ""})`;
+  const deviceBaseHint = (d: any) => `${d.label} (U${d.unit}${d.sizeUnits > 1 ? `-${d.unit + d.sizeUnits - 1}` : ""})`;
 
+  // Determine if a device has selectable interfaces/ports
+  const getDeviceInterfaces = (d: any): { id: string; label: string; sub: string; connected: boolean }[] => {
+    if (d.type === "switch" && d.switchPorts?.length) {
+      return d.switchPorts.map((p: any) => ({
+        id: String(p.port),
+        label: p.label && p.label !== String(p.port) ? `Puerto ${p.port} — ${p.label}` : `Puerto ${p.port}`,
+        sub: [p.speed || "", p.connected ? "conectado" : "libre", p.vlan ? `VLAN ${p.vlan}` : ""].filter(Boolean).join(" · "),
+        connected: !!p.connected,
+      }));
+    }
+    if (d.type === "patchpanel" && d.ports?.length) {
+      return d.ports.map((p: any) => ({
+        id: String(p.port),
+        label: p.label && p.label !== `P${p.port}` ? `Puerto ${p.port} — ${p.label}` : `Puerto ${p.port}`,
+        sub: [p.connected ? "conectado" : "libre", p.destination || ""].filter(Boolean).join(" · "),
+        connected: !!p.connected,
+      }));
+    }
+    if (d.type === "router" && d.routerInterfaces?.length) {
+      return d.routerInterfaces.map((iface: any) => ({
+        id: iface.id,
+        label: iface.name,
+        sub: [iface.type, iface.ipAddress || "", iface.connected ? "conectado" : "libre"].filter(Boolean).join(" · "),
+        connected: !!iface.connected,
+      }));
+    }
+    return [];
+  };
+
+  const handleDeviceClick = (d: any) => {
+    const ifaces = getDeviceInterfaces(d);
+    if (ifaces.length === 0) {
+      // No ports — select directly
+      onSelect(deviceBaseHint(d));
+    } else {
+      setSelectedDevice(d);
+    }
+  };
+
+  // ── Step 2: Port / Interface picker ─────────────────────────────────────────
+  if (selectedDevice) {
+    const ifaces = getDeviceInterfaces(selectedDevice);
+    const col = TYPE_COLOR[selectedDevice.type] || "#6b7280";
+    return (
+      <div className="fixed inset-0 z-[99999] flex items-center justify-center" style={{ background: "rgba(0,0,0,0.65)", backdropFilter: "blur(6px)" }}>
+        <div className="rounded-2xl border border-white/10 overflow-hidden" style={{ background: "#111", width: 420, maxWidth: "92vw", boxShadow: "0 24px 64px rgba(0,0,0,0.7)" }}>
+          {/* Header */}
+          <div className="px-5 py-4 border-b border-white/[0.07] flex items-center gap-3">
+            <button onClick={() => setSelectedDevice(null)} className="w-7 h-7 flex items-center justify-center rounded-lg text-white/40 hover:text-white/80 hover:bg-white/[0.06] transition-all cursor-pointer">
+              <XIcon className="w-3.5 h-3.5" style={{ transform: "rotate(45deg)" }} />
+            </button>
+            <div className="flex-1 min-w-0">
+              <div className="text-[10px] font-bold uppercase tracking-widest text-white/30 mb-0.5">
+                {isSrc ? "Interfaz de origen" : "Interfaz de destino"}
+              </div>
+              <div className="text-sm font-bold text-white/90 truncate">{selectedDevice.label}</div>
+            </div>
+            <button onClick={onCancel} className="w-7 h-7 flex items-center justify-center rounded-lg text-white/30 hover:text-white/70 hover:bg-white/[0.06] transition-all cursor-pointer">
+              <XIcon className="w-4 h-4" />
+            </button>
+          </div>
+
+          {/* "Sin interfaz específica" */}
+          <div className="px-4 pt-3 pb-1">
+            <button
+              onClick={() => onSelect(deviceBaseHint(selectedDevice))}
+              className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-white/40 hover:text-white/70 hover:bg-white/[0.04] transition-all cursor-pointer text-xs border border-dashed border-white/[0.08]"
+            >
+              <Layers className="w-3.5 h-3.5 shrink-0" />
+              <span className="italic">Sin interfaz específica</span>
+            </button>
+          </div>
+
+          {/* Interface list */}
+          <div className="overflow-y-auto px-4 pb-4 mt-1" style={{ maxHeight: 340, scrollbarWidth: "thin", scrollbarColor: "rgba(255,255,255,0.1) transparent" }}>
+            {ifaces.map((iface) => (
+              <button
+                key={iface.id}
+                onClick={() => onSelect(`${selectedDevice.label} > ${iface.label}`)}
+                className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl mb-1 transition-all cursor-pointer text-left"
+                style={{ background: iface.connected ? `${col}12` : "rgba(255,255,255,0.025)" }}
+                onMouseEnter={e => (e.currentTarget.style.background = `${col}22`)}
+                onMouseLeave={e => (e.currentTarget.style.background = iface.connected ? `${col}12` : "rgba(255,255,255,0.025)")}
+              >
+                <div className="w-2 h-2 rounded-full shrink-0 mt-0.5" style={{ background: iface.connected ? "#22c55e" : "#4b5563", boxShadow: iface.connected ? "0 0 5px #22c55e88" : "none" }} />
+                <div className="flex-1 min-w-0">
+                  <div className="text-[12px] font-semibold text-white/85 truncate">{iface.label}</div>
+                  {iface.sub && <div className="text-[10px] text-white/35 truncate">{iface.sub}</div>}
+                </div>
+              </button>
+            ))}
+          </div>
+          <div className="px-5 py-2.5 border-t border-white/[0.05] text-[9px] text-white/20 text-center">
+            La interfaz seleccionada se asociará al link
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Step 1: Device picker ────────────────────────────────────────────────────
   return (
     <div className="fixed inset-0 z-[99999] flex items-center justify-center" style={{ background: "rgba(0,0,0,0.65)", backdropFilter: "blur(6px)" }}>
       <div
@@ -161,10 +264,7 @@ function RackDevicePickerModal({
             </div>
             <div className="text-sm font-bold text-white/90 truncate">{rackName}</div>
           </div>
-          <button
-            onClick={onCancel}
-            className="w-7 h-7 flex items-center justify-center rounded-lg text-white/30 hover:text-white/70 hover:bg-white/[0.06] transition-all cursor-pointer"
-          >
+          <button onClick={onCancel} className="w-7 h-7 flex items-center justify-center rounded-lg text-white/30 hover:text-white/70 hover:bg-white/[0.06] transition-all cursor-pointer">
             <XIcon className="w-4 h-4" />
           </button>
         </div>
@@ -205,21 +305,20 @@ function RackDevicePickerModal({
             const typeLabel = TYPE_LABEL[d.type] || d.type;
             const monInfo = d.monitorId ? getMonitorData(d.monitorId) : null;
             const monColor = monInfo && monInfo.status != null ? (STATUS_COLORS_RACK[monInfo.status as number] || "#6b7280") : null;
+            const hasInterfaces = getDeviceInterfaces(d).length > 0;
 
             return (
               <button
                 key={d.id}
-                onClick={() => onSelect(buildHint(d))}
+                onClick={() => handleDeviceClick(d)}
                 className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl mb-1 transition-all cursor-pointer group text-left"
                 style={{ background: "rgba(255,255,255,0.025)" }}
                 onMouseEnter={e => (e.currentTarget.style.background = `${col}18`)}
                 onMouseLeave={e => (e.currentTarget.style.background = "rgba(255,255,255,0.025)")}
               >
-                {/* Type icon */}
                 <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ background: `${col}22`, border: `1px solid ${col}44`, color: col }}>
                   {icon}
                 </div>
-                {/* Info */}
                 <div className="flex-1 min-w-0">
                   <div className="text-[12px] font-semibold text-white/85 truncate">{d.label}</div>
                   <div className="text-[10px] text-white/35 flex items-center gap-1.5">
@@ -229,11 +328,9 @@ function RackDevicePickerModal({
                     {d.portCount && <><span>·</span><span>{d.portCount}P</span></>}
                   </div>
                 </div>
-                {/* Monitor status dot */}
-                {monColor && (
-                  <div className="w-2 h-2 rounded-full shrink-0" style={{ background: monColor, boxShadow: `0 0 6px ${monColor}` }} />
-                )}
-                {/* U badge */}
+                {monColor && <div className="w-2 h-2 rounded-full shrink-0" style={{ background: monColor, boxShadow: `0 0 6px ${monColor}` }} />}
+                {/* Chevron if has interfaces */}
+                {hasInterfaces && <div className="text-white/25 text-xs shrink-0">›</div>}
                 <div className="text-[9px] font-bold px-1.5 py-0.5 rounded shrink-0" style={{ background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.3)" }}>
                   U{d.unit}
                 </div>
@@ -244,7 +341,7 @@ function RackDevicePickerModal({
 
         {/* Footer hint */}
         <div className="px-5 py-3 border-t border-white/[0.05] text-[9px] text-white/20 text-center">
-          El nombre del equipo se usará como interfaz de conexión
+          › indica que tiene puertos seleccionables
         </div>
       </div>
     </div>

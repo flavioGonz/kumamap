@@ -1,4 +1,5 @@
 export const iconSvgPaths: Record<string, string> = {
+  _rack:      '<rect x="3" y="1" width="18" height="22" rx="2"/><line x1="3" x2="21" y1="6.5" y2="6.5"/><line x1="3" x2="21" y1="11.5" y2="11.5"/><line x1="3" x2="21" y1="16.5" y2="16.5"/><circle cx="7" cy="4" r="1"/><circle cx="7" cy="9" r="1"/><circle cx="7" cy="14" r="1"/><circle cx="7" cy="19" r="1"/><rect x="10" y="2.5" width="8" height="2.5" rx="0.5" fill="white" fill-opacity="0.3"/>',
   router:     '<rect width="20" height="8" x="2" y="14" rx="2"/><rect width="20" height="8" x="2" y="2" rx="2"/><line x1="6" x2="6.01" y1="6" y2="6"/><line x1="6" x2="6.01" y1="18" y2="18"/>',
   switch:     '<rect x="16" y="16" width="6" height="6" rx="1"/><rect x="2" y="16" width="6" height="6" rx="1"/><rect x="9" y="2" width="6" height="6" rx="1"/><path d="M5 16v-3a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3"/><path d="M12 12V8"/>',
   ethernet:   '<rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10v4"/><path d="M10 10v4"/><path d="M14 10v4"/><path d="M18 10v4"/>',

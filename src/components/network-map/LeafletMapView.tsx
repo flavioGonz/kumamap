@@ -1,13 +1,31 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback, useMemo } from "react";
+import React, { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { apiUrl } from "@/lib/api";
 import { toast } from "sonner";
 import type { KumaMonitor } from "./MonitorPanel";
 import ContextMenu, { menuIcons } from "./ContextMenu";
 import LinkModal, { type LinkFormData } from "./LinkModal";
 import InputModal from "./InputModal";
-import { Pencil, Signal } from "lucide-react";
+import {
+  Pencil,
+  Signal,
+  Download,
+  Lock,
+  Check,
+  Loader2,
+  Activity,
+  Server,
+  Network,
+  Cable,
+  Zap,
+  Router,
+  PlugZap,
+  HardDrive,
+  Layers,
+  Search,
+  X as XIcon,
+} from "lucide-react";
 import Tooltip from "./Tooltip";
 import TimeMachine from "./TimeMachine";
 import EventReportModal from "./EventReportModal";
@@ -15,6 +33,7 @@ import CameraStreamConfigModal, { type CameraStreamConfig } from "./CameraStream
 import CameraStreamViewer from "./CameraStreamViewer";
 import IconPickerModal from "./IconPickerModal";
 import NodeSizeModal from "./NodeSizeModal";
+import RackDesignerDrawer from "./RackDesignerDrawer";
 import { formatTraffic } from "@/utils/format";
 import { statusColors, getStatusColor as _getStatusColor, getMonitorData as _getMonitorData } from "@/utils/status";
 import { iconSvgPaths, getIconSvg, createMarkerIcon } from "@/utils/map-icons";
@@ -23,6 +42,8 @@ import MapClock from "./MapClock";
 import VisualizationPanel from "./VisualizationPanel";
 import FOVColorPickerModal from "./FOVColorPickerModal";
 import LensPickerModal from "./LensPickerModal";
+import NewMonitorModal from "./NewMonitorModal";
+
 
 interface SavedNode {
   id: string;
@@ -77,6 +98,159 @@ interface LeafletMapViewProps {
 
 
 
+// ── Rack Device Picker Modal ─────────────────────────────────────────────────
+// Must be a proper component (not IIFE) so React hooks are valid
+
+const STATUS_COLORS_RACK: Record<number, string> = { 0: "#ef4444", 1: "#22c55e", 2: "#f59e0b", 3: "#8b5cf6" };
+
+function RackDevicePickerModal({
+  devices,
+  rackName,
+  isSrc,
+  onSelect,
+  onCancel,
+  getMonitorData,
+}: {
+  devices: any[];
+  rackName: string;
+  isSrc: boolean;
+  onSelect: (hint: string) => void;
+  onCancel: () => void;
+  getMonitorData: (id: number) => any;
+}) {
+  const [query, setQuery] = React.useState("");
+
+  const TYPE_ICON: Record<string, React.ReactNode> = {
+    server:        <Server className="w-3.5 h-3.5" />,
+    switch:        <Network className="w-3.5 h-3.5" />,
+    patchpanel:    <Cable className="w-3.5 h-3.5" />,
+    router:        <Router className="w-3.5 h-3.5" />,
+    ups:           <Zap className="w-3.5 h-3.5" />,
+    pdu:           <PlugZap className="w-3.5 h-3.5" />,
+    "tray-fiber":  <HardDrive className="w-3.5 h-3.5" />,
+    other:         <Layers className="w-3.5 h-3.5" />,
+  };
+  const TYPE_LABEL: Record<string, string> = {
+    server: "Servidor", switch: "Switch", patchpanel: "Patch Panel",
+    router: "Router", ups: "UPS", pdu: "PDU",
+    "tray-fiber": "Fibra", "tray-1u": "Bandeja", "tray-2u": "Bandeja", other: "Otro",
+  };
+  const TYPE_COLOR: Record<string, string> = {
+    server: "#3b82f6", switch: "#22c55e", patchpanel: "#f59e0b",
+    router: "#8b5cf6", ups: "#ef4444", pdu: "#ec4899",
+    "tray-fiber": "#06b6d4", other: "#6b7280",
+  };
+
+  const filtered = devices.filter((d: any) =>
+    !query || d.label?.toLowerCase().includes(query.toLowerCase()) || TYPE_LABEL[d.type]?.toLowerCase().includes(query.toLowerCase())
+  );
+
+  const buildHint = (d: any) => `${d.label} (U${d.unit}${d.sizeUnits > 1 ? `-${d.unit + d.sizeUnits - 1}` : ""})`;
+
+  return (
+    <div className="fixed inset-0 z-[99999] flex items-center justify-center" style={{ background: "rgba(0,0,0,0.65)", backdropFilter: "blur(6px)" }}>
+      <div
+        className="rounded-2xl border border-white/10 overflow-hidden"
+        style={{ background: "#111", width: 380, maxWidth: "90vw", boxShadow: "0 24px 64px rgba(0,0,0,0.7)" }}
+      >
+        {/* Header */}
+        <div className="px-5 py-4 border-b border-white/[0.07] flex items-center gap-3">
+          <div className="flex-1 min-w-0">
+            <div className="text-[10px] font-bold uppercase tracking-widest text-white/30 mb-0.5">
+              {isSrc ? "Equipo de origen" : "Equipo de destino"}
+            </div>
+            <div className="text-sm font-bold text-white/90 truncate">{rackName}</div>
+          </div>
+          <button
+            onClick={onCancel}
+            className="w-7 h-7 flex items-center justify-center rounded-lg text-white/30 hover:text-white/70 hover:bg-white/[0.06] transition-all cursor-pointer"
+          >
+            <XIcon className="w-4 h-4" />
+          </button>
+        </div>
+
+        {/* Search */}
+        <div className="px-4 pt-3 pb-2">
+          <div className="flex items-center gap-2 rounded-lg border border-white/[0.08] px-3 py-2" style={{ background: "rgba(255,255,255,0.03)" }}>
+            <Search className="w-3.5 h-3.5 text-white/30 shrink-0" />
+            <input
+              autoFocus
+              value={query}
+              onChange={e => setQuery(e.target.value)}
+              placeholder="Buscar equipo..."
+              className="flex-1 bg-transparent text-xs text-white/80 placeholder-white/25 outline-none"
+            />
+          </div>
+        </div>
+
+        {/* "Sin equipo específico" option */}
+        <div className="px-4 pb-1">
+          <button
+            onClick={() => onSelect("")}
+            className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-white/40 hover:text-white/70 hover:bg-white/[0.04] transition-all cursor-pointer text-xs border border-dashed border-white/[0.08]"
+          >
+            <Layers className="w-3.5 h-3.5 shrink-0" />
+            <span className="italic">Sin equipo específico</span>
+          </button>
+        </div>
+
+        {/* Device list */}
+        <div className="overflow-y-auto px-4 pb-4 mt-1" style={{ maxHeight: 320, scrollbarWidth: "thin", scrollbarColor: "rgba(255,255,255,0.1) transparent" }}>
+          {filtered.length === 0 && (
+            <div className="py-8 text-center text-xs text-white/25 italic">Sin equipos en este rack</div>
+          )}
+          {filtered.map((d: any) => {
+            const col = TYPE_COLOR[d.type] || "#6b7280";
+            const icon = TYPE_ICON[d.type] || TYPE_ICON.other;
+            const typeLabel = TYPE_LABEL[d.type] || d.type;
+            const monInfo = d.monitorId ? getMonitorData(d.monitorId) : null;
+            const monColor = monInfo && monInfo.status != null ? (STATUS_COLORS_RACK[monInfo.status as number] || "#6b7280") : null;
+
+            return (
+              <button
+                key={d.id}
+                onClick={() => onSelect(buildHint(d))}
+                className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl mb-1 transition-all cursor-pointer group text-left"
+                style={{ background: "rgba(255,255,255,0.025)" }}
+                onMouseEnter={e => (e.currentTarget.style.background = `${col}18`)}
+                onMouseLeave={e => (e.currentTarget.style.background = "rgba(255,255,255,0.025)")}
+              >
+                {/* Type icon */}
+                <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ background: `${col}22`, border: `1px solid ${col}44`, color: col }}>
+                  {icon}
+                </div>
+                {/* Info */}
+                <div className="flex-1 min-w-0">
+                  <div className="text-[12px] font-semibold text-white/85 truncate">{d.label}</div>
+                  <div className="text-[10px] text-white/35 flex items-center gap-1.5">
+                    <span>{typeLabel}</span>
+                    <span>·</span>
+                    <span>U{d.unit}{d.sizeUnits > 1 ? `–${d.unit + d.sizeUnits - 1}` : ""}</span>
+                    {d.portCount && <><span>·</span><span>{d.portCount}P</span></>}
+                  </div>
+                </div>
+                {/* Monitor status dot */}
+                {monColor && (
+                  <div className="w-2 h-2 rounded-full shrink-0" style={{ background: monColor, boxShadow: `0 0 6px ${monColor}` }} />
+                )}
+                {/* U badge */}
+                <div className="text-[9px] font-bold px-1.5 py-0.5 rounded shrink-0" style={{ background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.3)" }}>
+                  U{d.unit}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Footer hint */}
+        <div className="px-5 py-3 border-t border-white/[0.05] text-[9px] text-white/20 text-center">
+          El nombre del equipo se usará como interfaz de conexión
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function LeafletMapView({
   mapId,
   mapName,
@@ -97,6 +271,15 @@ export default function LeafletMapView({
 }: LeafletMapViewProps) {
   const isImageMode = !!imageBackground;
   const sidebarWidth = readonly ? 0 : panelCollapsed ? 40 : 320;
+  const monitorsRef = useRef<KumaMonitor[]>(kumaMonitors);
+  const monitorIndexRef = useRef<Map<number, KumaMonitor>>(new Map());
+  useEffect(() => {
+    monitorsRef.current = kumaMonitors;
+    const map = new Map<number, KumaMonitor>();
+    kumaMonitors.forEach((m) => map.set(m.id, m));
+    monitorIndexRef.current = map;
+  }, [kumaMonitors]);
+
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<any>(null);
   const markersRef = useRef<Map<string, any>>(new Map());
@@ -130,6 +313,15 @@ export default function LeafletMapView({
   const linkSourceRef = useRef<string | null>(null);
   const [pendingLinkTarget, setPendingLinkTarget] = useState<string | null>(null);
 
+  // Rack device picker — shown when a link endpoint is a rack node
+  const [rackPickerState, setRackPickerState] = useState<{
+    rackNodeId: string;
+    side: "source" | "target";
+    pendingSourceId: string;
+    pendingTargetId: string;
+    pendingSourceInterface?: string; // already selected if source was picked first
+  } | null>(null);
+
   // Modal states
   const [linkModalOpen, setLinkModalOpen] = useState(false);
   const [linkModalData, setLinkModalData] = useState<{ sourceId: string; targetId: string; edgeId?: string; initial?: Partial<LinkFormData> }>({ sourceId: "", targetId: "" });
@@ -143,6 +335,11 @@ export default function LeafletMapView({
 
   // Icon picker & Node size modals (Leaflet)
   const [iconPickerNodeId, setIconPickerNodeId] = useState<string | null>(null);
+  const [nodeSizeModalNodeId, setNodeSizeModalNodeId] = useState<string | null>(null);
+  const [rackDrawerNodeId, setRackDrawerNodeId] = useState<string | null>(null);
+
+  // New Monitor creation
+  const [newMonitorModalOpen, setNewMonitorModalOpen] = useState(false);
   const [sizePickerNodeId, setSizePickerNodeId] = useState<string | null>(null);
   const [overlayOpacity, setOverlayOpacity] = useState(initialViewState?.overlayOpacity ?? 0);
   const [assignModalOpen, setAssignModalOpen] = useState(false);
@@ -166,6 +363,7 @@ export default function LeafletMapView({
   const polygonLayersRef = useRef<Map<string, any>>(new Map());
   const edgeUpdateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [importMapPickerOpen, setImportMapPickerOpen] = useState(false);
+  const [importMapSearch, setImportMapSearch] = useState("");
   const [importingMapId, setImportingMapId] = useState<string | null>(null);
   const [nodeMapModalNodeId, setNodeMapModalNodeId] = useState<string | null>(null);
   const [timeMachineOpen, setTimeMachineOpen] = useState(false);
@@ -298,7 +496,6 @@ export default function LeafletMapView({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
-  // Alert sound on monitor DOWN
   const playAlertSound = useCallback(() => {
     try {
       const ctx = new AudioContext();
@@ -314,6 +511,220 @@ export default function LeafletMapView({
       osc.stop(ctx.currentTime + 0.5);
     } catch {}
   }, []);
+
+  const handleTimeDragging = useCallback((d: boolean) => setTimeDragging(d), []);
+
+  const handleTimeMachineFocusEvent = useCallback((monitorId: number, eventType: "down" | "up") => {
+    const node = nodesRef.current.find(n => n.kuma_monitor_id === monitorId);
+    if (!node || !mapRef.current || !LRef.current) return;
+    const L = LRef.current;
+    const map = mapRef.current;
+    const flashColor = eventType === "down" ? "#ef4444" : "#22c55e";
+    const marker = markersRef.current.get(node.id);
+
+    // Check if node is visible in current viewport — only pan if not visible
+    const bounds = map.getBounds();
+    const nodeLatLng = L.latLng(node.x, node.y);
+    if (!bounds.contains(nodeLatLng)) {
+      map.panTo(nodeLatLng, { animate: true, duration: 0.6 });
+    }
+
+    // Subtle vibration animation on marker (NO scale, NO transform)
+    if (marker?.getElement()) {
+      const el = marker.getElement();
+      // Glow effect only — no position/scale changes
+      el.style.filter = `drop-shadow(0 0 20px ${flashColor}) drop-shadow(0 0 40px ${flashColor}) brightness(1.8)`;
+      el.style.transition = "filter 0.2s";
+      // CSS vibration class
+      el.classList.add("node-vibrate");
+      setTimeout(() => {
+        el.style.filter = `drop-shadow(0 0 10px ${flashColor}) brightness(1.2)`;
+        el.style.transition = "filter 1.5s";
+      }, 1500);
+      setTimeout(() => {
+        el.style.filter = "";
+        el.style.transition = "filter 1s";
+        el.classList.remove("node-vibrate");
+      }, 4000);
+    }
+
+    // Pulse rings around the node (visual only, don't move node)
+    for (let i = 0; i < 2; i++) {
+      setTimeout(() => {
+        const ring = L.circleMarker(nodeLatLng, {
+          radius: 8, color: flashColor, fillColor: flashColor,
+          fillOpacity: 0.3, weight: 2, opacity: 0.7,
+        }).addTo(map);
+        let r = 8;
+        const iv = setInterval(() => {
+          r += 1.5;
+          ring.setRadius(r);
+          ring.setStyle({ opacity: Math.max(0, 0.7 - r / 50), fillOpacity: Math.max(0, 0.3 - r / 70) });
+          if (r > 45) { clearInterval(iv); try { map.removeLayer(ring); } catch {} }
+        }, 30);
+      }, i * 500);
+    }
+
+    // Open event popup AFTER a short delay (ensures map settled)
+    setTimeout(() => {
+      const mon = kumaMonitors.find(m => m.id === monitorId);
+      const existing = failPopupsRef.current.get(node.id);
+      if (existing) { try { map.removeLayer(existing); } catch {} }
+
+      // Colors based on event type
+      const isDown = eventType === "down";
+      const bgGrad = isDown ? "linear-gradient(135deg,#dc2626,#991b1b)" : "linear-gradient(135deg,#16a34a,#15803d)";
+      const borderColor = isDown ? "#fca5a5" : "#86efac";
+      const shadowColor = isDown ? "rgba(239,68,68" : "rgba(34,197,94";
+      const statusText = isDown ? "▼ OFFLINE" : "▲ RECOVERED";
+      const icon = isDown
+        ? '<path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>'
+        : '<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>';
+
+      const popup = L.popup({
+        closeButton: false, autoClose: false, closeOnClick: false,
+        className: "fail-popup-tm", offset: [0, -22], autoPan: false,
+      })
+        .setLatLng(nodeLatLng)
+        .setContent(`
+          <div style="background:${bgGrad};border:2px solid ${borderColor};border-radius:14px;padding:10px 16px;min-width:160px;box-shadow:0 8px 32px ${shadowColor},0.4),0 0 60px ${shadowColor},0.2),inset 0 1px 0 rgba(255,255,255,0.15);animation:failPopupIn 0.4s cubic-bezier(0.34,1.56,0.64,1);">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+              <div style="width:28px;height:28px;border-radius:8px;background:rgba(255,255,255,0.15);display:flex;align-items:center;justify-content:center;animation:failIconPulse 1.5s ease-in-out infinite;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round">${icon}</svg>
+              </div>
+              <div>
+                <div style="color:white;font-size:13px;font-weight:800;text-shadow:0 1px 2px rgba(0,0,0,0.3);">${node.label}</div>
+                <div style="color:rgba(255,255,255,0.8);font-size:10px;font-weight:700;letter-spacing:0.05em;">${statusText}</div>
+              </div>
+            </div>
+            ${mon?.msg ? `<div style="color:rgba(255,255,255,0.65);font-size:9px;margin-top:2px;">${mon.msg}</div>` : ""}
+            <button onclick="window.__kumamap_showEventDetail(${monitorId})" style="margin-top:6px;width:100%;padding:4px 0;border-radius:8px;background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.25);color:white;font-size:10px;font-weight:700;cursor:pointer;transition:all 0.2s;letter-spacing:0.05em;" onmouseover="this.style.background='rgba(255,255,255,0.25)'" onmouseout="this.style.background='rgba(255,255,255,0.15)'">
+              📋 Detalles
+            </button>
+          </div>
+        `);
+      popup.addTo(map);
+      failPopupsRef.current.set(node.id, popup);
+
+      // Register global handler
+      (window as any).__kumamap_showEventDetail = (mid: number) => {
+        const m = kumaMonitors.find(km => km.id === mid);
+        setEventDetail({
+          nodeLabel: node.label || "?",
+          monitorId: mid,
+          msg: m?.msg || mon?.msg || "",
+          time: new Date(),
+          type: m?.type || "unknown",
+          ping: m?.ping ?? null,
+          status: m?.status ?? 0,
+        });
+      };
+
+      setTimeout(() => { try { map.removeLayer(popup); failPopupsRef.current.delete(node.id); } catch {} }, 8000);
+    }, 300);
+  }, [kumaMonitors]);
+
+  const handleTimeMachineChange = useCallback((time: Date | null, statuses: Map<number, number>) => {
+    setTimeMachineTime(time);
+    if (!LRef.current || !mapRef.current) return;
+    const L = LRef.current;
+    const map = mapRef.current;
+
+    if (!time || statuses.size === 0) {
+      // Back to LIVE — clear fail popups and re-render
+      failPopupsRef.current.forEach((p) => { try { map.removeLayer(p); } catch {} });
+      failPopupsRef.current.clear();
+      renderNodes(L, map);
+      renderEdges(L, map);
+      return;
+    }
+
+    // Apply historical statuses to nodes + show dramatic fail popups
+    // First close all existing fail popups
+    failPopupsRef.current.forEach((p) => { try { map.removeLayer(p); } catch {} });
+    failPopupsRef.current.clear();
+
+    nodesRef.current.forEach((node) => {
+      const marker = markersRef.current.get(node.id);
+      if (!marker || !node.kuma_monitor_id) return;
+      const st = statuses.get(node.kuma_monitor_id);
+      if (st === undefined) return;
+      const color = st === 0 ? "#ef4444" : st === 1 ? "#22c55e" : st === 3 ? "#8b5cf6" : "#f59e0b";
+      const ncd = node.custom_data ? JSON.parse(node.custom_data) : {};
+      marker.setIcon(createMarkerIcon(L, color, st === 0, false, ncd.nodeSize || 1.0, node.icon || "server"));
+
+      // Show dramatic red fail popup for DOWN nodes
+      if (st === 0) {
+        const mon = kumaMonitors.find(m => m.id === node.kuma_monitor_id);
+        const popup = L.popup({
+          closeButton: false,
+          autoClose: false,
+          closeOnClick: false,
+          className: "fail-popup-tm",
+          offset: [0, -20],
+          autoPan: false,
+        })
+          .setLatLng([node.x, node.y])
+          .setContent(`
+            <div style="
+              background: linear-gradient(135deg, #dc2626, #991b1b);
+              border: 2px solid #fca5a5;
+              border-radius: 14px;
+              padding: 8px 14px;
+              min-width: 140px;
+              box-shadow: 0 8px 32px rgba(239,68,68,0.4), 0 0 60px rgba(239,68,68,0.2), inset 0 1px 0 rgba(255,255,255,0.15);
+              animation: failPopupIn 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+            ">
+              <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+                <div style="
+                  width:24px;height:24px;border-radius:8px;
+                  background:rgba(255,255,255,0.15);
+                  display:flex;align-items:center;justify-content:center;
+                  animation: failIconPulse 1.5s ease-in-out infinite;
+                ">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round">
+                    <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                    <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+                  </svg>
+                </div>
+                <div>
+                  <div style="color:white;font-size:12px;font-weight:800;text-shadow:0 1px 2px rgba(0,0,0,0.3);">
+                    ${node.label}
+                  </div>
+                  <div style="color:rgba(255,255,255,0.7);font-size:9px;font-weight:600;letter-spacing:0.05em;">
+                    ▼ OFFLINE
+                  </div>
+                </div>
+              </div>
+              ${mon?.msg ? `<div style="color:rgba(255,255,255,0.6);font-size:8px;margin-top:2px;font-style:italic;">${mon.msg}</div>` : ""}
+              ${time ? `<div style="color:rgba(255,255,255,0.5);font-size:8px;font-family:monospace;margin-top:3px;">
+                ${time.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+              </div>` : ""}
+            </div>
+          `)
+          .openOn(map);
+        failPopupsRef.current.set(node.id, popup);
+      }
+    });
+
+    // Re-render edges with historical statuses
+    // Temporarily override kumaMonitors statuses for renderEdges
+    const originalStatuses = new Map<number, number | undefined>();
+    kumaMonitors.forEach(m => {
+      originalStatuses.set(m.id, m.status);
+      const historicalStatus = statuses.get(m.id);
+      if (historicalStatus !== undefined) {
+        (m as any).status = historicalStatus;
+      }
+    });
+
+    renderEdges(L, map);
+
+    // Restore original statuses
+    kumaMonitors.forEach(m => {
+      (m as any).status = originalStatuses.get(m.id);
+    });
+  }, [kumaMonitors]);
 
   // Map style
   const [mapStyle, setMapStyle] = useState<"dark" | "satellite" | "streets">(initialViewState?.mapStyle || "dark");
@@ -504,7 +915,7 @@ export default function LeafletMapView({
   // Downtime counter interval — update every second
   useEffect(() => {
     downtimeIntervalRef.current = setInterval(() => {
-      if (mapRef.current && LRef.current && downSinceRef.current.size > 0) {
+      if (mapRef.current && LRef.current) {
         updateDowntimeCounters();
       }
     }, 1000);
@@ -521,13 +932,44 @@ export default function LeafletMapView({
   }, [kumaMonitors]);
 
   function getStatusColor(monitorId: number | null): string {
-    return _getStatusColor(monitorId, monitorIndex);
+    return _getStatusColor(monitorId, monitorIndexRef.current);
   }
 
   function getMonitorData(monitorId: number | null): KumaMonitor | undefined {
-    return _getMonitorData(monitorId, monitorIndex);
+    return _getMonitorData(monitorId, monitorIndexRef.current);
   }
 
+  // ── Rack aggregated status ────────────────────────────────────────────────────
+  // Returns the worst status across all monitored devices inside a rack node.
+  function getRackStatus(node: SavedNode): {
+    status: number; color: string; pulse: boolean; monitoredCount: number;
+    totalDevices: number;
+    deviceStatuses: Array<{ label: string; type: string; status: number; color: string; ping: number | null; uptime24: number | null }>;
+  } {
+    const cd = node.custom_data ? (() => { try { return JSON.parse(node.custom_data!); } catch { return {}; } })() : {};
+    const devices: any[] = cd.devices || [];
+    const monitored = devices.filter((d: any) => d.monitorId);
+    if (monitored.length === 0) {
+      return { status: -1, color: "#6b7280", pulse: false, monitoredCount: 0, totalDevices: devices.length, deviceStatuses: [] };
+    }
+    const deviceStatuses = monitored.map((d: any) => {
+      const m = getMonitorData(d.monitorId);
+      const s = m?.status ?? 2;
+      return { label: d.label || "Equipo", type: d.type || "other", status: s, color: statusColors[s] || "#6b7280", ping: m?.ping ?? null, uptime24: m?.uptime24 ?? null };
+    });
+    let worstStatus = 1;
+    if (deviceStatuses.some(d => d.status === 0)) worstStatus = 0;
+    else if (deviceStatuses.some(d => d.status === 2)) worstStatus = 2;
+    else if (deviceStatuses.some(d => d.status === 3)) worstStatus = 3;
+    return {
+      status: worstStatus,
+      color: statusColors[worstStatus] || "#22c55e",
+      pulse: worstStatus === 0 || worstStatus === 2,
+      monitoredCount: monitored.length,
+      totalDevices: devices.length,
+      deviceStatuses,
+    };
+  }
 
   // Build sparkline SVG from ping history
   function buildSparkline(pings: number[], width: number = 200, height: number = 40): string {
@@ -559,10 +1001,60 @@ export default function LeafletMapView({
   const pingHistoryRef = useRef<Map<number, number[]>>(new Map());
 
   function createPopupContent(node: SavedNode): string {
+    const cd = node.custom_data ? (() => { try { return JSON.parse(node.custom_data!); } catch { return {}; } })() : {};
+
+    // ── Rack popup — aggregated status from all device monitors ──────────────
+    if (node.icon === "_rack" && cd.type === "rack") {
+      const rack = getRackStatus(node);
+      const upCount = rack.deviceStatuses.filter(d => d.status === 1).length;
+      const downCount = rack.deviceStatuses.filter(d => d.status === 0).length;
+      const pendCount = rack.deviceStatuses.filter(d => d.status === 2 || d.status === 3).length;
+      const unmonitored = rack.totalDevices - rack.monitoredCount;
+      const st = rack.status === 0 ? "DOWN" : rack.status === 2 ? "PENDING" : rack.status === 3 ? "MAINT" : rack.monitoredCount > 0 ? "OK" : "SIN SENSOR";
+      const col = rack.color;
+      const rows = rack.deviceStatuses.map(d => {
+        const stT = d.status === 0 ? "DOWN" : d.status === 2 ? "PEND" : d.status === 3 ? "MAINT" : "UP";
+        const pingT = d.ping != null ? `${d.ping}ms` : "";
+        return `<div style="display:flex;align-items:center;gap:6px;padding:3px 0;border-bottom:1px solid rgba(255,255,255,0.04);">
+          <div style="width:7px;height:7px;border-radius:50%;background:${d.color};box-shadow:0 0 5px ${d.color}88;flex-shrink:0;${d.status===0||d.status===2?"animation:ping-badge 1.5s ease-in-out infinite;":""}"></div>
+          <span style="flex:1;font-size:10px;color:#ccc;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${d.label}</span>
+          <span style="font-size:8px;font-weight:700;color:${d.color};background:${d.color}22;padding:1px 4px;border-radius:3px;">${stT}</span>
+          ${pingT ? `<span style="font-size:8px;color:#666;font-family:monospace;">${pingT}</span>` : ""}
+        </div>`;
+      }).join("");
+      return `<div style="background:#0f0f0f;color:#eee;padding:10px 14px;border-radius:12px;min-width:240px;max-width:300px;font-family:system-ui;border:1px solid ${col}44;">
+        <div style="height:2px;background:linear-gradient(90deg,${col},${col}44);border-radius:1px;margin:-10px -14px 8px;"></div>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+          <div style="width:10px;height:10px;border-radius:50%;background:${col};box-shadow:0 0 8px ${col};flex-shrink:0;"></div>
+          <strong style="font-size:13px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${node.label}</strong>
+          <span style="color:${col};font-size:9px;font-weight:700;background:${col}22;padding:1px 6px;border-radius:4px;letter-spacing:0.5px;">${st}</span>
+        </div>
+        ${rack.monitoredCount > 0 ? `
+        <div style="display:flex;gap:5px;margin-bottom:8px;">
+          <div style="flex:1;background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.2);border-radius:6px;padding:4px 6px;text-align:center;">
+            <div style="font-size:14px;font-weight:800;color:#22c55e;">${upCount}</div>
+            <div style="font-size:8px;color:#555;letter-spacing:0.5px;">UP</div>
+          </div>
+          <div style="flex:1;background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.2);border-radius:6px;padding:4px 6px;text-align:center;">
+            <div style="font-size:14px;font-weight:800;color:#ef4444;">${downCount}</div>
+            <div style="font-size:8px;color:#555;letter-spacing:0.5px;">DOWN</div>
+          </div>
+          <div style="flex:1;background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.2);border-radius:6px;padding:4px 6px;text-align:center;">
+            <div style="font-size:14px;font-weight:800;color:#f59e0b;">${pendCount}</div>
+            <div style="font-size:8px;color:#555;letter-spacing:0.5px;">PEND</div>
+          </div>
+        </div>
+        <div style="max-height:140px;overflow-y:auto;">${rows}</div>` : ""}
+        <div style="font-size:9px;color:#555;margin-top:6px;display:flex;justify-content:space-between;">
+          <span>${rack.totalDevices} equipos · ${cd.totalUnits || 42}U</span>
+          ${unmonitored > 0 ? `<span>${unmonitored} sin sensor</span>` : ""}
+        </div>
+      </div>`;
+    }
+
     const m = getMonitorData(node.kuma_monitor_id);
     const color = getStatusColor(node.kuma_monitor_id);
     const statusText = m ? (m.status === 1 ? "UP" : m.status === 0 ? "DOWN" : "PENDING") : "N/A";
-    const cd = node.custom_data ? JSON.parse(node.custom_data) : {};
 
     // Get tag info for display
     const tagBadges = (m?.tags || []).map((t: any) =>
@@ -591,7 +1083,7 @@ export default function LeafletMapView({
         ${tagBadges ? `<div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:6px;">${tagBadges}</div>` : ""}
         ${cd.ip || cd.mac ? `
           <div style="font-size:10px;color:#999;margin-bottom:6px;display:flex;gap:6px;flex-wrap:wrap;">
-            ${cd.ip ? `<span style="background:rgba(59,130,246,0.12);border:1px solid rgba(59,130,246,0.25);color:#60a5fa;padding:1px 6px;border-radius:6px;font-family:monospace;font-size:10px;">${cd.ip}</span>` : ""}
+            ${cd.ip ? `<a href="http://${cd.ip}" target="_blank" rel="noopener noreferrer" style="text-decoration:none;"><span style="background:rgba(59,130,246,0.12);border:1px solid rgba(59,130,246,0.25);color:#60a5fa;padding:1px 6px;border-radius:6px;font-family:monospace;font-size:10px;cursor:pointer;">${cd.ip}</span></a>` : ""}
             ${cd.mac ? `<span style="background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.08);color:#888;padding:1px 6px;border-radius:6px;font-family:monospace;font-size:9px;">${cd.mac}</span>` : ""}
           </div>
         ` : ""}
@@ -638,10 +1130,16 @@ export default function LeafletMapView({
       const isCamera = node.icon === "_camera";
       const isWaypoint = node.icon === "_waypoint";
       const isPolygon = node.icon === "_polygon";
+      const isRack = node.icon === "_rack";
       const cd = node.custom_data ? JSON.parse(node.custom_data) : {};
-      const color = getStatusColor(node.kuma_monitor_id);
+      let color = getStatusColor(node.kuma_monitor_id);
       const m = getMonitorData(node.kuma_monitor_id);
-      const pulse = !isLabel && (m?.status === 0 || m?.status === 2);
+      let pulse = !isLabel && (m?.status === 0 || m?.status === 2);
+      // Rack nodes: aggregate color+pulse from all device monitors
+      if (isRack) {
+        const rackInfo = getRackStatus(node);
+        if (rackInfo.monitoredCount > 0) { color = rackInfo.color; pulse = rackInfo.pulse; }
+      }
       const nodeScale: number = cd.nodeSize || 1.0;
 
 
@@ -720,7 +1218,7 @@ export default function LeafletMapView({
 
       const marker = L.marker([node.x, node.y], {
         icon: nodeIcon,
-        draggable: !readonly,
+        draggable: !readonly && node.icon !== '_polygon',
       });
 
       // Camera FOV cone + interactive handles
@@ -989,6 +1487,9 @@ export default function LeafletMapView({
               renderNodes(L, map);
             }
           }
+        } else if (isRack && !readonly) {
+          // Double clicking a rack opens the Rack Designer Drawer!
+          setRackDrawerNodeId(node.id);
         } else if (!isWaypoint) {
           // If node has linked maps, open modal (or first map in kiosk mode)
           const cd = node.custom_data ? (() => { try { return JSON.parse(node.custom_data!); } catch { return {}; } })() : {};
@@ -1359,28 +1860,27 @@ export default function LeafletMapView({
     });
   }
 
-  // Format downtime: shows elapsed time + start date/time
-  function formatDowntime(ms: number, startTimestamp?: number): string {
+  // Format elapsed downtime: "00:34:21" or "1d 02:15:30"
+  function formatElapsed(ms: number): string {
     if (ms < 0) ms = 0;
     const totalSec = Math.floor(ms / 1000);
     const h = Math.floor(totalSec / 3600);
     const m = Math.floor((totalSec % 3600) / 60);
     const s = totalSec % 60;
-    let elapsed: string;
     if (h >= 24) {
       const d = Math.floor(h / 24);
       const rh = h % 24;
-      elapsed = `${d}d ${String(rh).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-    } else {
-      elapsed = `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+      return `${d}d ${String(rh).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
     }
-    if (startTimestamp) {
-      const dt = new Date(startTimestamp);
-      const day = dt.toLocaleDateString("es-UY", { day: "2-digit", month: "short" });
-      const time = dt.toLocaleTimeString("es-UY", { hour: "2-digit", minute: "2-digit", hour12: false });
-      return `${elapsed} (${day} ${time})`;
-    }
-    return elapsed;
+    return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  }
+
+  // Format the "since" label: "desde 08-abr. 10:33"
+  function formatSince(ts: number): string {
+    const dt = new Date(ts);
+    const day = dt.toLocaleDateString("es-UY", { day: "2-digit", month: "short" });
+    const time = dt.toLocaleTimeString("es-UY", { hour: "2-digit", minute: "2-digit", hour12: false });
+    return `${day} ${time}`;
   }
 
   // Update downtime counter labels on the map (called every second)
@@ -1394,8 +1894,14 @@ export default function LeafletMapView({
     // Build set of currently-down node IDs
     const downNodeIds = new Set<string>();
     nodesRef.current.forEach((node) => {
-      if (!node.kuma_monitor_id) return;
       if (node.icon === "_textLabel" || node.icon === "_waypoint" || node.icon === "_camera" || node.icon === "_polygon") return;
+      if (node.icon === "_rack") {
+        // Rack node: show downtime badge if ANY device monitor is DOWN
+        const rackInfo = getRackStatus(node);
+        if (rackInfo.status === 0) downNodeIds.add(node.id);
+        return;
+      }
+      if (!node.kuma_monitor_id) return;
       const mon = getMonitorData(node.kuma_monitor_id);
       if (mon?.status === 0) downNodeIds.add(node.id);
     });
@@ -1412,61 +1918,105 @@ export default function LeafletMapView({
     nodesRef.current.forEach((node) => {
       if (!downNodeIds.has(node.id)) return;
 
-      const mon = getMonitorData(node.kuma_monitor_id);
-      const downTimestamp = mon?.downTime ? new Date(mon.downTime).getTime() : (downSinceRef.current.get(node.kuma_monitor_id!) ?? now);
+      // ── Resolve downTimestamp ────────────────────────────────────────────────
+      let downTimestamp: number;
+      if (node.icon === "_rack") {
+        // FIX: iterate devices directly using monitorId (not status value)
+        const cd2 = node.custom_data ? (() => { try { return JSON.parse(node.custom_data!); } catch { return {}; } })() : {};
+        const rackDevices: any[] = cd2.devices || [];
+        let earliest = now;
+        for (const d of rackDevices) {
+          if (!d.monitorId) continue;
+          const m = getMonitorData(d.monitorId);
+          if (m?.status !== 0) continue;
+          const t = m.downTime ? new Date(m.downTime).getTime() : (downSinceRef.current.get(d.monitorId) ?? now);
+          if (t < earliest) earliest = t;
+        }
+        downTimestamp = earliest;
+      } else {
+        const mon = getMonitorData(node.kuma_monitor_id);
+        // Prefer real downTime from Kuma heartbeat DB; fall back to first-detected time
+        downTimestamp = mon?.downTime ? new Date(mon.downTime).getTime() : (downSinceRef.current.get(node.kuma_monitor_id!) ?? now);
+      }
       const elapsed = now - downTimestamp;
-      const label = formatDowntime(elapsed, downTimestamp);
+      const elapsedStr = formatElapsed(elapsed);
+      const sinceStr = formatSince(downTimestamp);
 
-      // Node visual size (to anchor the badge above it)
+      // ── Node visual size (for anchor placement) ──────────────────────────────
       const cd = node.custom_data ? (() => { try { return JSON.parse(node.custom_data!); } catch { return {}; } })() : {};
       const scale: number = cd.nodeSize || 1.0;
-      const containerPx = Math.round(28 * scale); // matches createMarkerIcon
+      const containerPx = Math.round(28 * scale);
 
       const existing = downtimeMarkersRef.current.get(node.id);
       if (existing) {
-        // Update label text only — avoid re-creating the marker every second
+        // Only update the elapsed timer — "since" never changes once set
         const el = existing.getElement();
         if (el) {
-          const span = el.querySelector(".dt-val");
-          if (span) span.textContent = label;
+          const span = el.querySelector(".dt-elapsed");
+          if (span) span.textContent = elapsedStr;
         }
       } else {
-        // Single horizontal pill: [! icon] [⏱ 00:00:00]
-        // Anchor bottom of pill well above the node center, clearing the permanent label tooltip
-        // label tooltip offset is ~(containerPx/2 + 16 + ~18px label height) above center ≈ 48px
-        // We add a few extra px so the pill clears it
-        const pillH = 20;
-        const clearance = Math.round(containerPx / 2) + 48; // clears node + label tooltip
-        const anchorYFinal = pillH + clearance;
+        // ── Tooltip bubble: timer (big) + since (small) + bottom arrow ─────────
+        // Total height: ~54px bubble + 8px arrow = 62px
+        const tipH = 62;
+        const clearance = Math.round(containerPx / 2) + 20; // clear node circle + a bit
+        const anchorYFinal = tipH + clearance;
 
         const icon = L.divIcon({
           className: "downtime-counter",
           html: `<div style="
-            display:inline-flex;align-items:center;gap:5px;
-            pointer-events:none;
+            position:relative;
+            display:inline-flex;flex-direction:column;align-items:flex-start;
             transform:translateX(-50%);
-            background:rgba(127,29,29,0.96);
+            pointer-events:none;
+            background:rgba(15,2,2,0.97);
             border:1.5px solid #ef4444;
-            border-radius:20px;
-            padding:3px 8px 3px 6px;
-            box-shadow:0 0 12px rgba(239,68,68,0.55), 0 2px 8px rgba(0,0,0,0.6);
+            border-radius:10px;
+            padding:7px 11px 6px 9px;
+            min-width:128px;
+            box-shadow:0 0 0 1px rgba(239,68,68,0.15), 0 0 18px rgba(239,68,68,0.45), 0 6px 16px rgba(0,0,0,0.75);
             white-space:nowrap;
-            animation:ping-badge 2s ease-in-out infinite;
+            animation:kuma-tip-pulse 2.4s ease-in-out infinite;
           ">
-            <!-- ! icon circle -->
-            <div style="
-              width:14px;height:14px;border-radius:50%;
-              background:rgba(239,68,68,0.9);
-              border:1px solid #fca5a5;
-              display:flex;align-items:center;justify-content:center;
-              flex-shrink:0;
-            ">
-              <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3.5" stroke-linecap="round">
-                <line x1="12" y1="5" x2="12" y2="14"/><circle cx="12" cy="19" r="1.5" fill="#fff" stroke="none"/>
-              </svg>
+            <!-- Row 1: alert icon + elapsed timer -->
+            <div style="display:flex;align-items:center;gap:6px;">
+              <div style="
+                width:15px;height:15px;border-radius:50%;flex-shrink:0;
+                background:linear-gradient(135deg,#ef4444,#b91c1c);
+                border:1px solid rgba(252,165,165,0.5);
+                display:flex;align-items:center;justify-content:center;
+              ">
+                <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3.5" stroke-linecap="round">
+                  <line x1="12" y1="5" x2="12" y2="14"/><circle cx="12" cy="19" r="1.5" fill="#fff" stroke="none"/>
+                </svg>
+              </div>
+              <span class="dt-elapsed" style="
+                font-size:13px;font-weight:800;color:#fca5a5;
+                font-family:monospace;letter-spacing:1px;line-height:1;
+              ">${elapsedStr}</span>
             </div>
-            <!-- timer -->
-            <span class="dt-val" style="font-size:10px;font-weight:800;color:#fca5a5;font-family:monospace;letter-spacing:0.5px;line-height:1;">${label}</span>
+            <!-- Row 2: since date -->
+            <div style="
+              margin-top:4px;padding-left:21px;
+              font-size:9px;color:rgba(252,165,165,0.5);
+              font-family:monospace;letter-spacing:0.5px;line-height:1;
+            ">desde ${sinceStr}</div>
+            <!-- Bottom arrow pointing to node -->
+            <div style="
+              position:absolute;bottom:-7px;left:50%;transform:translateX(-50%);
+              width:0;height:0;
+              border-left:7px solid transparent;
+              border-right:7px solid transparent;
+              border-top:7px solid #ef4444;
+            "></div>
+            <!-- Arrow inner fill (matches bg) -->
+            <div style="
+              position:absolute;bottom:-5px;left:50%;transform:translateX(-50%);
+              width:0;height:0;
+              border-left:6px solid transparent;
+              border-right:6px solid transparent;
+              border-top:6px solid rgba(15,2,2,0.97);
+            "></div>
           </div>`,
           iconSize: [0, 0],
           iconAnchor: [0, anchorYFinal],
@@ -1505,14 +2055,20 @@ export default function LeafletMapView({
       const marker = markersRef.current.get(node.id);
       if (!marker) return;
 
-      const color = getStatusColor(node.kuma_monitor_id);
+      let color = getStatusColor(node.kuma_monitor_id);
       const m = getMonitorData(node.kuma_monitor_id);
-      const pulse = m?.status === 0 || m?.status === 2;
+      let pulse = m?.status === 0 || m?.status === 2;
       const cd = node.custom_data ? JSON.parse(node.custom_data) : {};
       const ns: number = cd.nodeSize || 1.0;
 
+      // Rack nodes: aggregate status from all device monitors
+      if (node.icon === "_rack") {
+        const rackInfo = getRackStatus(node);
+        if (rackInfo.monitoredCount > 0) { color = rackInfo.color; pulse = rackInfo.pulse; }
+      }
+
       const hasLinkedMapRefresh = Array.isArray(cd.linkedMaps) && cd.linkedMaps.length > 0;
-      marker.setIcon(createMarkerIcon(L, color, pulse, linkSource === node.id, ns, node.icon || "server", hasLinkedMapRefresh));
+      marker.setIcon(createMarkerIcon(L, color, pulse, linkSource === node.id, ns, node.icon, hasLinkedMapRefresh));
       marker.setPopupContent(createPopupContent(node));
     });
 
@@ -1561,9 +2117,52 @@ export default function LeafletMapView({
       return;
     }
 
-    // Open modal to fill interface details
+    const srcNode = nodesRef.current.find(n => n.id === linkSource);
+    const tgtNode = nodesRef.current.find(n => n.id === targetId);
+    const srcIsRack = srcNode?.icon === "_rack";
+    const tgtIsRack = tgtNode?.icon === "_rack";
+
+    // If source is a rack → pick source device first
+    if (srcIsRack) {
+      setRackPickerState({ rackNodeId: linkSource, side: "source", pendingSourceId: linkSource, pendingTargetId: targetId });
+      return;
+    }
+    // If only target is a rack → pick target device
+    if (tgtIsRack) {
+      setRackPickerState({ rackNodeId: targetId, side: "target", pendingSourceId: linkSource, pendingTargetId: targetId });
+      return;
+    }
+
+    // Normal flow — no rack involved
     setLinkModalData({ sourceId: linkSource, targetId });
     setLinkModalOpen(true);
+  }
+
+  function handleRackPickerSelect(interfaceHint: string) {
+    if (!rackPickerState) return;
+    const { side, pendingSourceId, pendingTargetId, pendingSourceInterface } = rackPickerState;
+
+    if (side === "source") {
+      // Source device chosen — check if target is also a rack
+      const tgtNode = nodesRef.current.find(n => n.id === pendingTargetId);
+      if (tgtNode?.icon === "_rack") {
+        // Chain: now pick target device
+        setRackPickerState({ rackNodeId: pendingTargetId, side: "target", pendingSourceId, pendingTargetId, pendingSourceInterface: interfaceHint });
+      } else {
+        setRackPickerState(null);
+        setLinkModalData({ sourceId: pendingSourceId, targetId: pendingTargetId, initial: { sourceInterface: interfaceHint } });
+        setLinkModalOpen(true);
+      }
+    } else {
+      // Target device chosen
+      setRackPickerState(null);
+      setLinkModalData({
+        sourceId: pendingSourceId,
+        targetId: pendingTargetId,
+        initial: { sourceInterface: pendingSourceInterface || "", targetInterface: interfaceHint },
+      });
+      setLinkModalOpen(true);
+    }
   }
 
   function handleLinkModalSubmit(data: LinkFormData) {
@@ -1852,6 +2451,88 @@ export default function LeafletMapView({
       ];
     }
 
+    if (node?.icon === "_rack") {
+      return [
+        {
+          label: linkSource ? "Cancelar enlace" : "Nuevo link",
+          icon: menuIcons.Link2,
+          onClick: () => {
+             if (linkSource) cancelLinkCreation();
+             else startLinkCreation(nodeId);
+          },
+        },
+        {
+          label: "Diseñador de Rack",
+          icon: menuIcons.Server,
+          onClick: () => setRackDrawerNodeId(nodeId),
+        },
+        {
+          label: "Editar Nombre",
+          icon: menuIcons.Pencil,
+          onClick: () => {
+            const cd = node?.custom_data ? JSON.parse(node.custom_data) : {};
+            setInputModalConfig({ nodeId, initial: node?.label || "", mac: cd.mac || "", ip: cd.ip || "", credUser: cd.credUser || "", credPass: cd.credPass || "", labelHidden: cd.labelHidden ?? false, labelSize: cd.labelSize ?? 12, nodeColor: cd.nodeColor || "" });
+            setInputModalOpen(true);
+          },
+        },
+        {
+          label: "Duplicar Rack",
+          icon: menuIcons.Copy,
+          divider: true,
+          onClick: () => {
+            if (!node) return;
+            const newNodeId = `rack-${Date.now()}`;
+            nodesRef.current = [...nodesRef.current, {
+              id: newNodeId,
+              kuma_monitor_id: node.kuma_monitor_id ?? null,
+              label: node.label,
+              icon: node.icon,
+              x: node.x + 0.0001,
+              y: node.y + 0.0001,
+              custom_data: node.custom_data,
+            }];
+            if (LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current);
+            toast.success("Rack duplicado");
+          },
+        },
+        ...(() => {
+          const ncd = node?.custom_data ? (() => { try { return JSON.parse(node.custom_data!); } catch { return {}; } })() : {};
+          const linked: { id: string; name: string }[] = ncd.linkedMaps || [];
+          const items: any[] = [];
+          linked.forEach(lm => {
+            items.push({
+              label: `Abrir: ${lm.name}`,
+              icon: menuIcons.ExternalLink,
+              divider: items.length === 0,
+              onClick: () => {
+                if (readonly) window.open(apiUrl(`/view/${lm.id}`), "_blank");
+                else window.open(apiUrl(`/?map=${lm.id}`), "_blank");
+              },
+            });
+          });
+          items.push({
+            label: linked.length > 0 ? "Gestionar submapas" : "Asignar submapa",
+            icon: menuIcons.FolderOpen,
+            divider: linked.length === 0,
+            onClick: () => setNodeMapModalNodeId(nodeId),
+          });
+          return items;
+        })(),
+        {
+          label: "Eliminar Rack",
+          icon: menuIcons.Trash2,
+          danger: true,
+          divider: true,
+          onClick: () => {
+            pushUndo();
+            nodesRef.current = nodesRef.current.filter((n) => n.id !== nodeId);
+            if (LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current);
+            toast.success("Rack eliminado");
+          },
+        },
+      ];
+    }
+
     return [
       {
         label: linkSource ? "Cancelar enlace" : "Nuevo link",
@@ -2051,8 +2732,8 @@ export default function LeafletMapView({
             icon: menuIcons.ExternalLink,
             divider: items.length === 0, // divider before first map item
             onClick: () => {
-              if (readonly) window.location.href = `/?map=${lm.id}`;
-              else window.open(apiUrl(`/view/${lm.id}`), "_blank");
+              if (readonly) window.open(apiUrl(`/view/${lm.id}`), "_blank");
+              else window.open(apiUrl(`/?map=${lm.id}`), "_blank");
             },
           });
         });
@@ -2394,7 +3075,7 @@ export default function LeafletMapView({
       `}</style>
 
       {/* ── Floating Top Bar ── */}
-      {!readonly && <div
+      {!readonly && !rackDrawerNodeId && <div
         className="absolute top-3 left-1/2 -translate-x-1/2 flex items-center gap-1.5 rounded-2xl px-2.5 py-1.5 kumamap-no-print"
         id="leaflet-toolbar"
         style={{
@@ -2485,6 +3166,19 @@ export default function LeafletMapView({
           }}
             className="group flex items-center justify-center rounded-xl p-2 text-[#888] hover:text-[#ededed] hover:bg-white/[0.06] transition-all">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m16.24 7.76-1.804 5.412a2 2 0 0 1-1.265 1.265L7.76 16.24l1.804-5.412a2 2 0 0 1 1.265-1.265z"/><circle cx="12" cy="12" r="10"/></svg>
+          </button>
+          </Tooltip>
+          <Tooltip content="Insertar Rack / Armario" placement="bottom">
+          <button onClick={() => {
+            if (!mapRef.current) return;
+            const center = mapRef.current.getCenter();
+            const id = `rack-${Date.now()}`;
+            nodesRef.current = [...nodesRef.current, { id, kuma_monitor_id: null, label: "Rack", x: center.lat, y: center.lng, icon: "_rack", custom_data: JSON.stringify({ type: "rack", totalUnits: 42, devices: [] }) }];
+            if (LRef.current) renderNodes(LRef.current, mapRef.current);
+            toast.success("Rack creado — doble clic para editar");
+          }}
+            className="group flex items-center justify-center rounded-xl p-2 text-[#888] hover:text-[#ededed] hover:bg-white/[0.06] transition-all">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="16" height="20" x="4" y="2" rx="2" ry="2"/><line x1="8" x2="16" y1="6" y2="6"/><line x1="8" x2="16" y1="10" y2="10"/><line x1="8" x2="16" y1="14" y2="14"/><line x1="8" x2="16" y1="18" y2="18"/></svg>
           </button>
           </Tooltip>
         </div>
@@ -2608,19 +3302,7 @@ export default function LeafletMapView({
             />
           </div>
           </Tooltip>
-          {/* Rotation slider */}
-          <Tooltip content="Rotar mapa (doble clic = resetear)" placement="bottom">
-          <div className="flex items-center gap-1 rounded-xl px-2 py-1" style={{ background: "rgba(255,255,255,0.02)" }}>
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={mapRotation !== 0 ? "#60a5fa" : "#555"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>
-            <input type="range" min="-180" max="180" step="5" value={mapRotation}
-              onChange={(e) => setMapRotation(parseInt(e.target.value))}
-              onDoubleClick={() => setMapRotation(0)}
-              className="w-12 h-1 rounded-full appearance-none cursor-pointer"
-              style={{ background: `linear-gradient(to right, #333 0%, #3b82f6 ${((mapRotation + 180) / 360) * 100}%, #333 100%)` }}
-            />
-            {mapRotation !== 0 && <span className="text-[9px] text-[#666] font-mono">{mapRotation}°</span>}
-          </div>
-          </Tooltip>
+
           </>}
 
           <div className="h-5 w-px mx-0.5" style={{ background: "rgba(255,255,255,0.06)" }} />
@@ -2725,17 +3407,7 @@ export default function LeafletMapView({
           />
         </div>
 
-        {/* Rotation */}
-        <div className="flex items-center gap-1 rounded-xl px-2 py-1" style={{ background: "rgba(255,255,255,0.02)" }}>
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={mapRotation !== 0 ? "#60a5fa" : "#555"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>
-          <input type="range" min="-180" max="180" step="5" value={mapRotation}
-            onChange={(e) => setMapRotation(parseInt(e.target.value))}
-            onDoubleClick={() => setMapRotation(0)}
-            className="w-12 h-1 rounded-full appearance-none cursor-pointer"
-            style={{ background: `linear-gradient(to right, #333 0%, #3b82f6 ${((mapRotation + 180) / 360) * 100}%, #333 100%)` }}
-          />
-          {mapRotation !== 0 && <span className="text-[9px] text-[#666] font-mono">{mapRotation}°</span>}
-        </div>
+
 
         </>}
 
@@ -2790,8 +3462,11 @@ export default function LeafletMapView({
             {importMapPickerOpen && (
               <div className="absolute top-full right-0 mt-1 rounded-xl shadow-2xl py-1 z-[99999] min-w-[200px]"
                 style={{ background: "rgba(12,12,12,0.98)", border: "1px solid rgba(52,211,153,0.25)", backdropFilter: "blur(20px)" }}>
-                <div className="px-3 py-1 text-[9px] font-bold uppercase tracking-wider text-[#555]">Importar nodos de</div>
-                {availableMaps.filter(m => m.id !== mapId).map(m => (
+                <div className="px-3 py-1 pb-2">
+                  <input type="text" autoFocus placeholder="Buscar mapa..." value={importMapSearch} onChange={(e) => setImportMapSearch(e.target.value)} className="w-full rounded bg-white/5 border border-white/10 px-2 py-1 text-xs text-[#ededed] focus:outline-none focus:border-[#34d399]" />
+                </div>
+                <div className="px-3 py-1 text-[9px] font-bold uppercase tracking-wider text-[#555]">Importar nodos de (hasta 5)</div>
+                {availableMaps.filter(m => m.id !== mapId && m.name.toLowerCase().includes(importMapSearch.toLowerCase())).slice(0, 5).map(m => (
                   <button key={m.id} onClick={async () => {
                     setImportMapPickerOpen(false);
                     setImportingMapId(m.id);
@@ -2839,91 +3514,87 @@ export default function LeafletMapView({
           </div>
         )}
 
-        {/* Edit mode toggle – moved to near Save */}
-        <Tooltip content={editMode ? "Salir de edición" : "Modo edición"} placement="bottom">
-        <button
-          onClick={() => setEditMode(v => !v)}
-          className="flex items-center gap-1 rounded-xl px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wider transition-all"
-          style={{
-            background: editMode ? "rgba(245,158,11,0.15)" : "transparent",
-            border: editMode ? "1px solid rgba(245,158,11,0.3)" : "1px solid rgba(255,255,255,0.08)",
-            color: editMode ? "#f59e0b" : "#555",
-          }}
-        >
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M12 20h9"/><path d="M16.376 3.622a1 1 0 0 1 3.002 3.002L7.368 18.635a2 2 0 0 1-.855.506l-2.872.838a.5.5 0 0 1-.62-.62l.838-2.872a2 2 0 0 1 .506-.855z"/>
-          </svg>
-          {editMode ? "Editar" : "Edit"}
-        </button>
-        </Tooltip>
+        {/* ─── Grouped Global Actions (Export, Edit, Save) ─── */}
+        <div className="flex items-center gap-0.5 rounded-xl px-1.5 py-1 ml-0.5"
+          style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
+          
+          {/* Export */}
+          <div className="relative">
+            <Tooltip content="Exportar Mapa" placement="bottom">
+            <button
+              onClick={() => setExportMenuOpen(v => !v)}
+              className="flex items-center justify-center rounded-lg p-1.5 transition-all outline-none"
+              style={{ color: exportMenuOpen ? "#ededed" : "#888", background: exportMenuOpen ? "rgba(255,255,255,0.08)" : "transparent" }}
+            >
+              <Download className="h-4 w-4" />
+            </button>
+            </Tooltip>
+            {exportMenuOpen && (
+              <div
+                className="absolute top-full mt-2 right-0 rounded-xl overflow-hidden shadow-2xl animate-in fade-in zoom-in-95 duration-150"
+                style={{ background: "rgba(12,12,12,0.98)", border: "1px solid rgba(255,255,255,0.1)", zIndex: 99999, minWidth: "190px", backdropFilter: "blur(20px)" }}
+                onMouseLeave={() => setExportMenuOpen(false)}
+              >
+                <button onClick={() => { setExportMenuOpen(false); handleExportPng(); }}
+                  className="flex items-center gap-2.5 w-full px-4 py-2.5 text-[11px] text-left transition-all hover:bg-white/[0.05]"
+                  style={{ color: "#ccc" }}>
+                  <div className="h-6 w-6 rounded-lg flex items-center justify-center bg-blue-500/10 border border-blue-500/20">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><rect width="18" height="18" x="3" y="3" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>
+                  </div>
+                  Exportar como PNG
+                </button>
+                <button onClick={() => { setExportMenuOpen(false); handlePrint(); }}
+                  className="flex items-center gap-2.5 w-full px-4 py-2.5 text-[11px] text-left transition-all hover:bg-white/[0.05]"
+                  style={{ color: "#ccc" }}>
+                  <div className="h-6 w-6 rounded-lg flex items-center justify-center bg-purple-500/10 border border-purple-500/20">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect width="12" height="8" x="6" y="14"/></svg>
+                  </div>
+                  Imprimir mapa
+                </button>
+                <div style={{ height: "1px", background: "rgba(255,255,255,0.06)", margin: "2px 0" }} />
+                <button onClick={() => { setExportMenuOpen(false); handleExportCsv(); }}
+                  className="flex items-center gap-2.5 w-full px-4 py-2.5 text-[11px] text-left transition-all hover:bg-white/[0.05]"
+                  style={{ color: "#ccc" }}>
+                  <div className="h-6 w-6 rounded-lg flex items-center justify-center bg-emerald-500/10 border border-emerald-500/20">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><line x1="8" x2="16" y1="13" y2="13"/><line x1="8" x2="16" y1="17" y2="17"/><line x1="8" x2="11" y1="9" y2="9"/></svg>
+                  </div>
+                  Exportar XLSX
+                </button>
+              </div>
+            )}
+          </div>
 
-        {/* Export dropdown */}
-        <div className="relative">
-          <Tooltip content="Exportar mapa" placement="bottom">
+          <div className="h-4 w-px mx-0.5" style={{ background: "rgba(255,255,255,0.08)" }} />
+
+          {/* Edit mode toggle (Pencil for edit, Lock for lock/view) */}
+          <Tooltip content={editMode ? "Bloquear Mapa (Vista)" : "Modo Edición"} placement="bottom">
           <button
-            onClick={() => setExportMenuOpen(v => !v)}
-            className="flex items-center justify-center rounded-xl p-1.5 transition-all"
-            style={{ color: exportMenuOpen ? "#ededed" : "#888", background: exportMenuOpen ? "rgba(255,255,255,0.08)" : "transparent" }}
-            onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.06)"; (e.currentTarget as HTMLElement).style.color = "#ededed"; }}
-            onMouseLeave={(e) => { if (!exportMenuOpen) { (e.currentTarget as HTMLElement).style.background = "transparent"; (e.currentTarget as HTMLElement).style.color = "#888"; } }}
+            onClick={() => setEditMode(v => !v)}
+            className="flex items-center justify-center rounded-lg p-1.5 transition-all hover:bg-white/5 active:scale-95"
+            style={{
+              color: editMode ? "#f59e0b" : "#666",
+              background: editMode ? "rgba(245,158,11,0.1)" : "transparent",
+            }}
           >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
+            {editMode ? <Lock className="h-4 w-4" /> : <Pencil className="h-4 w-4 opacity-50" />}
           </button>
           </Tooltip>
-          {exportMenuOpen && (
-            <div
-              className="absolute top-full mt-2 right-0 rounded-xl overflow-hidden shadow-2xl"
-              style={{ background: "rgba(12,12,12,0.98)", border: "1px solid rgba(255,255,255,0.1)", zIndex: 99999, minWidth: "190px", backdropFilter: "blur(20px)" }}
-              onMouseLeave={() => setExportMenuOpen(false)}
-            >
-              <button onClick={() => { setExportMenuOpen(false); handleExportPng(); }}
-                className="flex items-center gap-2.5 w-full px-4 py-2.5 text-[11px] text-left transition-all hover:bg-white/[0.05]"
-                style={{ color: "#ccc" }}>
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#60a5fa" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>
-                Exportar como PNG
-              </button>
-              <button onClick={() => { setExportMenuOpen(false); handlePrint(); }}
-                className="flex items-center gap-2.5 w-full px-4 py-2.5 text-[11px] text-left transition-all hover:bg-white/[0.05]"
-                style={{ color: "#ccc" }}>
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect width="12" height="8" x="6" y="14"/></svg>
-                Imprimir mapa
-              </button>
-              <div style={{ height: "1px", background: "rgba(255,255,255,0.06)", margin: "2px 0" }} />
-              <button onClick={() => { setExportMenuOpen(false); handleExportCsv(); }}
-                className="flex items-center gap-2.5 w-full px-4 py-2.5 text-[11px] text-left transition-all hover:bg-white/[0.05]"
-                style={{ color: "#ccc" }}>
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#34d399" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><line x1="8" x2="16" y1="13" y2="13"/><line x1="8" x2="16" y1="17" y2="17"/><line x1="8" x2="11" y1="9" y2="9"/></svg>
-                Exportar lista de nodos (XLSX)
-              </button>
-            </div>
-          )}
+
+          {/* Save */}
+          <Tooltip content="Guardar Cambios" placement="bottom">
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="flex items-center justify-center rounded-lg p-1.5 transition-all disabled:opacity-30 active:scale-95"
+            style={{
+              color: saving ? "#60a5fa" : "#22c55e",
+              background: saving ? "rgba(59,130,246,0.1)" : "transparent",
+            }}
+          >
+            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+          </button>
+          </Tooltip>
         </div>
-
-        <div className="h-5 w-px mx-0.5" style={{ background: "rgba(255,255,255,0.06)" }} />
-
-        {/* Save */}
-        <button
-          onClick={handleSave}
-          disabled={saving}
-          className="flex items-center gap-1.5 rounded-xl px-4 py-1.5 text-[11px] font-bold transition-all"
-          style={{
-            background: "linear-gradient(135deg, rgba(59,130,246,0.2), rgba(99,102,241,0.15))",
-            border: "1px solid rgba(59,130,246,0.3)",
-            color: "#60a5fa",
-            boxShadow: "0 2px 12px rgba(59,130,246,0.1)",
-          }}
-          onMouseEnter={(e) => {
-            (e.currentTarget as HTMLElement).style.background = "linear-gradient(135deg, rgba(59,130,246,0.3), rgba(99,102,241,0.25))";
-            (e.currentTarget as HTMLElement).style.boxShadow = "0 4px 20px rgba(59,130,246,0.2)";
-          }}
-          onMouseLeave={(e) => {
-            (e.currentTarget as HTMLElement).style.background = "linear-gradient(135deg, rgba(59,130,246,0.2), rgba(99,102,241,0.15))";
-            (e.currentTarget as HTMLElement).style.boxShadow = "0 2px 12px rgba(59,130,246,0.1)";
-          }}
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15.2 3a2 2 0 0 1 1.4.6l3.8 3.8a2 2 0 0 1 .6 1.4V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/><path d="M17 21v-7a1 1 0 0 0-1-1H8a1 1 0 0 0-1 1v7"/><path d="M7 3v4a1 1 0 0 0 1 1h7"/></svg>
-          {saving ? "Guardando..." : "Guardar"}
-        </button>
       </div>}
 
       {/* Context Menu */}
@@ -2943,26 +3614,24 @@ export default function LeafletMapView({
       )}
 
       {/* ── VERTICAL SIDEBAR CONTROLS (Right Side) ── */}
-      {!readonly && (
-        <VisualizationPanel
-          mapRef={mapRef}
-          nodesRef={nodesRef}
-          LRef={LRef}
-          sidebarWidth={sidebarWidth}
-          showNodes={showNodes}
-          setShowNodes={setShowNodes}
-          showLinks={showLinks}
-          setShowLinks={setShowLinks}
-          showCameras={showCameras}
-          setShowCameras={setShowCameras}
-          showFOV={showFOV}
-          setShowFOV={setShowFOV}
-          showLabels={showLabels}
-          setShowLabels={setShowLabels}
-          panelCollapsed={panelCollapsed}
-          onTogglePanel={onTogglePanel}
-        />
-      )}
+      {!rackDrawerNodeId && <VisualizationPanel
+        mapRef={mapRef}
+        nodesRef={nodesRef}
+        LRef={LRef}
+        sidebarWidth={sidebarWidth}
+        showNodes={showNodes}
+        setShowNodes={setShowNodes}
+        showLinks={showLinks}
+        setShowLinks={setShowLinks}
+        showCameras={showCameras}
+        setShowCameras={setShowCameras}
+        showFOV={showFOV}
+        setShowFOV={setShowFOV}
+        showLabels={showLabels}
+        setShowLabels={setShowLabels}
+        panelCollapsed={panelCollapsed}
+        onTogglePanel={!readonly ? onTogglePanel : undefined}
+      />}
 
       {/* Link Modal */}
       <LinkModal
@@ -3269,10 +3938,10 @@ export default function LeafletMapView({
 
 
       {/* ── Map Clock ── */}
-      <MapClock timeMachineTime={timeMachineTime} timeMachineOpen={timeMachineOpen} />
+      {!rackDrawerNodeId && <MapClock timeMachineTime={timeMachineTime} timeMachineOpen={timeMachineOpen} />}
 
       {/* ── Status bar bottom ── */}
-      {!readonly && (() => {
+      {!readonly && !rackDrawerNodeId && (() => {
         const total = nodesRef.current.filter(n => n.kuma_monitor_id && n.icon !== "_textLabel" && n.icon !== "_waypoint").length;
         const up = nodesRef.current.filter(n => { const m = getMonitorData(n.kuma_monitor_id); return m?.status === 1; }).length;
         const down = nodesRef.current.filter(n => { const m = getMonitorData(n.kuma_monitor_id); return m?.status === 0; }).length;
@@ -3295,7 +3964,7 @@ export default function LeafletMapView({
 
       {/* Time Machine — day/night solar overlay */}
       {!readonly && (() => {
-        // Calcula oscuridad según hora del día: 0 = mediodía (sin overlay), 1 = medianoche (máximo)
+        // Calcula oscuridad según hora del d: 0 = mediodía (sin overlay), 1 = medianoche (máximo)
         const getSkyDarkness = (date: Date): number => {
           const h = date.getHours() + date.getMinutes() / 60 + date.getSeconds() / 3600;
           // Curva coseno: 0 en mediodía (h=12), 1 en medianoche (h=0 o h=24)
@@ -3304,8 +3973,6 @@ export default function LeafletMapView({
         };
 
         const skyOpacity = (timeMachineTime && timeMachineOpen) ? getSkyDarkness(timeMachineTime) : 0;
-
-        // Color de overlay: azul noche oscuro
         const overlayColor = `rgba(0, 8, 35, ${skyOpacity})`;
 
         return (
@@ -3322,222 +3989,14 @@ export default function LeafletMapView({
       })()}
 
       {/* Time Machine */}
-      {!readonly && <TimeMachine
+      {!readonly && !rackDrawerNodeId && <TimeMachine
         open={timeMachineOpen}
         onToggle={() => setTimeMachineOpen((v) => !v)}
-        onDragging={useCallback((d: boolean) => setTimeDragging(d), [])}
+        onDragging={handleTimeDragging}
         mapMonitorIds={mapMonitorIds}
         initialFocusMonitorId={tmFocusMonitorId}
-        onFocusEvent={useCallback((monitorId: number, eventType: "down" | "up") => {
-          const node = nodesRef.current.find(n => n.kuma_monitor_id === monitorId);
-          if (!node || !mapRef.current || !LRef.current) return;
-          const L = LRef.current;
-          const map = mapRef.current;
-          const flashColor = eventType === "down" ? "#ef4444" : "#22c55e";
-          const marker = markersRef.current.get(node.id);
-
-          // Check if node is visible in current viewport — only pan if not visible
-          const bounds = map.getBounds();
-          const nodeLatLng = L.latLng(node.x, node.y);
-          if (!bounds.contains(nodeLatLng)) {
-            map.panTo(nodeLatLng, { animate: true, duration: 0.6 });
-          }
-
-          // Subtle vibration animation on marker (NO scale, NO transform)
-          if (marker?.getElement()) {
-            const el = marker.getElement();
-            // Glow effect only — no position/scale changes
-            el.style.filter = `drop-shadow(0 0 20px ${flashColor}) drop-shadow(0 0 40px ${flashColor}) brightness(1.8)`;
-            el.style.transition = "filter 0.2s";
-            // CSS vibration class
-            el.classList.add("node-vibrate");
-            setTimeout(() => {
-              el.style.filter = `drop-shadow(0 0 10px ${flashColor}) brightness(1.2)`;
-              el.style.transition = "filter 1.5s";
-            }, 1500);
-            setTimeout(() => {
-              el.style.filter = "";
-              el.style.transition = "filter 1s";
-              el.classList.remove("node-vibrate");
-            }, 4000);
-          }
-
-          // Pulse rings around the node (visual only, don't move node)
-          for (let i = 0; i < 2; i++) {
-            setTimeout(() => {
-              const ring = L.circleMarker(nodeLatLng, {
-                radius: 8, color: flashColor, fillColor: flashColor,
-                fillOpacity: 0.3, weight: 2, opacity: 0.7,
-              }).addTo(map);
-              let r = 8;
-              const iv = setInterval(() => {
-                r += 1.5;
-                ring.setRadius(r);
-                ring.setStyle({ opacity: Math.max(0, 0.7 - r / 50), fillOpacity: Math.max(0, 0.3 - r / 70) });
-                if (r > 45) { clearInterval(iv); try { map.removeLayer(ring); } catch {} }
-              }, 30);
-            }, i * 500);
-          }
-
-          // Open event popup AFTER a short delay (ensures map settled)
-          setTimeout(() => {
-            const mon = kumaMonitors.find(m => m.id === monitorId);
-            const existing = failPopupsRef.current.get(node.id);
-            if (existing) { try { map.removeLayer(existing); } catch {} }
-
-            // Colors based on event type
-            const isDown = eventType === "down";
-            const bgGrad = isDown ? "linear-gradient(135deg,#dc2626,#991b1b)" : "linear-gradient(135deg,#16a34a,#15803d)";
-            const borderColor = isDown ? "#fca5a5" : "#86efac";
-            const shadowColor = isDown ? "rgba(239,68,68" : "rgba(34,197,94";
-            const statusText = isDown ? "▼ OFFLINE" : "▲ RECOVERED";
-            const icon = isDown
-              ? '<path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>'
-              : '<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>';
-
-            const popup = L.popup({
-              closeButton: false, autoClose: false, closeOnClick: false,
-              className: "fail-popup-tm", offset: [0, -22], autoPan: false,
-            })
-              .setLatLng(nodeLatLng)
-              .setContent(`
-                <div style="background:${bgGrad};border:2px solid ${borderColor};border-radius:14px;padding:10px 16px;min-width:160px;box-shadow:0 8px 32px ${shadowColor},0.4),0 0 60px ${shadowColor},0.2),inset 0 1px 0 rgba(255,255,255,0.15);animation:failPopupIn 0.4s cubic-bezier(0.34,1.56,0.64,1);">
-                  <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
-                    <div style="width:28px;height:28px;border-radius:8px;background:rgba(255,255,255,0.15);display:flex;align-items:center;justify-content:center;animation:failIconPulse 1.5s ease-in-out infinite;">
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round">${icon}</svg>
-                    </div>
-                    <div>
-                      <div style="color:white;font-size:13px;font-weight:800;text-shadow:0 1px 2px rgba(0,0,0,0.3);">${node.label}</div>
-                      <div style="color:rgba(255,255,255,0.8);font-size:10px;font-weight:700;letter-spacing:0.05em;">${statusText}</div>
-                    </div>
-                  </div>
-                  ${mon?.msg ? `<div style="color:rgba(255,255,255,0.65);font-size:9px;margin-top:2px;">${mon.msg}</div>` : ""}
-                  <button onclick="window.__kumamap_showEventDetail(${monitorId})" style="margin-top:6px;width:100%;padding:4px 0;border-radius:8px;background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.25);color:white;font-size:10px;font-weight:700;cursor:pointer;transition:all 0.2s;letter-spacing:0.05em;" onmouseover="this.style.background='rgba(255,255,255,0.25)'" onmouseout="this.style.background='rgba(255,255,255,0.15)'">
-                    📋 Detalles
-                  </button>
-                </div>
-              `);
-            popup.addTo(map);
-            failPopupsRef.current.set(node.id, popup);
-
-            // Register global handler
-            (window as any).__kumamap_showEventDetail = (mid: number) => {
-              const m = kumaMonitors.find(km => km.id === mid);
-              setEventDetail({
-                nodeLabel: node.label || "?",
-                monitorId: mid,
-                msg: m?.msg || mon?.msg || "",
-                time: new Date(),
-                type: m?.type || "unknown",
-                ping: m?.ping ?? null,
-                status: m?.status ?? 0,
-              });
-            };
-
-            setTimeout(() => { try { map.removeLayer(popup); failPopupsRef.current.delete(node.id); } catch {} }, 8000);
-          }, 300);
-        }, [kumaMonitors])}
-        onTimeChange={(time: Date | null, statuses: Map<number, number>) => {
-          setTimeMachineTime(time);
-          if (!LRef.current || !mapRef.current) return;
-          const L = LRef.current;
-          const map = mapRef.current;
-
-          if (!time || statuses.size === 0) {
-            // Back to LIVE — clear fail popups and re-render
-            failPopupsRef.current.forEach((p) => { try { map.removeLayer(p); } catch {} });
-            failPopupsRef.current.clear();
-            renderNodes(L, map);
-            renderEdges(L, map);
-            return;
-          }
-
-          // Apply historical statuses to nodes + show dramatic fail popups
-          // First close all existing fail popups
-          failPopupsRef.current.forEach((p) => { try { map.removeLayer(p); } catch {} });
-          failPopupsRef.current.clear();
-
-          nodesRef.current.forEach((node) => {
-            const marker = markersRef.current.get(node.id);
-            if (!marker || !node.kuma_monitor_id) return;
-            const st = statuses.get(node.kuma_monitor_id);
-            if (st === undefined) return;
-            const color = st === 0 ? "#ef4444" : st === 1 ? "#22c55e" : st === 3 ? "#8b5cf6" : "#f59e0b";
-            const ncd = node.custom_data ? JSON.parse(node.custom_data) : {};
-            marker.setIcon(createMarkerIcon(L, color, st === 0, false, ncd.nodeSize || 1.0, node.icon || "server"));
-
-            // Show dramatic red fail popup for DOWN nodes
-            if (st === 0) {
-              const mon = kumaMonitors.find(m => m.id === node.kuma_monitor_id);
-              const popup = L.popup({
-                closeButton: false,
-                autoClose: false,
-                closeOnClick: false,
-                className: "fail-popup-tm",
-                offset: [0, -20],
-                autoPan: false,
-              })
-                .setLatLng([node.x, node.y])
-                .setContent(`
-                  <div style="
-                    background: linear-gradient(135deg, #dc2626, #991b1b);
-                    border: 2px solid #fca5a5;
-                    border-radius: 14px;
-                    padding: 8px 14px;
-                    min-width: 140px;
-                    box-shadow: 0 8px 32px rgba(239,68,68,0.4), 0 0 60px rgba(239,68,68,0.2), inset 0 1px 0 rgba(255,255,255,0.15);
-                    animation: failPopupIn 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
-                  ">
-                    <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
-                      <div style="
-                        width:24px;height:24px;border-radius:8px;
-                        background:rgba(255,255,255,0.15);
-                        display:flex;align-items:center;justify-content:center;
-                        animation: failIconPulse 1.5s ease-in-out infinite;
-                      ">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round">
-                          <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
-                          <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
-                        </svg>
-                      </div>
-                      <div>
-                        <div style="color:white;font-size:12px;font-weight:800;text-shadow:0 1px 2px rgba(0,0,0,0.3);">
-                          ${node.label}
-                        </div>
-                        <div style="color:rgba(255,255,255,0.7);font-size:9px;font-weight:600;letter-spacing:0.05em;">
-                          ▼ OFFLINE
-                        </div>
-                      </div>
-                    </div>
-                    ${mon?.msg ? `<div style="color:rgba(255,255,255,0.6);font-size:8px;margin-top:2px;font-style:italic;">${mon.msg}</div>` : ""}
-                    ${time ? `<div style="color:rgba(255,255,255,0.5);font-size:8px;font-family:monospace;margin-top:3px;">
-                      ${time.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
-                    </div>` : ""}
-                  </div>
-                `)
-                .openOn(map);
-              failPopupsRef.current.set(node.id, popup);
-            }
-          });
-
-          // Re-render edges with historical statuses
-          // Temporarily override kumaMonitors statuses for renderEdges
-          const originalStatuses = new Map<number, number | undefined>();
-          kumaMonitors.forEach(m => {
-            originalStatuses.set(m.id, m.status);
-            const historicalStatus = statuses.get(m.id);
-            if (historicalStatus !== undefined) {
-              (m as any).status = historicalStatus;
-            }
-          });
-
-          renderEdges(L, map);
-
-          // Restore original statuses
-          kumaMonitors.forEach(m => {
-            (m as any).status = originalStatuses.get(m.id);
-          });
-        }}
+        onFocusEvent={handleTimeMachineFocusEvent}
+        onTimeChange={handleTimeMachineChange}
         monitors={kumaMonitors.map((m) => ({
           id: m.id,
           name: m.name,
@@ -3715,8 +4174,8 @@ export default function LeafletMapView({
                     style={{ background: "rgba(99,102,241,0.06)", border: "1px solid rgba(99,102,241,0.12)" }}>
                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#818cf8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
                     <span className="flex-1 text-xs font-semibold text-[#a5b4fc] truncate">{lm.name}</span>
-                    <Tooltip content="Abrir mapa en kiosco">
-                    <a href={apiUrl(`/view/${lm.id}`)} target="_blank" rel="noopener noreferrer"
+                    <Tooltip content="Abrir mapa">
+                    <a href={apiUrl(`/?map=${lm.id}`)} target="_blank" rel="noopener noreferrer"
                       className="rounded-lg px-2 py-1 text-[10px] font-semibold text-[#60a5fa] hover:bg-blue-500/10 transition-all"
                       onClick={(e) => e.stopPropagation()}>
                       <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" x2="21" y1="14" y2="3"/></svg>
@@ -3872,9 +4331,58 @@ export default function LeafletMapView({
           0%, 100% { transform: scale(1); box-shadow: 0 0 10px rgba(239,68,68,0.7), 0 0 20px rgba(239,68,68,0.3); }
           50% { transform: scale(1.18); box-shadow: 0 0 16px rgba(239,68,68,0.9), 0 0 32px rgba(239,68,68,0.5); }
         }
+        /* Tooltip downtime bubble — subtle scale + glow pulse */
+        @keyframes kuma-tip-pulse {
+          0%   { box-shadow: 0 0 0 1px rgba(239,68,68,0.15), 0 0 14px rgba(239,68,68,0.35), 0 6px 16px rgba(0,0,0,0.75); }
+          50%  { box-shadow: 0 0 0 1px rgba(239,68,68,0.35), 0 0 24px rgba(239,68,68,0.65), 0 8px 20px rgba(0,0,0,0.8); }
+          100% { box-shadow: 0 0 0 1px rgba(239,68,68,0.15), 0 0 14px rgba(239,68,68,0.35), 0 6px 16px rgba(0,0,0,0.75); }
+        }
         /* Make sure downtime counter sits above all other layers */
         .downtime-counter { z-index: 6000 !important; }
       `}</style>
+      <NewMonitorModal
+        open={newMonitorModalOpen}
+        onClose={() => setNewMonitorModalOpen(false)}
+        onCreated={(mid) => {
+          // Monitor created! It will eventually arrive via WebSocket
+          // but we can provide immediate feedback
+          toast.info("Sensor creado y sincronizando...");
+        }}
+      />
+      {/* ── Rack Device Picker — shown when linking from/to a rack node ── */}
+      {rackPickerState && (() => {
+        const rackNode = nodesRef.current.find(n => n.id === rackPickerState.rackNodeId);
+        const cd = rackNode?.custom_data ? (() => { try { return JSON.parse(rackNode.custom_data!); } catch { return {}; } })() : {};
+        const devices: any[] = (cd.devices || []).sort((a: any, b: any) => b.unit - a.unit);
+        return (
+          <RackDevicePickerModal
+            devices={devices}
+            rackName={rackNode?.label || "Rack"}
+            isSrc={rackPickerState.side === "source"}
+            onSelect={handleRackPickerSelect}
+            onCancel={() => { setRackPickerState(null); cancelLinkCreation(); }}
+            getMonitorData={getMonitorData}
+          />
+        );
+      })()}
+
+      <RackDesignerDrawer
+        open={rackDrawerNodeId !== null}
+        onClose={() => setRackDrawerNodeId(null)}
+        nodeId={rackDrawerNodeId}
+        nodes={nodesRef.current}
+        monitors={monitorsRef.current}
+        onSave={(nodeId, cd) => {
+          const idx = nodesRef.current.findIndex(n => n.id === nodeId);
+          if (idx >= 0) {
+            nodesRef.current[idx].custom_data = JSON.stringify(cd);
+            if (LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current);
+            pushUndo();
+            handleSave();
+            toast.success("Rack guardado");
+          }
+        }}
+      />
     </div>
   );
 }

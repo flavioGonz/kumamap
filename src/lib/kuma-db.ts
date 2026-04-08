@@ -7,12 +7,18 @@
  *    KUMA_DB_PATH=/path/to/kuma.db
  *    (read-only access to the SQLite file)
  *
- *  MySQL/MariaDB mode (Uptime Kuma 2.0 embedded MariaDB or external):
+ *  MySQL/MariaDB mode — TCP (Uptime Kuma 2.0 external MariaDB):
  *    KUMA_DB_HOST=127.0.0.1
  *    KUMA_DB_USER=kumamap_reader
  *    KUMA_DB_PASSWORD=yourpassword
  *    KUMA_DB_NAME=kuma        (default: kuma)
  *    KUMA_DB_PORT=3306        (default: 3306)
+ *
+ *  MySQL/MariaDB mode — Unix socket (Uptime Kuma 2.0 embedded MariaDB via Docker volume):
+ *    KUMA_DB_SOCKET=/home/nico/uptime-kuma-data/run/mariadb.sock
+ *    KUMA_DB_USER=kumamap_reader
+ *    KUMA_DB_PASSWORD=yourpassword
+ *    KUMA_DB_NAME=kuma        (default: kuma)
  *
  *  Disabled (neither env set):
  *    App works via Socket.IO only; historical timeline shows limited data.
@@ -39,7 +45,7 @@ type DbMode = "sqlite" | "mysql" | "disabled";
 
 function detectMode(): DbMode {
   if (process.env.KUMA_DB_PATH) return "sqlite";
-  if (process.env.KUMA_DB_HOST) return "mysql";
+  if (process.env.KUMA_DB_HOST || process.env.KUMA_DB_SOCKET) return "mysql";
   return "disabled";
 }
 
@@ -118,13 +124,14 @@ let mysqlPool: mysql.Pool | null = null;
 export function getKumaDb(): mysql.Pool {
   if (detectMode() !== "mysql") {
     throw new Error(
-      "[KumaDB] MySQL mode requires KUMA_DB_HOST to be set in the environment. " +
+      "[KumaDB] MySQL mode requires KUMA_DB_HOST or KUMA_DB_SOCKET to be set in the environment. " +
         "Set KUMA_DB_PATH for SQLite mode, or leave both unset to use Socket.IO only."
     );
   }
 
   if (!mysqlPool) {
-    const host = process.env.KUMA_DB_HOST!;
+    const socketPath = process.env.KUMA_DB_SOCKET;
+    const host = process.env.KUMA_DB_HOST;
     const user = process.env.KUMA_DB_USER || "kumamap_reader";
     const password = process.env.KUMA_DB_PASSWORD;
     const database = process.env.KUMA_DB_NAME || "kuma";
@@ -132,16 +139,18 @@ export function getKumaDb(): mysql.Pool {
 
     if (!password) {
       throw new Error(
-        "[KumaDB] KUMA_DB_PASSWORD is required when KUMA_DB_HOST is set. " +
+        "[KumaDB] KUMA_DB_PASSWORD is required when KUMA_DB_HOST or KUMA_DB_SOCKET is set. " +
           "Run `npm run setup-db` to create the read-only user and get the connection settings."
       );
     }
 
-    console.log(`[KumaDB] MySQL mode — connecting to ${user}@${host}:${port}/${database}`);
+    if (socketPath) {
+      console.log(`[KumaDB] MySQL mode — connecting via socket ${socketPath} as ${user}@${database}`);
+    } else {
+      console.log(`[KumaDB] MySQL mode — connecting to ${user}@${host}:${port}/${database}`);
+    }
 
-    mysqlPool = mysql.createPool({
-      host,
-      port,
+    const poolConfig: mysql.PoolOptions = {
       user,
       password,
       database,
@@ -149,7 +158,16 @@ export function getKumaDb(): mysql.Pool {
       connectionLimit: 5,
       queueLimit: 0,
       connectTimeout: 10_000,
-    });
+    };
+
+    if (socketPath) {
+      poolConfig.socketPath = socketPath;
+    } else {
+      poolConfig.host = host;
+      poolConfig.port = port;
+    }
+
+    mysqlPool = mysql.createPool(poolConfig);
   }
 
   return mysqlPool;
@@ -257,10 +275,14 @@ export async function fetchBadDatesFromDb(monitorIds: number[]): Promise<string[
 export function getDbMode(): { mode: DbMode; detail: string } {
   const mode = detectMode();
   if (mode === "sqlite") return { mode, detail: `SQLite: ${process.env.KUMA_DB_PATH}` };
-  if (mode === "mysql")
+  if (mode === "mysql") {
+    const connStr = process.env.KUMA_DB_SOCKET
+      ? `socket:${process.env.KUMA_DB_SOCKET}`
+      : `${process.env.KUMA_DB_HOST}:${process.env.KUMA_DB_PORT || 3306}`;
     return {
       mode,
-      detail: `MySQL: ${process.env.KUMA_DB_USER || "kumamap_reader"}@${process.env.KUMA_DB_HOST}:${process.env.KUMA_DB_PORT || 3306}/${process.env.KUMA_DB_NAME || "kuma"}`,
+      detail: `MySQL: ${process.env.KUMA_DB_USER || "kumamap_reader"}@${connStr}/${process.env.KUMA_DB_NAME || "kuma"}`,
     };
+  }
   return { mode: "disabled", detail: "No DB configured — using Socket.IO only" };
 }

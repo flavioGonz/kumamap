@@ -64,6 +64,7 @@ KumaMap ofrece mapas geolocalizados interactivos con soporte de **jerarquia de m
 - **Conexiones con curvas Bezier** entre nodos para topologia de aspecto profesional
 - **Nodos de camara** con conos de campo de vision ajustables, rotacion, presets de lente, y personalizacion de color
 - **Indicador LIVE/OFF** en la barra superior con estado de conexion a Kuma en tiempo real
+- **Tooltip de downtime animado** — burbuja anclada sobre nodos caídos con contador `hh:mm:ss` en tiempo real y fecha/hora de inicio de la caída; resplandor rojo pulsante
 
 ### Integracion con Uptime Kuma
 - **Conexion Socket.IO en tiempo real** (no polling)
@@ -86,6 +87,27 @@ KumaMap ofrece mapas geolocalizados interactivos con soporte de **jerarquia de m
 - **Deshacer/Rehacer** (Ctrl+Z / Ctrl+Y)
 - **Auto-guardado** con toggle en la barra superior
 - **Modo edicion** — toggle para ocultar/mostrar herramientas de edicion
+
+### Diseñador de Racks (v1.7.0+)
+- **Gestión de inventario de racks** — visualización interactiva de dispositivos de red en formato U estándar
+- **Nodo rack en el mapa** — el icono del rack muestra el peor estado del grupo: si algún dispositivo tiene monitor DOWN/PENDING, el rack pulsa en rojo/amarillo igual que un nodo individual
+- **Tabla de puertos con editor inline** — al seleccionar un puerto en la tabla, el editor de propiedades se expande como acordeón debajo de la fila (no al final)
+- **Tabbed interface** para organización de datos (Puertos / General)
+- **Selector de puerto al crear links** — al conectar un rack con otro nodo, aparece un picker para elegir a qué dispositivo del rack vincular el link
+- **Tipos de dispositivos** — Servidores, Switches, Patch Panels, Routers, UPS, PDU, bandejas de fibra, y más
+- **Integración con Uptime Kuma** — asignar monitores a dispositivos para estado en vivo con colores y tooltips
+- **Exportación múltiple** con modal rediseñado (tarjetas con color por formato):
+  - **Word (.docx)** — Reportes profesionales formateados con tablas
+  - **Excel (.xlsx)** — Libros de múltiples hojas con inventario y detalles de puertos
+  - **PDF** — Abre el reporte en una nueva pestaña y lanza el diálogo de impresión del navegador
+  - **Markdown (.md)** — Formato texto compatible con control de versiones
+  - **PNG** — Imagen visual del rack para presentaciones
+- **Configuración de puertos**:
+  - Patch Panel: destino, dispositivo conectado, color y longitud de cable, tipo PoE
+  - Switch: velocidad, VLAN, watts PoE, estado uplink
+  - Router: tipo de interfaz (WAN/LAN/MGMT), dirección IP, notas
+- **Bloqueo de rack** — prevenir cambios accidentales durante operaciones normales
+- **Posicionamiento flexible** — ajustar altura de dispositivos (1U-48U+) e IPs de gestión
 
 <!-- screenshot: time machine abierto con eventos DOWN en la línea de tiempo -->
 
@@ -240,10 +262,11 @@ EOF
 | `KUMA_URL` | URL interna de Uptime Kuma | `http://127.0.0.1:3001` |
 | `KUMA_USER` | Usuario de login de Kuma | `admin` |
 | `KUMA_PASS` | Contraseña de login de Kuma | `mipassword` |
-| `KUMA_DB_HOST` | [MySQL] IP/Host temporal de base de datos Kuma | `192.168.1.100` |
+| `KUMA_DB_HOST` | [MySQL] IP/Host de base de datos Kuma | `192.168.1.100` |
 | `KUMA_DB_USER` | [MySQL] Usuario de SOLO LECTURA a conectar | `kumamap_reader` |
 | `KUMA_DB_PASSWORD` | [MySQL] Contraseña del lector | `password_seguro` |
 | `KUMA_DB_NAME` | [MySQL] Nombre original de la BD Kuma | `kuma` |
+| `KUMA_DB_SOCKET` | [MySQL] Socket Unix para MariaDB embebido en Docker | `/home/nico/uptime-kuma-data/run/mariadb.sock` |
 
 > ⚠️ **Prerequisito MySQL: crear el usuario de solo lectura**
 > 

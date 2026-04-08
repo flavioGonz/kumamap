@@ -325,6 +325,7 @@ export default function LeafletMapView({
     y: number;
     nodeId?: string;
     edgeId?: string;
+    latlng?: [number, number]; // map-level right-click position for paste
   } | null>(null);
 
   // Link creation state
@@ -454,8 +455,11 @@ export default function LeafletMapView({
         // Labels tipo texto: solo se ocultan con el toggle de etiquetas
         setMarkerVisible(showLabels);
       } else {
-        // Nodos normales: respetan showNodes; cuando se ocultan, su tooltip también
-        setMarkerVisible(showNodes);
+        // Nodos normales: ícono sigue showNodes; el tooltip de nombre sigue showLabels
+        marker.getElement()?.style.setProperty("display", showNodes ? "" : "none");
+        const tooltip = marker.getTooltip();
+        const tooltipEl = tooltip?.getElement?.();
+        if (tooltipEl) tooltipEl.style.setProperty("display", (showNodes && showLabels) ? "" : "none");
       }
     });
     // FOV polygons
@@ -821,6 +825,11 @@ export default function LeafletMapView({
               finishPolygon();
             }
           });
+          map.on("contextmenu", (e: any) => {
+            if (readonly) return;
+            e.originalEvent?.preventDefault?.();
+            setCtxMenu({ x: e.originalEvent.clientX, y: e.originalEvent.clientY, latlng: [e.latlng.lat, e.latlng.lng] });
+          });
 
           // First fit — container may not have final size yet, so do it twice
           fitImageToContainer(map, imgBounds);
@@ -889,6 +898,11 @@ export default function LeafletMapView({
             e.originalEvent?.preventDefault?.();
             finishPolygon();
           }
+        });
+        map.on("contextmenu", (e: any) => {
+          if (readonly) return;
+          e.originalEvent?.preventDefault?.();
+          setCtxMenu({ x: e.originalEvent.clientX, y: e.originalEvent.clientY, latlng: [e.latlng.lat, e.latlng.lng] });
         });
 
         // Render initial nodes after map is ready
@@ -2305,6 +2319,35 @@ export default function LeafletMapView({
   }
 
   // ─── Context menu items ─────────────────────
+  // ── Map-level context menu (no node/edge selected) ───────────────────────────
+  function getMapCtxItems(latlng?: [number, number]) {
+    if (!latlng) return [];
+    let clipboard: { label: string; icon: string; custom_data: string | null } | null = null;
+    try { const s = localStorage.getItem("kumamap_node_clipboard"); clipboard = s ? JSON.parse(s) : null; } catch {}
+    if (!clipboard) return [];
+    return [
+      {
+        label: `Pegar: ${clipboard.label}`,
+        icon: menuIcons.Clipboard,
+        onClick: () => {
+          pushUndo();
+          const newId = `node-${Date.now()}`;
+          nodesRef.current = [...nodesRef.current, {
+            id: newId,
+            kuma_monitor_id: null,
+            label: clipboard!.label,
+            icon: clipboard!.icon,
+            x: latlng[0],
+            y: latlng[1],
+            custom_data: clipboard!.custom_data || null,
+          }];
+          if (LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current);
+          toast.success(`"${clipboard!.label}" pegado`);
+        },
+      },
+    ];
+  }
+
   function getNodeCtxItems(nodeId: string) {
     const node = nodesRef.current.find((n) => n.id === nodeId);
     const isLabel = node?.icon === "_textLabel";
@@ -2495,9 +2538,23 @@ export default function LeafletMapView({
           },
         },
         {
-          label: "Duplicar Rack",
+          label: "Copiar Rack",
           icon: menuIcons.Copy,
           divider: true,
+          onClick: () => {
+            try {
+              localStorage.setItem("kumamap_node_clipboard", JSON.stringify({
+                label: node?.label || "Rack",
+                icon: node?.icon || "_rack",
+                custom_data: node?.custom_data || null,
+              }));
+              toast.success(`"${node?.label}" copiado al portapapeles`);
+            } catch { toast.error("No se pudo copiar"); }
+          },
+        },
+        {
+          label: "Duplicar Rack",
+          icon: menuIcons.Plus,
           onClick: () => {
             if (!node) return;
             const newNodeId = `rack-${Date.now()}`;
@@ -2708,13 +2765,28 @@ export default function LeafletMapView({
           },
         },
       ] : []),
+      // Copy node to cross-map clipboard
+      {
+        label: "Copiar nodo",
+        icon: menuIcons.Copy,
+        divider: true,
+        onClick: () => {
+          try {
+            localStorage.setItem("kumamap_node_clipboard", JSON.stringify({
+              label: node?.label || "Nodo",
+              icon: node?.icon || "server",
+              custom_data: node?.custom_data || null,
+            }));
+            toast.success(`"${node?.label}" copiado al portapapeles`);
+          } catch { toast.error("No se pudo copiar"); }
+        },
+      },
       // Duplicate node (non-cameras — cameras have their own duplicate)
       ...(node?.icon !== "_camera" ? [{
         label: "Duplicar nodo",
         icon: menuIcons.Plus,
         onClick: () => {
           pushUndo();
-          const cd = node?.custom_data ? JSON.parse(node.custom_data) : {};
           const newId = `node-${Date.now()}`;
           nodesRef.current = [...nodesRef.current, {
             id: newId,
@@ -3617,20 +3689,22 @@ export default function LeafletMapView({
       </div>}
 
       {/* Context Menu */}
-      {!readonly && ctxMenu && (
-        <ContextMenu
-          x={ctxMenu.x}
-          y={ctxMenu.y}
-          items={
-            ctxMenu.nodeId
-              ? getNodeCtxItems(ctxMenu.nodeId)
-              : ctxMenu.edgeId
-              ? getEdgeCtxItems(ctxMenu.edgeId)
-              : []
-          }
-          onClose={() => setCtxMenu(null)}
-        />
-      )}
+      {!readonly && ctxMenu && (() => {
+        const items = ctxMenu.nodeId
+          ? getNodeCtxItems(ctxMenu.nodeId)
+          : ctxMenu.edgeId
+          ? getEdgeCtxItems(ctxMenu.edgeId)
+          : getMapCtxItems(ctxMenu.latlng);
+        if (items.length === 0) return null;
+        return (
+          <ContextMenu
+            x={ctxMenu.x}
+            y={ctxMenu.y}
+            items={items}
+            onClose={() => setCtxMenu(null)}
+          />
+        );
+      })()}
 
       {/* ── VERTICAL SIDEBAR CONTROLS (Right Side) ── */}
       {!rackDrawerNodeId && <VisualizationPanel

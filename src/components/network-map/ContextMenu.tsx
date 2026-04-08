@@ -3,6 +3,7 @@
 import {
   Pencil, Trash2, Copy, Link2, Maximize2,
   Palette, Plus, Server, RotateCcw, Type, Signal, Scaling, Clock, ExternalLink, FolderOpen,
+  Clipboard,
 } from "lucide-react";
 
 interface MenuItem {
@@ -77,4 +78,4 @@ export default function ContextMenu({ x, y, items, onClose }: ContextMenuProps) 
 }
 
 // Helper to build common menu items
-export const menuIcons = { Pencil, Trash2, Copy, Link2, Maximize2, Palette, Plus, Server, RotateCcw, Type, Signal, Scaling, Clock, ExternalLink, FolderOpen };
+export const menuIcons = { Pencil, Trash2, Copy, Link2, Maximize2, Palette, Plus, Server, RotateCcw, Type, Signal, Scaling, Clock, ExternalLink, FolderOpen, Clipboard };

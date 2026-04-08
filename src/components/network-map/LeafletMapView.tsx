@@ -2419,27 +2419,40 @@ export default function LeafletMapView({
   // ── Map-level context menu (no node/edge selected) ───────────────────────────
   function getMapCtxItems(latlng?: [number, number]) {
     if (!latlng) return [];
-    let clipboard: { label: string; icon: string; custom_data: string | null } | null = null;
+    let clipboard: {
+      label: string | null;
+      icon: string;
+      kuma_monitor_id: number | null;
+      x: number;
+      y: number;
+      width?: number;
+      height?: number;
+      color?: string | null;
+      custom_data: string | null;
+    } | null = null;
     try { const s = localStorage.getItem("kumamap_node_clipboard"); clipboard = s ? JSON.parse(s) : null; } catch {}
     if (!clipboard) return [];
     return [
       {
-        label: `Pegar: ${clipboard.label}`,
+        label: `Pegar: ${clipboard.label || clipboard.icon}`,
         icon: menuIcons.Clipboard,
         onClick: () => {
           pushUndo();
           const newId = `node-${Date.now()}`;
           nodesRef.current = [...nodesRef.current, {
             id: newId,
-            kuma_monitor_id: null,
+            kuma_monitor_id: clipboard!.kuma_monitor_id ?? null,
             label: clipboard!.label,
             icon: clipboard!.icon,
-            x: latlng[0],
-            y: latlng[1],
+            x: clipboard!.x,
+            y: clipboard!.y,
+            ...(clipboard!.width  != null ? { width:  clipboard!.width  } : {}),
+            ...(clipboard!.height != null ? { height: clipboard!.height } : {}),
+            ...(clipboard!.color  != null ? { color:  clipboard!.color  } : {}),
             custom_data: clipboard!.custom_data || null,
           }];
           if (LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current);
-          toast.success(`"${clipboard!.label}" pegado`);
+          toast.success(`"${clipboard!.label || clipboard!.icon}" pegado`);
         },
       },
     ];
@@ -2641,8 +2654,14 @@ export default function LeafletMapView({
           onClick: () => {
             try {
               localStorage.setItem("kumamap_node_clipboard", JSON.stringify({
-                label: node?.label || "Rack",
+                label: node?.label ?? null,
                 icon: node?.icon || "_rack",
+                kuma_monitor_id: node?.kuma_monitor_id ?? null,
+                x: node?.x ?? 0,
+                y: node?.y ?? 0,
+                width:  node?.width  ?? undefined,
+                height: node?.height ?? undefined,
+                color:  node?.color  ?? null,
                 custom_data: node?.custom_data || null,
               }));
               toast.success(`"${node?.label}" copiado al portapapeles`);
@@ -2870,11 +2889,17 @@ export default function LeafletMapView({
         onClick: () => {
           try {
             localStorage.setItem("kumamap_node_clipboard", JSON.stringify({
-              label: node?.label || "Nodo",
+              label: node?.label ?? null,
               icon: node?.icon || "server",
+              kuma_monitor_id: node?.kuma_monitor_id ?? null,
+              x: node?.x ?? 0,
+              y: node?.y ?? 0,
+              width:  node?.width  ?? undefined,
+              height: node?.height ?? undefined,
+              color:  node?.color  ?? null,
               custom_data: node?.custom_data || null,
             }));
-            toast.success(`"${node?.label}" copiado al portapapeles`);
+            toast.success(`"${node?.label || node?.icon}" copiado al portapapeles`);
           } catch { toast.error("No se pudo copiar"); }
         },
       },

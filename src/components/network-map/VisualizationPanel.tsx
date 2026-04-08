@@ -51,7 +51,22 @@ export default function VisualizationPanel({
         boxShadow: "0 12px 40px rgba(0,0,0,0.5)",
         transition: "right 0.3s ease",
       }}>
-      {/* Zoom & View Group */}
+
+      {/* Monitor panel toggle — arriba del todo */}
+      {onTogglePanel && (
+        <>
+          <Tooltip content={panelCollapsed ? "Mostrar monitores" : "Ocultar monitores"} placement="left">
+            <button onClick={onTogglePanel}
+              className="h-8 w-8 flex items-center justify-center rounded-lg transition-all hover:bg-white/10"
+              style={{ color: !panelCollapsed ? "#60a5fa" : "#888" }}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/></svg>
+            </button>
+          </Tooltip>
+          <div className="mx-1 h-px bg-white/10 my-0.5" />
+        </>
+      )}
+
+      {/* Zoom Group */}
       <Tooltip content="Acercar" placement="left">
         <button onClick={() => mapRef.current?.zoomIn()}
           className="h-8 w-8 flex items-center justify-center rounded-lg text-[#ededed] hover:bg-white/10 transition-all">
@@ -108,19 +123,6 @@ export default function VisualizationPanel({
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
         </button>
       </Tooltip>
-
-      {onTogglePanel && (
-        <>
-          <div className="mx-1 h-px bg-white/10 my-0.5" />
-          <Tooltip content={panelCollapsed ? "Mostrar monitores" : "Ocultar monitores"} placement="left">
-            <button onClick={onTogglePanel}
-              className="h-7 w-7 flex items-center justify-center rounded-lg transition-all hover:bg-white/10"
-              style={{ color: !panelCollapsed ? "#60a5fa" : "#888" }}>
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/></svg>
-            </button>
-          </Tooltip>
-        </>
-      )}
     </div>
   );
 }

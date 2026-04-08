@@ -762,6 +762,18 @@ export default function MapListView({
                       <Pencil className="h-3.5 w-3.5" />
                     </button>
                     </Tooltip>
+                    <Tooltip content="Exportar JSON">
+                    <button onClick={(e) => { e.stopPropagation(); window.open(apiUrl(`/api/maps/${child.id}/export`), "_blank"); }}
+                      className="rounded-lg p-1.5 text-[#888] hover:text-emerald-400 hover:bg-emerald-500/10 transition-all opacity-0 group-hover/child:opacity-100">
+                      <Download className="h-3.5 w-3.5" />
+                    </button>
+                    </Tooltip>
+                    <Tooltip content="Clonar submap">
+                    <button onClick={(e) => { e.stopPropagation(); cloneMap(child); }}
+                      className="rounded-lg p-1.5 text-[#888] hover:text-amber-400 hover:bg-amber-500/10 transition-all opacity-0 group-hover/child:opacity-100">
+                      <Copy className="h-3.5 w-3.5" />
+                    </button>
+                    </Tooltip>
                     <Tooltip content="Eliminar submap">
                     <button onClick={(e) => { e.stopPropagation(); confirm(`Eliminar "${child.name}"?`) && deleteMap(child.id, child.name); }}
                       className="rounded-lg p-1.5 text-[#888] hover:text-red-400 hover:bg-red-500/10 transition-all opacity-0 group-hover/child:opacity-100">

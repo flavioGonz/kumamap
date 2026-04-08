@@ -106,7 +106,7 @@ const TYPE_META: Record<string, { label: string; icon: React.ReactNode; color: s
   other:             { label: "Otro",                icon: <Settings className="w-4 h-4" />,    color: "#6b7280" },
 };
 
-const UNIT_OPTIONS = [3, 6, 12, 18, 22, 24, 42, 45, 48];
+const UNIT_OPTIONS = [3, 6, 9, 12, 18, 22, 24, 42, 45, 48];
 const CABLE_LENGTHS = ["0.5m", "1m", "1.5m", "2m", "3m", "5m", "7m", "10m", "15m", "20m"];
 const CABLE_PRESET_COLORS = ["#ef4444", "#f97316", "#eab308", "#22c55e", "#3b82f6", "#8b5cf6", "#ec4899", "#a8a8a8", "#f5f5f5"];
 const SWITCH_SPEEDS = ["10", "100", "1G", "10G"] as const;
@@ -1659,14 +1659,16 @@ function EthernetIcon({ ifNum, color = "#888", size = 28 }: { ifNum: number; col
 // ── Port Table ────────────────────────────────────────────────────────────────
 
 function PortTable({
-  ports, selectedPort, onSelect, type
+  ports, selectedPort, onSelect, type, renderExpansion,
 }: {
   ports: AnyPort[];
   selectedPort: number | null;
   onSelect: (port: number) => void;
   type: "patch" | "switch";
+  renderExpansion?: (port: AnyPort) => React.ReactNode;
 }) {
   const isPatch = type === "patch";
+  const colCount = isPatch ? 7 : 8;
   return (
     <div style={{ overflowX: "auto" }}>
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11, minWidth: 480 }}>
@@ -1688,46 +1690,56 @@ function PortTable({
             const isSel = selectedPort === p.port;
             const speedColor: Record<string, string> = { "10": "#52525b", "100": "#3b82f6", "1G": "#10b981", "10G": "#f59e0b" };
             return (
-              <tr
-                key={p.port}
-                onClick={() => onSelect(isSel ? -1 : p.port)}
-                style={{
-                  cursor: "pointer",
-                  background: isSel ? "rgba(59,130,246,0.1)" : ri % 2 === 0 ? "transparent" : "rgba(255,255,255,0.02)",
-                  borderBottom: "1px solid rgba(255,255,255,0.04)",
-                  outline: isSel ? "1px solid rgba(59,130,246,0.35)" : "none",
-                  transition: "background 0.1s",
-                }}
-                onMouseEnter={e => { if (!isSel) (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.04)"; }}
-                onMouseLeave={e => { if (!isSel) (e.currentTarget as HTMLElement).style.background = ri % 2 === 0 ? "transparent" : "rgba(255,255,255,0.02)"; }}
-              >
-                <td style={{ padding: "5px 10px", fontFamily: "monospace", color: isSel ? "#93c5fd" : "rgba(255,255,255,0.5)", fontWeight: 700 }}>{p.port}</td>
-                <td style={{ padding: "5px 10px" }}>
-                  <div style={{ width: 8, height: 8, borderRadius: "50%", background: p.connected ? "#22c55e" : "#333", boxShadow: p.connected ? "0 0 6px #22c55e88" : "none" }} />
-                </td>
-                <td style={{ padding: "5px 10px", color: "rgba(255,255,255,0.75)" }}>{p.label}</td>
-                {isPatch ? (
-                  <>
-                    <td style={{ padding: "5px 10px", color: "rgba(255,255,255,0.4)" }}>{pp.destination || "—"}</td>
-                    <td style={{ padding: "5px 10px", color: "rgba(255,255,255,0.4)" }}>{pp.connectedDevice || "—"}</td>
-                    <td style={{ padding: "5px 10px" }}>
-                      {pp.cableColor && <span style={{ display: "inline-block", width: 10, height: 10, borderRadius: "50%", background: pp.cableColor, marginRight: 4, verticalAlign: "middle" }} />}
-                      <span style={{ color: "rgba(255,255,255,0.3)", fontFamily: "monospace" }}>{pp.cableLength || "—"}</span>
-                    </td>
-                    <td style={{ padding: "5px 10px", color: pp.isPoe ? "#f59e0b" : "rgba(255,255,255,0.2)" }}>{pp.isPoe ? (pp.poeType || "✓") : "—"}</td>
-                  </>
-                ) : (
-                  <>
-                    <td style={{ padding: "5px 10px" }}>
-                      {sp.speed && <span style={{ background: speedColor[sp.speed] + "33", color: speedColor[sp.speed], padding: "2px 6px", borderRadius: 4, fontWeight: 700, fontSize: 10, fontFamily: "monospace" }}>{sp.speed}</span>}
-                    </td>
-                    <td style={{ padding: "5px 10px", color: "rgba(255,255,255,0.4)" }}>{sp.connectedDevice || "—"}</td>
-                    <td style={{ padding: "5px 10px", color: "rgba(255,255,255,0.3)", fontFamily: "monospace" }}>{sp.vlan || "—"}</td>
-                    <td style={{ padding: "5px 10px", color: sp.isPoe ? "#f59e0b" : "rgba(255,255,255,0.2)" }}>{sp.isPoe ? `${sp.poeWatts || ""}W` : "—"}</td>
-                    <td style={{ padding: "5px 10px", color: sp.uplink ? "#60a5fa" : "rgba(255,255,255,0.2)" }}>{sp.uplink ? "↑" : "—"}</td>
-                  </>
-                )}
-              </tr>
+              <React.Fragment key={p.port}>
+                <tr
+                  onClick={() => onSelect(isSel ? -1 : p.port)}
+                  style={{
+                    cursor: "pointer",
+                    background: isSel ? "rgba(59,130,246,0.1)" : ri % 2 === 0 ? "transparent" : "rgba(255,255,255,0.02)",
+                    borderBottom: isSel && renderExpansion ? "none" : "1px solid rgba(255,255,255,0.04)",
+                    outline: isSel ? "1px solid rgba(59,130,246,0.35)" : "none",
+                    transition: "background 0.1s",
+                  }}
+                  onMouseEnter={e => { if (!isSel) (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.04)"; }}
+                  onMouseLeave={e => { if (!isSel) (e.currentTarget as HTMLElement).style.background = ri % 2 === 0 ? "transparent" : "rgba(255,255,255,0.02)"; }}
+                >
+                  <td style={{ padding: "5px 10px", fontFamily: "monospace", color: isSel ? "#93c5fd" : "rgba(255,255,255,0.5)", fontWeight: 700 }}>{p.port}</td>
+                  <td style={{ padding: "5px 10px" }}>
+                    <div style={{ width: 8, height: 8, borderRadius: "50%", background: p.connected ? "#22c55e" : "#333", boxShadow: p.connected ? "0 0 6px #22c55e88" : "none" }} />
+                  </td>
+                  <td style={{ padding: "5px 10px", color: "rgba(255,255,255,0.75)" }}>{p.label}</td>
+                  {isPatch ? (
+                    <>
+                      <td style={{ padding: "5px 10px", color: "rgba(255,255,255,0.4)" }}>{pp.destination || "—"}</td>
+                      <td style={{ padding: "5px 10px", color: "rgba(255,255,255,0.4)" }}>{pp.connectedDevice || "—"}</td>
+                      <td style={{ padding: "5px 10px" }}>
+                        {pp.cableColor && <span style={{ display: "inline-block", width: 10, height: 10, borderRadius: "50%", background: pp.cableColor, marginRight: 4, verticalAlign: "middle" }} />}
+                        <span style={{ color: "rgba(255,255,255,0.3)", fontFamily: "monospace" }}>{pp.cableLength || "—"}</span>
+                      </td>
+                      <td style={{ padding: "5px 10px", color: pp.isPoe ? "#f59e0b" : "rgba(255,255,255,0.2)" }}>{pp.isPoe ? (pp.poeType || "✓") : "—"}</td>
+                    </>
+                  ) : (
+                    <>
+                      <td style={{ padding: "5px 10px" }}>
+                        {sp.speed && <span style={{ background: speedColor[sp.speed] + "33", color: speedColor[sp.speed], padding: "2px 6px", borderRadius: 4, fontWeight: 700, fontSize: 10, fontFamily: "monospace" }}>{sp.speed}</span>}
+                      </td>
+                      <td style={{ padding: "5px 10px", color: "rgba(255,255,255,0.4)" }}>{sp.connectedDevice || "—"}</td>
+                      <td style={{ padding: "5px 10px", color: "rgba(255,255,255,0.3)", fontFamily: "monospace" }}>{sp.vlan || "—"}</td>
+                      <td style={{ padding: "5px 10px", color: sp.isPoe ? "#f59e0b" : "rgba(255,255,255,0.2)" }}>{sp.isPoe ? `${sp.poeWatts || ""}W` : "—"}</td>
+                      <td style={{ padding: "5px 10px", color: sp.uplink ? "#60a5fa" : "rgba(255,255,255,0.2)" }}>{sp.uplink ? "↑" : "—"}</td>
+                    </>
+                  )}
+                </tr>
+                <AnimatePresence>
+                  {isSel && renderExpansion && (
+                    <tr key={`exp-${p.port}`} style={{ borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+                      <td colSpan={colCount} style={{ padding: 0 }}>
+                        {renderExpansion(p)}
+                      </td>
+                    </tr>
+                  )}
+                </AnimatePresence>
+              </React.Fragment>
             );
           })}
         </tbody>
@@ -1750,10 +1762,117 @@ function PatchPanelEditor({ ports, onChange }: { ports: PatchPort[]; onChange: (
     setSelectedPort(portNum === -1 || portNum === selectedPort ? null : portNum);
   };
 
+  const renderPatchExpansion = (port: AnyPort) => {
+    const p = port as PatchPort;
+    return (
+      <motion.div
+        initial={{ height: 0, opacity: 0 }}
+        animate={{ height: "auto", opacity: 1 }}
+        exit={{ height: 0, opacity: 0 }}
+        transition={{ duration: 0.18, ease: "easeInOut" }}
+        style={{ overflow: "hidden" }}
+      >
+        <div
+          className="rounded-b-xl overflow-hidden"
+          style={{ background: "rgba(139,92,246,0.06)", border: "1px solid rgba(139,92,246,0.2)", borderTop: "none", margin: "0 1px 2px 1px" }}
+        >
+          {/* Header */}
+          <div
+            className="flex items-center gap-3 px-4 py-2"
+            style={{ background: "rgba(139,92,246,0.1)", borderBottom: "1px solid rgba(139,92,246,0.15)" }}
+          >
+            <span className="font-mono font-bold" style={{ fontSize: 12, color: "#c4b5fd" }}>
+              Puerto {p.port}
+            </span>
+            {p.label && p.label !== `P${p.port}` && (
+              <span className="px-2 py-0.5 rounded font-mono" style={{ fontSize: 10, background: "rgba(139,92,246,0.2)", color: "#a78bfa" }}>
+                {p.label}
+              </span>
+            )}
+            {p.cableColor && (
+              <span className="w-3 h-3 rounded-full shrink-0" style={{ background: p.cableColor, boxShadow: `0 0 6px ${p.cableColor}88` }} />
+            )}
+            <div className="flex items-center gap-2 ml-auto">
+              <span style={{ fontSize: 11, color: "rgba(255,255,255,0.4)" }}>Conectado</span>
+              <button onClick={e => { e.stopPropagation(); updatePort(p.port, { connected: !p.connected }); }} style={toggleTrack(p.connected, "#22c55e")}>
+                <div style={toggleThumb(p.connected)} />
+              </button>
+              <button onClick={e => { e.stopPropagation(); setSelectedPort(null); }} className="ml-2 cursor-pointer" style={{ color: "rgba(255,255,255,0.3)" }}>
+                <X style={{ width: 14, height: 14 }} />
+              </button>
+            </div>
+          </div>
+          {/* Fields grid */}
+          <div className="p-3 grid gap-2.5" style={{ gridTemplateColumns: "1fr 1fr 1fr 1fr" }}>
+            <div>
+              <span className="block text-[10px] mb-1" style={{ color: "rgba(255,255,255,0.35)" }}>Etiqueta</span>
+              <input type="text" value={p.label} onChange={e => updatePort(p.port, { label: e.target.value })} onClick={e => e.stopPropagation()} style={miniFieldStyle} />
+            </div>
+            <div>
+              <span className="block text-[10px] mb-1" style={{ color: "rgba(255,255,255,0.35)" }}>Destino / Sala</span>
+              <input type="text" value={p.destination || ""} onChange={e => updatePort(p.port, { destination: e.target.value })} onClick={e => e.stopPropagation()} placeholder="Sala, piso, patch..." style={miniFieldStyle} />
+            </div>
+            <div>
+              <span className="block text-[10px] mb-1" style={{ color: "rgba(255,255,255,0.35)" }}>Dispositivo conectado</span>
+              <input type="text" value={p.connectedDevice || ""} onChange={e => updatePort(p.port, { connectedDevice: e.target.value })} onClick={e => e.stopPropagation()} placeholder="Nombre del equipo" style={miniFieldStyle} />
+            </div>
+            <div>
+              <span className="block text-[10px] mb-1" style={{ color: "rgba(255,255,255,0.35)" }}>MAC Address</span>
+              <input type="text" value={p.macAddress || ""} onChange={e => updatePort(p.port, { macAddress: e.target.value })} onClick={e => e.stopPropagation()} placeholder="AA:BB:CC:DD:EE:FF" style={{ ...miniFieldStyle, fontFamily: "monospace" }} />
+            </div>
+            <div>
+              <span className="block text-[10px] mb-1" style={{ color: "rgba(255,255,255,0.35)" }}>Largo de cable</span>
+              <select value={p.cableLength || ""} onChange={e => updatePort(p.port, { cableLength: e.target.value })} onClick={e => e.stopPropagation()} style={miniFieldStyle}>
+                <option value="" style={{ background: "#1a1a1a" }}>—</option>
+                {CABLE_LENGTHS.map(l => <option key={l} value={l} style={{ background: "#1a1a1a" }}>{l}</option>)}
+              </select>
+            </div>
+            <div>
+              <span className="block text-[10px] mb-1.5" style={{ color: "rgba(255,255,255,0.35)" }}>Color de cable</span>
+              <div className="flex items-center gap-1.5 flex-wrap">
+                {CABLE_PRESET_COLORS.map(c => (
+                  <button key={c} onClick={e => { e.stopPropagation(); updatePort(p.port, { cableColor: c }); }}
+                    className="transition-all cursor-pointer"
+                    style={{ width: 18, height: 18, borderRadius: "50%", background: c, border: p.cableColor === c ? "2px solid #fff" : "2px solid transparent", boxShadow: p.cableColor === c ? `0 0 0 1.5px ${c}` : "none" }} />
+                ))}
+                <input type="color" value={p.cableColor || "#3b82f6"} onChange={e => updatePort(p.port, { cableColor: e.target.value })} onClick={e => e.stopPropagation()} title="Color personalizado"
+                  style={{ width: 18, height: 18, borderRadius: "50%", padding: 0, border: "none", cursor: "pointer", background: "transparent" }} />
+              </div>
+            </div>
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center justify-between">
+                <span style={{ fontSize: 11, color: "rgba(255,255,255,0.4)" }}>PoE</span>
+                <button onClick={e => { e.stopPropagation(); updatePort(p.port, { isPoe: !p.isPoe }); }} style={toggleTrack(!!p.isPoe, "#f59e0b")}>
+                  <div style={toggleThumb(!!p.isPoe)} />
+                </button>
+              </div>
+            </div>
+            <div>
+              {p.isPoe && (
+                <>
+                  <span className="block text-[10px] mb-1" style={{ color: "rgba(255,255,255,0.35)" }}>Tipo PoE</span>
+                  <select value={p.poeType || ""} onChange={e => updatePort(p.port, { poeType: e.target.value as PatchPort["poeType"] })} onClick={e => e.stopPropagation()} style={miniFieldStyle}>
+                    <option value="" style={{ background: "#1a1a1a" }}>—</option>
+                    {POE_TYPES.map(t => <option key={t} value={t} style={{ background: "#1a1a1a" }}>{t}</option>)}
+                  </select>
+                </>
+              )}
+            </div>
+            <div style={{ gridColumn: "span 4" }}>
+              <span className="block text-[10px] mb-1" style={{ color: "rgba(255,255,255,0.35)" }}>Notas</span>
+              <textarea value={p.notes || ""} onChange={e => updatePort(p.port, { notes: e.target.value })} onClick={e => e.stopPropagation()}
+                rows={2} style={{ ...miniFieldStyle, resize: "none", width: "100%" }} />
+            </div>
+          </div>
+        </div>
+      </motion.div>
+    );
+  };
+
   return (
     <div className="flex flex-col gap-3">
-      {/* Port table */}
-      <PortTable ports={ports} selectedPort={selectedPort} onSelect={handleSelect} type="patch" />
+      {/* Port table with inline accordion expansion */}
+      <PortTable ports={ports} selectedPort={selectedPort} onSelect={handleSelect} type="patch" renderExpansion={renderPatchExpansion} />
 
       {/* Legend */}
       <div className="flex items-center gap-4 flex-wrap" style={{ fontSize: 10, color: "rgba(255,255,255,0.3)" }}>
@@ -1773,150 +1892,6 @@ function PatchPanelEditor({ ports, onChange }: { ports: PatchPort[]; onChange: (
           Clic en puerto para editar
         </span>
       </div>
-
-      {/* Inline port detail — expands below, full width */}
-      <AnimatePresence>
-        {sel && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.2, ease: "easeInOut" }}
-            style={{ overflow: "hidden" }}
-          >
-            <div
-              className="rounded-xl overflow-hidden"
-              style={{ background: "rgba(139,92,246,0.06)", border: "1px solid rgba(139,92,246,0.2)" }}
-            >
-              {/* Header */}
-              <div
-                className="flex items-center gap-3 px-4 py-2.5"
-                style={{ background: "rgba(139,92,246,0.1)", borderBottom: "1px solid rgba(139,92,246,0.15)" }}
-              >
-                <span
-                  className="font-mono font-bold"
-                  style={{ fontSize: 13, color: "#c4b5fd" }}
-                >
-                  Puerto {sel.port}
-                </span>
-                {sel.label && sel.label !== `P${sel.port}` && (
-                  <span
-                    className="px-2 py-0.5 rounded font-mono"
-                    style={{ fontSize: 10, background: "rgba(139,92,246,0.2)", color: "#a78bfa" }}
-                  >
-                    {sel.label}
-                  </span>
-                )}
-                {sel.cableColor && (
-                  <span
-                    className="w-3 h-3 rounded-full shrink-0"
-                    style={{ background: sel.cableColor, boxShadow: `0 0 6px ${sel.cableColor}88` }}
-                  />
-                )}
-                <div className="flex items-center gap-2 ml-auto">
-                  <span style={{ fontSize: 11, color: "rgba(255,255,255,0.4)" }}>Conectado</span>
-                  <button onClick={() => updatePort(sel.port, { connected: !sel.connected })} style={toggleTrack(sel.connected, "#22c55e")}>
-                    <div style={toggleThumb(sel.connected)} />
-                  </button>
-                  <button
-                    onClick={() => setSelectedPort(null)}
-                    className="ml-2 cursor-pointer"
-                    style={{ color: "rgba(255,255,255,0.3)" }}
-                  >
-                    <X style={{ width: 14, height: 14 }} />
-                  </button>
-                </div>
-              </div>
-
-              {/* Fields grid */}
-              <div className="p-4 grid gap-3" style={{ gridTemplateColumns: "1fr 1fr 1fr 1fr" }}>
-                {/* Row 1 */}
-                <div>
-                  <span className="block text-[10px] mb-1" style={{ color: "rgba(255,255,255,0.35)" }}>Etiqueta</span>
-                  <input type="text" value={sel.label}
-                    onChange={e => updatePort(sel.port, { label: e.target.value })}
-                    style={miniFieldStyle} />
-                </div>
-                <div>
-                  <span className="block text-[10px] mb-1" style={{ color: "rgba(255,255,255,0.35)" }}>Destino / Sala</span>
-                  <input type="text" value={sel.destination || ""}
-                    onChange={e => updatePort(sel.port, { destination: e.target.value })}
-                    placeholder="Sala, piso, patch..."
-                    style={miniFieldStyle} />
-                </div>
-                <div>
-                  <span className="block text-[10px] mb-1" style={{ color: "rgba(255,255,255,0.35)" }}>Dispositivo conectado</span>
-                  <input type="text" value={sel.connectedDevice || ""}
-                    onChange={e => updatePort(sel.port, { connectedDevice: e.target.value })}
-                    placeholder="Nombre del equipo"
-                    style={miniFieldStyle} />
-                </div>
-                <div>
-                  <span className="block text-[10px] mb-1" style={{ color: "rgba(255,255,255,0.35)" }}>MAC Address</span>
-                  <input type="text" value={sel.macAddress || ""}
-                    onChange={e => updatePort(sel.port, { macAddress: e.target.value })}
-                    placeholder="AA:BB:CC:DD:EE:FF"
-                    style={{ ...miniFieldStyle, fontFamily: "monospace" }} />
-                </div>
-
-                {/* Row 2 */}
-                <div>
-                  <span className="block text-[10px] mb-1" style={{ color: "rgba(255,255,255,0.35)" }}>Largo de cable</span>
-                  <select value={sel.cableLength || ""} onChange={e => updatePort(sel.port, { cableLength: e.target.value })} style={miniFieldStyle}>
-                    <option value="" style={{ background: "#1a1a1a" }}>—</option>
-                    {CABLE_LENGTHS.map(l => <option key={l} value={l} style={{ background: "#1a1a1a" }}>{l}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <span className="block text-[10px] mb-1.5" style={{ color: "rgba(255,255,255,0.35)" }}>Color de cable</span>
-                  <div className="flex items-center gap-1.5 flex-wrap">
-                    {CABLE_PRESET_COLORS.map(c => (
-                      <button key={c} onClick={() => updatePort(sel.port, { cableColor: c })}
-                        className="transition-all cursor-pointer"
-                        style={{
-                          width: 18, height: 18, borderRadius: "50%",
-                          background: c,
-                          border: sel.cableColor === c ? "2px solid #fff" : "2px solid transparent",
-                          boxShadow: sel.cableColor === c ? `0 0 0 1.5px ${c}` : "none",
-                        }} />
-                    ))}
-                    <input type="color" value={sel.cableColor || "#3b82f6"}
-                      onChange={e => updatePort(sel.port, { cableColor: e.target.value })}
-                      title="Color personalizado"
-                      style={{ width: 18, height: 18, borderRadius: "50%", padding: 0, border: "none", cursor: "pointer", background: "transparent" }} />
-                  </div>
-                </div>
-                <div className="flex flex-col gap-2">
-                  <div className="flex items-center justify-between">
-                    <span style={{ fontSize: 11, color: "rgba(255,255,255,0.4)" }}>PoE</span>
-                    <button onClick={() => updatePort(sel.port, { isPoe: !sel.isPoe })} style={toggleTrack(!!sel.isPoe, "#f59e0b")}>
-                      <div style={toggleThumb(!!sel.isPoe)} />
-                    </button>
-                  </div>
-                </div>
-                <div>
-                  {sel.isPoe && (
-                    <>
-                      <span className="block text-[10px] mb-1" style={{ color: "rgba(255,255,255,0.35)" }}>Tipo PoE</span>
-                      <select value={sel.poeType || ""} onChange={e => updatePort(sel.port, { poeType: e.target.value as PatchPort["poeType"] })} style={miniFieldStyle}>
-                        <option value="" style={{ background: "#1a1a1a" }}>—</option>
-                        {POE_TYPES.map(t => <option key={t} value={t} style={{ background: "#1a1a1a" }}>{t}</option>)}
-                      </select>
-                    </>
-                  )}
-                </div>
-
-                {/* Row 3 — notes full width */}
-                <div style={{ gridColumn: "span 4" }}>
-                  <span className="block text-[10px] mb-1" style={{ color: "rgba(255,255,255,0.35)" }}>Notas</span>
-                  <textarea value={sel.notes || ""} onChange={e => updatePort(sel.port, { notes: e.target.value })}
-                    rows={2} style={{ ...miniFieldStyle, resize: "none", width: "100%" }} />
-                </div>
-              </div>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
     </div>
   );
 }
@@ -1935,10 +1910,109 @@ function SwitchEditor({ ports, onChange }: { ports: SwitchPort[]; onChange: (p: 
     setSelectedPort(portNum === -1 || portNum === selectedPort ? null : portNum);
   };
 
+  const renderSwitchExpansion = (port: AnyPort) => {
+    const p = port as SwitchPort;
+    return (
+      <motion.div
+        initial={{ height: 0, opacity: 0 }}
+        animate={{ height: "auto", opacity: 1 }}
+        exit={{ height: 0, opacity: 0 }}
+        transition={{ duration: 0.18, ease: "easeInOut" }}
+        style={{ overflow: "hidden" }}
+      >
+        <div
+          className="rounded-b-xl overflow-hidden"
+          style={{ background: "rgba(16,185,129,0.05)", border: "1px solid rgba(16,185,129,0.2)", borderTop: "none", margin: "0 1px 2px 1px" }}
+        >
+          {/* Header */}
+          <div className="flex items-center gap-3 px-4 py-2" style={{ background: "rgba(16,185,129,0.08)", borderBottom: "1px solid rgba(16,185,129,0.15)" }}>
+            <span className="font-mono font-bold" style={{ fontSize: 12, color: "#6ee7b7" }}>Puerto {p.port}</span>
+            {p.speed && (
+              <span className="px-2 py-0.5 rounded font-mono font-bold" style={{ fontSize: 10, background: SPEED_COLOR[p.speed] + "33", color: SPEED_COLOR[p.speed] }}>
+                {p.speed}
+              </span>
+            )}
+            {p.uplink && (
+              <span className="px-2 py-0.5 rounded font-mono" style={{ fontSize: 10, background: "#3b82f633", color: "#60a5fa" }}>UPLINK</span>
+            )}
+            <div className="flex items-center gap-2 ml-auto">
+              <span style={{ fontSize: 11, color: "rgba(255,255,255,0.4)" }}>Conectado</span>
+              <button onClick={e => { e.stopPropagation(); updatePort(p.port, { connected: !p.connected }); }} style={toggleTrack(p.connected, "#22c55e")}>
+                <div style={toggleThumb(p.connected)} />
+              </button>
+              <button onClick={e => { e.stopPropagation(); setSelectedPort(null); }} className="ml-2 cursor-pointer" style={{ color: "rgba(255,255,255,0.3)" }}>
+                <X style={{ width: 14, height: 14 }} />
+              </button>
+            </div>
+          </div>
+          {/* Fields grid */}
+          <div className="p-3 grid gap-2.5" style={{ gridTemplateColumns: "1fr 1fr 1fr 1fr" }}>
+            <div>
+              <span className="block text-[10px] mb-1" style={{ color: "rgba(255,255,255,0.35)" }}>Etiqueta</span>
+              <input type="text" value={p.label} onChange={e => updatePort(p.port, { label: e.target.value })} onClick={e => e.stopPropagation()} style={miniFieldStyle} />
+            </div>
+            <div>
+              <span className="block text-[10px] mb-1" style={{ color: "rgba(255,255,255,0.35)" }}>Velocidad</span>
+              <div className="flex gap-1">
+                {SWITCH_SPEEDS.map(s => (
+                  <button key={s} onClick={e => { e.stopPropagation(); updatePort(p.port, { speed: s }); }}
+                    className="flex-1 rounded text-center transition-all cursor-pointer"
+                    style={{ padding: "4px 2px", fontSize: 10, fontWeight: 700, background: p.speed === s ? SPEED_COLOR[s] : "rgba(255,255,255,0.05)", color: p.speed === s ? "#fff" : "#555", border: `1px solid ${p.speed === s ? SPEED_COLOR[s] : "transparent"}`, borderRadius: 6 }}>
+                    {s}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <span className="block text-[10px] mb-1" style={{ color: "rgba(255,255,255,0.35)" }}>Dispositivo conectado</span>
+              <input type="text" value={p.connectedDevice || ""} onChange={e => updatePort(p.port, { connectedDevice: e.target.value })} onClick={e => e.stopPropagation()} placeholder="Nombre del equipo" style={miniFieldStyle} />
+            </div>
+            <div>
+              <span className="block text-[10px] mb-1" style={{ color: "rgba(255,255,255,0.35)" }}>MAC Address</span>
+              <input type="text" value={p.macAddress || ""} onChange={e => updatePort(p.port, { macAddress: e.target.value })} onClick={e => e.stopPropagation()} placeholder="AA:BB:CC:DD:EE:FF" style={{ ...miniFieldStyle, fontFamily: "monospace" }} />
+            </div>
+            <div>
+              <span className="block text-[10px] mb-1" style={{ color: "rgba(255,255,255,0.35)" }}>VLAN</span>
+              <input type="number" min={1} max={4094} value={p.vlan || ""} onChange={e => updatePort(p.port, { vlan: parseInt(e.target.value) || undefined })} onClick={e => e.stopPropagation()} placeholder="1" style={{ ...miniFieldStyle, fontFamily: "monospace" }} />
+            </div>
+            <div className="flex flex-col gap-2 justify-center">
+              <div className="flex items-center justify-between">
+                <span style={{ fontSize: 11, color: "rgba(255,255,255,0.4)" }}>PoE</span>
+                <button onClick={e => { e.stopPropagation(); updatePort(p.port, { isPoe: !p.isPoe }); }} style={toggleTrack(!!p.isPoe, "#f59e0b")}>
+                  <div style={toggleThumb(!!p.isPoe)} />
+                </button>
+              </div>
+              <div className="flex items-center justify-between">
+                <span style={{ fontSize: 11, color: "rgba(255,255,255,0.4)" }}>Uplink</span>
+                <button onClick={e => { e.stopPropagation(); updatePort(p.port, { uplink: !p.uplink }); }} style={toggleTrack(!!p.uplink, "#3b82f6")}>
+                  <div style={toggleThumb(!!p.uplink)} />
+                </button>
+              </div>
+            </div>
+            <div>
+              {p.isPoe && (
+                <>
+                  <span className="block text-[10px] mb-1" style={{ color: "rgba(255,255,255,0.35)" }}>Potencia PoE (W)</span>
+                  <input type="number" min={0} max={90} value={p.poeWatts || ""} onChange={e => updatePort(p.port, { poeWatts: parseFloat(e.target.value) || undefined })} onClick={e => e.stopPropagation()} placeholder="15.4" style={{ ...miniFieldStyle, fontFamily: "monospace" }} />
+                </>
+              )}
+            </div>
+            <div />
+            <div style={{ gridColumn: "span 4" }}>
+              <span className="block text-[10px] mb-1" style={{ color: "rgba(255,255,255,0.35)" }}>Notas</span>
+              <textarea value={p.notes || ""} onChange={e => updatePort(p.port, { notes: e.target.value })} onClick={e => e.stopPropagation()}
+                rows={2} style={{ ...miniFieldStyle, resize: "none", width: "100%" }} />
+            </div>
+          </div>
+        </div>
+      </motion.div>
+    );
+  };
+
   return (
     <div className="flex flex-col gap-3">
-      {/* Port table */}
-      <PortTable ports={ports} selectedPort={selectedPort} onSelect={handleSelect} type="switch" />
+      {/* Port table with inline accordion expansion */}
+      <PortTable ports={ports} selectedPort={selectedPort} onSelect={handleSelect} type="switch" renderExpansion={renderSwitchExpansion} />
 
       {/* Legend */}
       <div className="flex items-center gap-3 flex-wrap" style={{ fontSize: 10, color: "rgba(255,255,255,0.3)" }}>
@@ -1955,136 +2029,6 @@ function SwitchEditor({ ports, onChange }: { ports: SwitchPort[]; onChange: (p: 
         </span>
         <span className="ml-auto" style={{ color: "rgba(255,255,255,0.2)" }}>Clic en puerto para editar</span>
       </div>
-
-      {/* Inline port detail — expands below, full width */}
-      <AnimatePresence>
-        {sel && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.2, ease: "easeInOut" }}
-            style={{ overflow: "hidden" }}
-          >
-            <div
-              className="rounded-xl overflow-hidden"
-              style={{ background: "rgba(16,185,129,0.05)", border: "1px solid rgba(16,185,129,0.2)" }}
-            >
-              {/* Header */}
-              <div
-                className="flex items-center gap-3 px-4 py-2.5"
-                style={{ background: "rgba(16,185,129,0.08)", borderBottom: "1px solid rgba(16,185,129,0.15)" }}
-              >
-                <span className="font-mono font-bold" style={{ fontSize: 13, color: "#6ee7b7" }}>
-                  Puerto {sel.port}
-                </span>
-                {sel.speed && (
-                  <span
-                    className="px-2 py-0.5 rounded font-mono font-bold"
-                    style={{ fontSize: 10, background: SPEED_COLOR[sel.speed] + "33", color: SPEED_COLOR[sel.speed] }}
-                  >
-                    {sel.speed}
-                  </span>
-                )}
-                {sel.uplink && (
-                  <span className="px-2 py-0.5 rounded font-mono" style={{ fontSize: 10, background: "#3b82f633", color: "#60a5fa" }}>
-                    UPLINK
-                  </span>
-                )}
-                <div className="flex items-center gap-2 ml-auto">
-                  <span style={{ fontSize: 11, color: "rgba(255,255,255,0.4)" }}>Conectado</span>
-                  <button onClick={() => updatePort(sel.port, { connected: !sel.connected })} style={toggleTrack(sel.connected, "#22c55e")}>
-                    <div style={toggleThumb(sel.connected)} />
-                  </button>
-                  <button onClick={() => setSelectedPort(null)} className="ml-2 cursor-pointer" style={{ color: "rgba(255,255,255,0.3)" }}>
-                    <X style={{ width: 14, height: 14 }} />
-                  </button>
-                </div>
-              </div>
-
-              {/* Fields grid */}
-              <div className="p-4 grid gap-3" style={{ gridTemplateColumns: "1fr 1fr 1fr 1fr" }}>
-                {/* Row 1 */}
-                <div>
-                  <span className="block text-[10px] mb-1" style={{ color: "rgba(255,255,255,0.35)" }}>Etiqueta</span>
-                  <input type="text" value={sel.label} onChange={e => updatePort(sel.port, { label: e.target.value })} style={miniFieldStyle} />
-                </div>
-                <div>
-                  <span className="block text-[10px] mb-1" style={{ color: "rgba(255,255,255,0.35)" }}>Velocidad</span>
-                  <div className="flex gap-1">
-                    {SWITCH_SPEEDS.map(s => (
-                      <button key={s} onClick={() => updatePort(sel.port, { speed: s })}
-                        className="flex-1 rounded text-center transition-all cursor-pointer"
-                        style={{
-                          padding: "4px 2px", fontSize: 10, fontWeight: 700,
-                          background: sel.speed === s ? SPEED_COLOR[s] : "rgba(255,255,255,0.05)",
-                          color: sel.speed === s ? "#fff" : "#555",
-                          border: `1px solid ${sel.speed === s ? SPEED_COLOR[s] : "transparent"}`,
-                          borderRadius: 6,
-                        }}>
-                        {s}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <div>
-                  <span className="block text-[10px] mb-1" style={{ color: "rgba(255,255,255,0.35)" }}>Dispositivo conectado</span>
-                  <input type="text" value={sel.connectedDevice || ""}
-                    onChange={e => updatePort(sel.port, { connectedDevice: e.target.value })}
-                    placeholder="Nombre del equipo" style={miniFieldStyle} />
-                </div>
-                <div>
-                  <span className="block text-[10px] mb-1" style={{ color: "rgba(255,255,255,0.35)" }}>MAC Address</span>
-                  <input type="text" value={sel.macAddress || ""}
-                    onChange={e => updatePort(sel.port, { macAddress: e.target.value })}
-                    placeholder="AA:BB:CC:DD:EE:FF"
-                    style={{ ...miniFieldStyle, fontFamily: "monospace" }} />
-                </div>
-
-                {/* Row 2 */}
-                <div>
-                  <span className="block text-[10px] mb-1" style={{ color: "rgba(255,255,255,0.35)" }}>VLAN</span>
-                  <input type="number" min={1} max={4094} value={sel.vlan || ""}
-                    onChange={e => updatePort(sel.port, { vlan: parseInt(e.target.value) || undefined })}
-                    placeholder="1" style={{ ...miniFieldStyle, fontFamily: "monospace" }} />
-                </div>
-                <div className="flex flex-col gap-2 justify-center">
-                  <div className="flex items-center justify-between">
-                    <span style={{ fontSize: 11, color: "rgba(255,255,255,0.4)" }}>PoE</span>
-                    <button onClick={() => updatePort(sel.port, { isPoe: !sel.isPoe })} style={toggleTrack(!!sel.isPoe, "#f59e0b")}>
-                      <div style={toggleThumb(!!sel.isPoe)} />
-                    </button>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span style={{ fontSize: 11, color: "rgba(255,255,255,0.4)" }}>Uplink</span>
-                    <button onClick={() => updatePort(sel.port, { uplink: !sel.uplink })} style={toggleTrack(!!sel.uplink, "#3b82f6")}>
-                      <div style={toggleThumb(!!sel.uplink)} />
-                    </button>
-                  </div>
-                </div>
-                <div>
-                  {sel.isPoe && (
-                    <>
-                      <span className="block text-[10px] mb-1" style={{ color: "rgba(255,255,255,0.35)" }}>Potencia PoE (W)</span>
-                      <input type="number" min={0} max={90} value={sel.poeWatts || ""}
-                        onChange={e => updatePort(sel.port, { poeWatts: parseFloat(e.target.value) || undefined })}
-                        placeholder="15.4" style={{ ...miniFieldStyle, fontFamily: "monospace" }} />
-                    </>
-                  )}
-                </div>
-                <div />
-
-                {/* Row 3 — notes */}
-                <div style={{ gridColumn: "span 4" }}>
-                  <span className="block text-[10px] mb-1" style={{ color: "rgba(255,255,255,0.35)" }}>Notas</span>
-                  <textarea value={sel.notes || ""} onChange={e => updatePort(sel.port, { notes: e.target.value })}
-                    rows={2} style={{ ...miniFieldStyle, resize: "none", width: "100%" }} />
-                </div>
-              </div>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
     </div>
   );
 }

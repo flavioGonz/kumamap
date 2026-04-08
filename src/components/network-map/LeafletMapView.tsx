@@ -278,6 +278,24 @@ export default function LeafletMapView({
     const map = new Map<number, KumaMonitor>();
     kumaMonitors.forEach((m) => map.set(m.id, m));
     monitorIndexRef.current = map;
+
+    // Fetch real down-since times from DB whenever monitors update and some are DOWN
+    const downIds = kumaMonitors.filter(m => m.status === 0 && m.active).map(m => m.id);
+    if (downIds.length > 0) {
+      fetch("/api/kuma/down-since")
+        .then(r => r.ok ? r.json() : {})
+        .then((data: Record<string, string>) => {
+          for (const [idStr, isoTs] of Object.entries(data)) {
+            const id = Number(idStr);
+            const ts = new Date(isoTs).getTime();
+            if (!isNaN(ts) && ts > 0) {
+              // Always update — DB is authoritative for streak start time
+              downSinceRef.current.set(id, ts);
+            }
+          }
+        })
+        .catch(() => { /* DB not configured — silent */ });
+    }
   }, [kumaMonitors]);
 
   const containerRef = useRef<HTMLDivElement>(null);
@@ -285,6 +303,7 @@ export default function LeafletMapView({
   const markersRef = useRef<Map<string, any>>(new Map());
   const failPopupsRef = useRef<Map<string, any>>(new Map());
   const downSinceRef = useRef<Map<number, number>>(new Map()); // monitorId → timestamp when DOWN detected
+  const downSinceFetchedRef = useRef(false); // flag to avoid duplicate fetches
   const downtimeMarkersRef = useRef<Map<string, any>>(new Map()); // edgeId → L.marker with timer
   const downtimeIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const polylinesRef = useRef<Map<string, any>>(new Map());

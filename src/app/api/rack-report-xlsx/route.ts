@@ -1,4 +1,5 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
+import ExcelJS from "exceljs";
 
 // ── Type definitions (matches RackDesignerDrawer) ─────────────────────────────
 
@@ -26,7 +27,17 @@ interface RackDevice {
   serial?: string; cableLength?: number; isPoeCapable?: boolean; notes?: string;
 }
 
-// ── Colors ────────────────────────────────────────────────────────────────────
+// ── Brand palette ─────────────────────────────────────────────────────────────
+
+const BRAND_DARK  = "1E3A5F"; // navy header background
+const BRAND_MID   = "2D6A9F"; // accent / sub-header
+const ROW_ALT     = "EBF3FB"; // alternating row tint
+const ROW_WHITE   = "FFFFFF";
+const GREEN_FILL  = "D6F4DC"; // connected port
+const GRAY_FILL   = "F0F0F0"; // free port
+const HEADER_FONT = { bold: true, color: { argb: "FFFFFFFF" }, size: 11 };
+const BORDER_THIN: Partial<ExcelJS.Border> = { style: "thin", color: { argb: "FFD0D0D0" } };
+const ALL_BORDERS = { top: BORDER_THIN, left: BORDER_THIN, bottom: BORDER_THIN, right: BORDER_THIN };
 
 const TYPE_LABELS: Record<string, string> = {
   server: "Servidor", switch: "Switch", patchpanel: "Patch Panel",
@@ -35,178 +46,234 @@ const TYPE_LABELS: Record<string, string> = {
   "tray-2u": "Bandeja 2U", other: "Otro",
 };
 
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function styleHeaderRow(row: ExcelJS.Row) {
+  row.height = 22;
+  row.eachCell((cell) => {
+    cell.font = HEADER_FONT;
+    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: `FF${BRAND_DARK}` } };
+    cell.border = ALL_BORDERS;
+    cell.alignment = { vertical: "middle", horizontal: "center", wrapText: false };
+  });
+}
+
+function styleDataRow(row: ExcelJS.Row, even: boolean) {
+  row.height = 18;
+  const bg = even ? ROW_ALT : ROW_WHITE;
+  row.eachCell({ includeEmpty: true }, (cell) => {
+    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: `FF${bg}` } };
+    cell.border = ALL_BORDERS;
+    cell.alignment = { vertical: "middle", wrapText: false };
+  });
+}
+
 // ── Main handler ─────────────────────────────────────────────────────────────
 
 export async function POST(request: NextRequest) {
   try {
     const { rackName, totalUnits, devices } = await request.json();
 
-    // Dynamic import to avoid issues with missing optional dependency
-    let XLSX: any;
-    try {
-      XLSX = require("xlsx");
-    } catch (e) {
-      // If xlsx is not available, return error
-      return NextResponse.json(
-        { error: "Excel export not available. Please install the xlsx package." },
-        { status: 503 }
-      );
-    }
-
-    const usedUnits = devices.reduce((s: number, d: RackDevice) => s + d.sizeUnits, 0);
+    const usedUnits = (devices as RackDevice[]).reduce((s, d) => s + d.sizeUnits, 0);
     const freeUnits = totalUnits - usedUnits;
-    const sorted = [...devices].sort((a: RackDevice, b: RackDevice) => b.unit - a.unit);
-
-    // Create workbook with multiple sheets
-    const wb = XLSX.utils.book_new();
-
-    // Sheet 1: Summary
-    const summaryData = [
-      ["Rack Inventory", rackName],
-      [],
-      ["Métrica", "Valor"],
-      ["Total Unidades", totalUnits],
-      ["Ocupadas", usedUnits],
-      ["Libres", freeUnits],
-      ["Porcentaje Ocupado", `${Math.round((usedUnits / totalUnits) * 100)}%`],
-      [],
-      ["Fecha Generación", new Date().toLocaleDateString("es-UY")],
-    ];
-    const wsSummary = XLSX.utils.aoa_to_sheet(summaryData);
-    wsSummary["!cols"] = [{ wch: 20 }, { wch: 30 }];
-    XLSX.utils.book_append_sheet(wb, wsSummary, "Resumen");
-
-    // Sheet 2: Equipment Details
-    const equipmentHeaders = [
-      "Posición U",
-      "Nombre",
-      "Tipo",
-      "Modelo",
-      "Serial",
-      "IP Gestión",
-      "Puertos",
-      "Notas",
-    ];
-    const equipmentData = sorted.map((d: RackDevice) => {
-      const meta = TYPE_LABELS[d.type] || "Otro";
-      const connPorts = d.type === "patchpanel"
-        ? `${(d.ports || []).filter((p: PatchPort) => p.connected).length}/${d.portCount || 24}`
-        : d.type === "switch"
-        ? `${(d.switchPorts || []).filter((p: SwitchPort) => p.connected).length}/${d.portCount || 24}`
-        : "—";
-      return [
-        `U${d.unit}${d.sizeUnits > 1 ? `-${d.unit + d.sizeUnits - 1}` : ""}`,
-        d.label,
-        meta,
-        d.model || "",
-        d.serial || "",
-        d.managementIp || "",
-        connPorts,
-        d.notes || "",
-      ];
+    const occupancy  = totalUnits > 0 ? Math.round((usedUnits / totalUnits) * 100) : 0;
+    const sorted     = [...(devices as RackDevice[])].sort((a, b) => b.unit - a.unit);
+    const dateStr    = new Date().toLocaleDateString("es-UY", {
+      day: "2-digit", month: "2-digit", year: "numeric",
     });
-    const wsEquipment = XLSX.utils.aoa_to_sheet([equipmentHeaders, ...equipmentData]);
-    wsEquipment["!cols"] = [
-      { wch: 12 },
-      { wch: 20 },
-      { wch: 15 },
-      { wch: 25 },
-      { wch: 15 },
-      { wch: 18 },
-      { wch: 12 },
-      { wch: 30 },
+
+    const wb = new ExcelJS.Workbook();
+    wb.creator  = "KumaMap";
+    wb.created  = new Date();
+    wb.modified = new Date();
+
+    // ────────────────────────────────────────────────────────────────────────
+    // SHEET 1 — Resumen
+    // ────────────────────────────────────────────────────────────────────────
+    const wsSummary = wb.addWorksheet("Resumen");
+    wsSummary.columns = [
+      { key: "metric", width: 28 },
+      { key: "value",  width: 32 },
     ];
-    XLSX.utils.book_append_sheet(wb, wsEquipment, "Equipos");
 
-    // Sheet 3: Port Details (if any patch panels or switches)
-    const patchDevices = sorted.filter((d: RackDevice) => d.type === "patchpanel" && d.ports);
-    const switchDevices = sorted.filter((d: RackDevice) => d.type === "switch" && d.switchPorts);
+    // Title row
+    const titleRow = wsSummary.addRow(["Inventario de Rack", rackName]);
+    titleRow.height = 28;
+    titleRow.getCell(1).font = { bold: true, size: 14, color: { argb: `FF${BRAND_DARK}` } };
+    titleRow.getCell(2).font = { bold: true, size: 14 };
 
+    wsSummary.addRow([]);
+
+    // Sub-header
+    const sh = wsSummary.addRow(["Métrica", "Valor"]);
+    styleHeaderRow(sh);
+
+    const metrics: [string, string | number][] = [
+      ["Total Unidades",     totalUnits],
+      ["Unidades Ocupadas",  usedUnits],
+      ["Unidades Libres",    freeUnits],
+      ["Porcentaje Ocupado", `${occupancy}%`],
+      ["Total Equipos",      devices.length],
+      ["Fecha Generación",   dateStr],
+    ];
+
+    metrics.forEach(([label, val], i) => {
+      const row = wsSummary.addRow([label, val]);
+      styleDataRow(row, i % 2 === 0);
+      row.getCell(1).font = { bold: true, size: 10 };
+      row.getCell(2).alignment = { horizontal: "center", vertical: "middle" };
+    });
+
+    // Occupancy bar (visual progress using fill)
+    wsSummary.addRow([]);
+    const barLabel = wsSummary.addRow([`Ocupación: ${occupancy}%`]);
+    barLabel.getCell(1).font = { bold: true, color: { argb: `FF${BRAND_MID}` } };
+
+    // ────────────────────────────────────────────────────────────────────────
+    // SHEET 2 — Equipos
+    // ────────────────────────────────────────────────────────────────────────
+    const wsEq = wb.addWorksheet("Equipos");
+    wsEq.columns = [
+      { key: "pos",     header: "Posición U",  width: 13 },
+      { key: "name",    header: "Nombre",       width: 24 },
+      { key: "type",    header: "Tipo",         width: 18 },
+      { key: "model",   header: "Modelo",       width: 26 },
+      { key: "serial",  header: "Serial",       width: 18 },
+      { key: "ip",      header: "IP Gestión",   width: 18 },
+      { key: "ports",   header: "Puertos",      width: 14 },
+      { key: "notes",   header: "Notas",        width: 34 },
+    ];
+
+    const eqHeader = wsEq.getRow(1);
+    styleHeaderRow(eqHeader);
+    wsEq.autoFilter = { from: "A1", to: "H1" };
+
+    sorted.forEach((d, i) => {
+      const connPorts =
+        d.type === "patchpanel"
+          ? `${(d.ports || []).filter(p => p.connected).length}/${d.portCount || 24}`
+          : d.type === "switch"
+          ? `${(d.switchPorts || []).filter(p => p.connected).length}/${d.portCount || 24}`
+          : "—";
+
+      const row = wsEq.addRow({
+        pos:    `U${d.unit}${d.sizeUnits > 1 ? `–${d.unit + d.sizeUnits - 1}` : ""}`,
+        name:   d.label,
+        type:   TYPE_LABELS[d.type] || "Otro",
+        model:  d.model   || "",
+        serial: d.serial  || "",
+        ip:     d.managementIp || "",
+        ports:  connPorts,
+        notes:  d.notes   || "",
+      });
+      styleDataRow(row, i % 2 === 0);
+      row.getCell("ports").alignment = { horizontal: "center", vertical: "middle" };
+    });
+
+    // ────────────────────────────────────────────────────────────────────────
+    // SHEET 3 — Patch Panel
+    // ────────────────────────────────────────────────────────────────────────
+    const patchDevices = sorted.filter(d => d.type === "patchpanel" && d.ports);
     if (patchDevices.length > 0) {
-      const patchHeaders = [
-        "Equipo",
-        "Puerto",
-        "Etiqueta",
-        "Conectado",
-        "Destino",
-        "Dispositivo",
-        "Cable",
-        "PoE",
+      const wsPatch = wb.addWorksheet("Patch Panel");
+      wsPatch.columns = [
+        { key: "device",  header: "Equipo",       width: 22 },
+        { key: "port",    header: "Puerto",        width: 9  },
+        { key: "label",   header: "Etiqueta",      width: 18 },
+        { key: "conn",    header: "Conectado",     width: 11 },
+        { key: "dest",    header: "Destino",       width: 22 },
+        { key: "cdv",     header: "Dispositivo",   width: 22 },
+        { key: "cable",   header: "Cable",         width: 10 },
+        { key: "poe",     header: "PoE",           width: 10 },
+        { key: "notes",   header: "Notas",         width: 28 },
       ];
-      const patchData: any[] = [];
-      patchDevices.forEach((d: RackDevice) => {
-        (d.ports || []).forEach((p: PatchPort) => {
-          patchData.push([
-            d.label,
-            p.port,
-            p.label,
-            p.connected ? "✓" : "",
-            p.destination || "",
-            p.connectedDevice || "",
-            p.cableLength || "",
-            p.isPoe ? (p.poeType || "✓") : "",
-          ]);
+
+      styleHeaderRow(wsPatch.getRow(1));
+      wsPatch.autoFilter = { from: "A1", to: "I1" };
+
+      let rowIdx = 0;
+      patchDevices.forEach(d => {
+        (d.ports || []).forEach(p => {
+          const row = wsPatch.addRow({
+            device: d.label,
+            port:   p.port,
+            label:  p.label,
+            conn:   p.connected ? "✓" : "",
+            dest:   p.destination   || "",
+            cdv:    p.connectedDevice || "",
+            cable:  p.cableLength   || "",
+            poe:    p.isPoe ? (p.poeType || "✓") : "",
+            notes:  p.notes || "",
+          });
+
+          // Color by connection status
+          const bg = p.connected ? GREEN_FILL : GRAY_FILL;
+          row.height = 17;
+          row.eachCell({ includeEmpty: true }, cell => {
+            cell.fill    = { type: "pattern", pattern: "solid", fgColor: { argb: `FF${bg}` } };
+            cell.border  = ALL_BORDERS;
+            cell.alignment = { vertical: "middle" };
+          });
+          row.getCell("conn").alignment  = { horizontal: "center", vertical: "middle" };
+          row.getCell("port").alignment  = { horizontal: "center", vertical: "middle" };
+          rowIdx++;
         });
       });
-      const wsPatch = XLSX.utils.aoa_to_sheet([patchHeaders, ...patchData]);
-      wsPatch["!cols"] = [
-        { wch: 20 },
-        { wch: 8 },
-        { wch: 15 },
-        { wch: 10 },
-        { wch: 20 },
-        { wch: 20 },
-        { wch: 10 },
-        { wch: 10 },
-      ];
-      XLSX.utils.book_append_sheet(wb, wsPatch, "Patch Panel");
     }
 
+    // ────────────────────────────────────────────────────────────────────────
+    // SHEET 4 — Puertos Switch
+    // ────────────────────────────────────────────────────────────────────────
+    const switchDevices = sorted.filter(d => d.type === "switch" && d.switchPorts);
     if (switchDevices.length > 0) {
-      const switchHeaders = [
-        "Equipo",
-        "Puerto",
-        "Etiqueta",
-        "Conectado",
-        "Velocidad",
-        "Dispositivo",
-        "VLAN",
-        "PoE",
-        "Uplink",
+      const wsSwitch = wb.addWorksheet("Puertos Switch");
+      wsSwitch.columns = [
+        { key: "device",  header: "Equipo",       width: 22 },
+        { key: "port",    header: "Puerto",        width: 9  },
+        { key: "label",   header: "Etiqueta",      width: 18 },
+        { key: "conn",    header: "Conectado",     width: 11 },
+        { key: "speed",   header: "Velocidad",     width: 13 },
+        { key: "cdv",     header: "Dispositivo",   width: 22 },
+        { key: "vlan",    header: "VLAN",          width: 10 },
+        { key: "poe",     header: "PoE",           width: 10 },
+        { key: "uplink",  header: "Uplink",        width: 9  },
+        { key: "notes",   header: "Notas",         width: 28 },
       ];
-      const switchData: any[] = [];
-      switchDevices.forEach((d: RackDevice) => {
-        (d.switchPorts || []).forEach((p: SwitchPort) => {
-          switchData.push([
-            d.label,
-            p.port,
-            p.label,
-            p.connected ? "✓" : "",
-            p.speed || "",
-            p.connectedDevice || "",
-            p.vlan || "",
-            p.isPoe ? `${p.poeWatts || ""}W` : "",
-            p.uplink ? "↑" : "",
-          ]);
+
+      styleHeaderRow(wsSwitch.getRow(1));
+      wsSwitch.autoFilter = { from: "A1", to: "J1" };
+
+      switchDevices.forEach(d => {
+        (d.switchPorts || []).forEach((p, i) => {
+          const row = wsSwitch.addRow({
+            device: d.label,
+            port:   p.port,
+            label:  p.label,
+            conn:   p.connected ? "✓" : "",
+            speed:  p.speed || "",
+            cdv:    p.connectedDevice || "",
+            vlan:   p.vlan || "",
+            poe:    p.isPoe ? `${p.poeWatts || ""}W` : "",
+            uplink: p.uplink ? "↑" : "",
+            notes:  p.notes || "",
+          });
+
+          const bg = p.connected ? GREEN_FILL : (i % 2 === 0 ? ROW_ALT : ROW_WHITE);
+          row.height = 17;
+          row.eachCell({ includeEmpty: true }, cell => {
+            cell.fill   = { type: "pattern", pattern: "solid", fgColor: { argb: `FF${bg}` } };
+            cell.border = ALL_BORDERS;
+            cell.alignment = { vertical: "middle" };
+          });
+          row.getCell("conn").alignment   = { horizontal: "center", vertical: "middle" };
+          row.getCell("port").alignment   = { horizontal: "center", vertical: "middle" };
+          row.getCell("uplink").alignment = { horizontal: "center", vertical: "middle" };
         });
       });
-      const wsSwitch = XLSX.utils.aoa_to_sheet([switchHeaders, ...switchData]);
-      wsSwitch["!cols"] = [
-        { wch: 20 },
-        { wch: 8 },
-        { wch: 15 },
-        { wch: 10 },
-        { wch: 12 },
-        { wch: 20 },
-        { wch: 10 },
-        { wch: 10 },
-        { wch: 8 },
-      ];
-      XLSX.utils.book_append_sheet(wb, wsSwitch, "Puertos Switch");
     }
 
-    // Write to buffer
-    const buffer = XLSX.write(wb, { bookType: "xlsx", type: "buffer" });
+    // ── Serialize and return ─────────────────────────────────────────────────
+    const buffer = await wb.xlsx.writeBuffer();
 
     return new Response(buffer, {
       status: 200,
@@ -217,6 +284,9 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     console.error("XLSX generation error:", error);
-    return NextResponse.json({ error: "Failed to generate Excel file" }, { status: 500 });
+    return new Response(JSON.stringify({ error: "Failed to generate Excel file" }), {
+      status: 500,
+      headers: { "Content-Type": "application/json" },
+    });
   }
 }

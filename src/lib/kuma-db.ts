@@ -268,6 +268,72 @@ export async function fetchBadDatesFromDb(monitorIds: number[]): Promise<string[
   throw new Error("[KumaDB] No database configured.");
 }
 
+// ─────────────────────────────────────────────
+// Down-since query (start of current down streak)
+// ─────────────────────────────────────────────
+
+/**
+ * For each given monitor ID that is currently in a DOWN streak, returns the ISO
+ * timestamp of when that streak began (i.e. the first consecutive DOWN heartbeat
+ * after the last UP heartbeat). If a monitor has never had an UP heartbeat in
+ * the stored history, returns its earliest recorded DOWN heartbeat.
+ *
+ * Returns a Map<monitorId, isoTimestamp>.
+ */
+export async function fetchDownSinceTimes(monitorIds: number[]): Promise<Map<number, string>> {
+  if (!monitorIds || monitorIds.length === 0) return new Map();
+  const mode = detectMode();
+  if (mode === "disabled") return new Map();
+
+  if (mode === "sqlite") {
+    const db = getSqliteDb();
+    const placeholders = monitorIds.map(() => "?").join(",");
+    // Find the first DOWN heartbeat after the last UP heartbeat for each monitor
+    const stmt = db.prepare(`
+      SELECT h.monitor_id as monitorID, MIN(h.time) as down_since
+      FROM heartbeat h
+      WHERE h.monitor_id IN (${placeholders})
+        AND h.status = 0
+        AND h.time > COALESCE(
+          (SELECT MAX(u.time) FROM heartbeat u
+           WHERE u.monitor_id = h.monitor_id AND u.status = 1),
+          '1970-01-01 00:00:00'
+        )
+      GROUP BY h.monitor_id
+    `);
+    const rows = stmt.all(...monitorIds) as { monitorID: number; down_since: string }[];
+    const result = new Map<number, string>();
+    for (const r of rows) {
+      // Normalise SQLite ISO string → proper ISO-8601
+      const t = r.down_since.includes("T") ? r.down_since : r.down_since.replace(" ", "T") + "Z";
+      result.set(r.monitorID, t);
+    }
+    return result;
+  }
+
+  // MySQL / MariaDB
+  const db = getKumaDb();
+  const [rows] = await db.query(
+    `SELECT h.monitor_id AS monitorID, MIN(h.time) AS down_since
+     FROM heartbeat h
+     WHERE h.monitor_id IN (?)
+       AND h.status = 0
+       AND h.time > COALESCE(
+         (SELECT MAX(u.time) FROM heartbeat u
+          WHERE u.monitor_id = h.monitor_id AND u.status = 1),
+         '1970-01-01 00:00:00'
+       )
+     GROUP BY h.monitor_id`,
+    [monitorIds]
+  ) as any[];
+  const result = new Map<number, string>();
+  for (const r of (rows as { monitorID: number; down_since: Date | string }[])) {
+    const d = r.down_since instanceof Date ? r.down_since.toISOString() : String(r.down_since);
+    result.set(r.monitorID, d);
+  }
+  return result;
+}
+
 /**
  * Returns a human-readable description of the current DB mode.
  * Useful for status/health endpoints.

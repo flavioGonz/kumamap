@@ -13,3 +13,4 @@ data/
 .DS_Store
 *.tsbuildinfo
 next-env.d.ts
+hosts_remotos.md

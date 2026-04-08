@@ -52,6 +52,9 @@ interface SavedNode {
   x: number; // latitude
   y: number; // longitude
   icon: string;
+  width?: number;
+  height?: number;
+  color?: string | null;
   custom_data?: string | null;
 }
 
@@ -2442,7 +2445,7 @@ export default function LeafletMapView({
           nodesRef.current = [...nodesRef.current, {
             id: newId,
             kuma_monitor_id: clipboard!.kuma_monitor_id ?? null,
-            label: clipboard!.label,
+            label: clipboard!.label ?? "",
             icon: clipboard!.icon,
             x: clipboard!.x,
             y: clipboard!.y,

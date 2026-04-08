@@ -31,6 +31,7 @@ import TimeMachine from "./TimeMachine";
 import EventReportModal from "./EventReportModal";
 import CameraStreamConfigModal, { type CameraStreamConfig } from "./CameraStreamConfigModal";
 import CameraStreamViewer from "./CameraStreamViewer";
+import CameraTooltipViewer from "./CameraTooltipViewer";
 import IconPickerModal from "./IconPickerModal";
 import NodeSizeModal from "./NodeSizeModal";
 import RackDesignerDrawer from "./RackDesignerDrawer";
@@ -452,6 +453,8 @@ export default function LeafletMapView({
   // Camera stream modals
   const [streamConfigNodeId, setStreamConfigNodeId] = useState<string | null>(null);
   const [streamViewerNodeId, setStreamViewerNodeId] = useState<string | null>(null);
+  const [streamViewerMode, setStreamViewerMode] = useState<"tooltip" | "pip">("tooltip");
+  const [tooltipAnchor, setTooltipAnchor] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
 
   // Icon picker & Node size modals (Leaflet)
   const [iconPickerNodeId, setIconPickerNodeId] = useState<string | null>(null);
@@ -1684,10 +1687,21 @@ export default function LeafletMapView({
           }
           return;
         }
-        // Camera click: open stream viewer if configured
+        // Camera click: open stream tooltip if configured
         if (isCamera) {
           const camCd = node.custom_data ? JSON.parse(node.custom_data) : {};
           if (camCd.streamUrl) {
+            // Compute screen position of the marker for tooltip anchor
+            const map = mapRef.current;
+            if (map) {
+              const pt = map.latLngToContainerPoint([node.x, node.y]);
+              const rect = containerRef.current?.getBoundingClientRect();
+              setTooltipAnchor({
+                x: (rect?.left ?? 0) + pt.x,
+                y: (rect?.top ?? 0) + pt.y,
+              });
+            }
+            setStreamViewerMode("tooltip");
             setStreamViewerNodeId(node.id);
           }
           return;
@@ -3101,6 +3115,28 @@ export default function LeafletMapView({
     return () => clearInterval(interval);
   }, [handleSave, autoSaveEnabled]);
 
+  // ── Update camera tooltip anchor on map move/zoom ──
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !streamViewerNodeId || streamViewerMode !== "tooltip") return;
+    const updateAnchor = () => {
+      const node = nodesRef.current.find((n) => n.id === streamViewerNodeId);
+      if (!node) return;
+      const pt = map.latLngToContainerPoint([node.x, node.y]);
+      const rect = containerRef.current?.getBoundingClientRect();
+      setTooltipAnchor({
+        x: (rect?.left ?? 0) + pt.x,
+        y: (rect?.top ?? 0) + pt.y,
+      });
+    };
+    map.on("move", updateAnchor);
+    map.on("zoom", updateAnchor);
+    return () => {
+      map.off("move", updateAnchor);
+      map.off("zoom", updateAnchor);
+    };
+  }, [streamViewerNodeId, streamViewerMode]);
+
   // Node search — used by both image mode and livemap (nodes take priority over geocoding)
   const handleNodeSearch = useCallback((): boolean => {
     if (!searchQuery.trim() || !mapRef.current) return false;
@@ -4270,7 +4306,7 @@ export default function LeafletMapView({
         );
       })()}
 
-      {/* ── Camera Stream Viewer ── */}
+      {/* ── Camera Stream Viewer (Tooltip or PiP) ── */}
       {streamViewerNodeId && (() => {
         const camNode = nodesRef.current.find((n) => n.id === streamViewerNodeId);
         const camCd = camNode?.custom_data ? JSON.parse(camNode.custom_data) : {};
@@ -4280,6 +4316,18 @@ export default function LeafletMapView({
           streamUrl: camCd.streamUrl,
           snapshotInterval: camCd.snapshotInterval,
         };
+        if (streamViewerMode === "tooltip") {
+          return (
+            <CameraTooltipViewer
+              config={viewCfg}
+              cameraName={camNode?.label || "Cámara"}
+              anchorX={tooltipAnchor.x}
+              anchorY={tooltipAnchor.y}
+              onClose={() => setStreamViewerNodeId(null)}
+              onExpand={() => setStreamViewerMode("pip")}
+            />
+          );
+        }
         return (
           <CameraStreamViewer
             config={viewCfg}

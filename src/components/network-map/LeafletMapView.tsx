@@ -4144,6 +4144,7 @@ export default function LeafletMapView({
         onClose={() => setAlertOpen(false)}
         sidebarWidth={sidebarWidth}
         onEventClick={handleAlertEventClick}
+        mapMonitorIds={mapMonitorIds}
       />
 
       {/* Link Modal */}

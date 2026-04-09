@@ -20,6 +20,8 @@ interface AlertManagerPanelProps {
   sidebarWidth: number;
   onCountChange?: (count: number) => void;
   onEventClick?: (event: TimelineEvent) => void;
+  /** Monitor IDs present on the current map — used to show "not on map" and filter */
+  mapMonitorIds?: number[];
 }
 
 // ── Helpers ────────────────────────────────────────────────────────
@@ -56,9 +58,135 @@ function formatFullDate(date: Date): string {
   });
 }
 
-function toLocalDatetimeStr(d: Date): string {
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+// ── Event message interpreter ─────────────────────────────────────
+function interpretEvent(ev: TimelineEvent): { translated: string; explanation: string; suggestion: string } {
+  const msg = (ev.msg || "").trim();
+  const isDown = ev.status === 0;
+  const isUp = ev.status === 1;
+  const isPending = ev.status === 2;
+
+  // Common patterns
+  if (/Connection failed/i.test(msg) || /connect ETIMEDOUT/i.test(msg)) {
+    return {
+      translated: "Fallo de conexión",
+      explanation: isDown
+        ? "El monitor no pudo establecer conexión con el host destino. El servicio o dispositivo no responde."
+        : "Se restableció la conexión con el host destino.",
+      suggestion: isDown
+        ? "Verificar que el equipo esté encendido, comprobar conectividad de red y revisar firewall o reglas de acceso."
+        : "La conexión fue restablecida. Monitorear estabilidad en las próximas horas.",
+    };
+  }
+  if (/timeout/i.test(msg) && !/ETIMEDOUT/.test(msg)) {
+    return {
+      translated: "Tiempo de espera agotado",
+      explanation: isDown
+        ? "La solicitud al servicio excedió el tiempo máximo de espera sin obtener respuesta."
+        : "El servicio respondió dentro del tiempo esperado nuevamente.",
+      suggestion: isDown
+        ? "Verificar carga del servidor, latencia de red, o posible congestión. Considerar aumentar el timeout si es un enlace lento."
+        : "Servicio normalizado. Si el timeout fue recurrente, evaluar capacidad del enlace.",
+    };
+  }
+  if (/certificate|ssl|tls/i.test(msg)) {
+    return {
+      translated: "Error de certificado SSL/TLS",
+      explanation: "El certificado de seguridad del servicio presenta problemas (expirado, autofirmado, o dominio no coincide).",
+      suggestion: "Revisar la fecha de expiración del certificado y renovarlo si es necesario. Verificar que el dominio coincida con el certificado.",
+    };
+  }
+  if (/ECONNREFUSED/i.test(msg)) {
+    return {
+      translated: "Conexión rechazada",
+      explanation: "El host destino rechazó activamente la conexión. El puerto está cerrado o el servicio no está corriendo.",
+      suggestion: "Verificar que el servicio esté ejecutándose en el puerto esperado. Revisar configuración del firewall.",
+    };
+  }
+  if (/EHOSTUNREACH/i.test(msg)) {
+    return {
+      translated: "Host inalcanzable",
+      explanation: "No se puede llegar al host destino. Puede haber un problema de ruteo o el equipo está desconectado de la red.",
+      suggestion: "Verificar cableado, switches intermedios, y tablas de ruteo. Comprobar que el equipo esté en la red.",
+    };
+  }
+  if (/ENETUNREACH/i.test(msg)) {
+    return {
+      translated: "Red inalcanzable",
+      explanation: "La red destino no es accesible desde el punto de monitoreo.",
+      suggestion: "Revisar rutas de red, enlaces WAN/VPN entre sitios, y estado de los routers intermedios.",
+    };
+  }
+  if (/DNS/i.test(msg) || /ENOTFOUND/i.test(msg) || /getaddrinfo/i.test(msg)) {
+    return {
+      translated: "Error de resolución DNS",
+      explanation: "No se pudo resolver el nombre de dominio a una dirección IP.",
+      suggestion: "Verificar configuración DNS del servidor de monitoreo, comprobar que el registro DNS exista y esté actualizado.",
+    };
+  }
+  if (/status code/i.test(msg)) {
+    const code = msg.match(/(\d{3})/)?.[1];
+    const codeNum = code ? parseInt(code) : 0;
+    const codeLabel = codeNum >= 500 ? "Error del servidor" : codeNum >= 400 ? "Error del cliente" : `Código ${code}`;
+    return {
+      translated: `Respuesta HTTP ${code || "inválida"} — ${codeLabel}`,
+      explanation: codeNum >= 500
+        ? "El servidor respondió con un error interno. El servicio puede estar sobrecargado o con errores."
+        : codeNum === 404
+          ? "El recurso solicitado no fue encontrado en el servidor."
+          : codeNum === 403
+            ? "El acceso al recurso fue denegado por el servidor."
+            : `El servidor respondió con código ${code}, indicando un estado no esperado.`,
+      suggestion: codeNum >= 500
+        ? "Revisar logs del servidor web, verificar estado de la aplicación y recursos disponibles (CPU, RAM, disco)."
+        : "Verificar la URL monitoreada, permisos de acceso y configuración del servidor web.",
+    };
+  }
+  if (/comparing/i.test(msg) && />=/.test(msg)) {
+    return {
+      translated: "Verificación de contador SNMP",
+      explanation: "Se comparó el valor del contador SNMP con el umbral esperado. Esto es parte del monitoreo de tráfico de red.",
+      suggestion: "Valor normal de operación del monitor SNMP. Los contadores se incrementan con el tráfico de la interfaz.",
+    };
+  }
+  if (/ping/i.test(msg) || /packet loss/i.test(msg)) {
+    return {
+      translated: "Monitor de ping/latencia",
+      explanation: isDown
+        ? "El host no respondió al ping o presenta pérdida de paquetes significativa."
+        : "El host respondió correctamente al ping.",
+      suggestion: isDown
+        ? "Verificar conectividad, posible congestión de red, o que el host tenga ICMP habilitado."
+        : "Conectividad normal. Monitorear latencia para detectar tendencias.",
+    };
+  }
+
+  // Generic fallback
+  if (isDown) {
+    return {
+      translated: msg || "Servicio caído",
+      explanation: "El monitor detectó que el servicio o dispositivo dejó de responder correctamente.",
+      suggestion: "Revisar el estado del servicio, conectividad de red y logs del sistema.",
+    };
+  }
+  if (isUp) {
+    return {
+      translated: msg || "Servicio restaurado",
+      explanation: "El servicio o dispositivo volvió a responder correctamente después de una interrupción.",
+      suggestion: "Servicio normalizado. Revisar causa raíz de la caída anterior para prevenir recurrencia.",
+    };
+  }
+  if (isPending) {
+    return {
+      translated: msg || "Estado pendiente",
+      explanation: "El monitor está en proceso de verificación o fue configurado recientemente.",
+      suggestion: "Esperar a que el ciclo de monitoreo complete la verificación.",
+    };
+  }
+  return {
+    translated: msg || "Evento de monitoreo",
+    explanation: "Se registró un cambio de estado en el monitor.",
+    suggestion: "Revisar el historial del monitor para más contexto.",
+  };
 }
 
 // ── Constants ─────────────────────────────────────────────────────
@@ -75,10 +203,11 @@ const QUICK_RANGES = [
 ];
 
 // ── Event Detail Card ─────────────────────────────────────────────
-function EventDetailCard({ event, onBack, onLocate }: {
+function EventDetailCard({ event, onBack, onLocate, isOnMap }: {
   event: TimelineEvent;
   onBack: () => void;
   onLocate: () => void;
+  isOnMap: boolean;
 }) {
   const st = STATUS_MAP[event.status] || STATUS_MAP[2];
   const prevSt = STATUS_MAP[event.prevStatus] || STATUS_MAP[2];
@@ -116,10 +245,15 @@ function EventDetailCard({ event, onBack, onLocate }: {
             >
               {st.icon}
             </div>
-            <div>
-              <div className="text-sm font-bold text-white/90">{event.monitorName}</div>
-              <div className="text-[10px] font-semibold" style={{ color: st.color }}>
-                {st.label}
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-bold text-white/90 truncate">{event.monitorName}</div>
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-semibold" style={{ color: st.color }}>{st.label}</span>
+                {!isOnMap && (
+                  <span className="text-[8px] font-bold px-1.5 py-0.5 rounded" style={{ background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.25)", border: "1px solid rgba(255,255,255,0.08)" }}>
+                    NO EN MAPA
+                  </span>
+                )}
               </div>
             </div>
           </div>
@@ -150,56 +284,102 @@ function EventDetailCard({ event, onBack, onLocate }: {
 
       {/* Details */}
       <div className="px-4 flex flex-col gap-3 flex-1 overflow-y-auto" style={{ scrollbarWidth: "thin", scrollbarColor: "rgba(255,255,255,0.1) transparent" }}>
-        {/* Message */}
+        {/* Interpreted event */}
+        {(() => {
+          const interp = interpretEvent(event);
+          return (
+            <>
+              {/* Translated message */}
+              <div>
+                <div className="text-[10px] text-white/30 font-semibold uppercase tracking-wider mb-1.5">Diagnóstico</div>
+                <div
+                  className="rounded-lg p-3"
+                  style={{ background: `${st.color}08`, border: `1px solid ${st.color}18` }}
+                >
+                  <div className="text-[12px] font-bold mb-1.5" style={{ color: st.color }}>{interp.translated}</div>
+                  <div className="text-[11px] text-white/55 leading-relaxed">{interp.explanation}</div>
+                </div>
+              </div>
+
+              {/* Suggestion */}
+              <div>
+                <div className="text-[10px] text-white/30 font-semibold uppercase tracking-wider mb-1.5">Acción sugerida</div>
+                <div
+                  className="rounded-lg p-3 flex gap-2.5"
+                  style={{ background: "rgba(99,102,241,0.05)", border: "1px solid rgba(99,102,241,0.12)" }}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#a5b4fc" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 mt-0.5">
+                    <circle cx="12" cy="12" r="10" /><path d="M12 16v-4" /><path d="M12 8h.01" />
+                  </svg>
+                  <div className="text-[11px] text-white/50 leading-relaxed">{interp.suggestion}</div>
+                </div>
+              </div>
+            </>
+          );
+        })()}
+
+        {/* Raw message */}
         {event.msg && (
           <div>
-            <div className="text-[10px] text-white/30 font-semibold uppercase tracking-wider mb-1">Mensaje</div>
+            <div className="text-[10px] text-white/30 font-semibold uppercase tracking-wider mb-1">Mensaje original</div>
             <div
-              className="rounded-lg p-3 text-[11px] text-white/60 leading-relaxed break-words"
-              style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)" }}
+              className="rounded-lg p-3 text-[10px] text-white/35 leading-relaxed break-words font-mono"
+              style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.04)" }}
             >
               {event.msg}
             </div>
           </div>
         )}
 
-        {/* Ping */}
-        {event.ping != null && event.ping > 0 && (
-          <div>
-            <div className="text-[10px] text-white/30 font-semibold uppercase tracking-wider mb-1">Latencia</div>
-            <div className="flex items-center gap-2">
-              <span className="text-lg font-bold font-mono text-white/80">{event.ping}</span>
-              <span className="text-[10px] text-white/30">ms</span>
+        {/* Ping + Monitor ID row */}
+        <div className="flex items-center gap-4">
+          {event.ping != null && event.ping > 0 && (
+            <div>
+              <div className="text-[10px] text-white/30 font-semibold uppercase tracking-wider mb-1">Latencia</div>
+              <div className="flex items-baseline gap-1">
+                <span className="text-lg font-bold font-mono text-white/80">{event.ping}</span>
+                <span className="text-[10px] text-white/30">ms</span>
+              </div>
             </div>
+          )}
+          <div>
+            <div className="text-[10px] text-white/30 font-semibold uppercase tracking-wider mb-1">Monitor</div>
+            <span className="text-[11px] font-mono text-white/50">#{event.monitorId}</span>
           </div>
-        )}
-
-        {/* Monitor ID */}
-        <div>
-          <div className="text-[10px] text-white/30 font-semibold uppercase tracking-wider mb-1">Monitor ID</div>
-          <span className="text-[11px] font-mono text-white/50">#{event.monitorId}</span>
         </div>
       </div>
 
       {/* Action buttons at bottom */}
       <div className="px-4 py-3 border-t border-white/5 flex gap-2">
-        <button
-          onClick={onLocate}
-          className="flex-1 flex items-center justify-center gap-2 h-9 rounded-lg text-[11px] font-semibold transition-all"
-          style={{ background: "rgba(99,102,241,0.12)", color: "#a5b4fc", border: "1px solid rgba(99,102,241,0.25)" }}
-        >
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="12" cy="12" r="3" /><path d="M12 2v4" /><path d="M12 18v4" /><path d="M2 12h4" /><path d="M18 12h4" />
-          </svg>
-          Localizar en mapa
-        </button>
+        {isOnMap ? (
+          <button
+            onClick={onLocate}
+            className="flex-1 flex items-center justify-center gap-2 h-9 rounded-lg text-[11px] font-semibold transition-all"
+            style={{ background: "rgba(99,102,241,0.12)", color: "#a5b4fc", border: "1px solid rgba(99,102,241,0.25)" }}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="3" /><path d="M12 2v4" /><path d="M12 18v4" /><path d="M2 12h4" /><path d="M18 12h4" />
+            </svg>
+            Localizar en mapa
+          </button>
+        ) : (
+          <div
+            className="flex-1 flex items-center justify-center gap-2 h-9 rounded-lg text-[11px] font-medium"
+            style={{ background: "rgba(255,255,255,0.03)", color: "rgba(255,255,255,0.2)", border: "1px solid rgba(255,255,255,0.05)" }}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M18.36 6.64a9 9 0 1 1-12.73 0" /><line x1="12" y1="2" x2="12" y2="12" />
+            </svg>
+            Sensor no está en este mapa
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
 // ── Component ──────────────────────────────────────────────────────
-export default function AlertManagerPanel({ open, onClose, sidebarWidth, onCountChange, onEventClick }: AlertManagerPanelProps) {
+export default function AlertManagerPanel({ open, onClose, sidebarWidth, onCountChange, onEventClick, mapMonitorIds }: AlertManagerPanelProps) {
   const [events, setEvents] = useState<TimelineEvent[]>([]);
   const [loading, setLoading] = useState(false);
   const [hours, setHours] = useState(24);
@@ -207,6 +387,7 @@ export default function AlertManagerPanel({ open, onClose, sidebarWidth, onCount
   const [filterStatus, setFilterStatus] = useState<number | null>(null);
   const [searchText, setSearchText] = useState("");
   const [selectedEvent, setSelectedEvent] = useState<TimelineEvent | null>(null);
+  const [filterOnMap, setFilterOnMap] = useState(false);
   // Date range filter
   const [useCustomDates, setUseCustomDates] = useState(false);
   const [dateFrom, setDateFrom] = useState("");
@@ -215,6 +396,9 @@ export default function AlertManagerPanel({ open, onClose, sidebarWidth, onCount
   const scrollRef = useRef<HTMLDivElement>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const datePickerRef = useRef<HTMLDivElement>(null);
+
+  // Set of monitor IDs on the current map
+  const mapMonitorSet = useMemo(() => new Set(mapMonitorIds || []), [mapMonitorIds]);
 
   // Close date picker on outside click
   useEffect(() => {
@@ -283,11 +467,15 @@ export default function AlertManagerPanel({ open, onClose, sidebarWidth, onCount
   const filtered = events.filter(e => {
     if (filterStatus !== null && e.status !== filterStatus) return false;
     if (searchText && !e.monitorName.toLowerCase().includes(searchText.toLowerCase()) && !e.msg.toLowerCase().includes(searchText.toLowerCase())) return false;
+    if (filterOnMap && !mapMonitorSet.has(e.monitorId)) return false;
     return true;
   });
 
   const filteredLenRef = useRef(filtered.length);
   filteredLenRef.current = filtered.length;
+
+  // Count how many are on map vs not
+  const onMapCount = useMemo(() => filtered.filter(e => mapMonitorSet.has(e.monitorId)).length, [filtered, mapMonitorSet]);
 
   // ── Infinite scroll ──
   const handleScroll = useCallback(() => {
@@ -298,19 +486,24 @@ export default function AlertManagerPanel({ open, onClose, sidebarWidth, onCount
     }
   }, []);
 
-  useEffect(() => { setVisibleCount(PAGE_SIZE); }, [filterStatus, searchText, hours, useCustomDates, dateFrom, dateTo]);
+  useEffect(() => { setVisibleCount(PAGE_SIZE); }, [filterStatus, searchText, hours, useCustomDates, dateFrom, dateTo, filterOnMap]);
 
   const visible = filtered.slice(0, visibleCount);
 
   // ── Event handlers ──
   const handleEventSelect = useCallback((ev: TimelineEvent) => {
     setSelectedEvent(ev);
-    onEventClick?.(ev);
-  }, [onEventClick]);
+    // Only trigger map/TM interaction if the monitor is on the map
+    if (mapMonitorSet.has(ev.monitorId)) {
+      onEventClick?.(ev);
+    }
+  }, [onEventClick, mapMonitorSet]);
 
   const handleLocateFromDetail = useCallback(() => {
-    if (selectedEvent) onEventClick?.(selectedEvent);
-  }, [selectedEvent, onEventClick]);
+    if (selectedEvent && mapMonitorSet.has(selectedEvent.monitorId)) {
+      onEventClick?.(selectedEvent);
+    }
+  }, [selectedEvent, onEventClick, mapMonitorSet]);
 
   const handleQuickRange = useCallback((h: number) => {
     setUseCustomDates(false);
@@ -332,6 +525,7 @@ export default function AlertManagerPanel({ open, onClose, sidebarWidth, onCount
 
   // ── Render detail card ──
   if (selectedEvent) {
+    const selectedOnMap = mapMonitorSet.has(selectedEvent.monitorId);
     return (
       <div
         className="fixed top-0 bottom-0 flex flex-col"
@@ -346,6 +540,7 @@ export default function AlertManagerPanel({ open, onClose, sidebarWidth, onCount
           event={selectedEvent}
           onBack={() => setSelectedEvent(null)}
           onLocate={handleLocateFromDetail}
+          isOnMap={selectedOnMap}
         />
         <style>{`
           @keyframes am-spin { to { transform: rotate(360deg); } }
@@ -407,7 +602,7 @@ export default function AlertManagerPanel({ open, onClose, sidebarWidth, onCount
           />
         </div>
 
-        {/* Status chips */}
+        {/* Status chips + map filter */}
         <div className="flex items-center gap-1 flex-wrap">
           {[
             { val: null, label: "Todos", color: "#888" },
@@ -429,6 +624,25 @@ export default function AlertManagerPanel({ open, onClose, sidebarWidth, onCount
               {chip.label}
             </button>
           ))}
+          <div className="flex-1" />
+          {/* Map filter toggle */}
+          <button
+            onClick={() => setFilterOnMap(v => !v)}
+            className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium transition-all"
+            style={{
+              background: filterOnMap ? "rgba(59,130,246,0.15)" : "rgba(255,255,255,0.04)",
+              color: filterOnMap ? "#60a5fa" : "rgba(255,255,255,0.35)",
+              border: `1px solid ${filterOnMap ? "rgba(59,130,246,0.3)" : "transparent"}`,
+            }}
+            title={filterOnMap ? "Mostrando solo sensores del mapa" : "Mostrar solo sensores en este mapa"}
+          >
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21" />
+              <line x1="9" y1="3" x2="9" y2="18" /><line x1="15" y1="6" x2="15" y2="21" />
+            </svg>
+            Mapa
+            {filterOnMap && <span className="text-[8px] font-bold text-blue-300">{onMapCount}</span>}
+          </button>
         </div>
 
         {/* Time range row: quick chips + date picker toggle */}
@@ -560,18 +774,30 @@ export default function AlertManagerPanel({ open, onClose, sidebarWidth, onCount
           const st = STATUS_MAP[ev.status] || STATUS_MAP[2];
           const prevSt = STATUS_MAP[ev.prevStatus] || STATUS_MAP[2];
           const date = new Date(ev.time);
+          const isOnMap = mapMonitorSet.has(ev.monitorId);
           return (
             <div
               key={`${ev.monitorId}-${ev.time}-${i}`}
               onClick={() => handleEventSelect(ev)}
               className="group rounded-lg px-3 py-2.5 mb-1 transition-all hover:bg-white/[0.06] cursor-pointer active:scale-[0.99]"
-              style={{ borderLeft: `3px solid ${st.color}` }}
+              style={{ borderLeft: `3px solid ${st.color}`, opacity: isOnMap ? 1 : 0.55 }}
             >
-              {/* Top row: monitor name + time ago */}
+              {/* Top row: monitor name + badges + time ago */}
               <div className="flex items-center justify-between mb-1">
-                <span className="text-[11px] font-semibold text-white/85 truncate max-w-[200px]">
-                  {ev.monitorName}
-                </span>
+                <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                  <span className="text-[11px] font-semibold text-white/85 truncate max-w-[180px]">
+                    {ev.monitorName}
+                  </span>
+                  {!isOnMap && (
+                    <span
+                      className="shrink-0 text-[7px] font-bold px-1 py-px rounded"
+                      style={{ background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.2)", border: "1px solid rgba(255,255,255,0.06)" }}
+                      title="Este sensor no está en el mapa actual"
+                    >
+                      NO EN MAPA
+                    </span>
+                  )}
+                </div>
                 <span className="text-[10px] text-white/25 font-mono shrink-0 ml-2" title={formatTime(date)}>
                   {timeAgo(date)}
                 </span>
@@ -634,6 +860,14 @@ export default function AlertManagerPanel({ open, onClose, sidebarWidth, onCount
               </span>
             );
           })}
+          {mapMonitorSet.size > 0 && (
+            <span className="flex items-center gap-1 text-[10px] font-mono" style={{ color: "rgba(96,165,250,0.6)" }}>
+              <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21" />
+              </svg>
+              {onMapCount}
+            </span>
+          )}
         </div>
         <span className="text-[9px] text-white/15 font-mono">
           {loading ? "cargando..." : useCustomDates ? activeRangeLabel : `últimas ${hours}h`}

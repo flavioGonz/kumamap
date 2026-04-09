@@ -3,6 +3,17 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { apiUrl } from "@/lib/api";
 
+// ── Report data type (from EventReportModal) ─────────────────────
+interface ReportData {
+  monitor: { id: number; name: string; type: string; url: string; status: number; tags: { name: string; color: string }[] };
+  period: { hours: number; from: string | null; to: string | null };
+  stats: { totalChecks: number; upChecks: number; downChecks: number; uptimePercent: number; avgPing: number; maxPing: number; minPing: number };
+  events: Array<{ time: string; status: number; prevStatus: number; msg: string; ping: number | null; duration: number }>;
+  eventsByDay: Record<string, Array<{ time: string; status: number; prevStatus: number; msg: string }>>;
+  downtimes: Array<{ start: string; end: string; durationMs: number; msg: string }>;
+  totalDowntimeMs: number;
+}
+
 // ── Types ──────────────────────────────────────────────────────────
 export interface TimelineEvent {
   monitorId: number;
@@ -262,6 +273,79 @@ const QUICK_RANGES = [
   { value: 720, label: "30d" },
 ];
 
+// ── Report helpers ────────────────────────────────────────────────
+function getUptimeColor(pct: number): string {
+  if (pct >= 99.9) return "#22c55e";
+  if (pct >= 99) return "#4ade80";
+  if (pct >= 95) return "#f59e0b";
+  if (pct >= 90) return "#f97316";
+  return "#ef4444";
+}
+function getUptimeGrade(pct: number): string {
+  if (pct >= 99.99) return "Excelente";
+  if (pct >= 99.9) return "Muy bueno";
+  if (pct >= 99) return "Bueno";
+  if (pct >= 95) return "Aceptable";
+  if (pct >= 90) return "Bajo";
+  return "Critico";
+}
+
+function exportReportExcel(data: ReportData, hours: number) {
+  import("xlsx").then(XLSX => {
+    const wb = XLSX.utils.book_new();
+    const summary = [
+      ["REPORTE DE DISPONIBILIDAD"], [""],
+      ["Monitor", data.monitor.name], ["Tipo", data.monitor.type.toUpperCase()],
+      ["URL/Host", data.monitor.url], ["Periodo", `${hours} horas`],
+      ["Desde", data.period.from ? new Date(data.period.from).toLocaleString() : "N/A"],
+      ["Hasta", data.period.to ? new Date(data.period.to).toLocaleString() : "N/A"], [""],
+      ["ESTADISTICAS"], ["Uptime", `${data.stats.uptimePercent}%`],
+      ["Total chequeos", data.stats.totalChecks], ["Chequeos UP", data.stats.upChecks],
+      ["Chequeos DOWN", data.stats.downChecks], ["Ping promedio", `${data.stats.avgPing}ms`],
+      ["Ping maximo", `${data.stats.maxPing}ms`], ["Ping minimo", `${data.stats.minPing}ms`],
+      ["Downtime total", formatDuration(data.totalDowntimeMs)],
+    ];
+    const ws1 = XLSX.utils.aoa_to_sheet(summary);
+    ws1["!cols"] = [{ wch: 20 }, { wch: 40 }];
+    XLSX.utils.book_append_sheet(wb, ws1, "Resumen");
+    const evtRows: (string | number)[][] = [["Fecha", "Hora", "Estado", "Estado Anterior", "Mensaje", "Ping (ms)"]];
+    for (const evt of data.events) {
+      const d = new Date(evt.time);
+      evtRows.push([d.toLocaleDateString(), d.toLocaleTimeString(), evt.status === 0 ? "DOWN" : evt.status === 1 ? "UP" : "PENDING", evt.prevStatus === 0 ? "DOWN" : evt.prevStatus === 1 ? "UP" : "PENDING", evt.msg, evt.ping != null ? evt.ping : ("N/A" as any)]);
+    }
+    const ws2 = XLSX.utils.aoa_to_sheet(evtRows);
+    ws2["!cols"] = [{ wch: 14 }, { wch: 12 }, { wch: 10 }, { wch: 14 }, { wch: 35 }, { wch: 10 }];
+    XLSX.utils.book_append_sheet(wb, ws2, "Eventos");
+    const dtRows: string[][] = [["Inicio", "Fin", "Duracion", "Mensaje"]];
+    for (const dt of data.downtimes) dtRows.push([new Date(dt.start).toLocaleString(), new Date(dt.end).toLocaleString(), formatDuration(dt.durationMs), dt.msg]);
+    const ws3 = XLSX.utils.aoa_to_sheet(dtRows);
+    ws3["!cols"] = [{ wch: 22 }, { wch: 22 }, { wch: 14 }, { wch: 35 }];
+    XLSX.utils.book_append_sheet(wb, ws3, "Caidas");
+    XLSX.writeFile(wb, `Reporte_${data.monitor.name.replace(/[^a-zA-Z0-9]/g, "_")}_${hours}h.xlsx`);
+  });
+}
+
+function exportReportPDF(data: ReportData, hours: number) {
+  const w = window.open("", "_blank");
+  if (!w) return;
+  const uptimeColor = getUptimeColor(data.stats.uptimePercent);
+  const evtRows = data.events.map(e => {
+    const d = new Date(e.time);
+    const statusColor = e.status === 0 ? "#dc2626" : "#16a34a";
+    return `<tr><td>${d.toLocaleDateString()}</td><td>${d.toLocaleTimeString()}</td><td style="color:${statusColor};font-weight:700">${e.status === 0 ? "▼ DOWN" : "▲ UP"}</td><td>${e.msg || ""}</td><td>${e.ping ?? "—"}</td></tr>`;
+  }).join("");
+  const dtRows = data.downtimes.map(d => `<tr><td>${new Date(d.start).toLocaleString()}</td><td>${new Date(d.end).toLocaleString()}</td><td style="font-weight:700;color:#dc2626">${formatDuration(d.durationMs)}</td><td>${d.msg || ""}</td></tr>`).join("");
+  w.document.write(`<!DOCTYPE html><html><head><title>Reporte - ${data.monitor.name}</title>
+  <style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:'Segoe UI',system-ui,sans-serif;color:#333;padding:40px;background:#fff}.header{background:linear-gradient(135deg,#1e293b,#0f172a);color:white;padding:30px;border-radius:16px;margin-bottom:30px}.header h1{font-size:24px;font-weight:800;margin-bottom:4px}.header p{color:rgba(255,255,255,0.6);font-size:13px}.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:24px}.stat{background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:16px;text-align:center}.stat-value{font-size:28px;font-weight:800;margin-bottom:2px}.stat-label{font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:0.05em;font-weight:600}.section{margin-bottom:24px}.section h2{font-size:16px;font-weight:700;color:#1e293b;margin-bottom:12px;padding-bottom:8px;border-bottom:2px solid #e2e8f0}table{width:100%;border-collapse:collapse;font-size:12px}th{background:#f1f5f9;padding:10px 12px;text-align:left;font-weight:700;color:#475569;text-transform:uppercase;font-size:10px;letter-spacing:0.05em}td{padding:8px 12px;border-bottom:1px solid #f1f5f9}tr:hover td{background:#f8fafc}.footer{margin-top:30px;padding-top:16px;border-top:2px solid #e2e8f0;font-size:11px;color:#94a3b8;display:flex;justify-content:space-between}@media print{body{padding:20px}.header{break-inside:avoid}}</style></head><body>
+  <div class="header"><div style="display:flex;align-items:center;justify-content:space-between"><div><h1>${data.monitor.name}</h1><p>${data.monitor.type.toUpperCase()} — ${data.monitor.url}</p></div><div style="text-align:right"><div style="font-size:36px;font-weight:900;color:${uptimeColor}">${data.stats.uptimePercent}%</div><div style="font-size:11px;color:rgba(255,255,255,0.5)">UPTIME</div></div></div><div style="margin-top:12px;font-size:12px;color:rgba(255,255,255,0.5);">Periodo: ${data.period.from ? new Date(data.period.from).toLocaleString() : "—"} → ${data.period.to ? new Date(data.period.to).toLocaleString() : "—"} (${hours}h)</div></div>
+  <div class="stats"><div class="stat"><div class="stat-value" style="color:${uptimeColor}">${data.stats.uptimePercent}%</div><div class="stat-label">Disponibilidad</div></div><div class="stat"><div class="stat-value" style="color:#3b82f6">${data.stats.avgPing}ms</div><div class="stat-label">Ping Promedio</div></div><div class="stat"><div class="stat-value" style="color:#dc2626">${data.stats.downChecks}</div><div class="stat-label">Caidas</div></div><div class="stat"><div class="stat-value" style="color:#f59e0b">${formatDuration(data.totalDowntimeMs)}</div><div class="stat-label">Downtime Total</div></div></div>
+  ${data.events.length > 0 ? `<div class="section"><h2>Eventos (${data.events.length})</h2><table><thead><tr><th>Fecha</th><th>Hora</th><th>Estado</th><th>Mensaje</th><th>Ping</th></tr></thead><tbody>${evtRows}</tbody></table></div>` : ""}
+  ${data.downtimes.length > 0 ? `<div class="section"><h2>Periodos de Caida (${data.downtimes.length})</h2><table><thead><tr><th>Inicio</th><th>Fin</th><th>Duracion</th><th>Mensaje</th></tr></thead><tbody>${dtRows}</tbody></table></div>` : ""}
+  <div class="footer"><span>KumaMap Network Monitoring</span><span>Generado: ${new Date().toLocaleString()}</span></div></body></html>`);
+  w.document.close();
+  setTimeout(() => w.print(), 500);
+}
+
 // ── Event Detail Card ─────────────────────────────────────────────
 function EventDetailCard({ event, onBack, onLocate, isOnMap, downtime, allEvents, downtimes, onSelectEvent }: {
   event: TimelineEvent;
@@ -276,6 +360,21 @@ function EventDetailCard({ event, onBack, onLocate, isOnMap, downtime, allEvents
   const st = STATUS_MAP[event.status] || STATUS_MAP[2];
   const prevSt = STATUS_MAP[event.prevStatus] || STATUS_MAP[2];
   const date = new Date(event.time);
+
+  // ── Report data for this monitor ──
+  const [reportData, setReportData] = useState<ReportData | null>(null);
+  const [reportHours, setReportHours] = useState(24);
+  const [reportLoading, setReportLoading] = useState(false);
+
+  useEffect(() => {
+    setReportLoading(true);
+    fetch(apiUrl(`/api/kuma/report/${event.monitorId}?hours=${reportHours}`))
+      .then(r => r.json())
+      .then(d => { setReportData(d); setReportLoading(false); })
+      .catch(() => setReportLoading(false));
+  }, [event.monitorId, reportHours]);
+
+  const uptimeColor = reportData ? getUptimeColor(reportData.stats.uptimePercent) : "#888";
 
   return (
     <div className="flex flex-col h-full" style={{ animation: "am-slideIn 0.2s ease-out" }}>
@@ -386,6 +485,65 @@ function EventDetailCard({ event, onBack, onLocate, isOnMap, downtime, allEvents
 
       {/* Details */}
       <div className="px-4 flex flex-col gap-3 flex-1 overflow-y-auto" style={{ scrollbarWidth: "thin", scrollbarColor: "rgba(255,255,255,0.1) transparent" }}>
+
+        {/* ── Report stats (from EventReportModal) ── */}
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <div className="text-[10px] text-white/30 font-semibold uppercase tracking-wider">Disponibilidad</div>
+            {/* Period selector chips */}
+            <div className="flex gap-0.5">
+              {[{ h: 24, l: "1d" }, { h: 72, l: "3d" }, { h: 168, l: "7d" }, { h: 720, l: "30d" }].map(p => (
+                <button key={p.h} onClick={() => setReportHours(p.h)}
+                  className="px-1.5 py-0.5 rounded text-[8px] font-bold transition-all"
+                  style={{
+                    background: reportHours === p.h ? `${uptimeColor}20` : "rgba(255,255,255,0.03)",
+                    color: reportHours === p.h ? uptimeColor : "#444",
+                    border: `1px solid ${reportHours === p.h ? `${uptimeColor}33` : "transparent"}`,
+                  }}>{p.l}</button>
+              ))}
+            </div>
+          </div>
+          {reportLoading ? (
+            <div className="flex justify-center py-4">
+              <div className="animate-spin rounded-full h-4 w-4 border-b-2" style={{ borderColor: uptimeColor }} />
+            </div>
+          ) : reportData ? (
+            <div className="space-y-2">
+              {/* Uptime hero */}
+              <div className="flex items-baseline gap-2 mb-1">
+                <span className="text-2xl font-black tracking-tight" style={{ color: uptimeColor }}>{reportData.stats.uptimePercent}%</span>
+                <span className="text-[9px] font-bold uppercase tracking-wider" style={{ color: `${uptimeColor}88` }}>{getUptimeGrade(reportData.stats.uptimePercent)}</span>
+              </div>
+              {/* Mini uptime bar */}
+              <div className="flex gap-[1px] w-full h-[12px] rounded-md overflow-hidden" style={{ background: "rgba(0,0,0,0.3)" }}>
+                {Array.from({ length: 48 }, (_, i) => {
+                  const slotMs = (reportHours * 3600000) / 48;
+                  const slotStart = Date.now() - reportHours * 3600000 + i * slotMs;
+                  const hasDown = reportData.events.some(e => {
+                    const t = new Date(e.time).getTime();
+                    return e.status === 0 && t >= slotStart && t < slotStart + slotMs;
+                  });
+                  return <div key={i} className="flex-1" style={{ background: hasDown ? "#ef4444" : "rgba(34,197,94,0.5)", borderRadius: i === 0 ? "3px 0 0 3px" : i === 47 ? "0 3px 3px 0" : "0" }} />;
+                })}
+              </div>
+              {/* Stats grid */}
+              <div className="grid grid-cols-4 gap-1.5">
+                {[
+                  { label: "Ping", value: `${reportData.stats.avgPing}ms`, color: "#60a5fa" },
+                  { label: "Caídas", value: `${reportData.downtimes.length}`, color: reportData.downtimes.length > 0 ? "#ef4444" : "#22c55e" },
+                  { label: "Downtime", value: formatDuration(reportData.totalDowntimeMs), color: reportData.totalDowntimeMs > 0 ? "#f59e0b" : "#22c55e" },
+                  { label: "Checks", value: `${reportData.stats.totalChecks}`, color: "#8b5cf6" },
+                ].map(s => (
+                  <div key={s.label} className="rounded-lg p-2 text-center" style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.03)" }}>
+                    <div className="text-[11px] font-black" style={{ color: s.color }}>{s.value}</div>
+                    <div className="text-[7px] text-[#444] font-bold uppercase tracking-wider mt-0.5">{s.label}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+        </div>
+
         {/* Interpreted event */}
         {(() => {
           const interp = interpretEvent(event);
@@ -532,27 +690,51 @@ function EventDetailCard({ event, onBack, onLocate, isOnMap, downtime, allEvents
       </div>
 
       {/* Action buttons at bottom */}
-      <div className="px-4 py-3 border-t border-white/5 flex gap-2">
-        {isOnMap ? (
-          <button
-            onClick={onLocate}
-            className="flex-1 flex items-center justify-center gap-2 h-9 rounded-lg text-[11px] font-semibold transition-all"
-            style={{ background: "rgba(99,102,241,0.12)", color: "#a5b4fc", border: "1px solid rgba(99,102,241,0.25)" }}
-          >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="3" /><path d="M12 2v4" /><path d="M12 18v4" /><path d="M2 12h4" /><path d="M18 12h4" />
-            </svg>
-            Localizar en mapa
-          </button>
-        ) : (
-          <div
-            className="flex-1 flex items-center justify-center gap-2 h-9 rounded-lg text-[11px] font-medium"
-            style={{ background: "rgba(255,255,255,0.03)", color: "rgba(255,255,255,0.2)", border: "1px solid rgba(255,255,255,0.05)" }}
-          >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M18.36 6.64a9 9 0 1 1-12.73 0" /><line x1="12" y1="2" x2="12" y2="12" />
-            </svg>
-            Sensor no está en este mapa
+      <div className="px-4 py-3 border-t border-white/5 flex flex-col gap-2">
+        <div className="flex gap-2">
+          {isOnMap ? (
+            <button
+              onClick={onLocate}
+              className="flex-1 flex items-center justify-center gap-2 h-9 rounded-lg text-[11px] font-semibold transition-all"
+              style={{ background: "rgba(99,102,241,0.12)", color: "#a5b4fc", border: "1px solid rgba(99,102,241,0.25)" }}
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="3" /><path d="M12 2v4" /><path d="M12 18v4" /><path d="M2 12h4" /><path d="M18 12h4" />
+              </svg>
+              Localizar
+            </button>
+          ) : (
+            <div
+              className="flex-1 flex items-center justify-center gap-2 h-9 rounded-lg text-[11px] font-medium"
+              style={{ background: "rgba(255,255,255,0.03)", color: "rgba(255,255,255,0.2)", border: "1px solid rgba(255,255,255,0.05)" }}
+            >
+              No en mapa
+            </div>
+          )}
+        </div>
+        {/* Export buttons */}
+        {reportData && (
+          <div className="flex gap-2">
+            <button
+              onClick={() => exportReportExcel(reportData, reportHours)}
+              className="flex-1 flex items-center justify-center gap-1.5 h-8 rounded-lg text-[10px] font-bold transition-all hover:brightness-125"
+              style={{ background: "rgba(34,197,94,0.08)", border: "1px solid rgba(34,197,94,0.15)", color: "#4ade80" }}
+            >
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" />
+              </svg>
+              Excel
+            </button>
+            <button
+              onClick={() => exportReportPDF(reportData, reportHours)}
+              className="flex-1 flex items-center justify-center gap-1.5 h-8 rounded-lg text-[10px] font-bold transition-all hover:brightness-125"
+              style={{ background: "rgba(59,130,246,0.08)", border: "1px solid rgba(59,130,246,0.15)", color: "#60a5fa" }}
+            >
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" />
+              </svg>
+              PDF / Imprimir
+            </button>
           </div>
         )}
       </div>

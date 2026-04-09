@@ -777,37 +777,38 @@ export default function LeafletMapView({
     setTmFocusMonitorId(ev.monitorId);
     setTmJumpTo({ time: new Date(ev.time), monitorId: ev.monitorId });
 
-    // If node found on map, fly to it
+    // If node found on map, fly to it + zoom
     if (node) {
       const nodeLatLng = L.latLng(node.x, node.y);
-      const bounds = map.getBounds();
-      if (!bounds.contains(nodeLatLng)) {
-        map.flyTo(nodeLatLng, Math.max(map.getZoom(), 16), { animate: true, duration: 0.8 });
-      }
+      // Always fly and zoom to a good level so node is centered and visible
+      const targetZoom = Math.max(map.getZoom(), 17);
+      map.flyTo(nodeLatLng, targetZoom, { animate: true, duration: 1 });
 
-      // Flash marker
-      const marker = markersRef.current.get(node.id);
-      if (marker?.getElement()) {
-        const el = marker.getElement();
-        el.style.filter = `drop-shadow(0 0 20px ${flashColor}) drop-shadow(0 0 40px ${flashColor}) brightness(1.8)`;
-        el.style.transition = "filter 0.2s";
-        el.classList.add("node-vibrate");
-        setTimeout(() => { el.style.filter = `drop-shadow(0 0 10px ${flashColor}) brightness(1.2)`; el.style.transition = "filter 1.5s"; }, 1500);
-        setTimeout(() => { el.style.filter = ""; el.style.transition = "filter 1s"; el.classList.remove("node-vibrate"); }, 4000);
-      }
+      // Flash marker after flyTo completes
+      setTimeout(() => {
+        const marker = markersRef.current.get(node.id);
+        if (marker?.getElement()) {
+          const el = marker.getElement();
+          el.style.filter = `drop-shadow(0 0 20px ${flashColor}) drop-shadow(0 0 40px ${flashColor}) brightness(1.8)`;
+          el.style.transition = "filter 0.2s";
+          el.classList.add("node-vibrate");
+          setTimeout(() => { el.style.filter = `drop-shadow(0 0 10px ${flashColor}) brightness(1.2)`; el.style.transition = "filter 1.5s"; }, 1500);
+          setTimeout(() => { el.style.filter = ""; el.style.transition = "filter 1s"; el.classList.remove("node-vibrate"); }, 4000);
+        }
 
-      // Pulse ring
-      const ring = L.circleMarker(nodeLatLng, {
-        radius: 8, color: flashColor, fillColor: flashColor,
-        fillOpacity: 0.3, weight: 2, opacity: 0.7,
-      }).addTo(map);
-      let r = 8;
-      const iv = setInterval(() => {
-        r += 1.5;
-        ring.setRadius(r);
-        ring.setStyle({ opacity: Math.max(0, 0.7 - r / 50), fillOpacity: Math.max(0, 0.3 - r / 70) });
-        if (r > 45) { clearInterval(iv); try { map.removeLayer(ring); } catch {} }
-      }, 30);
+        // Pulse ring
+        const ring = L.circleMarker(nodeLatLng, {
+          radius: 8, color: flashColor, fillColor: flashColor,
+          fillOpacity: 0.3, weight: 2, opacity: 0.7,
+        }).addTo(map);
+        let r = 8;
+        const iv = setInterval(() => {
+          r += 1.5;
+          ring.setRadius(r);
+          ring.setStyle({ opacity: Math.max(0, 0.7 - r / 50), fillOpacity: Math.max(0, 0.3 - r / 70) });
+          if (r > 45) { clearInterval(iv); try { map.removeLayer(ring); } catch {} }
+        }, 30);
+      }, 600);
 
       // Show event tooltip popup on the node
       setTimeout(() => {
@@ -851,7 +852,7 @@ export default function LeafletMapView({
 
         // Auto-remove after 12s
         setTimeout(() => { try { map.removeLayer(popup); failPopupsRef.current.delete(`alert-${ev.monitorId}`); } catch {} }, 12000);
-      }, 400);
+      }, 1000);
     }
   }, [kumaMonitors, readonly]);
 

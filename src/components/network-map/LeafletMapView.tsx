@@ -932,9 +932,12 @@ export default function LeafletMapView({
           map.on("contextmenu", (e: any) => {
             if (readonly) return;
             e.originalEvent?.preventDefault?.();
-            // Skip if a node/edge/polygon handler already consumed this event
-            if (ctxHandledRef.current) { ctxHandledRef.current = false; return; }
-            setCtxMenu({ x: e.originalEvent.clientX, y: e.originalEvent.clientY, latlng: [e.latlng.lat, e.latlng.lng] });
+            // Defer so edge/node/polygon handlers (which fire synchronously on the
+            // same event) have a chance to set ctxHandledRef before we act.
+            setTimeout(() => {
+              if (ctxHandledRef.current) { ctxHandledRef.current = false; return; }
+              setCtxMenu({ x: e.originalEvent.clientX, y: e.originalEvent.clientY, latlng: [e.latlng.lat, e.latlng.lng] });
+            }, 0);
           });
 
           // First fit — container may not have final size yet, so do it twice
@@ -1008,8 +1011,10 @@ export default function LeafletMapView({
         map.on("contextmenu", (e: any) => {
           if (readonly) return;
           e.originalEvent?.preventDefault?.();
-          if (ctxHandledRef.current) { ctxHandledRef.current = false; return; }
-          setCtxMenu({ x: e.originalEvent.clientX, y: e.originalEvent.clientY, latlng: [e.latlng.lat, e.latlng.lng] });
+          setTimeout(() => {
+            if (ctxHandledRef.current) { ctxHandledRef.current = false; return; }
+            setCtxMenu({ x: e.originalEvent.clientX, y: e.originalEvent.clientY, latlng: [e.latlng.lat, e.latlng.lng] });
+          }, 0);
         });
 
         // Render initial nodes after map is ready

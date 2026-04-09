@@ -1998,6 +1998,8 @@ export default function LeafletMapView({
       });
       hitLine.on("contextmenu", (e: any) => {
         e.originalEvent.preventDefault();
+        e.originalEvent.stopPropagation();
+        L.DomEvent.stopPropagation(e);
         setCtxMenu({ x: e.originalEvent.clientX, y: e.originalEvent.clientY, edgeId: edge.id });
       });
       hitLine.addTo(map);
@@ -2006,6 +2008,8 @@ export default function LeafletMapView({
       // Right-click on edge (visible line)
       line.on("contextmenu", (e: any) => {
         e.originalEvent.preventDefault();
+        e.originalEvent.stopPropagation();
+        L.DomEvent.stopPropagation(e);
         setCtxMenu({
           x: e.originalEvent.clientX,
           y: e.originalEvent.clientY,

@@ -372,7 +372,10 @@ export default function LeafletMapView({
   onSetLiveMap,
 }: LeafletMapViewProps) {
   const isImageMode = !!imageBackground;
-  const sidebarWidth = readonly ? 0 : panelCollapsed ? 40 : 320;
+  const [alertOpen, setAlertOpen] = useState(false);
+  const alertCount = useAlertCount(60000);
+  // When alerts panel is open it replaces the monitor sidebar
+  const sidebarWidth = readonly ? 0 : alertOpen ? 380 : panelCollapsed ? 40 : 320;
   const monitorsRef = useRef<KumaMonitor[]>(kumaMonitors);
   const monitorIndexRef = useRef<Map<number, KumaMonitor>>(new Map());
   useEffect(() => {
@@ -480,8 +483,6 @@ export default function LeafletMapView({
   const [showCameras, setShowCameras] = useState(true);
   const [showFOV, setShowFOV] = useState(true);
   const [showLabels, setShowLabels] = useState(initialViewState?.showLabels ?? true);
-  const [alertOpen, setAlertOpen] = useState(false);
-  const alertCount = useAlertCount(60000);
   const [mapRotation, setMapRotation] = useState(0);
   const [timeDragging, setTimeDragging] = useState(false);
   const [polygonMode, setPolygonMode] = useState(false);
@@ -3990,10 +3991,18 @@ export default function LeafletMapView({
         showLabels={showLabels}
         setShowLabels={setShowLabels}
         panelCollapsed={panelCollapsed}
-        onTogglePanel={!readonly ? onTogglePanel : undefined}
+        onTogglePanel={!readonly ? () => {
+          if (alertOpen) setAlertOpen(false); // close alerts when opening monitors
+          onTogglePanel?.();
+        } : undefined}
         alertCount={alertCount}
         alertOpen={alertOpen}
-        onToggleAlerts={!readonly ? () => setAlertOpen(v => !v) : undefined}
+        onToggleAlerts={!readonly ? () => {
+          setAlertOpen(v => {
+            if (!v && !panelCollapsed) onTogglePanel?.(); // close monitors when opening alerts
+            return !v;
+          });
+        } : undefined}
       />}
 
       {/* Alert Manager Panel */}

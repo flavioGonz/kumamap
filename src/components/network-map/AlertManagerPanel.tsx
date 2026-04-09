@@ -125,7 +125,7 @@ export default function AlertManagerPanel({ open, onClose, sidebarWidth, onCount
     <div
       className="fixed top-0 bottom-0 flex flex-col"
       style={{
-        right: sidebarWidth,
+        right: 0,
         width: 380,
         zIndex: 9998,
         background: "rgba(8,8,12,0.96)",

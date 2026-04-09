@@ -58,12 +58,13 @@ interface MapData {
 
 // ─── Inner Canvas ───────────────────────────────
 function CanvasInner({
-  mapId, kumaMonitors, kumaConnected, onBack,
+  mapId, kumaMonitors, kumaConnected, onBack, onOpenMap,
 }: {
   mapId: string;
   kumaMonitors: KumaMonitor[];
   kumaConnected: boolean;
   onBack: () => void;
+  onOpenMap?: (mapId: string) => void;
 }) {
   const reactFlow = useReactFlow();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -957,6 +958,7 @@ function CanvasInner({
           kumaMonitors={kumaMonitors}
           kumaConnected={kumaConnected}
           onBack={onBack}
+          onOpenMap={onOpenMap}
           panelCollapsed={panelCollapsed}
           onTogglePanel={() => setPanelCollapsed(v => !v)}
           availableMaps={allMaps}
@@ -1319,6 +1321,7 @@ function CanvasInner({
             kumaMonitors={kumaMonitors}
             kumaConnected={kumaConnected}
             onBack={onBack}
+          onOpenMap={onOpenMap}
             panelCollapsed={panelCollapsed}
             onTogglePanel={() => setPanelCollapsed(v => !v)}
             availableMaps={allMaps}
@@ -1519,6 +1522,7 @@ export default function NetworkMapEditor(props: {
   kumaMonitors: KumaMonitor[];
   kumaConnected: boolean;
   onBack: () => void;
+  onOpenMap?: (mapId: string) => void;
 }) {
   return (
     <ReactFlowProvider>

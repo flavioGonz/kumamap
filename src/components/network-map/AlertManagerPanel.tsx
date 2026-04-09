@@ -58,6 +58,54 @@ function formatFullDate(date: Date): string {
   });
 }
 
+function formatDuration(ms: number): string {
+  if (ms < 0) return "";
+  const secs = Math.floor(ms / 1000);
+  if (secs < 60) return `${secs}s`;
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) return `${mins}m ${secs % 60}s`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ${mins % 60}m`;
+  const days = Math.floor(hrs / 24);
+  return `${days}d ${hrs % 24}h ${mins % 60}m`;
+}
+
+/** Compute downtime duration for each DOWN event.
+ * Returns a Map from event key "monitorId-time" → duration in ms.
+ * Duration = time between DOWN and next UP (status=1) for the same monitor.
+ * If still down (no recovery found), returns -1 (ongoing). */
+function computeDowntimes(events: TimelineEvent[]): Map<string, number> {
+  const result = new Map<string, number>();
+  // Events are sorted newest-first. For each DOWN event, scan forward (older) for the recovery.
+  // Actually: recovery comes AFTER the down event in time → it's earlier in the array (newer).
+  // So for each DOWN event at index i, scan backward (i-1, i-2...) for the same monitor with status=1.
+  for (let i = 0; i < events.length; i++) {
+    const ev = events[i];
+    if (ev.status !== 0) continue;
+    const downTime = new Date(ev.time).getTime();
+    const key = `${ev.monitorId}-${ev.time}`;
+    let recovered = false;
+    // Search for next recovery event for this monitor (newer in time = earlier in array)
+    for (let j = i - 1; j >= 0; j--) {
+      const candidate = events[j];
+      if (candidate.monitorId === ev.monitorId && candidate.status === 1) {
+        const upTime = new Date(candidate.time).getTime();
+        result.set(key, upTime - downTime);
+        recovered = true;
+        break;
+      }
+      // If we find another DOWN for the same monitor before a recovery, this DOWN was superseded
+      if (candidate.monitorId === ev.monitorId && candidate.status === 0) {
+        break;
+      }
+    }
+    if (!recovered) {
+      result.set(key, -1); // still down or no recovery in range
+    }
+  }
+  return result;
+}
+
 // ── Event message interpreter ─────────────────────────────────────
 function interpretEvent(ev: TimelineEvent): { translated: string; explanation: string; suggestion: string } {
   const msg = (ev.msg || "").trim();
@@ -203,11 +251,12 @@ const QUICK_RANGES = [
 ];
 
 // ── Event Detail Card ─────────────────────────────────────────────
-function EventDetailCard({ event, onBack, onLocate, isOnMap }: {
+function EventDetailCard({ event, onBack, onLocate, isOnMap, downtime }: {
   event: TimelineEvent;
   onBack: () => void;
   onLocate: () => void;
   isOnMap: boolean;
+  downtime?: number; // ms, -1 = ongoing, undefined = not a down event
 }) {
   const st = STATUS_MAP[event.status] || STATUS_MAP[2];
   const prevSt = STATUS_MAP[event.prevStatus] || STATUS_MAP[2];
@@ -279,6 +328,34 @@ function EventDetailCard({ event, onBack, onLocate, isOnMap }: {
             {formatFullDate(date)}
           </div>
           <div className="text-[10px] text-white/30 font-mono">{timeAgo(date)}</div>
+
+          {/* Downtime duration */}
+          {downtime != null && (
+            <div
+              className="flex items-center gap-2 mt-2 rounded-lg px-3 py-2"
+              style={{
+                background: downtime === -1 ? "rgba(239,68,68,0.08)" : "rgba(245,158,11,0.08)",
+                border: `1px solid ${downtime === -1 ? "rgba(239,68,68,0.15)" : "rgba(245,158,11,0.15)"}`,
+              }}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={downtime === -1 ? "#ef4444" : "#f59e0b"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="10" /><path d="M12 6v6l4 2" />
+              </svg>
+              <div>
+                <div className="text-[11px] font-bold" style={{ color: downtime === -1 ? "#ef4444" : "#f59e0b" }}>
+                  {downtime === -1 ? "Caída en curso" : `Tiempo de caída: ${formatDuration(downtime)}`}
+                </div>
+                <div className="text-[9px] text-white/30">
+                  {downtime === -1
+                    ? "El sensor aún no se ha recuperado"
+                    : "Duración total desde la caída hasta la recuperación"}
+                </div>
+              </div>
+              {downtime === -1 && (
+                <div className="ml-auto h-2 w-2 rounded-full bg-red-500" style={{ animation: "am-pulse 1.5s ease-in-out infinite", boxShadow: "0 0 8px #ef4444" }} />
+              )}
+            </div>
+          )}
         </div>
       </div>
 
@@ -474,6 +551,9 @@ export default function AlertManagerPanel({ open, onClose, sidebarWidth, onCount
   const filteredLenRef = useRef(filtered.length);
   filteredLenRef.current = filtered.length;
 
+  // Compute downtime durations for DOWN events
+  const downtimes = useMemo(() => computeDowntimes(events), [events]);
+
   // Count how many are on map vs not
   const onMapCount = useMemo(() => filtered.filter(e => mapMonitorSet.has(e.monitorId)).length, [filtered, mapMonitorSet]);
 
@@ -541,9 +621,11 @@ export default function AlertManagerPanel({ open, onClose, sidebarWidth, onCount
           onBack={() => setSelectedEvent(null)}
           onLocate={handleLocateFromDetail}
           isOnMap={selectedOnMap}
+          downtime={selectedEvent.status === 0 ? downtimes.get(`${selectedEvent.monitorId}-${selectedEvent.time}`) : undefined}
         />
         <style>{`
           @keyframes am-spin { to { transform: rotate(360deg); } }
+          @keyframes am-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
           @keyframes am-slideIn { from { opacity: 0; transform: translateX(12px); } to { opacity: 1; transform: translateX(0); } }
           @keyframes am-fadeSlide { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
         `}</style>
@@ -825,6 +907,27 @@ export default function AlertManagerPanel({ open, onClose, sidebarWidth, onCount
                 )}
               </div>
 
+              {/* Downtime duration for DOWN events */}
+              {ev.status === 0 && (() => {
+                const key = `${ev.monitorId}-${ev.time}`;
+                const dt = downtimes.get(key);
+                if (dt == null) return null;
+                const isOngoing = dt === -1;
+                return (
+                  <div className="flex items-center gap-1.5 mb-1">
+                    <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke={isOngoing ? "#ef4444" : "#f59e0b"} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="12" cy="12" r="10" /><path d="M12 6v6l4 2" />
+                    </svg>
+                    <span className="text-[9px] font-mono font-semibold" style={{ color: isOngoing ? "#ef4444" : "#f59e0b" }}>
+                      {isOngoing ? "Aún caído" : `Caída: ${formatDuration(dt)}`}
+                    </span>
+                    {isOngoing && (
+                      <span className="inline-block h-1.5 w-1.5 rounded-full bg-red-500" style={{ animation: "am-spin 2s linear infinite", boxShadow: "0 0 6px #ef4444" }} />
+                    )}
+                  </div>
+                );
+              })()}
+
               {/* Message */}
               {ev.msg && (
                 <div className="text-[10px] text-white/30 truncate leading-relaxed" title={ev.msg}>
@@ -878,6 +981,7 @@ export default function AlertManagerPanel({ open, onClose, sidebarWidth, onCount
         @keyframes am-spin { to { transform: rotate(360deg); } }
         @keyframes am-fadeSlide { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
         @keyframes am-slideIn { from { opacity: 0; transform: translateX(12px); } to { opacity: 1; transform: translateX(0); } }
+        @keyframes am-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
       `}</style>
     </div>
   );

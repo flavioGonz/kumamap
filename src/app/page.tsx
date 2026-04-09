@@ -93,6 +93,7 @@ export default function Page() {
             kumaMonitors={monitors}
             kumaConnected={connected}
             onBack={handleBack}
+            onOpenMap={handleOpenMap}
           />
         ) : (
           <MapListView

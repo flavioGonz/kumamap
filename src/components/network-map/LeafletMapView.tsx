@@ -99,6 +99,8 @@ interface LeafletMapViewProps {
   onUploadBackground?: () => void;
   /** Triggered when user wants to switch map type to livemap */
   onSetLiveMap?: () => void;
+  /** Navigate to a linked map in the same window */
+  onOpenMap?: (mapId: string) => void;
 }
 
 
@@ -370,6 +372,7 @@ export default function LeafletMapView({
   imageBackground = null,
   onUploadBackground,
   onSetLiveMap,
+  onOpenMap,
 }: LeafletMapViewProps) {
   const isImageMode = !!imageBackground;
   const [alertOpen, setAlertOpen] = useState(false);
@@ -1742,16 +1745,17 @@ export default function LeafletMapView({
           // Double clicking a rack opens the Rack Designer Drawer!
           setRackDrawerNodeId(node.id);
         } else if (!isWaypoint) {
-          // If node has linked maps, open modal (or first map in kiosk mode)
+          // If node has linked maps, navigate directly (1 map) or show modal (multiple)
           const cd = node.custom_data ? (() => { try { return JSON.parse(node.custom_data!); } catch { return {}; } })() : {};
           const linked: { id: string; name: string }[] = cd.linkedMaps || [];
-          if (linked.length > 0) {
-            if (readonly) {
-              // In kiosk mode, open first linked map directly
-              window.open(apiUrl(`/view/${linked[0].id}`), "_blank");
-            } else {
-              setNodeMapModalNodeId(node.id);
-            }
+          if (linked.length === 1) {
+            // Single linked map — navigate directly
+            if (readonly) window.open(apiUrl(`/view/${linked[0].id}`), "_blank");
+            else if (onOpenMap) onOpenMap(linked[0].id);
+            else window.open(apiUrl(`/?map=${linked[0].id}`), "_blank");
+          } else if (linked.length > 1) {
+            if (readonly) window.open(apiUrl(`/view/${linked[0].id}`), "_blank");
+            else setNodeMapModalNodeId(node.id);
           } else if (!readonly) {
             if (isCamera) {
               // Camera: open stream config modal
@@ -2940,6 +2944,7 @@ export default function LeafletMapView({
               divider: items.length === 0,
               onClick: () => {
                 if (readonly) window.open(apiUrl(`/view/${lm.id}`), "_blank");
+                else if (onOpenMap) onOpenMap(lm.id);
                 else window.open(apiUrl(`/?map=${lm.id}`), "_blank");
               },
             });
@@ -3185,9 +3190,10 @@ export default function LeafletMapView({
           items.push({
             label: `Abrir: ${lm.name}`,
             icon: menuIcons.ExternalLink,
-            divider: items.length === 0, // divider before first map item
+            divider: items.length === 0,
             onClick: () => {
               if (readonly) window.open(apiUrl(`/view/${lm.id}`), "_blank");
+              else if (onOpenMap) onOpenMap(lm.id);
               else window.open(apiUrl(`/?map=${lm.id}`), "_blank");
             },
           });
@@ -4702,11 +4708,11 @@ export default function LeafletMapView({
                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#818cf8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
                     <span className="flex-1 text-xs font-semibold text-[#a5b4fc] truncate">{lm.name}</span>
                     <Tooltip content="Abrir mapa">
-                    <a href={apiUrl(`/?map=${lm.id}`)} target="_blank" rel="noopener noreferrer"
+                    <button
                       className="rounded-lg px-2 py-1 text-[10px] font-semibold text-[#60a5fa] hover:bg-blue-500/10 transition-all"
-                      onClick={(e) => e.stopPropagation()}>
+                      onClick={(e) => { e.stopPropagation(); setNodeMapModalNodeId(null); if (onOpenMap) onOpenMap(lm.id); else window.open(apiUrl(`/?map=${lm.id}`), "_blank"); }}>
                       <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" x2="21" y1="14" y2="3"/></svg>
-                    </a>
+                    </button>
                     </Tooltip>
                     <Tooltip content="Desvincular">
                     <button onClick={() => removeLinkedMap(lm.id)}

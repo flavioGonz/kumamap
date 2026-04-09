@@ -7,7 +7,6 @@ import {
   Network,
   Trash2,
   Pencil,
-  Crosshair,
   Sparkles,
   MapIcon,
   Tag,
@@ -615,45 +614,6 @@ export default function MapListView({
                   className="rounded-lg p-1.5 transition-all opacity-0 group-hover/row:opacity-100"
                   style={{ color: "#6366f1" }}>
                   <Plus className="h-3.5 w-3.5" />
-                </button>
-                </Tooltip>
-                <Tooltip content="Copiar ubicación y coordenadas">
-                <button onClick={async (e) => {
-                  e.stopPropagation();
-                  try {
-                    const res = await fetch(apiUrl(`/api/maps/${map.id}/export`));
-                    const data = await res.json();
-                    const vs = data.map?.view_state ? JSON.parse(data.map.view_state) : null;
-                    const lines: string[] = [`📍 ${data.map?.name || map.name}`];
-                    if (vs?.center) lines.push(`Centro: ${vs.center[0].toFixed(5)}, ${vs.center[1].toFixed(5)}  zoom: ${vs.zoom ?? "?"}`);
-                    if (data.nodes?.length) {
-                      lines.push(`\nNodos (${data.nodes.length}):`);
-                      data.nodes
-                        .filter((n: any) => n.icon !== "_textLabel" && n.icon !== "_waypoint" && n.icon !== "_polygon")
-                        .forEach((n: any) => {
-                          lines.push(`  ${n.label || n.id}: ${Number(n.x).toFixed(5)}, ${Number(n.y).toFixed(5)}`);
-                        });
-                    }
-                    const text = lines.join("\n");
-                    // Fallback for HTTP (non-secure) contexts where clipboard API is unavailable
-                    if (navigator.clipboard?.writeText) {
-                      await navigator.clipboard.writeText(text);
-                    } else {
-                      const el = document.createElement("textarea");
-                      el.value = text;
-                      el.style.cssText = "position:fixed;top:0;left:0;opacity:0";
-                      document.body.appendChild(el);
-                      el.select();
-                      document.execCommand("copy");
-                      document.body.removeChild(el);
-                    }
-                    toast.success("Ubicación copiada", { description: `${data.nodes?.length ?? 0} nodos` });
-                  } catch {
-                    toast.error("No se pudo copiar la ubicación");
-                  }
-                }}
-                  className="rounded-lg p-1.5 text-emerald-400 hover:bg-emerald-500/10 transition-all opacity-0 group-hover/row:opacity-100">
-                  <Crosshair className="h-3.5 w-3.5" />
                 </button>
                 </Tooltip>
                 <Tooltip content="Renombrar">

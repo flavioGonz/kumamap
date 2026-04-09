@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, type CSSProperties } from "react";
 import { X, Maximize2, Camera, RefreshCw } from "lucide-react";
 import type { CameraStreamConfig } from "./CameraStreamConfigModal";
 
@@ -34,28 +34,49 @@ export default function CameraTooltipViewer({
 }: CameraTooltipViewerProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
-  const [snapshotKey, setSnapshotKey] = useState(Date.now());
   const containerRef = useRef<HTMLDivElement>(null);
+  // Double-buffer for flicker-free snapshots
+  const [bufferA, setBufferA] = useState<string>("");
+  const [bufferB, setBufferB] = useState<string>("");
+  const [activeBuffer, setActiveBuffer] = useState<"a" | "b">("a");
+  const loadingNextRef = useRef(false);
 
-  // Snapshot auto-refresh
+  // Snapshot double-buffer
   useEffect(() => {
     if (config.streamType !== "snapshot") return;
-    const ms = config.snapshotInterval ? config.snapshotInterval * 1000 : 2000;
-    const id = setInterval(() => setSnapshotKey(Date.now()), ms);
+    const ms = config.snapshotInterval ? config.snapshotInterval * 1000 : 1000;
+    const firstUrl = proxySnapshotUrl(config.streamUrl, Date.now());
+    setBufferA(firstUrl);
+    setActiveBuffer("a");
+
+    const id = setInterval(() => {
+      if (loadingNextRef.current) return;
+      loadingNextRef.current = true;
+      const nextUrl = proxySnapshotUrl(config.streamUrl, Date.now());
+      const img = new Image();
+      img.onload = () => {
+        loadingNextRef.current = false;
+        setActiveBuffer(prev => {
+          if (prev === "a") { setBufferB(nextUrl); return "b"; }
+          else { setBufferA(nextUrl); return "a"; }
+        });
+        setLoading(false);
+        setError(false);
+      };
+      img.onerror = () => { loadingNextRef.current = false; setError(true); };
+      img.src = nextUrl;
+    }, ms);
     return () => clearInterval(id);
-  }, [config.streamType, config.snapshotInterval]);
+  }, [config.streamType, config.snapshotInterval, config.streamUrl]);
 
   const handleRefresh = useCallback(() => {
-    setSnapshotKey(Date.now());
-    setLoading(true);
+    const url = proxySnapshotUrl(config.streamUrl, Date.now());
+    setActiveBuffer(prev => {
+      if (prev === "a") { setBufferB(url); return "b"; }
+      else { setBufferA(url); return "a"; }
+    });
     setError(false);
-  }, []);
-
-  // Stream source
-  const streamSrc =
-    config.streamType === "snapshot"
-      ? proxySnapshotUrl(config.streamUrl, snapshotKey)
-      : config.streamUrl;
+  }, [config.streamUrl]);
 
   // Position: place tooltip above the marker, centered horizontally
   // If it would go off-screen, flip below or adjust horizontally
@@ -209,11 +230,10 @@ export default function CameraTooltipViewer({
             </div>
           )}
 
-          {/* MJPEG or Snapshot */}
-          {(config.streamType === "mjpeg" || config.streamType === "snapshot") && (
+          {/* MJPEG — single img */}
+          {config.streamType === "mjpeg" && (
             <img
-              key={config.streamType === "snapshot" ? snapshotKey : "mjpeg"}
-              src={streamSrc}
+              src={config.streamUrl}
               alt={cameraName}
               style={{
                 width: "100%",
@@ -221,15 +241,41 @@ export default function CameraTooltipViewer({
                 objectFit: "contain",
                 display: error ? "none" : "block",
               }}
-              onLoad={() => {
-                setLoading(false);
-                setError(false);
-              }}
-              onError={() => {
-                setLoading(false);
-                setError(true);
-              }}
+              onLoad={() => { setLoading(false); setError(false); }}
+              onError={() => { setLoading(false); setError(true); }}
             />
+          )}
+
+          {/* Snapshot — double-buffered for flicker-free transitions */}
+          {config.streamType === "snapshot" && (
+            <div style={{ position: "relative", width: "100%", height: "100%" }}>
+              {bufferA && (
+                <img
+                  src={bufferA}
+                  alt={cameraName}
+                  style={{
+                    position: "absolute", inset: 0, width: "100%", height: "100%",
+                    objectFit: "contain",
+                    opacity: activeBuffer === "a" ? 1 : 0,
+                    transition: "opacity 0.3s ease-in-out",
+                  }}
+                  onLoad={() => { setLoading(false); setError(false); }}
+                />
+              )}
+              {bufferB && (
+                <img
+                  src={bufferB}
+                  alt={cameraName}
+                  style={{
+                    position: "absolute", inset: 0, width: "100%", height: "100%",
+                    objectFit: "contain",
+                    opacity: activeBuffer === "b" ? 1 : 0,
+                    transition: "opacity 0.3s ease-in-out",
+                  }}
+                  onLoad={() => { setLoading(false); setError(false); }}
+                />
+              )}
+            </div>
           )}
 
           {/* Iframe */}

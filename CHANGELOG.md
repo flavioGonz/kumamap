@@ -1,5 +1,79 @@
 # CHANGELOG - KumaMap
 
+## [1.9.0] - 2026-04-09
+
+### Nuevas Funcionalidades
+
+#### Alert Manager — Módulo completo de gestión de alertas
+- Panel lateral dedicado con scroll infinito, filtros por estado (Caídos/Activos/Pendiente/Mant.), búsqueda por nombre de monitor o mensaje, y filtro de rango de fechas
+- Chips de rango rápido (1h/6h/24h/3d/7d/30d) + selector de fechas personalizadas con calendario
+- Filtro "Mapa" para mostrar solo eventos de sensores presentes en el mapa actual
+- Badge "NO EN MAPA" y opacidad reducida para eventos de sensores que no están en el mapa
+- Badge de cantidad de alertas en el botón del sidebar
+
+#### Ficha unificada de eventos
+- Al seleccionar un evento del Alert Manager se abre una ficha detallada en el sidebar con:
+  - Estado actual y transición (DOWN → UP, etc.)
+  - Diagnóstico automático en español con traducción de mensajes de error comunes de Uptime Kuma (Connection failed, timeout, ECONNREFUSED, EHOSTUNREACH, DNS, SSL, HTTP status codes, SNMP)
+  - Acción sugerida específica para cada tipo de error
+  - Mensaje original del monitor
+  - Sección de **disponibilidad** con porcentaje de uptime, barra visual de 48 slots, grado (Excelente/Muy bueno/Bueno/Aceptable/Bajo/Crítico), y stats grid (Ping, Caídas, Downtime, Checks)
+  - Selector de periodo (1d/3d/7d/30d) para la sección de disponibilidad
+  - Botones de **exportar Excel** y **PDF/Imprimir** directamente desde la ficha
+  - Botón "Localizar en mapa" que vuela al nodo y lo ilumina
+- Navegación back/forward entre ficha y lista
+
+#### Duración de caída y gravedad
+- Cada evento DOWN muestra la duración de la caída hasta su recuperación
+- "Aún caído" con punto rojo pulsante si no se recuperó
+- Clasificación de gravedad: **LEVE** (amarillo, < 5 min — fluctuación transitoria) y **GRAVE** (rojo, ≥ 5 min o en curso — requiere atención)
+- Badge de gravedad visible tanto en la lista como en la ficha de detalle
+
+#### Timeline vertical del sensor
+- En la ficha de detalle, sección "Historial del sensor" con los últimos 30 eventos del mismo monitor
+- Cada evento muestra estado, gravedad, duración, fecha/hora y mensaje
+- El evento actual se marca como "ACTUAL"; los demás son clickeables para navegar entre eventos
+
+#### Integración Alert Manager ↔ Time Machine ↔ Mapa
+- Al seleccionar un evento del Alert Manager:
+  - Se abre el Time Machine posicionado en la hora del evento (rango ±1h)
+  - El mapa vuela y hace zoom al nodo dueño del evento
+  - El nodo se ilumina con flash + anillo de pulso + tooltip de estado
+- El scrubber del Time Machine ahora se mueve correctamente a la posición del evento (fix de fetch directo con rango correcto)
+- Fecha y hora visibles en el scrubber, ticks del timeline y reloj inferior
+
+#### Navegación directa de sub-mapas
+- Al hacer doble-clic o usar el menú contextual "Abrir: [mapa]" en un nodo con mapa asociado, se navega directamente al mapa en la misma ventana (en lugar de abrir la lista de mapas)
+- Si el nodo tiene múltiples mapas asociados, se abre el modal de selección
+- Prop `onOpenMap` encadenado a través de Page → NetworkMapEditor → CanvasInner → LeafletMapView
+
+#### Asistente de configuración de Rack (Wizard)
+- Nuevo ícono de wizard (sombrero de mago azul) junto al título "Equipos en el Rack" en el diseñador de racks
+- Asistente de 6 pasos:
+  1. **Tipo de rack**: Red, Servidores, Mixto, Telecom (auto-configura opciones según el tipo)
+  2. **Estructura**: Patch panels (cantidad, 24/48 puertos), bandejas de fibra, organizadores de cable
+  3. **Red**: Switches (cantidad, puertos, modelo), Routers (modelo), Servidores (cantidad, tamaño U, modelo)
+  4. **Energía**: UPS (tamaño U, modelo), PDU (cantidad)
+  5. **Extras**: Bandejas fijas
+  6. **Resumen**: Vista previa de todos los equipos con Us ocupadas/libres, validación de espacio
+- Genera todos los dispositivos con posiciones automáticas, colores y configuración base
+- El usuario puede editar cada equipo individualmente después del wizard
+
+### Mejoras
+
+- Dropdown de rango horario del Time Machine con tema oscuro (reemplaza el `<select>` nativo blanco)
+- Fecha visible en el scrubber del Time Machine junto a la hora
+- Ticks del timeline muestran fecha en primer/último tick y cuando el rango supera 24h
+- Indicador inferior (reloj del mapa) muestra hora + fecha en dos líneas cuando está en modo histórico
+
+### Correcciones
+
+- Fix: el scrubber del Time Machine no se movía al seleccionar evento del Alert Manager (refactorizado a fetch directo con posición post-carga)
+- Fix: sub-mapa desde menú contextual abría la lista de mapas en vez del mapa asociado
+- Fix: dropdown nativo blanco en el filtro de horas del Time Machine
+
+---
+
 ## [1.7.0] - 2026-04-08
 
 ### Nuevas Funcionalidades

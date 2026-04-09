@@ -21,6 +21,9 @@ interface VisualizationPanelProps {
   setShowLabels: React.Dispatch<React.SetStateAction<boolean>>;
   panelCollapsed: boolean;
   onTogglePanel?: () => void;
+  alertCount?: number;
+  alertOpen?: boolean;
+  onToggleAlerts?: () => void;
 }
 
 export default function VisualizationPanel({
@@ -40,6 +43,9 @@ export default function VisualizationPanel({
   setShowLabels,
   panelCollapsed,
   onTogglePanel,
+  alertCount = 0,
+  alertOpen = false,
+  onToggleAlerts,
 }: VisualizationPanelProps) {
   return (
     <div className="fixed top-1/2 -translate-y-1/2 flex flex-col gap-1 rounded-xl p-1 shadow-2xl backdrop-blur-3xl shrink-0"
@@ -63,6 +69,35 @@ export default function VisualizationPanel({
             </button>
           </Tooltip>
           <div className="mx-1 h-px bg-white/10 my-0.5" />
+        </>
+      )}
+
+      {/* Alert Manager toggle */}
+      {onToggleAlerts && (
+        <>
+          <Tooltip content={alertOpen ? "Cerrar alertas" : "Alert Manager"} placement="left">
+            <button onClick={onToggleAlerts}
+              className="relative h-8 w-8 flex items-center justify-center rounded-lg transition-all hover:bg-white/10"
+              style={{ color: alertOpen ? "#ef4444" : "#888" }}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" />
+                <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />
+              </svg>
+              {alertCount > 0 && (
+                <span className="absolute -top-0.5 -right-0.5 flex items-center justify-center rounded-full text-[8px] font-bold text-white"
+                  style={{
+                    minWidth: 14, height: 14, padding: "0 3px",
+                    background: "#ef4444",
+                    boxShadow: "0 0 6px rgba(239,68,68,0.5)",
+                    animation: "alert-pulse 2s ease-in-out infinite",
+                  }}>
+                  {alertCount > 99 ? "99+" : alertCount}
+                </span>
+              )}
+            </button>
+          </Tooltip>
+          <div className="mx-1 h-px bg-white/10 my-0.5" />
+          <style>{`@keyframes alert-pulse { 0%,100%{box-shadow:0 0 4px rgba(239,68,68,0.3)} 50%{box-shadow:0 0 10px rgba(239,68,68,0.7)} }`}</style>
         </>
       )}
 

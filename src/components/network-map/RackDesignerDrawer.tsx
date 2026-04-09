@@ -518,12 +518,32 @@ export default function RackDesignerDrawer({ open, onClose, nodeId, nodes, monit
     container.querySelector("#rack-export-table")!.innerHTML = tableHtml;
 
     try {
-      const canvas = await html2canvas(container, { backgroundColor: "#0f0f0f", scale: 2, useCORS: true } as any);
+      // Remove any SVG elements from clone that html2canvas can't handle
+      container.querySelectorAll("svg").forEach(svg => {
+        const placeholder = document.createElement("span");
+        placeholder.textContent = "●";
+        placeholder.style.cssText = "color:rgba(255,255,255,0.3);font-size:10px";
+        svg.replaceWith(placeholder);
+      });
+      // Remove any base64 images that are too large (photos)
+      container.querySelectorAll("img").forEach(img => {
+        if (img.src.length > 50000) img.remove();
+      });
+      const canvas = await html2canvas(container, {
+        backgroundColor: "#0f0f0f",
+        scale: 2,
+        useCORS: true,
+        logging: false,
+        removeContainer: false,
+      } as any);
       const a = document.createElement("a");
       a.href = canvas.toDataURL("image/png");
       a.download = `rack-${rackName.replace(/\s+/g, "_")}-${totalUnits}U.png`;
       a.click();
-    } catch { alert("Error al exportar."); }
+    } catch (err) {
+      console.error("Rack PNG export error:", err);
+      alert("Error al exportar: " + (err instanceof Error ? err.message : String(err)));
+    }
     finally { document.body.removeChild(container); }
   };
 

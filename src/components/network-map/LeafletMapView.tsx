@@ -41,6 +41,7 @@ import { iconSvgPaths, getIconSvg, createMarkerIcon } from "@/utils/map-icons";
 import { exportMapPng, printMap, exportNodesXlsx } from "@/utils/map-export";
 import MapClock from "./MapClock";
 import VisualizationPanel from "./VisualizationPanel";
+import AlertManagerPanel, { useAlertCount } from "./AlertManagerPanel";
 import FOVColorPickerModal from "./FOVColorPickerModal";
 import LensPickerModal from "./LensPickerModal";
 import NewMonitorModal from "./NewMonitorModal";
@@ -479,6 +480,8 @@ export default function LeafletMapView({
   const [showCameras, setShowCameras] = useState(true);
   const [showFOV, setShowFOV] = useState(true);
   const [showLabels, setShowLabels] = useState(initialViewState?.showLabels ?? true);
+  const [alertOpen, setAlertOpen] = useState(false);
+  const alertCount = useAlertCount(60000);
   const [mapRotation, setMapRotation] = useState(0);
   const [timeDragging, setTimeDragging] = useState(false);
   const [polygonMode, setPolygonMode] = useState(false);
@@ -3911,7 +3914,17 @@ export default function LeafletMapView({
         setShowLabels={setShowLabels}
         panelCollapsed={panelCollapsed}
         onTogglePanel={!readonly ? onTogglePanel : undefined}
+        alertCount={alertCount}
+        alertOpen={alertOpen}
+        onToggleAlerts={!readonly ? () => setAlertOpen(v => !v) : undefined}
       />}
+
+      {/* Alert Manager Panel */}
+      <AlertManagerPanel
+        open={alertOpen}
+        onClose={() => setAlertOpen(false)}
+        sidebarWidth={sidebarWidth}
+      />
 
       {/* Link Modal */}
       <LinkModal

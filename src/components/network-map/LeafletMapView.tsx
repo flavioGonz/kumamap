@@ -1978,16 +1978,29 @@ export default function LeafletMapView({
           const savedPos = cd.trafficLabelPos;
           const posLat = savedPos ? savedPos[0] : (srcNode.x + tgtNode.x) / 2;
           const posLng = savedPos ? savedPos[1] : (srcNode.y + tgtNode.y) / 2;
-          const value = snmpMon.ping;
           const statusColor = snmpMon.status === 1 ? "#22c55e" : snmpMon.status === 0 ? "#ef4444" : "#f59e0b";
-          const formattedValue = value != null ? formatTraffic(value) : "N/A";
 
-          // Build a mini SVG sparkline from cached heartbeats
+          // Extract SNMP counter value from msg: "comparing NNNN >= YYYY"
+          const extractCounter = (msg: string): number | null => {
+            const m = msg.match(/comparing\s+(\d+)/);
+            return m ? parseInt(m[1]) : null;
+          };
+
+          // Use cached throughput data (computed from SNMP counter deltas)
           const hbKey = `traffic-hb-${cd.snmpMonitorId}`;
-          const cached: number[] = (window as any)[hbKey] || [];
+          const cachedData: { throughputs: number[]; lastValue: string } = (window as any)[hbKey] || { throughputs: [], lastValue: "" };
+          const monInterval = snmpMon.interval || 60; // monitor polling interval in seconds
+
+          // Compute current throughput from cached data
+          let currentThroughput = cachedData.throughputs.length > 0
+            ? cachedData.throughputs[cachedData.throughputs.length - 1]
+            : null;
+          const formattedValue = currentThroughput != null ? formatTraffic(currentThroughput) : "N/A";
+
+          // Build a mini SVG sparkline from throughput history
           let sparkSvg = "";
-          if (cached.length >= 2) {
-            const pts = cached.slice(-30);
+          if (cachedData.throughputs.length >= 2) {
+            const pts = cachedData.throughputs.slice(-30);
             const maxV = Math.max(...pts, 1);
             const w = 80, h = 22;
             const pathParts = pts.map((v, i) => {
@@ -2002,13 +2015,32 @@ export default function LeafletMapView({
             </svg>`;
           }
 
-          // Fetch heartbeat data for sparkline (async, non-blocking)
-          if (!cached.length) {
+          // Fetch heartbeat data and compute throughput from SNMP counter deltas
+          if (!cachedData.throughputs.length || cachedData.lastValue !== snmpMon.msg) {
             fetch(apiUrl(`/api/kuma/history/${cd.snmpMonitorId}`))
               .then(r => r.json())
               .then((beats: any[]) => {
-                const pings = beats.filter((b: any) => b.ping != null).map((b: any) => b.ping).slice(-30);
-                if (pings.length > 0) (window as any)[hbKey] = pings;
+                // Extract counter values from each heartbeat msg
+                const counters: number[] = [];
+                for (const b of beats) {
+                  const val = extractCounter(b.msg || "");
+                  if (val !== null) counters.push(val);
+                }
+                // Compute throughput deltas (bytes/s → bits/s) between consecutive readings
+                const throughputs: number[] = [];
+                for (let i = 1; i < counters.length; i++) {
+                  let delta = counters[i] - counters[i - 1];
+                  // Handle 32-bit counter wrap (4294967296 = 2^32)
+                  if (delta < 0) delta += 4294967296;
+                  const bps = (delta * 8) / monInterval; // bits per second
+                  if (bps >= 0 && bps < 100_000_000_000) throughputs.push(bps); // sanity: < 100Gbps
+                }
+                if (throughputs.length > 0) {
+                  (window as any)[hbKey] = {
+                    throughputs: throughputs.slice(-30),
+                    lastValue: snmpMon.msg || "",
+                  };
+                }
               })
               .catch(() => {});
           }

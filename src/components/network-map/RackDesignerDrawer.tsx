@@ -4,7 +4,7 @@ import React, { useState, useEffect, useMemo, useRef, useCallback } from "react"
 import {
   X, Download, Server, Network, Zap, Settings, Trash2, Plus,
   Inbox, Router, Cable, Lock, Unlock, Save, Search, FileText, ChevronLeft, ChevronRight,
-  FileSpreadsheet, Printer, FileDown, Upload,
+  FileSpreadsheet, Printer, FileDown, Upload, ImageIcon, Camera as CameraIcon, ZoomIn, Trash,
 } from "lucide-react";
 import html2canvas from "html2canvas";
 import { motion, AnimatePresence } from "framer-motion";
@@ -177,8 +177,14 @@ export default function RackDesignerDrawer({ open, onClose, nodeId, nodes, monit
   const [isLocked, setIsLocked] = useState(true);
   const [isRackCollapsed, setIsRackCollapsed] = useState(false);
   const [selectedEmptyUnit, setSelectedEmptyUnit] = useState<number | null>(null);
+  const [dragDeviceId, setDragDeviceId] = useState<string | null>(null);
+  const [dragOverUnit, setDragOverUnit] = useState<number | null>(null);
   const [showExportModal, setShowExportModal] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
+  const [showGallery, setShowGallery] = useState(false);
+  const [rackPhotos, setRackPhotos] = useState<string[]>([]);
+  const [galleryIndex, setGalleryIndex] = useState(0);
+  const photoInputRef = useRef<HTMLInputElement>(null);
   const rackRef = useRef<HTMLDivElement>(null);
   const exportRef = useRef<HTMLDivElement>(null);
   const importFileRef = useRef<HTMLInputElement>(null);
@@ -202,6 +208,7 @@ export default function RackDesignerDrawer({ open, onClose, nodeId, nodes, monit
           const cd = node.custom_data ? JSON.parse(node.custom_data) : {};
           setTotalUnits(cd.totalUnits || 42);
           setDevices(cd.devices || []);
+          setRackPhotos(cd.photos || []);
           setRackName(node.label || "Rack");
         } catch {
           setTotalUnits(42);
@@ -257,7 +264,40 @@ export default function RackDesignerDrawer({ open, onClose, nodeId, nodes, monit
     cd.type = "rack";
     cd.totalUnits = totalUnits;
     cd.devices = currentDevices;
+    cd.photos = rackPhotos;
     onSave(nodeId, cd);
+  };
+
+  const handleAddPhoto = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files?.length) return;
+    Array.from(files).forEach(file => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const base64 = reader.result as string;
+        // Resize to max 1200px width for storage
+        const img = new Image();
+        img.onload = () => {
+          const maxW = 1200;
+          const scale = img.width > maxW ? maxW / img.width : 1;
+          const canvas = document.createElement("canvas");
+          canvas.width = img.width * scale;
+          canvas.height = img.height * scale;
+          const ctx = canvas.getContext("2d")!;
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          const compressed = canvas.toDataURL("image/jpeg", 0.82);
+          setRackPhotos(prev => [...prev, compressed]);
+        };
+        img.src = base64;
+      };
+      reader.readAsDataURL(file);
+    });
+    if (photoInputRef.current) photoInputRef.current.value = "";
+  };
+
+  const handleDeletePhoto = (idx: number) => {
+    setRackPhotos(prev => prev.filter((_, i) => i !== idx));
+    setGalleryIndex(prev => Math.min(prev, rackPhotos.length - 2));
   };
 
   const handleDownloadReport = async () => {
@@ -342,6 +382,25 @@ export default function RackDesignerDrawer({ open, onClose, nodeId, nodes, monit
       setIsImporting(false);
       if (importFileRef.current) importFileRef.current.value = "";
     }
+  };
+
+  const handleDropDevice = (targetUnit: number) => {
+    if (!dragDeviceId || isLocked) return;
+    const dev = devices.find(d => d.id === dragDeviceId);
+    if (!dev) return;
+    const endU = targetUnit + dev.sizeUnits - 1;
+    if (endU > totalUnits) return; // doesn't fit
+    // Check overlap (excluding self)
+    const hasOverlap = devices.some(d => {
+      if (d.id === dev.id) return false;
+      const dEnd = d.unit + d.sizeUnits - 1;
+      return Math.max(targetUnit, d.unit) <= Math.min(endU, dEnd);
+    });
+    if (hasOverlap) return;
+    setDevices(prev => prev.map(d => d.id === dev.id ? { ...d, unit: targetUnit } : d));
+    if (editingDevice?.id === dev.id) setEditingDevice({ ...editingDevice, unit: targetUnit });
+    setDragDeviceId(null);
+    setDragOverUnit(null);
   };
 
   const handleClickUnit = (u: number) => {
@@ -506,11 +565,29 @@ export default function RackDesignerDrawer({ open, onClose, nodeId, nodes, monit
               <div className="flex items-center gap-2">
                 <h2 className="text-[15px] font-semibold text-white/90 leading-none">{rackName}</h2>
               </div>
-              <p className="text-[11px] text-white/40 mt-0.5">
-                {totalUnits}U ·{" "}
-                <span style={{ color: "#fbbf24aa" }}>{usedUnits}U ocupadas</span> ·{" "}
-                <span style={{ color: "#34d399aa" }}>{freeUnits}U libres</span>
-              </p>
+              <div className="flex items-center gap-2 mt-0.5">
+                <p className="text-[11px] text-white/40">
+                  {totalUnits}U ·{" "}
+                  <span style={{ color: "#fbbf24aa" }}>{usedUnits}U ocupadas</span> ·{" "}
+                  <span style={{ color: "#34d399aa" }}>{freeUnits}U libres</span>
+                </p>
+                <button
+                  data-tooltip-id="rack-tip"
+                  data-tooltip-content={showGallery ? "Volver al rack" : `Fotos del rack${rackPhotos.length ? ` (${rackPhotos.length})` : ""}`}
+                  onClick={() => setShowGallery(g => !g)}
+                  className="flex items-center gap-1 px-2 py-0.5 rounded-md transition-all cursor-pointer"
+                  style={{
+                    background: showGallery ? "rgba(168,85,247,0.15)" : "rgba(255,255,255,0.04)",
+                    border: `1px solid ${showGallery ? "rgba(168,85,247,0.3)" : "rgba(255,255,255,0.08)"}`,
+                    color: showGallery ? "#c084fc" : "rgba(255,255,255,0.4)",
+                    fontSize: 10,
+                    fontWeight: 600,
+                  }}
+                >
+                  <ImageIcon style={{ width: 11, height: 11 }} />
+                  {rackPhotos.length > 0 && <span>{rackPhotos.length}</span>}
+                </button>
+              </div>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -665,6 +742,14 @@ export default function RackDesignerDrawer({ open, onClose, nodeId, nodes, monit
                       <div
                         key={u}
                         onClick={() => { setSelectedDeviceId(occ.device.id); setIsAddingNew(false); }}
+                        draggable={!isLocked}
+                        onDragStart={e => {
+                          if (isLocked) { e.preventDefault(); return; }
+                          setDragDeviceId(occ.device.id);
+                          e.dataTransfer.effectAllowed = "move";
+                          e.dataTransfer.setData("text/plain", occ.device.id);
+                        }}
+                        onDragEnd={() => { setDragDeviceId(null); setDragOverUnit(null); }}
                         className="relative w-full flex-shrink-0 cursor-pointer transition-all duration-100"
                         style={{
                           height: `${h}px`,
@@ -673,6 +758,8 @@ export default function RackDesignerDrawer({ open, onClose, nodeId, nodes, monit
                             ? `inset 0 0 0 2px #fff, 0 0 12px ${occ.device.color || meta.color}88`
                             : "inset 0 1px 0 rgba(255,255,255,0.18), inset 0 -1px 0 rgba(0,0,0,0.5)",
                           filter: isSelected ? "brightness(1.15)" : "brightness(1)",
+                          opacity: dragDeviceId === occ.device.id ? 0.4 : 1,
+                          cursor: !isLocked ? "grab" : "pointer",
                         }}
                       >
                         <div className="absolute left-0 top-0 bottom-0 w-[8px]" style={{ background: "#1a1a1a", borderRight: "1px solid #0a0a0a" }} />
@@ -707,17 +794,21 @@ export default function RackDesignerDrawer({ open, onClose, nodeId, nodes, monit
                   return null;
                 }
 
+                const isDragOver = dragOverUnit === u;
                 return (
                   <div
                     key={u}
                     onClick={() => handleClickUnit(u)}
+                    onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; setDragOverUnit(u); }}
+                    onDragLeave={() => { if (dragOverUnit === u) setDragOverUnit(null); }}
+                    onDrop={e => { e.preventDefault(); handleDropDevice(u); }}
                     className="w-full flex-shrink-0 flex items-center cursor-pointer group transition-colors"
-                    style={{ height: "26px", borderBottom: "1px solid #232323", background: "transparent" }}
-                    onMouseEnter={e => (e.currentTarget.style.background = "rgba(255,255,255,0.03)")}
-                    onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
+                    style={{ height: "26px", borderBottom: "1px solid #232323", background: isDragOver ? "rgba(59,130,246,0.15)" : "transparent" }}
+                    onMouseEnter={e => { if (!isDragOver) e.currentTarget.style.background = "rgba(255,255,255,0.03)"; }}
+                    onMouseLeave={e => { if (!isDragOver) e.currentTarget.style.background = "transparent"; }}
                   >
                     <div className="w-[8px] h-full shrink-0" style={{ background: "#1a1a1a", borderRight: "1px solid #0a0a0a" }} />
-                    <span className="text-[9px] text-white/15 font-mono flex-1 text-center group-hover:text-white/35 transition-colors select-none">{u}</span>
+                    <span className="text-[9px] font-mono flex-1 text-center group-hover:text-white/35 transition-colors select-none" style={{ color: isDragOver ? "#60a5fa" : "rgba(255,255,255,0.15)" }}>{u}</span>
                     <div className="w-[8px] h-full shrink-0" style={{ background: "#1a1a1a", borderLeft: "1px solid #0a0a0a" }} />
                   </div>
                 );
@@ -728,10 +819,176 @@ export default function RackDesignerDrawer({ open, onClose, nodeId, nodes, monit
             </div>
           </motion.div>
 
+          {/* Hidden photo input */}
+          <input ref={photoInputRef} type="file" accept="image/*" multiple className="hidden" onChange={handleAddPhoto} />
+
           {/* ── Right panel ── */}
           <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
             <AnimatePresence mode="wait">
-              {editingDevice ? (
+              {showGallery ? (
+                <motion.div
+                  key="gallery"
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.95 }}
+                  transition={{ duration: 0.25, ease: "easeOut" }}
+                  className="flex-1 flex flex-col min-h-0"
+                >
+                  {/* Gallery header */}
+                  <div className="shrink-0 flex items-center justify-between px-5 py-3 border-b border-white/[0.06]" style={{ background: "rgba(168,85,247,0.04)" }}>
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0" style={{ background: "linear-gradient(135deg,#a855f7,#6366f1)" }}>
+                        <CameraIcon className="w-3.5 h-3.5 text-white" />
+                      </div>
+                      <span className="text-sm font-semibold text-white/80">Fotos del Rack</span>
+                      <span className="text-[11px] text-white/30">{rackPhotos.length} foto{rackPhotos.length !== 1 ? "s" : ""}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {!isLocked && (
+                        <button
+                          onClick={() => photoInputRef.current?.click()}
+                          className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg font-medium transition-all cursor-pointer"
+                          style={{ background: "rgba(168,85,247,0.15)", color: "#c084fc", border: "1px solid rgba(168,85,247,0.3)" }}
+                        >
+                          <Plus className="w-3.5 h-3.5" /> Agregar
+                        </button>
+                      )}
+                      <button onClick={() => setShowGallery(false)} className="text-xs text-white/35 hover:text-white/65 transition-colors cursor-pointer">← Volver</button>
+                    </div>
+                  </div>
+
+                  {/* Gallery content */}
+                  <div className="flex-1 overflow-y-auto rack-scroll p-4">
+                    {rackPhotos.length === 0 ? (
+                      <motion.div
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: 0.1 }}
+                        className="flex flex-col items-center justify-center h-52 gap-3"
+                        style={{ color: "rgba(255,255,255,0.2)" }}
+                      >
+                        <ImageIcon className="w-16 h-16" />
+                        <p className="text-sm text-center">No hay fotos del rack</p>
+                        {!isLocked && (
+                          <button
+                            onClick={() => photoInputRef.current?.click()}
+                            className="flex items-center gap-1.5 px-4 py-2 text-xs rounded-xl font-medium transition-all cursor-pointer mt-2"
+                            style={{ background: "rgba(168,85,247,0.12)", color: "#c084fc", border: "1px solid rgba(168,85,247,0.25)" }}
+                          >
+                            <CameraIcon className="w-4 h-4" /> Subir fotos
+                          </button>
+                        )}
+                      </motion.div>
+                    ) : (
+                      <>
+                        {/* Main photo viewer */}
+                        <AnimatePresence mode="wait">
+                          <motion.div
+                            key={galleryIndex}
+                            initial={{ opacity: 0, scale: 0.92, rotateY: -8 }}
+                            animate={{ opacity: 1, scale: 1, rotateY: 0 }}
+                            exit={{ opacity: 0, scale: 0.92, rotateY: 8 }}
+                            transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+                            className="relative rounded-xl overflow-hidden mb-3"
+                            style={{
+                              background: "#000",
+                              boxShadow: "0 16px 60px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.06)",
+                              aspectRatio: "16/10",
+                            }}
+                          >
+                            <img
+                              src={rackPhotos[galleryIndex]}
+                              alt={`Rack foto ${galleryIndex + 1}`}
+                              style={{ width: "100%", height: "100%", objectFit: "contain" }}
+                            />
+                            {/* Photo overlay controls */}
+                            <div className="absolute top-2 right-2 flex gap-1.5">
+                              <span className="px-2 py-0.5 rounded-md text-[10px] font-bold" style={{ background: "rgba(0,0,0,0.7)", color: "#fff", backdropFilter: "blur(8px)" }}>
+                                {galleryIndex + 1} / {rackPhotos.length}
+                              </span>
+                            </div>
+                            {/* Prev/Next overlay arrows */}
+                            {rackPhotos.length > 1 && (
+                              <>
+                                <button
+                                  onClick={() => setGalleryIndex(i => (i - 1 + rackPhotos.length) % rackPhotos.length)}
+                                  className="absolute left-2 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full flex items-center justify-center cursor-pointer transition-all"
+                                  style={{ background: "rgba(0,0,0,0.6)", color: "#fff", backdropFilter: "blur(4px)", border: "1px solid rgba(255,255,255,0.1)" }}
+                                >
+                                  <ChevronLeft className="w-4 h-4" />
+                                </button>
+                                <button
+                                  onClick={() => setGalleryIndex(i => (i + 1) % rackPhotos.length)}
+                                  className="absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full flex items-center justify-center cursor-pointer transition-all"
+                                  style={{ background: "rgba(0,0,0,0.6)", color: "#fff", backdropFilter: "blur(4px)", border: "1px solid rgba(255,255,255,0.1)" }}
+                                >
+                                  <ChevronRight className="w-4 h-4" />
+                                </button>
+                              </>
+                            )}
+                          </motion.div>
+                        </AnimatePresence>
+
+                        {/* Thumbnail strip */}
+                        <div className="flex gap-2 overflow-x-auto pb-2 rack-scroll">
+                          {rackPhotos.map((photo, idx) => (
+                            <motion.div
+                              key={idx}
+                              initial={{ opacity: 0, scale: 0.8 }}
+                              animate={{ opacity: 1, scale: 1 }}
+                              transition={{ delay: idx * 0.05, duration: 0.2 }}
+                              className="relative shrink-0 rounded-lg overflow-hidden cursor-pointer group"
+                              style={{
+                                width: 72,
+                                height: 54,
+                                border: galleryIndex === idx ? "2px solid #a855f7" : "2px solid rgba(255,255,255,0.06)",
+                                boxShadow: galleryIndex === idx ? "0 0 12px rgba(168,85,247,0.3)" : "none",
+                              }}
+                              onClick={() => setGalleryIndex(idx)}
+                            >
+                              <img src={photo} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                              {/* Delete overlay on hover */}
+                              {!isLocked && (
+                                <div
+                                  className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                                  style={{ background: "rgba(0,0,0,0.65)" }}
+                                >
+                                  <button
+                                    onClick={e => { e.stopPropagation(); handleDeletePhoto(idx); }}
+                                    className="w-6 h-6 rounded-full flex items-center justify-center cursor-pointer"
+                                    style={{ background: "rgba(239,68,68,0.8)", color: "#fff" }}
+                                  >
+                                    <Trash2 className="w-3 h-3" />
+                                  </button>
+                                </div>
+                              )}
+                            </motion.div>
+                          ))}
+                          {/* Add photo thumbnail */}
+                          {!isLocked && (
+                            <motion.button
+                              initial={{ opacity: 0, scale: 0.8 }}
+                              animate={{ opacity: 1, scale: 1 }}
+                              transition={{ delay: rackPhotos.length * 0.05 }}
+                              onClick={() => photoInputRef.current?.click()}
+                              className="shrink-0 rounded-lg flex items-center justify-center cursor-pointer transition-all"
+                              style={{
+                                width: 72,
+                                height: 54,
+                                border: "2px dashed rgba(168,85,247,0.3)",
+                                background: "rgba(168,85,247,0.05)",
+                                color: "#a855f7",
+                              }}
+                            >
+                              <Plus className="w-5 h-5" />
+                            </motion.button>
+                          )}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </motion.div>
+              ) : editingDevice ? (
                 <DeviceEditor
                   key="editor"
                   device={editingDevice}
@@ -1269,6 +1526,14 @@ function DeviceEditor({
         </div>
       </div>
 
+      {/* Lock banner */}
+      {isLocked && (
+        <div className="shrink-0 flex items-center justify-center gap-2 py-1.5" style={{ background: "rgba(251,191,36,0.06)", borderBottom: "1px solid rgba(251,191,36,0.15)" }}>
+          <Lock className="w-3 h-3" style={{ color: "#fbbf24" }} />
+          <span style={{ fontSize: 10, color: "#fbbf24", fontWeight: 600, letterSpacing: "0.04em" }}>Modo lectura — desbloquea el candado para editar</span>
+        </div>
+      )}
+
       {/* Tab bar */}
       {hasPorts && (
         <div className="shrink-0 flex border-b border-white/[0.06]" style={{ background: "rgba(0,0,0,0.2)" }}>
@@ -1293,7 +1558,7 @@ function DeviceEditor({
       )}
 
       {/* Scrollable content */}
-      <div className="flex-1 overflow-y-auto rack-scroll p-5 flex flex-col gap-5">
+      <div className="flex-1 overflow-y-auto rack-scroll p-5 flex flex-col gap-5" style={isLocked ? { pointerEvents: "none", opacity: 0.6, filter: "saturate(0.6)" } : undefined}>
         {/* Ports tab */}
         {activeTab === "ports" && device.type === "patchpanel" && (
           <PatchPanelEditor
@@ -1321,24 +1586,24 @@ function DeviceEditor({
             <div className="grid grid-cols-2 gap-3 -mt-2">
               <div style={{ gridColumn: "span 2" }}>
                 <FieldLabel>Nombre</FieldLabel>
-                <input type="text" value={device.label} onChange={e => onChange({ ...device, label: e.target.value })} style={fieldStyle} />
+                <input type="text" value={device.label} onChange={e => onChange({ ...device, label: e.target.value })} disabled={isLocked} style={{ ...fieldStyle, opacity: isLocked ? 0.5 : 1 }} />
               </div>
               <div>
                 <FieldLabel>Tipo</FieldLabel>
-                <select value={device.type} onChange={e => handleTypeChange(e.target.value as RackDevice["type"])} style={fieldStyle}>
+                <select value={device.type} onChange={e => handleTypeChange(e.target.value as RackDevice["type"])} disabled={isLocked} style={{ ...fieldStyle, opacity: isLocked ? 0.5 : 1 }}>
                   {Object.entries(TYPE_META).map(([k, v]) => (<option key={k} value={k} style={{ background: "#1a1a1a" }}>{v.label}</option>))}
                 </select>
               </div>
               <div>
                 <FieldLabel>Color</FieldLabel>
                 <div className="flex items-center gap-2">
-                  <input type="color" value={device.color || meta.color} onChange={e => onChange({ ...device, color: e.target.value })} className="w-10 h-9 rounded-lg border border-white/10 cursor-pointer p-0.5" style={{ background: "rgba(255,255,255,0.05)" }} />
+                  <input type="color" value={device.color || meta.color} onChange={e => onChange({ ...device, color: e.target.value })} disabled={isLocked} className="w-10 h-9 rounded-lg border border-white/10 cursor-pointer p-0.5 disabled:opacity-40 disabled:cursor-not-allowed" style={{ background: "rgba(255,255,255,0.05)" }} />
                   <span className="text-[11px] text-white/35 font-mono">{device.color || meta.color}</span>
                 </div>
               </div>
               <div>
                 <FieldLabel>Modelo</FieldLabel>
-                <input type="text" value={device.model || ""} onChange={e => onChange({ ...device, model: e.target.value })} placeholder="ej. Cisco SG350-28P" style={fieldStyle} />
+                <input type="text" value={device.model || ""} onChange={e => onChange({ ...device, model: e.target.value })} placeholder="ej. Cisco SG350-28P" disabled={isLocked} style={{ ...fieldStyle, opacity: isLocked ? 0.5 : 1 }} />
               </div>
               <div>
                 <FieldLabel>Número de Serie</FieldLabel>
@@ -1347,7 +1612,7 @@ function DeviceEditor({
               {showManagementIp && (
                 <div style={{ gridColumn: "span 2" }}>
                   <FieldLabel>IP de Gestión</FieldLabel>
-                  <input type="text" value={device.managementIp || ""} onChange={e => onChange({ ...device, managementIp: e.target.value })} placeholder="192.168.1.1" style={{ ...fieldStyle, fontFamily: "monospace" }} />
+                  <input type="text" value={device.managementIp || ""} onChange={e => onChange({ ...device, managementIp: e.target.value })} placeholder="192.168.1.1" disabled={isLocked} style={{ ...fieldStyle, fontFamily: "monospace", opacity: isLocked ? 0.5 : 1 }} />
                 </div>
               )}
             </div>
@@ -1356,16 +1621,16 @@ function DeviceEditor({
             <div className="grid gap-3 -mt-2" style={{ gridTemplateColumns: showPortCount ? "1fr 1fr 1fr" : "1fr 1fr" }}>
               <div>
                 <FieldLabel>Posición (U base)</FieldLabel>
-                <input type="number" min={1} max={totalUnits} value={device.unit} onChange={e => onChange({ ...device, unit: parseInt(e.target.value) || 1 })} style={{ ...fieldStyle, fontFamily: "monospace" }} />
+                <input type="number" min={1} max={totalUnits} value={device.unit} onChange={e => onChange({ ...device, unit: parseInt(e.target.value) || 1 })} disabled={isLocked} style={{ ...fieldStyle, fontFamily: "monospace", opacity: isLocked ? 0.5 : 1 }} />
               </div>
               <div>
                 <FieldLabel>Alto (U)</FieldLabel>
-                <input type="number" min={1} max={totalUnits - device.unit + 1} value={device.sizeUnits} onChange={e => onChange({ ...device, sizeUnits: parseInt(e.target.value) || 1 })} style={{ ...fieldStyle, fontFamily: "monospace" }} />
+                <input type="number" min={1} max={totalUnits - device.unit + 1} value={device.sizeUnits} onChange={e => onChange({ ...device, sizeUnits: parseInt(e.target.value) || 1 })} disabled={isLocked} style={{ ...fieldStyle, fontFamily: "monospace", opacity: isLocked ? 0.5 : 1 }} />
               </div>
               {showPortCount && (
                 <div>
                   <FieldLabel>Cant. Puertos</FieldLabel>
-                  <select value={device.portCount || 24} onChange={e => handlePortCountChange(parseInt(e.target.value))} style={fieldStyle}>
+                  <select value={device.portCount || 24} onChange={e => handlePortCountChange(parseInt(e.target.value))} disabled={isLocked} style={{ ...fieldStyle, opacity: isLocked ? 0.5 : 1 }}>
                     {[8, 12, 16, 24, 28, 48, 52].map(n => (<option key={n} value={n} style={{ background: "#1a1a1a" }}>{n} puertos</option>))}
                   </select>
                 </div>
@@ -1483,7 +1748,7 @@ function DeviceEditor({
 
             <SectionHeader title="Notas" />
             <div className="-mt-2">
-              <textarea value={device.notes || ""} onChange={e => onChange({ ...device, notes: e.target.value })} rows={2} placeholder="IP, observaciones, configuración, modelo..." style={{ ...fieldStyle, resize: "none" }} />
+              <textarea value={device.notes || ""} onChange={e => onChange({ ...device, notes: e.target.value })} rows={2} placeholder="IP, observaciones, configuración, modelo..." disabled={isLocked} style={{ ...fieldStyle, resize: "none", opacity: isLocked ? 0.5 : 1 }} />
             </div>
           </>
         )}
@@ -1668,14 +1933,14 @@ function PortTable({
   renderExpansion?: (port: AnyPort) => React.ReactNode;
 }) {
   const isPatch = type === "patch";
-  const colCount = isPatch ? 7 : 8;
+  const colCount = isPatch ? 8 : 8;
   return (
     <div style={{ overflowX: "auto" }}>
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11, minWidth: 480 }}>
         <thead>
           <tr style={{ borderBottom: "1px solid rgba(255,255,255,0.1)" }}>
             {["#", "Estado", "Etiqueta",
-              ...(isPatch ? ["Destino", "Dispositivo", "Cable", "PoE"] : ["Velocidad", "Dispositivo", "VLAN", "PoE", "Uplink"])
+              ...(isPatch ? ["Destino", "Dispositivo", "Metraje", "Cable", "PoE"] : ["Velocidad", "Dispositivo", "VLAN", "PoE", "Uplink"])
             ].map(h => (
               <th key={h} style={{ padding: "6px 10px", textAlign: "left", fontSize: 9, fontWeight: 700, color: "rgba(255,255,255,0.3)", textTransform: "uppercase", letterSpacing: "0.08em" }}>
                 {h}
@@ -1712,9 +1977,9 @@ function PortTable({
                     <>
                       <td style={{ padding: "5px 10px", color: "rgba(255,255,255,0.4)" }}>{pp.destination || "—"}</td>
                       <td style={{ padding: "5px 10px", color: "rgba(255,255,255,0.4)" }}>{pp.connectedDevice || "—"}</td>
+                      <td style={{ padding: "5px 10px", color: "rgba(255,255,255,0.35)", fontFamily: "monospace", fontSize: 10 }}>{pp.cableLength || "—"}</td>
                       <td style={{ padding: "5px 10px" }}>
-                        {pp.cableColor && <span style={{ display: "inline-block", width: 10, height: 10, borderRadius: "50%", background: pp.cableColor, marginRight: 4, verticalAlign: "middle" }} />}
-                        <span style={{ color: "rgba(255,255,255,0.3)", fontFamily: "monospace" }}>{pp.cableLength || "—"}</span>
+                        {pp.cableColor ? <span style={{ display: "inline-block", width: 10, height: 10, borderRadius: "50%", background: pp.cableColor, verticalAlign: "middle", boxShadow: `0 0 4px ${pp.cableColor}66` }} /> : <span style={{ color: "rgba(255,255,255,0.2)" }}>—</span>}
                       </td>
                       <td style={{ padding: "5px 10px", color: pp.isPoe ? "#f59e0b" : "rgba(255,255,255,0.2)" }}>{pp.isPoe ? (pp.poeType || "✓") : "—"}</td>
                     </>

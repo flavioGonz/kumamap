@@ -1992,7 +1992,18 @@ export default function LeafletMapView({
         }
       }
 
-      // Right-click on edge
+      // Invisible wider hit polyline for easier right-click on thin lines
+      const hitLine = L.polyline(linePoints, {
+        color: "transparent", weight: 16, opacity: 0, interactive: true,
+      });
+      hitLine.on("contextmenu", (e: any) => {
+        e.originalEvent.preventDefault();
+        setCtxMenu({ x: e.originalEvent.clientX, y: e.originalEvent.clientY, edgeId: edge.id });
+      });
+      hitLine.addTo(map);
+      polylinesRef.current.set(`${edge.id}-hit`, hitLine);
+
+      // Right-click on edge (visible line)
       line.on("contextmenu", (e: any) => {
         e.originalEvent.preventDefault();
         setCtxMenu({

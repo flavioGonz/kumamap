@@ -95,24 +95,27 @@ export default function AlertManagerPanel({ open, onClose, sidebarWidth, onCount
     onCountChange?.(downCount);
   }, [events, onCountChange]);
 
-  // ── Infinite scroll ──
-  const handleScroll = useCallback(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    if (el.scrollTop + el.clientHeight >= el.scrollHeight - 80) {
-      setVisibleCount(prev => Math.min(prev + PAGE_SIZE, filtered.length));
-    }
-  }, []);
-
-  // Reset visible count on filter change
-  useEffect(() => { setVisibleCount(PAGE_SIZE); }, [filterStatus, searchText, hours]);
-
-  // ── Filter logic ──
+  // ── Filter logic (must be before handleScroll so length is available) ──
   const filtered = events.filter(e => {
     if (filterStatus !== null && e.status !== filterStatus) return false;
     if (searchText && !e.monitorName.toLowerCase().includes(searchText.toLowerCase()) && !e.msg.toLowerCase().includes(searchText.toLowerCase())) return false;
     return true;
   });
+
+  const filteredLenRef = useRef(filtered.length);
+  filteredLenRef.current = filtered.length;
+
+  // ── Infinite scroll ──
+  const handleScroll = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    if (el.scrollTop + el.clientHeight >= el.scrollHeight - 80) {
+      setVisibleCount(prev => Math.min(prev + PAGE_SIZE, filteredLenRef.current));
+    }
+  }, []);
+
+  // Reset visible count on filter change
+  useEffect(() => { setVisibleCount(PAGE_SIZE); }, [filterStatus, searchText, hours]);
 
   const visible = filtered.slice(0, visibleCount);
 

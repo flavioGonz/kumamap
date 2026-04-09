@@ -347,7 +347,7 @@ function exportReportPDF(data: ReportData, hours: number) {
 }
 
 // ── Event Detail Card ─────────────────────────────────────────────
-function EventDetailCard({ event, onBack, onLocate, isOnMap, downtime, allEvents, downtimes, onSelectEvent }: {
+function EventDetailCard({ event, onBack, onLocate, isOnMap, downtime, allEvents, downtimes, onSelectEvent, isAcknowledged, onAcknowledge }: {
   event: TimelineEvent;
   onBack: () => void;
   onLocate: () => void;
@@ -356,6 +356,8 @@ function EventDetailCard({ event, onBack, onLocate, isOnMap, downtime, allEvents
   allEvents: TimelineEvent[];
   downtimes: Map<string, number>;
   onSelectEvent: (ev: TimelineEvent) => void;
+  isAcknowledged: boolean;
+  onAcknowledge: () => void;
 }) {
   const st = STATUS_MAP[event.status] || STATUS_MAP[2];
   const prevSt = STATUS_MAP[event.prevStatus] || STATUS_MAP[2];
@@ -712,6 +714,34 @@ function EventDetailCard({ event, onBack, onLocate, isOnMap, downtime, allEvents
             </div>
           )}
         </div>
+        {/* Acknowledge button */}
+        {event.status === 0 && (
+          <button
+            onClick={onAcknowledge}
+            disabled={isAcknowledged}
+            className="flex items-center justify-center gap-2 h-9 rounded-lg text-[11px] font-semibold transition-all"
+            style={isAcknowledged
+              ? { background: "rgba(34,197,94,0.08)", color: "#4ade8088", border: "1px solid rgba(34,197,94,0.15)", cursor: "default" }
+              : { background: "rgba(245,158,11,0.12)", color: "#fbbf24", border: "1px solid rgba(245,158,11,0.25)" }
+            }
+          >
+            {isAcknowledged ? (
+              <>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M20 6 9 17l-5-5" />
+                </svg>
+                Alerta aceptada
+              </>
+            ) : (
+              <>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><path d="m9 11 3 3L22 4" />
+                </svg>
+                Aceptar alerta
+              </>
+            )}
+          </button>
+        )}
         {/* Export buttons */}
         {reportData && (
           <div className="flex gap-2">
@@ -752,6 +782,14 @@ export default function AlertManagerPanel({ open, onClose, sidebarWidth, onCount
   const [searchText, setSearchText] = useState("");
   const [selectedEvent, setSelectedEvent] = useState<TimelineEvent | null>(null);
   const [filterOnMap, setFilterOnMap] = useState(false);
+  // Acknowledged alerts — persisted in sessionStorage to survive re-renders
+  const [acknowledgedKeys, setAcknowledgedKeys] = useState<Set<string>>(() => {
+    if (typeof window === "undefined") return new Set();
+    try {
+      const stored = sessionStorage.getItem("kumamap-ack-alerts");
+      return stored ? new Set(JSON.parse(stored)) : new Set();
+    } catch { return new Set(); }
+  });
   // Date range filter
   const [useCustomDates, setUseCustomDates] = useState(false);
   const [dateFrom, setDateFrom] = useState("");
@@ -821,11 +859,21 @@ export default function AlertManagerPanel({ open, onClose, sidebarWidth, onCount
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, [open, fetchHours, fetchEvents]);
 
-  // ── Badge count ──
+  // ── Acknowledge handler ──
+  const handleAcknowledge = useCallback((key: string) => {
+    setAcknowledgedKeys(prev => {
+      const next = new Set(prev);
+      next.add(key);
+      try { sessionStorage.setItem("kumamap-ack-alerts", JSON.stringify([...next])); } catch {}
+      return next;
+    });
+  }, []);
+
+  // ── Badge count (excludes acknowledged) ──
   useEffect(() => {
-    const downCount = events.filter(e => e.status === 0).length;
+    const downCount = events.filter(e => e.status === 0 && !acknowledgedKeys.has(`${e.monitorId}-${e.time}`)).length;
     onCountChange?.(downCount);
-  }, [events, onCountChange]);
+  }, [events, onCountChange, acknowledgedKeys]);
 
   // ── Filter logic ──
   const filtered = events.filter(e => {
@@ -915,6 +963,8 @@ export default function AlertManagerPanel({ open, onClose, sidebarWidth, onCount
             setSelectedEvent(ev);
             if (mapMonitorSet.has(ev.monitorId)) onEventClick?.(ev);
           }}
+          isAcknowledged={acknowledgedKeys.has(`${selectedEvent.monitorId}-${selectedEvent.time}`)}
+          onAcknowledge={() => handleAcknowledge(`${selectedEvent.monitorId}-${selectedEvent.time}`)}
         />
         <style>{`
           @keyframes am-spin { to { transform: rotate(360deg); } }
@@ -1150,12 +1200,14 @@ export default function AlertManagerPanel({ open, onClose, sidebarWidth, onCount
           const prevSt = STATUS_MAP[ev.prevStatus] || STATUS_MAP[2];
           const date = new Date(ev.time);
           const isOnMap = mapMonitorSet.has(ev.monitorId);
+          const evKey = `${ev.monitorId}-${ev.time}`;
+          const isAck = acknowledgedKeys.has(evKey);
           return (
             <div
               key={`${ev.monitorId}-${ev.time}-${i}`}
               onClick={() => handleEventSelect(ev)}
               className="group rounded-lg px-3 py-2.5 mb-1 transition-all hover:bg-white/[0.06] cursor-pointer active:scale-[0.99]"
-              style={{ borderLeft: `3px solid ${st.color}`, opacity: isOnMap ? 1 : 0.55 }}
+              style={{ borderLeft: `3px solid ${isAck ? "rgba(255,255,255,0.15)" : st.color}`, opacity: isAck ? 0.45 : isOnMap ? 1 : 0.55 }}
             >
               {/* Top row: monitor name + badges + time ago */}
               <div className="flex items-center justify-between mb-1">
@@ -1163,6 +1215,16 @@ export default function AlertManagerPanel({ open, onClose, sidebarWidth, onCount
                   <span className="text-[11px] font-semibold text-white/85 truncate max-w-[180px]">
                     {ev.monitorName}
                   </span>
+                  {isAck && (
+                    <span
+                      className="shrink-0 flex items-center gap-0.5 text-[7px] font-bold px-1 py-px rounded"
+                      style={{ background: "rgba(34,197,94,0.1)", color: "#4ade80", border: "1px solid rgba(34,197,94,0.15)" }}
+                      title="Alerta aceptada"
+                    >
+                      <svg width="7" height="7" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>
+                      ACK
+                    </span>
+                  )}
                   {!isOnMap && (
                     <span
                       className="shrink-0 text-[7px] font-bold px-1 py-px rounded"
@@ -1260,6 +1322,17 @@ export default function AlertManagerPanel({ open, onClose, sidebarWidth, onCount
               </span>
             );
           })}
+          {(() => {
+            const ackCount = events.filter(e => e.status === 0 && acknowledgedKeys.has(`${e.monitorId}-${e.time}`)).length;
+            return ackCount > 0 ? (
+              <span className="flex items-center gap-1 text-[10px] font-mono" style={{ color: "rgba(74,222,128,0.5)" }}>
+                <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M20 6 9 17l-5-5" />
+                </svg>
+                {ackCount}
+              </span>
+            ) : null;
+          })()}
           {mapMonitorSet.size > 0 && (
             <span className="flex items-center gap-1 text-[10px] font-mono" style={{ color: "rgba(96,165,250,0.6)" }}>
               <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -1284,7 +1357,7 @@ export default function AlertManagerPanel({ open, onClose, sidebarWidth, onCount
   );
 }
 
-// ── Standalone hook for badge count ──
+// ── Standalone hook for badge count (respects acknowledged alerts) ──
 export function useAlertCount(pollMs = 60000) {
   const [count, setCount] = useState(0);
 
@@ -1295,13 +1368,22 @@ export function useAlertCount(pollMs = 60000) {
         const res = await fetch(apiUrl("/api/kuma/timeline?hours=24"));
         const data = await res.json();
         if (!alive) return;
-        const downEvents = (data.events || []).filter((e: any) => e.status === 0).length;
+        // Read acknowledged keys from sessionStorage
+        let ackSet = new Set<string>();
+        try {
+          const stored = sessionStorage.getItem("kumamap-ack-alerts");
+          if (stored) ackSet = new Set(JSON.parse(stored));
+        } catch {}
+        const downEvents = (data.events || []).filter((e: any) => e.status === 0 && !ackSet.has(`${e.monitorId}-${e.time}`)).length;
         setCount(downEvents);
       } catch { /* ignore */ }
     }
     poll();
     const id = setInterval(poll, pollMs);
-    return () => { alive = false; clearInterval(id); };
+    // Also listen for sessionStorage changes (when user acks inside the panel)
+    const onStorage = () => poll();
+    window.addEventListener("storage", onStorage);
+    return () => { alive = false; clearInterval(id); window.removeEventListener("storage", onStorage); };
   }, [pollMs]);
 
   return count;

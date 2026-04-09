@@ -371,10 +371,14 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
           <div className="absolute inset-0 flex flex-col justify-between pointer-events-none py-1">
             {Array.from({ length: 5 }, (_, i) => {
               const t = new Date(timeStart.getTime() + (i / 4) * rangeMs);
+              const showDate = i === 0 || i === 4 || rangeMs > 86400000;
               return (
                 <div key={i} className="relative">
                   <div className="absolute left-0 right-0 h-px" style={{ background: "rgba(255,255,255,0.03)" }} />
-                  <span className="absolute left-1/2 -translate-x-1/2 text-[6px] text-[#333] font-mono">{t.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
+                  <span className="absolute left-1/2 -translate-x-1/2 text-[6px] text-[#333] font-mono whitespace-nowrap">
+                    {t.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                    {showDate && <span className="text-[#2a2a2a] ml-0.5">{t.toLocaleDateString("es-UY", { day: "2-digit", month: "2-digit" })}</span>}
+                  </span>
                 </div>
               );
             })}
@@ -394,7 +398,12 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
               {!isLive && (
                 <div className="absolute left-[64px] -top-3.5 rounded-xl px-2.5 py-1 text-[10px] font-mono font-bold whitespace-nowrap"
                   style={{ background: "rgba(8,8,8,0.95)", border: "1px solid rgba(59,130,246,0.3)", color: "#60a5fa", boxShadow: "0 4px 16px rgba(0,0,0,0.5)" }}>
-                  {currentTime?.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+                  <span>{currentTime?.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</span>
+                  {currentTime && (
+                    <span className="ml-1.5 text-[8px] text-white/30">
+                      {currentTime.toLocaleDateString("es-UY", { day: "2-digit", month: "2-digit" })}
+                    </span>
+                  )}
                   {downCount > 0 && <span className="ml-1.5 text-red-400 font-bold">{downCount}↓</span>}
                 </div>
               )}
@@ -445,9 +454,16 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
             )}
           </button>
 
-          {/* LIVE indicator */}
-          <div className="text-[9px] font-mono font-black mt-1" style={{ color: isLive ? "#4ade80" : useCustomRange ? "#a855f7" : "#60a5fa" }}>
-            {isLive ? "LIVE" : currentTime?.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) || "▶"}
+          {/* LIVE / current time indicator */}
+          <div className="text-center font-mono font-black mt-1" style={{ color: isLive ? "#4ade80" : useCustomRange ? "#a855f7" : "#60a5fa", lineHeight: 1.2 }}>
+            <div className="text-[9px]">
+              {isLive ? "LIVE" : currentTime?.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) || "▶"}
+            </div>
+            {!isLive && currentTime && (
+              <div className="text-[7px] opacity-50">
+                {currentTime.toLocaleDateString("es-UY", { day: "2-digit", month: "2-digit" })}
+              </div>
+            )}
           </div>
         </div>
       </div>

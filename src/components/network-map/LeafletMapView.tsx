@@ -41,7 +41,7 @@ import { iconSvgPaths, getIconSvg, createMarkerIcon } from "@/utils/map-icons";
 import { exportMapPng, printMap, exportNodesXlsx } from "@/utils/map-export";
 import MapClock from "./MapClock";
 import VisualizationPanel from "./VisualizationPanel";
-import AlertManagerPanel, { useAlertCount } from "./AlertManagerPanel";
+import AlertManagerPanel, { useAlertCount, type TimelineEvent } from "./AlertManagerPanel";
 import FOVColorPickerModal from "./FOVColorPickerModal";
 import LensPickerModal from "./LensPickerModal";
 import NewMonitorModal from "./NewMonitorModal";
@@ -424,6 +424,13 @@ export default function LeafletMapView({
   const [editMode, setEditMode] = useState(false);
   const [eventDetail, setEventDetail] = useState<{ nodeLabel: string; monitorId: number; msg: string; time: Date; type: string; ping: number | null; status: number } | null>(null);
 
+  // Alert event tooltip state (shown when clicking an event in AlertManager)
+  const [alertTooltip, setAlertTooltip] = useState<{
+    event: TimelineEvent;
+    screenX: number;
+    screenY: number;
+  } | null>(null);
+
   // Context menu state
   const [ctxMenu, setCtxMenu] = useState<{
     x: number;
@@ -754,6 +761,93 @@ export default function LeafletMapView({
       setTimeout(() => { try { map.removeLayer(popup); failPopupsRef.current.delete(node.id); } catch {} }, 8000);
     }, 300);
   }, [kumaMonitors]);
+
+  // Handler for clicking an event in AlertManagerPanel
+  const handleAlertEventClick = useCallback((ev: TimelineEvent) => {
+    const node = nodesRef.current.find(n => n.kuma_monitor_id === ev.monitorId);
+    if (!mapRef.current || !LRef.current) return;
+    const L = LRef.current;
+    const map = mapRef.current;
+    const isDown = ev.status === 0;
+    const flashColor = isDown ? "#ef4444" : "#22c55e";
+
+    // If node found on map, fly to it
+    if (node) {
+      const nodeLatLng = L.latLng(node.x, node.y);
+      const bounds = map.getBounds();
+      if (!bounds.contains(nodeLatLng)) {
+        map.flyTo(nodeLatLng, Math.max(map.getZoom(), 16), { animate: true, duration: 0.8 });
+      }
+
+      // Flash marker
+      const marker = markersRef.current.get(node.id);
+      if (marker?.getElement()) {
+        const el = marker.getElement();
+        el.style.filter = `drop-shadow(0 0 20px ${flashColor}) drop-shadow(0 0 40px ${flashColor}) brightness(1.8)`;
+        el.style.transition = "filter 0.2s";
+        el.classList.add("node-vibrate");
+        setTimeout(() => { el.style.filter = `drop-shadow(0 0 10px ${flashColor}) brightness(1.2)`; el.style.transition = "filter 1.5s"; }, 1500);
+        setTimeout(() => { el.style.filter = ""; el.style.transition = "filter 1s"; el.classList.remove("node-vibrate"); }, 4000);
+      }
+
+      // Pulse ring
+      const ring = L.circleMarker(nodeLatLng, {
+        radius: 8, color: flashColor, fillColor: flashColor,
+        fillOpacity: 0.3, weight: 2, opacity: 0.7,
+      }).addTo(map);
+      let r = 8;
+      const iv = setInterval(() => {
+        r += 1.5;
+        ring.setRadius(r);
+        ring.setStyle({ opacity: Math.max(0, 0.7 - r / 50), fillOpacity: Math.max(0, 0.3 - r / 70) });
+        if (r > 45) { clearInterval(iv); try { map.removeLayer(ring); } catch {} }
+      }, 30);
+
+      // Show event tooltip popup on the node
+      setTimeout(() => {
+        const existing = failPopupsRef.current.get(`alert-${ev.monitorId}`);
+        if (existing) { try { map.removeLayer(existing); } catch {} }
+
+        const statusLabel = isDown ? "▼ CAÍDO" : ev.status === 1 ? "▲ ACTIVO" : ev.status === 2 ? "● PENDIENTE" : "◆ MANT.";
+        const bgGrad = isDown ? "linear-gradient(135deg,#dc2626,#991b1b)" : "linear-gradient(135deg,#16a34a,#15803d)";
+        const borderColor = isDown ? "#fca5a5" : "#86efac";
+        const shadowColor = isDown ? "rgba(239,68,68" : "rgba(34,197,94";
+        const evDate = new Date(ev.time);
+        const timeStr = evDate.toLocaleString("es-UY", { day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit", second:"2-digit" });
+
+        const popup = L.popup({
+          closeButton: true, autoClose: false, closeOnClick: true,
+          className: "fail-popup-tm", offset: [0, -22], autoPan: false,
+        })
+          .setLatLng(nodeLatLng)
+          .setContent(`
+            <div style="background:${bgGrad};border:2px solid ${borderColor};border-radius:14px;padding:10px 16px;min-width:180px;max-width:260px;box-shadow:0 8px 32px ${shadowColor},0.4),0 0 40px ${shadowColor},0.15);animation:failPopupIn 0.4s cubic-bezier(0.34,1.56,0.64,1);">
+              <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+                <div style="width:28px;height:28px;border-radius:8px;background:rgba(255,255,255,0.15);display:flex;align-items:center;justify-content:center;">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" /><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />
+                  </svg>
+                </div>
+                <div>
+                  <div style="color:white;font-size:13px;font-weight:800;text-shadow:0 1px 2px rgba(0,0,0,0.3);">${ev.monitorName}</div>
+                  <div style="color:rgba(255,255,255,0.8);font-size:10px;font-weight:700;letter-spacing:0.05em;">${statusLabel}</div>
+                </div>
+              </div>
+              <div style="color:rgba(255,255,255,0.6);font-size:9px;font-family:monospace;margin-bottom:4px;">
+                🕐 ${timeStr}
+              </div>
+              ${ev.msg ? `<div style="color:rgba(255,255,255,0.55);font-size:9px;word-break:break-word;line-height:1.3;">${ev.msg.substring(0, 120)}${ev.msg.length > 120 ? "…" : ""}</div>` : ""}
+              ${ev.ping != null && ev.ping > 0 ? `<div style="color:rgba(255,255,255,0.4);font-size:9px;margin-top:3px;font-family:monospace;">ping: ${ev.ping}ms</div>` : ""}
+            </div>
+          `);
+        popup.addTo(map);
+        failPopupsRef.current.set(`alert-${ev.monitorId}`, popup);
+
+        // Auto-remove after 12s
+        setTimeout(() => { try { map.removeLayer(popup); failPopupsRef.current.delete(`alert-${ev.monitorId}`); } catch {} }, 12000);
+      }, 400);
+    }
+  }, [kumaMonitors, readonly]);
 
   const handleTimeMachineChange = useCallback((time: Date | null, statuses: Map<number, number>) => {
     setTimeMachineTime(time);
@@ -4042,6 +4136,7 @@ export default function LeafletMapView({
         open={alertOpen}
         onClose={() => setAlertOpen(false)}
         sidebarWidth={sidebarWidth}
+        onEventClick={handleAlertEventClick}
       />
 
       {/* Link Modal */}

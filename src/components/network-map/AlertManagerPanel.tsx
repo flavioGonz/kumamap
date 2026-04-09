@@ -4,7 +4,7 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import { apiUrl } from "@/lib/api";
 
 // ── Types ──────────────────────────────────────────────────────────
-interface TimelineEvent {
+export interface TimelineEvent {
   monitorId: number;
   monitorName: string;
   time: string;
@@ -20,6 +20,8 @@ interface AlertManagerPanelProps {
   sidebarWidth: number;
   /** Current count callback — parent uses it for the badge */
   onCountChange?: (count: number) => void;
+  /** Called when user clicks an event — parent should locate the sensor on the map */
+  onEventClick?: (event: TimelineEvent) => void;
 }
 
 // ── Helpers ────────────────────────────────────────────────────────
@@ -54,7 +56,7 @@ const PAGE_SIZE = 50;
 const POLL_INTERVAL = 30000; // 30s
 
 // ── Component ──────────────────────────────────────────────────────
-export default function AlertManagerPanel({ open, onClose, sidebarWidth, onCountChange }: AlertManagerPanelProps) {
+export default function AlertManagerPanel({ open, onClose, sidebarWidth, onCountChange, onEventClick }: AlertManagerPanelProps) {
   const [events, setEvents] = useState<TimelineEvent[]>([]);
   const [loading, setLoading] = useState(false);
   const [hours, setHours] = useState(24);
@@ -240,7 +242,8 @@ export default function AlertManagerPanel({ open, onClose, sidebarWidth, onCount
           return (
             <div
               key={`${ev.monitorId}-${ev.time}-${i}`}
-              className="group rounded-lg px-3 py-2.5 mb-1 transition-all hover:bg-white/[0.03] cursor-default"
+              onClick={() => onEventClick?.(ev)}
+              className="group rounded-lg px-3 py-2.5 mb-1 transition-all hover:bg-white/[0.06] cursor-pointer active:scale-[0.99]"
               style={{ borderLeft: `3px solid ${st.color}` }}
             >
               {/* Top row: monitor name + time ago */}

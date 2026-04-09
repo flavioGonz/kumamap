@@ -504,6 +504,7 @@ export default function LeafletMapView({
   const [timeMachineOpen, setTimeMachineOpen] = useState(false);
   const [timeMachineTime, setTimeMachineTime] = useState<Date | null>(null);
   const [tmFocusMonitorId, setTmFocusMonitorId] = useState<number | null>(null);
+  const [tmJumpTo, setTmJumpTo] = useState<{ time: Date; monitorId: number } | null>(null);
   // Compute monitor IDs for nodes on THIS map — used by TimeMachine to filter events
   const [mapMonitorIdsVersion, setMapMonitorIdsVersion] = useState(0);
   const mapMonitorIds = useMemo(() => {
@@ -770,6 +771,11 @@ export default function LeafletMapView({
     const map = mapRef.current;
     const isDown = ev.status === 0;
     const flashColor = isDown ? "#ef4444" : "#22c55e";
+
+    // Open Time Machine and jump to event time
+    setTimeMachineOpen(true);
+    setTmFocusMonitorId(ev.monitorId);
+    setTmJumpTo({ time: new Date(ev.time), monitorId: ev.monitorId });
 
     // If node found on map, fly to it
     if (node) {
@@ -4501,6 +4507,7 @@ export default function LeafletMapView({
         onDragging={handleTimeDragging}
         mapMonitorIds={mapMonitorIds}
         initialFocusMonitorId={tmFocusMonitorId}
+        jumpTo={tmJumpTo}
         onFocusEvent={handleTimeMachineFocusEvent}
         onTimeChange={handleTimeMachineChange}
         monitors={kumaMonitors.map((m) => ({

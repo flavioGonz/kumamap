@@ -55,6 +55,86 @@ function formatTime(date: Date): string {
 const PAGE_SIZE = 50;
 const POLL_INTERVAL = 30000; // 30s
 
+// ── Time-range dropdown (dark themed) ─────────────────────────────
+const TIME_OPTIONS = [
+  { value: 1, label: "1h" },
+  { value: 6, label: "6h" },
+  { value: 24, label: "24h" },
+  { value: 72, label: "3 días" },
+  { value: 168, label: "7 días" },
+  { value: 720, label: "30 días" },
+];
+
+function TimeRangeDropdown({ value, onChange }: { value: number; onChange: (v: number) => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  const current = TIME_OPTIONS.find(o => o.value === value) || TIME_OPTIONS[2];
+
+  return (
+    <div ref={ref} style={{ position: "relative" }}>
+      <button
+        onClick={() => setOpen(v => !v)}
+        className="flex items-center gap-1 text-[10px] font-medium rounded px-2 py-0.5 cursor-pointer transition-all"
+        style={{
+          background: open ? "rgba(99,102,241,0.15)" : "rgba(255,255,255,0.06)",
+          border: `1px solid ${open ? "rgba(99,102,241,0.4)" : "rgba(255,255,255,0.08)"}`,
+          color: open ? "#a5b4fc" : "rgba(255,255,255,0.5)",
+        }}
+      >
+        {current.label}
+        <svg width="8" height="8" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+          style={{ transform: open ? "rotate(180deg)" : "none", transition: "transform 0.15s" }}>
+          <path d="M3 5l3 3 3-3" />
+        </svg>
+      </button>
+      {open && (
+        <div
+          style={{
+            position: "absolute", top: "calc(100% + 4px)", right: 0, zIndex: 50,
+            background: "linear-gradient(180deg, #1e1e2e 0%, #181825 100%)",
+            border: "1px solid rgba(255,255,255,0.1)",
+            borderRadius: 8, padding: "4px 0", minWidth: 90,
+            boxShadow: "0 8px 24px rgba(0,0,0,0.5)",
+            animation: "am-fadeSlide 0.15s ease-out",
+          }}
+        >
+          {TIME_OPTIONS.map(opt => (
+            <button
+              key={opt.value}
+              onClick={() => { onChange(opt.value); setOpen(false); }}
+              className="w-full text-left px-3 py-1.5 text-[11px] font-medium transition-all"
+              style={{
+                background: opt.value === value ? "rgba(99,102,241,0.12)" : "transparent",
+                color: opt.value === value ? "#a5b4fc" : "rgba(255,255,255,0.55)",
+                display: "flex", alignItems: "center", justifyContent: "space-between",
+              }}
+              onMouseEnter={e => { if (opt.value !== value) (e.target as HTMLElement).style.background = "rgba(255,255,255,0.05)"; }}
+              onMouseLeave={e => { if (opt.value !== value) (e.target as HTMLElement).style.background = "transparent"; }}
+            >
+              <span>{opt.label}</span>
+              {opt.value === value && (
+                <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="#a5b4fc" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M2 8.5l4 4 8-9" />
+                </svg>
+              )}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Component ──────────────────────────────────────────────────────
 export default function AlertManagerPanel({ open, onClose, sidebarWidth, onCountChange, onEventClick }: AlertManagerPanelProps) {
   const [events, setEvents] = useState<TimelineEvent[]>([]);
@@ -194,19 +274,7 @@ export default function AlertManagerPanel({ open, onClose, sidebarWidth, onCount
             </button>
           ))}
           <div className="flex-1" />
-          <select
-            value={hours}
-            onChange={e => setHours(Number(e.target.value))}
-            className="text-[10px] text-white/50 rounded px-1 py-0.5 outline-none cursor-pointer"
-            style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.08)" }}
-          >
-            <option value={1}>1h</option>
-            <option value={6}>6h</option>
-            <option value={24}>24h</option>
-            <option value={72}>3 días</option>
-            <option value={168}>7 días</option>
-            <option value={720}>30 días</option>
-          </select>
+          <TimeRangeDropdown value={hours} onChange={setHours} />
         </div>
       </div>
 
@@ -319,7 +387,10 @@ export default function AlertManagerPanel({ open, onClose, sidebarWidth, onCount
         </span>
       </div>
 
-      <style>{`@keyframes am-spin { to { transform: rotate(360deg); } }`}</style>
+      <style>{`
+        @keyframes am-spin { to { transform: rotate(360deg); } }
+        @keyframes am-fadeSlide { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
+      `}</style>
     </div>
   );
 }

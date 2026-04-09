@@ -25,9 +25,11 @@ interface TimeMachineProps {
   monitors: MonitorInfo[];
   mapMonitorIds?: number[];
   initialFocusMonitorId?: number | null;
+  /** External jump-to: { time, monitorId } — TimeMachine will set range, position & focus */
+  jumpTo?: { time: Date; monitorId: number } | null;
 }
 
-export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, onFocusEvent, monitors, mapMonitorIds, initialFocusMonitorId }: TimeMachineProps) {
+export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, onFocusEvent, monitors, mapMonitorIds, initialFocusMonitorId, jumpTo }: TimeMachineProps) {
   const [allEvents, setAllEvents] = useState<TimelineEvent[]>([]);
   const [statusChanges, setStatusChanges] = useState<Record<number, Array<{ t: number; s: number }>>>({});
   const [position, setPosition] = useState(1);
@@ -52,6 +54,36 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
       setFocusMonitorId(initialFocusMonitorId);
     }
   }, [initialFocusMonitorId]);
+
+  // External jumpTo — Alert Manager sends { time, monitorId }
+  const lastJumpRef = useRef<string>("");
+  useEffect(() => {
+    if (!jumpTo) return;
+    const key = `${jumpTo.monitorId}-${jumpTo.time.getTime()}`;
+    if (key === lastJumpRef.current) return;
+    lastJumpRef.current = key;
+
+    // Set focus to the specific monitor
+    setFocusMonitorId(jumpTo.monitorId);
+
+    // Compute a range: event time ± 1 hour
+    const evMs = jumpTo.time.getTime();
+    const rangeFrom = new Date(evMs - 3600000);
+    const rangeTo = new Date(evMs + 3600000);
+    setUseCustomRange(true);
+    // format for datetime-local input
+    const fmt = (d: Date) => {
+      const p = (n: number) => String(n).padStart(2, "0");
+      return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+    };
+    setCustomFrom(fmt(rangeFrom));
+    setCustomTo(fmt(rangeTo));
+    // Position at the event time within the range (0.5 = center)
+    const pos = (evMs - rangeFrom.getTime()) / (rangeTo.getTime() - rangeFrom.getTime());
+    setPosition(Math.max(0, Math.min(1, pos)));
+    setPlaying(false);
+    setLoaded(false); // force refetch with new range
+  }, [jumpTo]);
 
   // Stable key for the monitor ID set (avoids unnecessary refetches)
   const mapMonitorKey = useMemo(() => (mapMonitorIds || []).sort().join(","), [mapMonitorIds]);

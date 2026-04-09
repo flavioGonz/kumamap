@@ -57,6 +57,7 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
 
   // External jumpTo — Alert Manager sends { time, monitorId }
   const lastJumpRef = useRef<string>("");
+  const pendingJumpPosRef = useRef<number | null>(null);
   useEffect(() => {
     if (!jumpTo) return;
     const key = `${jumpTo.monitorId}-${jumpTo.time.getTime()}`;
@@ -70,19 +71,43 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
     const evMs = jumpTo.time.getTime();
     const rangeFrom = new Date(evMs - 3600000);
     const rangeTo = new Date(evMs + 3600000);
-    setUseCustomRange(true);
-    // format for datetime-local input
     const fmt = (d: Date) => {
       const p = (n: number) => String(n).padStart(2, "0");
       return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
     };
-    setCustomFrom(fmt(rangeFrom));
-    setCustomTo(fmt(rangeTo));
-    // Position at the event time within the range (0.5 = center)
-    const pos = (evMs - rangeFrom.getTime()) / (rangeTo.getTime() - rangeFrom.getTime());
-    setPosition(Math.max(0, Math.min(1, pos)));
+    const fromStr = fmt(rangeFrom);
+    const toStr = fmt(rangeTo);
+
+    setUseCustomRange(true);
+    setCustomFrom(fromStr);
+    setCustomTo(toStr);
     setPlaying(false);
-    setLoaded(false); // force refetch with new range
+
+    // Calculate target position
+    const pos = Math.max(0, Math.min(1, (evMs - rangeFrom.getTime()) / (rangeTo.getTime() - rangeFrom.getTime())));
+    pendingJumpPosRef.current = pos;
+    setPosition(pos);
+
+    // Directly fetch data with the correct range to avoid timing issues
+    const ids = Array.from(mapMonitorSet).join(",");
+    if (ids) {
+      setLoading(true);
+      const url = apiUrl(`/api/kuma/timeline?from=${encodeURIComponent(fromStr)}&to=${encodeURIComponent(toStr)}&monitorIds=${ids}`);
+      fetch(url)
+        .then(r => r.json())
+        .then(d => {
+          setAllEvents(d.events || []);
+          setStatusChanges(d.statusChanges || {});
+          setLoading(false);
+          setLoaded(true);
+          // Restore position after data loads (in case anything reset it)
+          if (pendingJumpPosRef.current !== null) {
+            setPosition(pendingJumpPosRef.current);
+            pendingJumpPosRef.current = null;
+          }
+        })
+        .catch(() => { setLoading(false); });
+    }
   }, [jumpTo]);
 
   // Stable key for the monitor ID set (avoids unnecessary refetches)

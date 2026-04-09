@@ -237,6 +237,18 @@ function interpretEvent(ev: TimelineEvent): { translated: string; explanation: s
   };
 }
 
+// ── Severity ──────────────────────────────────────────────────────
+/** Classify downtime severity based on duration.
+ * <5min = "leve" (transient, not a real failure)
+ * >=5min = "grave" (real failure requiring attention)
+ * ongoing = "grave" (still down) */
+function getSeverity(downtimeMs: number | undefined): { level: "leve" | "grave" | "none"; label: string; color: string; bg: string } {
+  if (downtimeMs == null) return { level: "none", label: "", color: "", bg: "" };
+  if (downtimeMs === -1) return { level: "grave", label: "GRAVE", color: "#ef4444", bg: "rgba(239,68,68,0.12)" };
+  if (downtimeMs < 300000) return { level: "leve", label: "LEVE", color: "#f59e0b", bg: "rgba(245,158,11,0.10)" }; // <5min
+  return { level: "grave", label: "GRAVE", color: "#ef4444", bg: "rgba(239,68,68,0.12)" }; // >=5min
+}
+
 // ── Constants ─────────────────────────────────────────────────────
 const PAGE_SIZE = 50;
 const POLL_INTERVAL = 30000;
@@ -251,12 +263,15 @@ const QUICK_RANGES = [
 ];
 
 // ── Event Detail Card ─────────────────────────────────────────────
-function EventDetailCard({ event, onBack, onLocate, isOnMap, downtime }: {
+function EventDetailCard({ event, onBack, onLocate, isOnMap, downtime, allEvents, downtimes, onSelectEvent }: {
   event: TimelineEvent;
   onBack: () => void;
   onLocate: () => void;
   isOnMap: boolean;
   downtime?: number; // ms, -1 = ongoing, undefined = not a down event
+  allEvents: TimelineEvent[];
+  downtimes: Map<string, number>;
+  onSelectEvent: (ev: TimelineEvent) => void;
 }) {
   const st = STATUS_MAP[event.status] || STATUS_MAP[2];
   const prevSt = STATUS_MAP[event.prevStatus] || STATUS_MAP[2];
@@ -329,33 +344,43 @@ function EventDetailCard({ event, onBack, onLocate, isOnMap, downtime }: {
           </div>
           <div className="text-[10px] text-white/30 font-mono">{timeAgo(date)}</div>
 
-          {/* Downtime duration */}
-          {downtime != null && (
-            <div
-              className="flex items-center gap-2 mt-2 rounded-lg px-3 py-2"
-              style={{
-                background: downtime === -1 ? "rgba(239,68,68,0.08)" : "rgba(245,158,11,0.08)",
-                border: `1px solid ${downtime === -1 ? "rgba(239,68,68,0.15)" : "rgba(245,158,11,0.15)"}`,
-              }}
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={downtime === -1 ? "#ef4444" : "#f59e0b"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="10" /><path d="M12 6v6l4 2" />
-              </svg>
-              <div>
-                <div className="text-[11px] font-bold" style={{ color: downtime === -1 ? "#ef4444" : "#f59e0b" }}>
-                  {downtime === -1 ? "Caída en curso" : `Tiempo de caída: ${formatDuration(downtime)}`}
+          {/* Downtime duration + severity */}
+          {downtime != null && (() => {
+            const severity = getSeverity(downtime);
+            return (
+              <div
+                className="flex items-center gap-2 mt-2 rounded-lg px-3 py-2"
+                style={{
+                  background: downtime === -1 ? "rgba(239,68,68,0.08)" : severity.level === "leve" ? "rgba(245,158,11,0.06)" : "rgba(239,68,68,0.08)",
+                  border: `1px solid ${downtime === -1 ? "rgba(239,68,68,0.15)" : severity.level === "leve" ? "rgba(245,158,11,0.12)" : "rgba(239,68,68,0.15)"}`,
+                }}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={severity.color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="10" /><path d="M12 6v6l4 2" />
+                </svg>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] font-bold" style={{ color: severity.color }}>
+                      {downtime === -1 ? "Caída en curso" : `Tiempo de caída: ${formatDuration(downtime)}`}
+                    </span>
+                    <span className="text-[8px] font-black px-1.5 py-0.5 rounded" style={{ background: severity.bg, color: severity.color, border: `1px solid ${severity.color}33` }}>
+                      {severity.label}
+                    </span>
+                  </div>
+                  <div className="text-[9px] text-white/30">
+                    {downtime === -1
+                      ? "El sensor aún no se ha recuperado"
+                      : severity.level === "leve"
+                        ? "Interrupción breve (< 5 min) — probable fluctuación transitoria"
+                        : "Interrupción significativa — requiere atención"}
+                  </div>
                 </div>
-                <div className="text-[9px] text-white/30">
-                  {downtime === -1
-                    ? "El sensor aún no se ha recuperado"
-                    : "Duración total desde la caída hasta la recuperación"}
-                </div>
+                {downtime === -1 && (
+                  <div className="ml-auto h-2 w-2 rounded-full bg-red-500 shrink-0" style={{ animation: "am-pulse 1.5s ease-in-out infinite", boxShadow: "0 0 8px #ef4444" }} />
+                )}
               </div>
-              {downtime === -1 && (
-                <div className="ml-auto h-2 w-2 rounded-full bg-red-500" style={{ animation: "am-pulse 1.5s ease-in-out infinite", boxShadow: "0 0 8px #ef4444" }} />
-              )}
-            </div>
-          )}
+            );
+          })()}
         </div>
       </div>
 
@@ -424,6 +449,86 @@ function EventDetailCard({ event, onBack, onLocate, isOnMap, downtime }: {
             <span className="text-[11px] font-mono text-white/50">#{event.monitorId}</span>
           </div>
         </div>
+
+        {/* ── Vertical timeline of sensor events ── */}
+        {(() => {
+          const sensorEvents = allEvents
+            .filter(e => e.monitorId === event.monitorId)
+            .slice(0, 30); // limit to last 30 events
+          if (sensorEvents.length <= 1) return null;
+          return (
+            <div>
+              <div className="text-[10px] text-white/30 font-semibold uppercase tracking-wider mb-2">
+                Historial del sensor
+                <span className="ml-1.5 text-white/15 normal-case">({sensorEvents.length} eventos)</span>
+              </div>
+              <div className="relative">
+                {/* Vertical line */}
+                <div className="absolute left-[7px] top-2 bottom-2 w-px" style={{ background: "rgba(255,255,255,0.06)" }} />
+                {sensorEvents.map((sev, idx) => {
+                  const sevSt = STATUS_MAP[sev.status] || STATUS_MAP[2];
+                  const sevDate = new Date(sev.time);
+                  const isCurrent = sev.time === event.time && sev.status === event.status;
+                  const sevKey = `${sev.monitorId}-${sev.time}`;
+                  const sevDt = sev.status === 0 ? downtimes.get(sevKey) : undefined;
+                  const severity = sevDt != null ? getSeverity(sevDt) : null;
+                  return (
+                    <div
+                      key={`${sev.time}-${idx}`}
+                      className={`relative flex items-start gap-2.5 py-1.5 pl-0 rounded-md transition-all ${isCurrent ? "" : "cursor-pointer hover:bg-white/[0.04]"}`}
+                      onClick={() => { if (!isCurrent) onSelectEvent(sev); }}
+                      style={{ opacity: isCurrent ? 1 : 0.7 }}
+                    >
+                      {/* Dot on the timeline */}
+                      <div
+                        className="relative shrink-0 mt-0.5 rounded-full z-10"
+                        style={{
+                          width: isCurrent ? 15 : 11,
+                          height: isCurrent ? 15 : 11,
+                          background: isCurrent ? sevSt.color : `${sevSt.color}88`,
+                          boxShadow: isCurrent ? `0 0 10px ${sevSt.color}` : "none",
+                          border: isCurrent ? `2px solid ${sevSt.color}` : "none",
+                        }}
+                      />
+                      {/* Content */}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded" style={{ color: sevSt.color, background: sevSt.bg }}>
+                            {sevSt.icon} {sevSt.label}
+                          </span>
+                          {severity && severity.level !== "none" && (
+                            <span className="text-[7px] font-black px-1 py-px rounded" style={{ background: severity.bg, color: severity.color, border: `1px solid ${severity.color}33` }}>
+                              {severity.label}
+                            </span>
+                          )}
+                          {isCurrent && (
+                            <span className="text-[7px] font-bold px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-400 border border-blue-500/25">ACTUAL</span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          <span className="text-[9px] font-mono text-white/40">
+                            {sevDate.toLocaleString("es-UY", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+                          </span>
+                          {sevDt != null && sevDt > 0 && (
+                            <span className="text-[8px] font-mono" style={{ color: severity?.color || "#f59e0b" }}>
+                              {formatDuration(sevDt)}
+                            </span>
+                          )}
+                          {sevDt === -1 && (
+                            <span className="text-[8px] font-mono text-red-400">en curso</span>
+                          )}
+                        </div>
+                        {sev.msg && (
+                          <div className="text-[8px] text-white/20 truncate mt-0.5 max-w-[240px]">{sev.msg}</div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })()}
       </div>
 
       {/* Action buttons at bottom */}
@@ -622,6 +727,12 @@ export default function AlertManagerPanel({ open, onClose, sidebarWidth, onCount
           onLocate={handleLocateFromDetail}
           isOnMap={selectedOnMap}
           downtime={selectedEvent.status === 0 ? downtimes.get(`${selectedEvent.monitorId}-${selectedEvent.time}`) : undefined}
+          allEvents={events}
+          downtimes={downtimes}
+          onSelectEvent={(ev) => {
+            setSelectedEvent(ev);
+            if (mapMonitorSet.has(ev.monitorId)) onEventClick?.(ev);
+          }}
         />
         <style>{`
           @keyframes am-spin { to { transform: rotate(360deg); } }
@@ -907,19 +1018,23 @@ export default function AlertManagerPanel({ open, onClose, sidebarWidth, onCount
                 )}
               </div>
 
-              {/* Downtime duration for DOWN events */}
+              {/* Downtime duration + severity for DOWN events */}
               {ev.status === 0 && (() => {
                 const key = `${ev.monitorId}-${ev.time}`;
                 const dt = downtimes.get(key);
                 if (dt == null) return null;
                 const isOngoing = dt === -1;
+                const severity = getSeverity(dt);
                 return (
                   <div className="flex items-center gap-1.5 mb-1">
-                    <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke={isOngoing ? "#ef4444" : "#f59e0b"} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke={severity.color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                       <circle cx="12" cy="12" r="10" /><path d="M12 6v6l4 2" />
                     </svg>
-                    <span className="text-[9px] font-mono font-semibold" style={{ color: isOngoing ? "#ef4444" : "#f59e0b" }}>
+                    <span className="text-[9px] font-mono font-semibold" style={{ color: severity.color }}>
                       {isOngoing ? "Aún caído" : `Caída: ${formatDuration(dt)}`}
+                    </span>
+                    <span className="text-[7px] font-black px-1 py-px rounded" style={{ background: severity.bg, color: severity.color, border: `1px solid ${severity.color}33` }}>
+                      {severity.label}
                     </span>
                     {isOngoing && (
                       <span className="inline-block h-1.5 w-1.5 rounded-full bg-red-500" style={{ animation: "am-spin 2s linear infinite", boxShadow: "0 0 6px #ef4444" }} />

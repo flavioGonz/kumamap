@@ -428,6 +428,7 @@ export default function LeafletMapView({
     edgeId?: string;
     latlng?: [number, number]; // map-level right-click position for paste
   } | null>(null);
+  const ctxHandledRef = useRef(false); // flag to prevent map ctx when edge/node ctx fires
 
   // Link creation state
   const [linkSource, setLinkSource] = useState<string | null>(null);
@@ -931,6 +932,8 @@ export default function LeafletMapView({
           map.on("contextmenu", (e: any) => {
             if (readonly) return;
             e.originalEvent?.preventDefault?.();
+            // Skip if a node/edge/polygon handler already consumed this event
+            if (ctxHandledRef.current) { ctxHandledRef.current = false; return; }
             setCtxMenu({ x: e.originalEvent.clientX, y: e.originalEvent.clientY, latlng: [e.latlng.lat, e.latlng.lng] });
           });
 
@@ -1005,6 +1008,7 @@ export default function LeafletMapView({
         map.on("contextmenu", (e: any) => {
           if (readonly) return;
           e.originalEvent?.preventDefault?.();
+          if (ctxHandledRef.current) { ctxHandledRef.current = false; return; }
           setCtxMenu({ x: e.originalEvent.clientX, y: e.originalEvent.clientY, latlng: [e.latlng.lat, e.latlng.lng] });
         });
 
@@ -1301,6 +1305,7 @@ export default function LeafletMapView({
         poly.on("contextmenu", (e: any) => {
           e.originalEvent.preventDefault();
           e.originalEvent.stopPropagation();
+          ctxHandledRef.current = true;
           setCtxMenu({ x: e.originalEvent.clientX, y: e.originalEvent.clientY, nodeId: node.id });
         });
         poly.addTo(map);
@@ -1654,6 +1659,7 @@ export default function LeafletMapView({
       marker.on("contextmenu", (e: any) => {
         e.originalEvent.preventDefault();
         e.originalEvent.stopPropagation();
+        ctxHandledRef.current = true;
         if (readonly) return;
         map.closePopup();
 
@@ -1999,7 +2005,7 @@ export default function LeafletMapView({
       hitLine.on("contextmenu", (e: any) => {
         e.originalEvent.preventDefault();
         e.originalEvent.stopPropagation();
-        L.DomEvent.stopPropagation(e);
+        ctxHandledRef.current = true;
         setCtxMenu({ x: e.originalEvent.clientX, y: e.originalEvent.clientY, edgeId: edge.id });
       });
       hitLine.addTo(map);
@@ -2009,7 +2015,7 @@ export default function LeafletMapView({
       line.on("contextmenu", (e: any) => {
         e.originalEvent.preventDefault();
         e.originalEvent.stopPropagation();
-        L.DomEvent.stopPropagation(e);
+        ctxHandledRef.current = true;
         setCtxMenu({
           x: e.originalEvent.clientX,
           y: e.originalEvent.clientY,

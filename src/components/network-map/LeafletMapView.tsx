@@ -1970,37 +1970,99 @@ export default function LeafletMapView({
         labelMarkersRef.current.set(`${edge.id}-tgt`, tgtLabel);
       }
 
-      // SNMP traffic label at center of edge
-      if (cd.snmpMonitorId) {
+      // SNMP traffic widget — draggable with mini sparkline
+      if (cd.snmpMonitorId && !cd.hideTraffic) {
         const snmpMon = kumaMonitors.find((m) => m.id === cd.snmpMonitorId);
         if (snmpMon) {
-          const midLat = (srcNode.x + tgtNode.x) / 2;
-          const midLng = (srcNode.y + tgtNode.y) / 2;
+          const savedPos = cd.trafficLabelPos;
+          const posLat = savedPos ? savedPos[0] : (srcNode.x + tgtNode.x) / 2;
+          const posLng = savedPos ? savedPos[1] : (srcNode.y + tgtNode.y) / 2;
           const value = snmpMon.ping;
           const statusColor = snmpMon.status === 1 ? "#22c55e" : snmpMon.status === 0 ? "#ef4444" : "#f59e0b";
           const formattedValue = value != null ? formatTraffic(value) : "N/A";
 
-          const trafficLabel = L.marker([midLat, midLng], {
+          // Build a mini SVG sparkline from cached heartbeats
+          const hbKey = `traffic-hb-${cd.snmpMonitorId}`;
+          const cached: number[] = (window as any)[hbKey] || [];
+          let sparkSvg = "";
+          if (cached.length >= 2) {
+            const pts = cached.slice(-30);
+            const maxV = Math.max(...pts, 1);
+            const w = 80, h = 22;
+            const pathParts = pts.map((v, i) => {
+              const x = (i / (pts.length - 1)) * w;
+              const y = h - (v / maxV) * (h - 2);
+              return `${i === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`;
+            });
+            const fillParts = [...pathParts, `L${w},${h}`, `L0,${h}`, "Z"];
+            sparkSvg = `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" style="display:block;margin-top:2px">
+              <path d="${fillParts.join(" ")}" fill="${statusColor}15" />
+              <path d="${pathParts.join(" ")}" fill="none" stroke="${statusColor}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>`;
+          }
+
+          // Fetch heartbeat data for sparkline (async, non-blocking)
+          if (!cached.length) {
+            fetch(apiUrl(`/api/kuma/history/${cd.snmpMonitorId}`))
+              .then(r => r.json())
+              .then((beats: any[]) => {
+                const pings = beats.filter((b: any) => b.ping != null).map((b: any) => b.ping).slice(-30);
+                if (pings.length > 0) (window as any)[hbKey] = pings;
+              })
+              .catch(() => {});
+          }
+
+          const trafficLabel = L.marker([posLat, posLng], {
+            draggable: !readonly,
             icon: L.divIcon({
               className: "traffic-label",
               html: `<div style="
-                background:rgba(0,0,0,0.85);
-                border:1px solid ${statusColor}55;
+                background:rgba(6,6,10,0.92);
+                border:1px solid ${statusColor}44;
                 color:${statusColor};
                 font-size:10px;font-weight:800;
                 font-family:ui-monospace,monospace;
-                padding:2px 8px;border-radius:6px;
+                padding:4px 8px;border-radius:8px;
                 white-space:nowrap;
-                box-shadow:0 2px 12px rgba(0,0,0,0.5), 0 0 8px ${statusColor}22;
-                display:flex;align-items:center;gap:4px;
+                box-shadow:0 4px 16px rgba(0,0,0,0.6), 0 0 12px ${statusColor}15;
+                cursor:${readonly ? "default" : "grab"};
+                min-width:80px;
               ">
-                <span style="font-size:8px;">▲▼</span> ${formattedValue}
+                <div style="display:flex;align-items:center;gap:4px;">
+                  <span style="font-size:7px;opacity:0.6">▲▼</span>
+                  <span>${formattedValue}</span>
+                </div>
+                ${sparkSvg}
               </div>`,
               iconSize: [0, 0],
-              iconAnchor: [0, 10],
+              iconAnchor: [0, 14],
             }),
-            interactive: false,
+            interactive: true,
           });
+
+          // Save position after drag
+          trafficLabel.on("dragend", () => {
+            const pos = trafficLabel.getLatLng();
+            const idx = edgesRef.current.findIndex((e) => e.id === edge.id);
+            if (idx >= 0) {
+              const oldCd = edgesRef.current[idx].custom_data ? JSON.parse(edgesRef.current[idx].custom_data!) : {};
+              oldCd.trafficLabelPos = [pos.lat, pos.lng];
+              edgesRef.current[idx] = { ...edgesRef.current[idx], custom_data: JSON.stringify(oldCd) };
+            }
+          });
+
+          // Right-click to hide
+          trafficLabel.on("contextmenu", (e: any) => {
+            e.originalEvent.preventDefault();
+            e.originalEvent.stopPropagation();
+            ctxHandledRef.current = true;
+            setCtxMenu({
+              x: e.originalEvent.clientX,
+              y: e.originalEvent.clientY,
+              edgeId: edge.id,
+            });
+          });
+
           trafficLabel.addTo(map);
           labelMarkersRef.current.set(`${edge.id}-traffic`, trafficLabel);
         }
@@ -3064,6 +3126,21 @@ export default function LeafletMapView({
           }
         },
       })),
+      // Toggle traffic widget visibility
+      ...(cd.snmpMonitorId ? [{
+        label: cd.hideTraffic ? "Mostrar tráfico" : "Ocultar tráfico",
+        icon: menuIcons.Activity,
+        onClick: () => {
+          const idx = edgesRef.current.findIndex((e) => e.id === edgeId);
+          if (idx >= 0) {
+            const oldCd = edgesRef.current[idx].custom_data ? JSON.parse(edgesRef.current[idx].custom_data!) : {};
+            oldCd.hideTraffic = !oldCd.hideTraffic;
+            edgesRef.current[idx] = { ...edgesRef.current[idx], custom_data: JSON.stringify(oldCd) };
+            if (LRef.current && mapRef.current) renderEdges(LRef.current, mapRef.current);
+            toast.success(oldCd.hideTraffic ? "Tráfico oculto" : "Tráfico visible");
+          }
+        },
+      }] : []),
       {
         label: "Eliminar conexion",
         icon: menuIcons.Trash2,

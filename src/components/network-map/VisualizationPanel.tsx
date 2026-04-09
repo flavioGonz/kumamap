@@ -84,20 +84,32 @@ export default function VisualizationPanel({
                 <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />
               </svg>
               {alertCount > 0 && (
-                <span className="absolute -top-0.5 -right-0.5 flex items-center justify-center rounded-full text-[8px] font-bold text-white"
-                  style={{
-                    minWidth: 14, height: 14, padding: "0 3px",
-                    background: "#ef4444",
-                    boxShadow: "0 0 6px rgba(239,68,68,0.5)",
-                    animation: "alert-pulse 2s ease-in-out infinite",
-                  }}>
-                  {alertCount > 99 ? "99+" : alertCount}
-                </span>
+                <>
+                  {/* Animated ping ring */}
+                  <span className="absolute -top-0.5 -right-0.5 rounded-full"
+                    style={{
+                      width: 16, height: 16,
+                      background: "rgba(239,68,68,0.4)",
+                      animation: "alert-ring 1.5s ease-out infinite",
+                    }}
+                  />
+                  {/* Badge number */}
+                  <span className="absolute -top-0.5 -right-0.5 flex items-center justify-center rounded-full text-[7px] font-black text-white"
+                    style={{
+                      minWidth: 16, height: 16, padding: "0 3px",
+                      background: "linear-gradient(135deg, #ef4444, #dc2626)",
+                      boxShadow: "0 0 8px rgba(239,68,68,0.6), 0 2px 4px rgba(0,0,0,0.4)",
+                      border: "1.5px solid rgba(0,0,0,0.3)",
+                      letterSpacing: "-0.02em",
+                    }}>
+                    {alertCount > 99 ? "99+" : alertCount}
+                  </span>
+                </>
               )}
             </button>
           </Tooltip>
           <div className="mx-1 h-px bg-white/10 my-0.5" />
-          <style>{`@keyframes alert-pulse { 0%,100%{box-shadow:0 0 4px rgba(239,68,68,0.3)} 50%{box-shadow:0 0 10px rgba(239,68,68,0.7)} }`}</style>
+          <style>{`@keyframes alert-ring { 0%{transform:scale(1);opacity:0.6} 100%{transform:scale(2.2);opacity:0} }`}</style>
         </>
       )}
 

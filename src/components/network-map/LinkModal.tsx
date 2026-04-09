@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import {
-  Link2, Cable, ArrowRight, X, Plug, Tag, Network, Check, Activity,
+  Link2, Cable, ArrowRight, X, Plug, Tag, Network, Check, Activity, Search, ChevronDown,
 } from "lucide-react";
 
 export interface LinkFormData {
@@ -236,31 +236,13 @@ export default function LinkModal({
               </div>
             </div>
 
-            {/* SNMP Monitor for traffic */}
+            {/* SNMP Monitor for traffic — custom dark dropdown with search */}
             {snmpMonitors.length > 0 && (
-              <div className="space-y-1.5">
-                <label className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-emerald-400">
-                  <Activity className="h-3 w-3" />
-                  Monitor SNMP de trafico
-                  <span className="normal-case tracking-normal text-[#555] font-normal">(opcional)</span>
-                </label>
-                <select
-                  value={snmpId ?? ""}
-                  onChange={(e) => setSnmpId(e.target.value ? parseInt(e.target.value) : null)}
-                  className="w-full rounded-xl px-3.5 py-2.5 text-sm text-[#ededed] focus:outline-none focus:ring-2 focus:ring-emerald-500/40 transition-all"
-                  style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(16,185,129,0.2)" }}
-                >
-                  <option value="">Sin monitor de trafico</option>
-                  {snmpMonitors.map((m) => (
-                    <option key={m.id} value={m.id}>
-                      {m.name} ({m.type.toUpperCase()}{m.ping != null ? ` · ${m.ping}ms` : ""})
-                    </option>
-                  ))}
-                </select>
-                <p className="text-[9px] text-[#555]">
-                  Asocia un monitor SNMP/Push de Kuma para ver trafico en este link
-                </p>
-              </div>
+              <SnmpDropdown
+                monitors={snmpMonitors}
+                value={snmpId}
+                onChange={setSnmpId}
+              />
             )}
 
             {/* Preview */}
@@ -316,5 +298,190 @@ export default function LinkModal({
         </div>
       </div>
     </>
+  );
+}
+
+// ── Custom SNMP dropdown with dark theme + search ──────────────────
+function SnmpDropdown({
+  monitors,
+  value,
+  onChange,
+}: {
+  monitors: SnmpMonitorOption[];
+  value: number | null;
+  onChange: (id: number | null) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const ref = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
+
+  // Close on outside click
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  // Focus search when opened
+  useEffect(() => {
+    if (open) setTimeout(() => searchRef.current?.focus(), 50);
+  }, [open]);
+
+  const filtered = useMemo(() => {
+    if (!search) return monitors;
+    const q = search.toLowerCase();
+    return monitors.filter(
+      (m) => m.name.toLowerCase().includes(q) || m.type.toLowerCase().includes(q)
+    );
+  }, [monitors, search]);
+
+  const selected = monitors.find((m) => m.id === value);
+
+  const typeColor = (t: string) => {
+    if (t === "snmp") return "#22c55e";
+    if (t === "push") return "#3b82f6";
+    return "#f59e0b";
+  };
+
+  return (
+    <div className="space-y-1.5">
+      <label className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-emerald-400">
+        <Activity className="h-3 w-3" />
+        Monitor de tráfico
+        <span className="normal-case tracking-normal text-[#555] font-normal">(opcional)</span>
+      </label>
+
+      <div ref={ref} className="relative">
+        {/* Trigger button */}
+        <button
+          type="button"
+          onClick={() => setOpen(!open)}
+          className="w-full flex items-center justify-between rounded-xl px-3.5 py-2.5 text-sm text-left transition-all focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
+          style={{
+            background: "rgba(255,255,255,0.04)",
+            border: `1px solid ${open ? "rgba(16,185,129,0.5)" : "rgba(16,185,129,0.2)"}`,
+            color: selected ? "#ededed" : "#555",
+          }}
+        >
+          <span className="flex items-center gap-2 truncate">
+            {selected ? (
+              <>
+                <span
+                  className="inline-block h-1.5 w-1.5 rounded-full shrink-0"
+                  style={{ background: typeColor(selected.type) }}
+                />
+                <span className="truncate">{selected.name}</span>
+                <span className="text-[10px] text-white/30 font-mono shrink-0">
+                  {selected.type.toUpperCase()}
+                  {selected.ping != null ? ` · ${selected.ping}ms` : ""}
+                </span>
+              </>
+            ) : (
+              "Sin monitor de tráfico"
+            )}
+          </span>
+          <ChevronDown
+            className="h-3.5 w-3.5 shrink-0 transition-transform"
+            style={{ color: "#555", transform: open ? "rotate(180deg)" : "none" }}
+          />
+        </button>
+
+        {/* Dropdown */}
+        {open && (
+          <div
+            className="absolute left-0 right-0 mt-1 rounded-xl overflow-hidden shadow-2xl"
+            style={{
+              zIndex: 50,
+              background: "rgba(14,14,14,0.98)",
+              border: "1px solid rgba(255,255,255,0.1)",
+              backdropFilter: "blur(20px)",
+              maxHeight: 280,
+              display: "flex",
+              flexDirection: "column",
+            }}
+          >
+            {/* Search bar */}
+            <div className="flex items-center gap-2 px-3 py-2" style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+              <Search className="h-3.5 w-3.5 text-white/25 shrink-0" />
+              <input
+                ref={searchRef}
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Buscar monitor..."
+                className="flex-1 bg-transparent text-xs text-white/80 placeholder:text-white/25 outline-none"
+              />
+              {search && (
+                <button type="button" onClick={() => setSearch("")} className="text-white/30 hover:text-white/60">
+                  <X className="h-3 w-3" />
+                </button>
+              )}
+            </div>
+
+            {/* Options list */}
+            <div className="overflow-y-auto flex-1" style={{ scrollbarWidth: "thin", scrollbarColor: "rgba(255,255,255,0.1) transparent" }}>
+              {/* None option */}
+              <button
+                type="button"
+                onClick={() => { onChange(null); setOpen(false); setSearch(""); }}
+                className="w-full flex items-center gap-2 px-3 py-2 text-left text-xs transition-all hover:bg-white/[0.06]"
+                style={{
+                  color: value === null ? "#22c55e" : "#555",
+                  borderBottom: "1px solid rgba(255,255,255,0.04)",
+                }}
+              >
+                <span className="inline-block h-1.5 w-1.5 rounded-full bg-white/10 shrink-0" />
+                Sin monitor de tráfico
+                {value === null && <Check className="h-3 w-3 ml-auto text-emerald-400" />}
+              </button>
+
+              {filtered.length === 0 && (
+                <div className="px-3 py-4 text-center text-[10px] text-white/20">
+                  Sin resultados para &quot;{search}&quot;
+                </div>
+              )}
+
+              {filtered.map((m) => (
+                <button
+                  key={m.id}
+                  type="button"
+                  onClick={() => { onChange(m.id); setOpen(false); setSearch(""); }}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-left text-xs transition-all hover:bg-white/[0.06]"
+                  style={{
+                    color: value === m.id ? "#ededed" : "#aaa",
+                    background: value === m.id ? "rgba(16,185,129,0.08)" : undefined,
+                  }}
+                >
+                  <span
+                    className="inline-block h-1.5 w-1.5 rounded-full shrink-0"
+                    style={{ background: typeColor(m.type) }}
+                  />
+                  <span className="truncate flex-1">{m.name}</span>
+                  <span className="text-[9px] font-mono px-1.5 py-0.5 rounded shrink-0"
+                    style={{
+                      background: typeColor(m.type) + "18",
+                      color: typeColor(m.type),
+                    }}>
+                    {m.type.toUpperCase()}
+                  </span>
+                  {m.ping != null && (
+                    <span className="text-[9px] text-white/25 font-mono shrink-0">{m.ping}ms</span>
+                  )}
+                  {value === m.id && <Check className="h-3 w-3 text-emerald-400 shrink-0" />}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      <p className="text-[9px] text-[#555]">
+        Asocia un monitor SNMP/Push de Kuma para ver tráfico en este link
+      </p>
+    </div>
   );
 }

@@ -25,6 +25,7 @@ import {
 import type { KumaMonitor } from "@/components/network-map/MonitorPanel";
 import { apiUrl } from "@/lib/api";
 import Tooltip from "@/components/network-map/Tooltip";
+import { ChangelogBadge, ChangelogModal } from "@/components/ChangelogModal";
 
 interface MapSummary {
   id: string;
@@ -66,6 +67,7 @@ export default function MapListView({
   const [importPreview, setImportPreview] = useState<{ maps: any[]; isBulk: boolean } | null>(null);
   const [importing, setImporting] = useState(false);
   const [exportingAll, setExportingAll] = useState(false);
+  const [changelogOpen, setChangelogOpen] = useState(false);
   const [expandedMaps, setExpandedMaps] = useState<Set<string>>(new Set());
   // Drag-and-drop reparenting
   const [draggingMapId, setDraggingMapId] = useState<string | null>(null);
@@ -378,6 +380,11 @@ export default function MapListView({
           >
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
           </a>
+          </Tooltip>
+
+          {/* ── Changelog ── */}
+          <Tooltip content="Novedades" placement="bottom">
+            <ChangelogBadge onClick={() => setChangelogOpen(true)} />
           </Tooltip>
 
           {/* divider */}
@@ -1062,6 +1069,8 @@ export default function MapListView({
           </div>
         </div>
       )}
+      {/* Changelog modal */}
+      <ChangelogModal open={changelogOpen} onClose={() => setChangelogOpen(false)} />
     </div>
   );
 }

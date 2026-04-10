@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Network } from "lucide-react";
 import { apiUrl } from "@/lib/api";
+import { ChangelogBanner } from "@/components/ChangelogModal";
 
 interface LoginPageProps {
   onLogin: () => void;
@@ -41,7 +42,7 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
 
   return (
     <div
-      className="min-h-screen flex items-center justify-center p-4"
+      className="min-h-screen flex flex-col items-center justify-center p-4 gap-4"
       style={{ background: "radial-gradient(ellipse at center, #111 0%, #0a0a0a 100%)" }}
     >
       <div
@@ -123,6 +124,9 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
           </button>
         </form>
       </div>
+
+      {/* Changelog banner below login card */}
+      <ChangelogBanner />
     </div>
   );
 }

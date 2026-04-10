@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { apiUrl } from "@/lib/api";
+import { ChangelogBadge, ChangelogModal } from "@/components/ChangelogModal";
 
 // ── Types ────────────────────────────────────────────────────────
 interface TimelineEvent {
@@ -154,6 +155,7 @@ export default function AlertsPage() {
   const [nocMode, setNocMode] = useState(false);
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [showFollowedOnly, setShowFollowedOnly] = useState(false);
+  const [changelogOpen, setChangelogOpen] = useState(false);
   const datePickerRef = useRef<HTMLDivElement>(null);
 
   // ── Sound ──
@@ -491,6 +493,8 @@ export default function AlertsPage() {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            {/* Changelog */}
+            <ChangelogBadge onClick={() => setChangelogOpen(true)} />
             {/* Sound toggle */}
             <button onClick={toggleSoundMute} className="h-8 w-8 flex items-center justify-center rounded-lg hover:bg-white/[0.06] transition-all" style={{ color: soundMuted ? "rgba(255,255,255,0.2)" : "#f59e0b" }} title={soundMuted ? "Activar sonido" : "Silenciar"}>
               {soundMuted ? (
@@ -781,6 +785,8 @@ export default function AlertsPage() {
           {nocMode && <span className="text-[9px] text-blue-400/50 font-mono">ESC para salir</span>}
         </div>
       </footer>
+
+      <ChangelogModal open={changelogOpen} onClose={() => setChangelogOpen(false)} />
 
       <style>{`
         @keyframes noc-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }

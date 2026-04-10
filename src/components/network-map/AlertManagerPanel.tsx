@@ -311,7 +311,10 @@ function exportReportExcel(data: ReportData, hours: number) {
     const evtRows: (string | number)[][] = [["Fecha", "Hora", "Estado", "Estado Anterior", "Mensaje", "Ping (ms)"]];
     for (const evt of data.events) {
       const d = new Date(evt.time);
-      evtRows.push([d.toLocaleDateString(), d.toLocaleTimeString(), evt.status === 0 ? "DOWN" : evt.status === 1 ? "UP" : "PENDING", evt.prevStatus === 0 ? "DOWN" : evt.prevStatus === 1 ? "UP" : "PENDING", evt.msg, evt.ping != null ? evt.ping : ("N/A" as any)]);
+      const isMsgFailure = /connection failed|timeout|timed out|refused|unreachable|error|ECONNREFUSED|ETIMEDOUT|ENOTFOUND/i.test(evt.msg || "");
+      const statusStr = evt.status === 0 ? "DOWN" : (evt.status === 1 && isMsgFailure) ? "FALLO" : evt.status === 1 ? "UP" : "PENDING";
+      const prevStatusStr = evt.prevStatus === 0 ? "DOWN" : evt.prevStatus === 1 ? "UP" : "PENDING";
+      evtRows.push([d.toLocaleDateString(), d.toLocaleTimeString(), statusStr, prevStatusStr, evt.msg, evt.ping != null ? evt.ping : ("N/A" as any)]);
     }
     const ws2 = XLSX.utils.aoa_to_sheet(evtRows);
     ws2["!cols"] = [{ wch: 14 }, { wch: 12 }, { wch: 10 }, { wch: 14 }, { wch: 35 }, { wch: 10 }];
@@ -331,8 +334,14 @@ function exportReportPDF(data: ReportData, hours: number) {
   const uptimeColor = getUptimeColor(data.stats.uptimePercent);
   const evtRows = data.events.map(e => {
     const d = new Date(e.time);
-    const statusColor = e.status === 0 ? "#dc2626" : "#16a34a";
-    return `<tr><td>${d.toLocaleDateString()}</td><td>${d.toLocaleTimeString()}</td><td style="color:${statusColor};font-weight:700">${e.status === 0 ? "▼ DOWN" : "▲ UP"}</td><td>${e.msg || ""}</td><td>${e.ping ?? "—"}</td></tr>`;
+    // Detect effective status: if msg indicates failure even when status=1, show as warning
+    const msgLower = (e.msg || "").toLowerCase();
+    const isMsgFailure = /connection failed|timeout|timed out|refused|unreachable|error|ECONNREFUSED|ETIMEDOUT|ENOTFOUND/i.test(e.msg || "");
+    const isDown = e.status === 0;
+    const isWarning = !isDown && isMsgFailure;
+    const statusColor = isDown ? "#dc2626" : isWarning ? "#d97706" : "#16a34a";
+    const statusLabel = isDown ? "▼ DOWN" : isWarning ? "⚠ FALLO" : "▲ UP";
+    return `<tr style="${isWarning ? "background:#fffbeb" : ""}"><td>${d.toLocaleDateString()}</td><td>${d.toLocaleTimeString()}</td><td style="color:${statusColor};font-weight:700">${statusLabel}</td><td>${e.msg || ""}</td><td>${e.ping ?? "—"}</td></tr>`;
   }).join("");
   const dtRows = data.downtimes.map(d => `<tr><td>${new Date(d.start).toLocaleString()}</td><td>${new Date(d.end).toLocaleString()}</td><td style="font-weight:700;color:#dc2626">${formatDuration(d.durationMs)}</td><td>${d.msg || ""}</td></tr>`).join("");
   w.document.write(`<!DOCTYPE html><html><head><title>Reporte - ${data.monitor.name}</title>

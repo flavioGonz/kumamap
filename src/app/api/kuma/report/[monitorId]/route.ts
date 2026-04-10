@@ -20,10 +20,15 @@ export async function GET(
   // Get full heartbeat history
   const beats = await kuma.getMonitorBeats(mid, Math.min(hours, 720)); // max 30 days
 
-  // Calculate stats
+  // Helper: detect if a heartbeat message indicates a real failure even if status=1
+  const isMsgFailure = (msg: string | undefined) =>
+    /connection failed|timeout|timed out|refused|unreachable|ECONNREFUSED|ETIMEDOUT|ENOTFOUND/i.test(msg || "");
+
+  // Calculate stats — count msg-failures as effective downs
   const totalBeats = beats.length;
-  const upBeats = beats.filter(b => b.status === 1).length;
-  const downBeats = beats.filter(b => b.status === 0).length;
+  const effectiveDownBeats = beats.filter(b => b.status === 0 || (b.status === 1 && isMsgFailure(b.msg))).length;
+  const upBeats = totalBeats - effectiveDownBeats;
+  const downBeats = effectiveDownBeats;
   const uptime = totalBeats > 0 ? (upBeats / totalBeats * 100) : 0;
   const avgPing = beats.filter(b => b.ping != null).reduce((sum, b) => sum + (b.ping || 0), 0) / (beats.filter(b => b.ping != null).length || 1);
   const maxPing = Math.max(...beats.filter(b => b.ping != null).map(b => b.ping || 0), 0);
@@ -39,12 +44,18 @@ export async function GET(
     duration: number;
   }> = [];
 
+  // Use effective status: status=0 OR (status=1 but msg indicates failure) → treat as DOWN (0)
+  const effectiveStatus = (b: typeof beats[0]) =>
+    b.status === 0 || (b.status === 1 && isMsgFailure(b.msg)) ? 0 : b.status;
+
   for (let i = 1; i < beats.length; i++) {
-    if (beats[i].status !== beats[i - 1].status) {
+    const curEff = effectiveStatus(beats[i]);
+    const prevEff = effectiveStatus(beats[i - 1]);
+    if (curEff !== prevEff) {
       events.push({
         time: beats[i].time,
-        status: beats[i].status,
-        prevStatus: beats[i - 1].status,
+        status: curEff,
+        prevStatus: prevEff,
         msg: beats[i].msg,
         ping: beats[i].ping,
         duration: beats[i].duration,
@@ -65,10 +76,11 @@ export async function GET(
   let downStart: string | null = null;
   let downMsg = "";
   for (const beat of beats) {
-    if (beat.status === 0 && !downStart) {
+    const eff = effectiveStatus(beat);
+    if (eff === 0 && !downStart) {
       downStart = beat.time;
       downMsg = beat.msg;
-    } else if (beat.status === 1 && downStart) {
+    } else if (eff !== 0 && downStart) {
       const durationMs = new Date(beat.time).getTime() - new Date(downStart).getTime();
       downtimes.push({ start: downStart, end: beat.time, durationMs, msg: downMsg });
       downStart = null;

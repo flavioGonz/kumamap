@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import {
-  X, Download, Server, Network, Zap, Settings, Trash2, Plus,
+  X, Download, Server, Network, Zap, Settings, Trash2, Plus, Phone,
   Inbox, Router, Cable, Lock, Unlock, Save, Search, FileText, ChevronLeft, ChevronRight,
   FileSpreadsheet, Printer, FileDown, Upload, ImageIcon, Camera as CameraIcon, ZoomIn, Trash,
 } from "lucide-react";
@@ -50,12 +50,24 @@ export interface RouterInterface {
   notes?: string;
 }
 
+export interface PbxExtension {
+  extension: string;
+  name: string;
+  ipPhone?: string;
+  macAddress?: string;
+  username?: string;
+  password?: string;
+  model?: string;
+  location?: string;
+  notes?: string;
+}
+
 export interface RackDevice {
   id: string;
   unit: number;
   sizeUnits: number;
   label: string;
-  type: "server" | "switch" | "patchpanel" | "ups" | "router" | "pdu" | "tray-fiber" | "tray-1u" | "tray-2u" | "cable-organizer" | "other";
+  type: "server" | "switch" | "patchpanel" | "ups" | "router" | "pdu" | "pbx" | "tray-fiber" | "tray-1u" | "tray-2u" | "cable-organizer" | "other";
   color?: string;
   monitorId?: number | null;
   ports?: PatchPort[];
@@ -79,6 +91,8 @@ export interface RackDevice {
   // PDU
   pduHasBreaker?: boolean;
   pduInputCount?: number;
+  // PBX
+  pbxExtensions?: PbxExtension[];
 }
 
 interface RackDesignerDrawerProps {
@@ -99,6 +113,7 @@ const TYPE_META: Record<string, { label: string; icon: React.ReactNode; color: s
   ups:          { label: "UPS / Energía",    icon: <Zap className="w-4 h-4" />,      color: "#f59e0b" },
   router:       { label: "Router",           icon: <Router className="w-4 h-4" />,   color: "#ef4444" },
   pdu:          { label: "PDU",              icon: <Zap className="w-4 h-4" />,      color: "#f97316" },
+  pbx:          { label: "PBX / Telefonía", icon: <Phone className="w-4 h-4" />,    color: "#06b6d4" },
   "tray-fiber": { label: "Bandeja de Fibra", icon: <Inbox className="w-4 h-4" />,   color: "#d946ef" },
   "tray-1u":         { label: "Bandeja 1U",          icon: <Inbox className="w-4 h-4" />,       color: "#52525b" },
   "tray-2u":         { label: "Bandeja 2U",          icon: <Inbox className="w-4 h-4" />,       color: "#52525b" },
@@ -461,16 +476,17 @@ export default function RackDesignerDrawer({ open, onClose, nodeId, nodes, monit
       "tray-1u":        (c, s) => svgI('<rect x="2" y="8" width="20" height="8" rx="1"/><line x1="7" y1="12" x2="17" y2="12"/>', c, s),
       "tray-2u":        (c, s) => svgI('<rect x="2" y="6" width="20" height="12" rx="1"/><line x1="7" y1="10" x2="17" y2="10"/><line x1="7" y1="14" x2="17" y2="14"/>', c, s),
       "cable-organizer":(c, s) => svgI('<rect x="2" y="9" width="20" height="6" rx="1"/><path d="M6 9c0-2 2-4 6-4s6 2 6 4"/><circle cx="8" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="16" cy="12" r="1"/>', c, s),
+      pbx:              (c, s) => svgI('<path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>', c, s),
       other:            (c, s) => svgI('<circle cx="12" cy="12" r="3"/><path d="M12 1v2"/><path d="M12 21v2"/><path d="M4.22 4.22l1.42 1.42"/><path d="M18.36 18.36l1.42 1.42"/><path d="M1 12h2"/><path d="M21 12h2"/><path d="M4.22 19.78l1.42-1.42"/><path d="M18.36 5.64l1.42-1.42"/>', c, s),
     };
     const TYPE_LABEL: Record<string, string> = {
       server: "Servidor", switch: "Switch", patchpanel: "Patch Panel", ups: "UPS",
-      router: "Router", pdu: "PDU", "tray-fiber": "Bandeja Fibra", "tray-1u": "Bandeja 1U",
+      router: "Router", pdu: "PDU", pbx: "PBX", "tray-fiber": "Bandeja Fibra", "tray-1u": "Bandeja 1U",
       "tray-2u": "Bandeja 2U", "cable-organizer": "Organizador", other: "Otro",
     };
     const TYPE_COLOR: Record<string, string> = {
       server: "#3b82f6", switch: "#10b981", patchpanel: "#8b5cf6", ups: "#f59e0b",
-      router: "#ef4444", pdu: "#f97316", "tray-fiber": "#d946ef", "tray-1u": "#52525b",
+      router: "#ef4444", pdu: "#f97316", pbx: "#06b6d4", "tray-fiber": "#d946ef", "tray-1u": "#52525b",
       "tray-2u": "#52525b", "cable-organizer": "#78716c", other: "#6b7280",
     };
 
@@ -602,6 +618,37 @@ export default function RackDesignerDrawer({ open, onClose, nodeId, nodes, monit
           </table>
         </div>
       </div>
+
+      <!-- PBX Extensions -->
+      ${(() => {
+        const pbxDevs = sorted.filter((d: any) => d.type === "pbx" && (d.pbxExtensions || []).length > 0);
+        if (pbxDevs.length === 0) return "";
+        return pbxDevs.map((d: any) => {
+          const exts = d.pbxExtensions || [];
+          const extRows = exts.map((ext: any, ei: number) => `
+            <tr style="border-bottom:1px solid rgba(255,255,255,0.05);background:${ei%2===0?'transparent':'rgba(255,255,255,0.02)'}">
+              <td style="padding:6px 8px;font-family:monospace;color:#06b6d4;font-weight:700;font-size:11px">${ext.extension}</td>
+              <td style="padding:6px 8px;color:#fff;font-size:11px">${ext.name||"—"}</td>
+              <td style="padding:6px 8px;font-family:monospace;color:rgba(255,255,255,0.4);font-size:10px">${ext.ipPhone||"—"}</td>
+              <td style="padding:6px 8px;font-family:monospace;color:rgba(255,255,255,0.4);font-size:10px">${ext.macAddress||"—"}</td>
+              <td style="padding:6px 8px;color:rgba(255,255,255,0.4);font-size:10px">${ext.model||"—"}</td>
+              <td style="padding:6px 8px;color:rgba(255,255,255,0.4);font-size:10px">${ext.location||"—"}</td>
+            </tr>
+          `).join("");
+          return `
+          <div style="margin-top:20px">
+            <div style="font-size:11px;color:#06b6d4;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:8px">${d.label} · ${exts.length} extensiones</div>
+            <table style="width:100%;border-collapse:collapse">
+              <thead><tr style="border-bottom:1px solid rgba(255,255,255,0.1)">
+                ${["Ext.","Nombre","IP Teléfono","MAC","Modelo","Ubicación"].map((h: string) =>
+                  `<th style="text-align:left;padding:6px 8px;color:rgba(255,255,255,0.35);font-weight:600;text-transform:uppercase;font-size:8px;letter-spacing:0.06em">${h}</th>`
+                ).join("")}
+              </tr></thead>
+              <tbody>${extRows}</tbody>
+            </table>
+          </div>`;
+        }).join("");
+      })()}
 
       <!-- Footer -->
       <div style="margin-top:24px;padding-top:12px;border-top:1px solid rgba(255,255,255,0.06);display:flex;justify-content:space-between;align-items:center">
@@ -2177,7 +2224,7 @@ function DeviceEditor({
 }) {
   const [activeTab, setActiveTab] = useState<"ports" | "general">("ports");
   const meta = TYPE_META[device.type] || TYPE_META.other;
-  const hasPorts = ["patchpanel", "switch", "router"].includes(device.type);
+  const hasPorts = ["patchpanel", "switch", "router", "pbx"].includes(device.type);
 
   const makeDefaultPatchPorts = (count: number): PatchPort[] =>
     Array.from({ length: count }, (_, i) => ({ port: i + 1, label: `P${i + 1}`, connected: false }));
@@ -2197,6 +2244,11 @@ function DeviceEditor({
         { id: "if-lan1", name: "LAN1", type: "LAN", connected: false },
         { id: "if-mgmt", name: "MGMT", type: "MGMT", connected: false },
       ];
+    if (type === "pbx" && !device.pbxExtensions)
+      upd.pbxExtensions = [
+        { extension: "100", name: "Recepción" },
+        { extension: "101", name: "Oficina 1" },
+      ];
     onChange({ ...device, ...upd });
   };
 
@@ -2213,7 +2265,7 @@ function DeviceEditor({
   };
 
   const showPortCount = device.type === "patchpanel" || device.type === "switch";
-  const showManagementIp = device.type === "switch" || device.type === "router" || device.type === "server";
+  const showManagementIp = device.type === "switch" || device.type === "router" || device.type === "server" || device.type === "pbx";
 
   // Default to ports tab if device has ports, otherwise general
   useEffect(() => {
@@ -2264,7 +2316,7 @@ function DeviceEditor({
       {hasPorts && (
         <div className="shrink-0 flex border-b border-white/[0.06]" style={{ background: "rgba(0,0,0,0.2)" }}>
           {[
-            { id: "ports", label: device.type === "router" ? "Interfaces" : `Puertos${device.type === "patchpanel" ? " del Panel" : ""}` },
+            { id: "ports", label: device.type === "router" ? "Interfaces" : device.type === "pbx" ? "Extensiones" : `Puertos${device.type === "patchpanel" ? " del Panel" : ""}` },
             { id: "general", label: "General" },
           ].map((tab) => (
             <button
@@ -2302,6 +2354,12 @@ function DeviceEditor({
           <RouterEditor
             interfaces={device.routerInterfaces || []}
             onChange={routerInterfaces => onChange({ ...device, routerInterfaces })}
+          />
+        )}
+        {activeTab === "ports" && device.type === "pbx" && (
+          <PbxExtensionsEditor
+            extensions={device.pbxExtensions || []}
+            onChange={pbxExtensions => onChange({ ...device, pbxExtensions })}
           />
         )}
 
@@ -3185,6 +3243,142 @@ function RouterEditor({ interfaces, onChange }: { interfaces: RouterInterface[];
       >
         <Plus style={{ width: 13, height: 13 }} /> Agregar Interfaz
       </button>
+    </div>
+  );
+}
+
+// ── PBX Extensions Editor ─────────────────────────────────────────────────────
+
+function PbxExtensionsEditor({ extensions, onChange }: { extensions: PbxExtension[]; onChange: (e: PbxExtension[]) => void }) {
+  const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
+  const [search, setSearch] = useState("");
+
+  const addExtension = () => {
+    const maxExt = extensions.reduce((m, e) => Math.max(m, parseInt(e.extension) || 0), 99);
+    onChange([...extensions, { extension: String(maxExt + 1), name: "" }]);
+    setExpandedIdx(extensions.length);
+  };
+
+  const removeExtension = (idx: number) => {
+    onChange(extensions.filter((_, i) => i !== idx));
+    if (expandedIdx === idx) setExpandedIdx(null);
+  };
+
+  const updateExtension = (idx: number, upd: Partial<PbxExtension>) => {
+    onChange(extensions.map((e, i) => i === idx ? { ...e, ...upd } : e));
+  };
+
+  const filtered = search
+    ? extensions.map((e, i) => ({ ...e, _idx: i })).filter(e =>
+        e.extension.includes(search) || e.name.toLowerCase().includes(search.toLowerCase()) ||
+        (e.ipPhone || "").includes(search) || (e.macAddress || "").toLowerCase().includes(search.toLowerCase()))
+    : extensions.map((e, i) => ({ ...e, _idx: i }));
+
+  const fStyle: React.CSSProperties = { width: "100%", padding: "6px 10px", borderRadius: 8, fontSize: 11, color: "#ddd", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)", outline: "none" };
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Phone className="w-4 h-4" style={{ color: "#06b6d4" }} />
+          <span className="text-xs font-bold text-white/60">{extensions.length} extensiones</span>
+        </div>
+        <button onClick={addExtension} className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[10px] font-bold transition-all hover:scale-105 active:scale-95 cursor-pointer"
+          style={{ background: "rgba(6,182,212,0.1)", color: "#22d3ee", border: "1px solid rgba(6,182,212,0.2)" }}>
+          <Plus className="w-3 h-3" />Agregar
+        </button>
+      </div>
+
+      {extensions.length > 5 && (
+        <div className="relative">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-white/25" />
+          <input type="text" placeholder="Buscar extensión, nombre, IP, MAC..." value={search} onChange={e => setSearch(e.target.value)}
+            className="w-full h-7 pl-8 pr-3 rounded-lg text-[11px] text-white/70 placeholder-white/25 outline-none"
+            style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)" }} />
+        </div>
+      )}
+
+      {/* Table header */}
+      <div className="grid gap-1 px-2 py-1" style={{ gridTemplateColumns: "60px 1fr 110px 40px", fontSize: 9, color: "rgba(255,255,255,0.3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+        <span>Ext.</span><span>Nombre / Usuario</span><span>IP Teléfono</span><span></span>
+      </div>
+
+      <div className="flex flex-col gap-1">
+        {filtered.map((ext) => {
+          const idx = ext._idx;
+          const isExpanded = expandedIdx === idx;
+          return (
+            <div key={idx} className="rounded-xl overflow-hidden transition-all" style={{ background: isExpanded ? "rgba(6,182,212,0.04)" : "rgba(255,255,255,0.02)", border: `1px solid ${isExpanded ? "rgba(6,182,212,0.15)" : "rgba(255,255,255,0.04)"}` }}>
+              {/* Row summary */}
+              <div onClick={() => setExpandedIdx(isExpanded ? null : idx)}
+                className="grid gap-1 px-2.5 py-2 cursor-pointer hover:bg-white/[0.03] transition-all items-center"
+                style={{ gridTemplateColumns: "60px 1fr 110px 40px" }}>
+                <span className="text-xs font-mono font-bold" style={{ color: "#22d3ee" }}>{ext.extension || "—"}</span>
+                <div className="min-w-0">
+                  <span className="text-[11px] text-white/70 truncate block">{ext.name || "Sin nombre"}</span>
+                  {ext.username && <span className="text-[9px] text-white/25 font-mono">{ext.username}</span>}
+                </div>
+                <span className="text-[10px] font-mono text-white/35 truncate">{ext.ipPhone || "—"}</span>
+                <button onClick={(e) => { e.stopPropagation(); removeExtension(idx); }}
+                  className="w-6 h-6 flex items-center justify-center rounded text-red-400/50 hover:text-red-400 hover:bg-red-500/10 transition-all cursor-pointer">
+                  <Trash2 className="w-3 h-3" />
+                </button>
+              </div>
+
+              {/* Expanded detail */}
+              {isExpanded && (
+                <div className="px-3 pb-3 pt-1 border-t border-white/[0.04]">
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="text-[9px] text-white/30 font-bold uppercase tracking-wider block mb-0.5">Extensión</label>
+                      <input type="text" value={ext.extension} onChange={e => updateExtension(idx, { extension: e.target.value })} placeholder="100" style={{ ...fStyle, fontFamily: "monospace" }} />
+                    </div>
+                    <div>
+                      <label className="text-[9px] text-white/30 font-bold uppercase tracking-wider block mb-0.5">Nombre</label>
+                      <input type="text" value={ext.name} onChange={e => updateExtension(idx, { name: e.target.value })} placeholder="Recepción" style={fStyle} />
+                    </div>
+                    <div>
+                      <label className="text-[9px] text-white/30 font-bold uppercase tracking-wider block mb-0.5">IP Teléfono</label>
+                      <input type="text" value={ext.ipPhone || ""} onChange={e => updateExtension(idx, { ipPhone: e.target.value })} placeholder="192.168.1.50" style={{ ...fStyle, fontFamily: "monospace" }} />
+                    </div>
+                    <div>
+                      <label className="text-[9px] text-white/30 font-bold uppercase tracking-wider block mb-0.5">MAC Address</label>
+                      <input type="text" value={ext.macAddress || ""} onChange={e => updateExtension(idx, { macAddress: e.target.value })} placeholder="AA:BB:CC:DD:EE:FF" style={{ ...fStyle, fontFamily: "monospace" }} />
+                    </div>
+                    <div>
+                      <label className="text-[9px] text-white/30 font-bold uppercase tracking-wider block mb-0.5">Modelo</label>
+                      <input type="text" value={ext.model || ""} onChange={e => updateExtension(idx, { model: e.target.value })} placeholder="Yealink T46U" style={fStyle} />
+                    </div>
+                    <div>
+                      <label className="text-[9px] text-white/30 font-bold uppercase tracking-wider block mb-0.5">Ubicación</label>
+                      <input type="text" value={ext.location || ""} onChange={e => updateExtension(idx, { location: e.target.value })} placeholder="Oficina 2" style={fStyle} />
+                    </div>
+                    <div>
+                      <label className="text-[9px] text-white/30 font-bold uppercase tracking-wider block mb-0.5">Usuario SIP</label>
+                      <input type="text" value={ext.username || ""} onChange={e => updateExtension(idx, { username: e.target.value })} placeholder="ext100" style={{ ...fStyle, fontFamily: "monospace" }} />
+                    </div>
+                    <div>
+                      <label className="text-[9px] text-white/30 font-bold uppercase tracking-wider block mb-0.5">Contraseña SIP</label>
+                      <input type="text" value={ext.password || ""} onChange={e => updateExtension(idx, { password: e.target.value })} placeholder="••••••" style={{ ...fStyle, fontFamily: "monospace" }} />
+                    </div>
+                    <div style={{ gridColumn: "span 2" }}>
+                      <label className="text-[9px] text-white/30 font-bold uppercase tracking-wider block mb-0.5">Notas</label>
+                      <input type="text" value={ext.notes || ""} onChange={e => updateExtension(idx, { notes: e.target.value })} placeholder="Notas adicionales..." style={fStyle} />
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {filtered.length === 0 && search && (
+        <div className="text-center py-4 text-[11px] text-white/20">Sin resultados para &quot;{search}&quot;</div>
+      )}
+      {extensions.length === 0 && !search && (
+        <div className="text-center py-6 text-[11px] text-white/20">Sin extensiones — agregá una para comenzar</div>
+      )}
     </div>
   );
 }

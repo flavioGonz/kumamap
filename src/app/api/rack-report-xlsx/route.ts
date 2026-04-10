@@ -19,10 +19,16 @@ interface RouterInterface {
   id: string; name: string; type: string; ipAddress?: string; connected: boolean; notes?: string;
 }
 
+interface PbxExtension {
+  extension: string; name: string; ipPhone?: string; macAddress?: string;
+  username?: string; password?: string; model?: string; location?: string; notes?: string;
+}
+
 interface RackDevice {
   id: string; unit: number; sizeUnits: number; label: string;
   type: string; color?: string; monitorId?: number | null;
   ports?: PatchPort[]; switchPorts?: SwitchPort[]; routerInterfaces?: RouterInterface[];
+  pbxExtensions?: PbxExtension[];
   portCount?: number; managementIp?: string; model?: string;
   serial?: string; cableLength?: number; isPoeCapable?: boolean; notes?: string;
 }
@@ -268,6 +274,57 @@ export async function POST(request: NextRequest) {
           row.getCell("conn").alignment   = { horizontal: "center", vertical: "middle" };
           row.getCell("port").alignment   = { horizontal: "center", vertical: "middle" };
           row.getCell("uplink").alignment = { horizontal: "center", vertical: "middle" };
+        });
+      });
+    }
+
+    // ── PBX Extensions sheet ────────────────────────────────────────────────
+    const pbxDevices = sorted.filter((d: RackDevice) => d.type === "pbx" && d.pbxExtensions && d.pbxExtensions.length > 0);
+    if (pbxDevices.length > 0) {
+      const wsPbx = wb.addWorksheet("Extensiones PBX");
+      wsPbx.columns = [
+        { header: "Equipo",     key: "device",    width: 22 },
+        { header: "Extensión",  key: "extension", width: 12 },
+        { header: "Nombre",     key: "name",      width: 22 },
+        { header: "IP Teléfono", key: "ipPhone",  width: 16 },
+        { header: "MAC Address", key: "mac",      width: 20 },
+        { header: "Modelo",     key: "model",     width: 18 },
+        { header: "Ubicación",  key: "location",  width: 18 },
+        { header: "Usuario SIP", key: "username", width: 14 },
+        { header: "Contraseña SIP", key: "password", width: 14 },
+        { header: "Notas",      key: "notes",     width: 28 },
+      ];
+      // Style header
+      const pbxHeaderRow = wsPbx.getRow(1);
+      pbxHeaderRow.height = 26;
+      pbxHeaderRow.eachCell((cell) => {
+        cell.font = { bold: true, color: { argb: "FFFFFFFF" }, size: 10 };
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF0891B2" } };
+        cell.alignment = { horizontal: "center", vertical: "middle" };
+        cell.border = { bottom: { style: "thin", color: { argb: "FF06B6D4" } } };
+      });
+      wsPbx.autoFilter = { from: "A1", to: "J1" };
+
+      pbxDevices.forEach((dev: RackDevice) => {
+        (dev.pbxExtensions || []).forEach((ext: PbxExtension) => {
+          const row = wsPbx.addRow({
+            device: dev.label,
+            extension: ext.extension,
+            name: ext.name,
+            ipPhone: ext.ipPhone || "",
+            mac: ext.macAddress || "",
+            model: ext.model || "",
+            location: ext.location || "",
+            username: ext.username || "",
+            password: ext.password || "",
+            notes: ext.notes || "",
+          });
+          row.getCell("extension").font = { bold: true, family: 3 };
+          row.getCell("extension").alignment = { horizontal: "center", vertical: "middle" };
+          row.getCell("ipPhone").font = { family: 3 };
+          row.getCell("mac").font = { family: 3, size: 9 };
+          row.getCell("username").font = { family: 3 };
+          row.getCell("password").font = { family: 3 };
         });
       });
     }

@@ -18,10 +18,16 @@ interface RouterInterface {
   id: string; name: string; type: string; ipAddress?: string; connected: boolean; notes?: string;
 }
 
+interface PbxExtension {
+  extension: string; name: string; ipPhone?: string; macAddress?: string;
+  username?: string; password?: string; model?: string; location?: string; notes?: string;
+}
+
 interface RackDevice {
   id: string; unit: number; sizeUnits: number; label: string;
   type: string; color?: string; monitorId?: number | null;
   ports?: PatchPort[]; switchPorts?: SwitchPort[]; routerInterfaces?: RouterInterface[];
+  pbxExtensions?: PbxExtension[];
   portCount?: number; managementIp?: string; model?: string;
   serial?: string; cableLength?: number; isPoeCapable?: boolean; notes?: string;
 }
@@ -30,7 +36,7 @@ interface RackDevice {
 
 const TYPE_LABELS: Record<string, string> = {
   server: "Servidor", switch: "Switch", patchpanel: "Patch Panel",
-  ups: "UPS / Energía", router: "Router", pdu: "PDU",
+  ups: "UPS / Energía", router: "Router", pdu: "PDU", pbx: "PBX / Telefonía",
   "tray-fiber": "Bandeja de Fibra", "tray-1u": "Bandeja 1U",
   "tray-2u": "Bandeja 2U", other: "Otro",
 };
@@ -126,6 +132,47 @@ function generatePDFHtml(rackName: string, totalUnits: number, devices: RackDevi
         ${tableRows}
       </tbody>
     </table>
+
+    ${(() => {
+      const pbxDevices = sorted.filter(d => d.type === "pbx" && (d.pbxExtensions || []).length > 0);
+      if (pbxDevices.length === 0) return "";
+      return `
+      <h2 style="color: #1e3a5f; margin-top: 30px; margin-bottom: 15px; border-bottom: 1px solid #ddd; padding-bottom: 10px;">Extensiones PBX</h2>
+      ${pbxDevices.map(d => {
+        const exts = d.pbxExtensions || [];
+        const extRows = exts.map((ext, ei) => `
+          <tr style="border-bottom: 1px solid #ddd; background: ${ei%2===0?'#fff':'#f9f9f9'}">
+            <td style="padding: 8px; font-family: monospace; font-weight: 600">${ext.extension}</td>
+            <td style="padding: 8px">${ext.name || "—"}</td>
+            <td style="padding: 8px; font-family: monospace; font-size: 12px">${ext.ipPhone || "—"}</td>
+            <td style="padding: 8px; font-family: monospace; font-size: 12px">${ext.macAddress || "—"}</td>
+            <td style="padding: 8px">${ext.model || "—"}</td>
+            <td style="padding: 8px">${ext.location || "—"}</td>
+            <td style="padding: 8px; font-family: monospace; font-size: 12px">${ext.username || "—"}</td>
+            <td style="padding: 8px; font-family: monospace; font-size: 12px">${ext.password || "—"}</td>
+            <td style="padding: 8px; font-size: 12px">${ext.notes || "—"}</td>
+          </tr>
+        `).join("");
+        return `
+        <h3 style="color: #0891b2; margin: 20px 0 10px 0; font-size: 16px">${d.label} · U${d.unit}${d.sizeUnits>1?`-${d.unit+d.sizeUnits-1}`:""} · ${exts.length} extensiones</h3>
+        <table>
+          <thead>
+            <tr>
+              <th style="background: #0891b2">Ext.</th>
+              <th style="background: #0891b2">Nombre</th>
+              <th style="background: #0891b2">IP Teléfono</th>
+              <th style="background: #0891b2">MAC</th>
+              <th style="background: #0891b2">Modelo</th>
+              <th style="background: #0891b2">Ubicación</th>
+              <th style="background: #0891b2">Usuario SIP</th>
+              <th style="background: #0891b2">Contraseña SIP</th>
+              <th style="background: #0891b2">Notas</th>
+            </tr>
+          </thead>
+          <tbody>${extRows}</tbody>
+        </table>`;
+      }).join("")}`;
+    })()}
 
     <div class="footer">
       <p>KumaMap Rack Designer | Reporte confidencial</p>

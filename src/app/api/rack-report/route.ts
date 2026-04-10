@@ -23,10 +23,16 @@ interface RouterInterface {
   id: string; name: string; type: string; ipAddress?: string; connected: boolean; notes?: string;
 }
 
+interface PbxExtension {
+  extension: string; name: string; ipPhone?: string; macAddress?: string;
+  username?: string; password?: string; model?: string; location?: string; notes?: string;
+}
+
 interface RackDevice {
   id: string; unit: number; sizeUnits: number; label: string;
   type: string; color?: string; monitorId?: number | null;
   ports?: PatchPort[]; switchPorts?: SwitchPort[]; routerInterfaces?: RouterInterface[];
+  pbxExtensions?: PbxExtension[];
   portCount?: number; managementIp?: string; model?: string;
   serial?: string; cableLength?: number; isPoeCapable?: boolean; notes?: string;
 }
@@ -35,7 +41,7 @@ interface RackDevice {
 
 const TYPE_LABELS: Record<string, string> = {
   server: "Servidor", switch: "Switch", patchpanel: "Patch Panel",
-  ups: "UPS / Energía", router: "Router", pdu: "PDU",
+  ups: "UPS / Energía", router: "Router", pdu: "PDU", pbx: "PBX / Telefonía",
   "tray-fiber": "Bandeja de Fibra", "tray-1u": "Bandeja 1U",
   "tray-2u": "Bandeja 2U", other: "Otro",
 };
@@ -183,7 +189,8 @@ function buildRackReport(rackName: string, totalUnits: number, devices: RackDevi
   const devicesWithPorts = sorted.filter(d =>
     (d.type === "patchpanel" && (d.ports || []).length > 0) ||
     (d.type === "switch" && (d.switchPorts || []).length > 0) ||
-    (d.type === "router" && (d.routerInterfaces || []).length > 0)
+    (d.type === "router" && (d.routerInterfaces || []).length > 0) ||
+    (d.type === "pbx" && (d.pbxExtensions || []).length > 0)
   );
 
   if (devicesWithPorts.length > 0) {
@@ -213,6 +220,8 @@ function buildRackReport(rackName: string, totalUnits: number, devices: RackDevi
         children.push(...buildSwitchTable(d.switchPorts, CW));
       } else if (d.type === "router" && d.routerInterfaces) {
         children.push(...buildRouterTable(d.routerInterfaces, CW));
+      } else if (d.type === "pbx" && d.pbxExtensions) {
+        children.push(...buildPbxTable(d.pbxExtensions, CW));
       }
 
       children.push(new Paragraph({ children: [], spacing: { before: 160, after: 0 } }));
@@ -407,6 +416,41 @@ function buildRouterTable(interfaces: RouterInterface[], CW: number): any[] {
   ];
 
   return [
+    new Table({ width: { size: CW, type: WidthType.DXA }, columnWidths: cols, rows }),
+  ];
+}
+
+function buildPbxTable(extensions: PbxExtension[], CW: number): any[] {
+  const cols = [600, 1400, 1200, 1200, 900, 1000, 900, 826]; // = 9026
+  const headers = ["Ext.", "Nombre", "IP Teléfono", "MAC", "Modelo", "Ubicación", "Usuario SIP", "Notas"];
+
+  const rows = [
+    new TableRow({
+      tableHeader: true,
+      children: headers.map((h, i) => headerCell(h, cols[i])),
+    }),
+    ...extensions.map((ext, ri) => {
+      const shade = ri % 2 === 0 ? "FFFFFF" : "F3F4F6";
+      return new TableRow({ children: [
+        dataCell(ext.extension, cols[0], { mono: true, shade }),
+        dataCell(ext.name || "—", cols[1], { shade }),
+        dataCell(ext.ipPhone || "—", cols[2], { mono: true, shade }),
+        dataCell(ext.macAddress || "—", cols[3], { mono: true, shade }),
+        dataCell(ext.model || "—", cols[4], { shade }),
+        dataCell(ext.location || "—", cols[5], { shade }),
+        dataCell(ext.username || "—", cols[6], { mono: true, shade }),
+        dataCell(ext.notes || "", cols[7], { shade }),
+      ]});
+    }),
+  ];
+
+  return [
+    new Paragraph({
+      children: [
+        new TextRun({ text: `${extensions.length} extensiones`, size: 18, font: "Arial", color: "0891B2" }),
+      ],
+      spacing: { before: 0, after: 100 },
+    }),
     new Table({ width: { size: CW, type: WidthType.DXA }, columnWidths: cols, rows }),
   ];
 }

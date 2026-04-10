@@ -210,7 +210,7 @@ export default function RackDesignerDrawer({ open, onClose, nodeId, nodes, monit
           setTotalUnits(cd.totalUnits || 42);
           setDevices(cd.devices || []);
           setRackPhotos(cd.photos || []);
-          setRackName(node.label || "Rack");
+          setRackName(cd.rackName || node.label || "Rack");
         } catch {
           setTotalUnits(42);
           setDevices([]);
@@ -266,6 +266,7 @@ export default function RackDesignerDrawer({ open, onClose, nodeId, nodes, monit
     cd.totalUnits = totalUnits;
     cd.devices = currentDevices;
     cd.photos = rackPhotos;
+    cd.rackName = rackName;
     onSave(nodeId, cd);
   };
 
@@ -477,9 +478,9 @@ export default function RackDesignerDrawer({ open, onClose, nodeId, nodes, monit
     const occMap = new Map<number, RackDevice>();
     devices.forEach(d => { for (let i = 0; i < d.sizeUnits; i++) occMap.set(d.unit + i, d); });
 
-    const unitH = 30; // px per U
-    const rackW = 260;
-    const rackX = 48; // left margin for U numbers
+    const unitH = 32; // px per U
+    const rackW = 340;
+    const rackX = 36; // left margin for U numbers
     const railW = 10;
     const now = new Date().toLocaleDateString("es-UY", { day:"2-digit", month:"2-digit", year:"numeric" });
 
@@ -500,11 +501,11 @@ export default function RackDesignerDrawer({ open, onClose, nodeId, nodes, monit
           <div style="position:relative;height:${h}px;background:${color};display:flex;align-items:center;overflow:hidden">
             <div style="position:absolute;left:0;top:0;bottom:0;width:${railW}px;background:#1a1a1a;border-right:1px solid #0a0a0a"></div>
             <div style="position:absolute;right:0;top:0;bottom:0;width:${railW}px;background:#1a1a1a;border-left:1px solid #0a0a0a"></div>
-            <div style="margin-left:${railW + 8}px;display:flex;align-items:center;gap:6px;min-width:0;flex:1;padding-right:${railW + 20}px">
+            <div style="margin-left:${railW + 8}px;display:flex;align-items:center;gap:6px;flex:1;padding-right:${railW + 24}px">
               ${icon}
-              <div style="min-width:0;flex:1">
-                <div style="font-size:11px;font-weight:700;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${dev.label}</div>
-                ${dev.model ? `<div style="font-size:8px;color:rgba(255,255,255,0.5);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${dev.model}</div>` : ""}
+              <div>
+                <div style="font-size:12px;font-weight:700;color:#fff;white-space:nowrap">${dev.label}</div>
+                ${dev.model ? `<div style="font-size:9px;color:rgba(255,255,255,0.5);white-space:nowrap">${dev.model}</div>` : ""}
               </div>
             </div>
             ${statusDot}
@@ -540,12 +541,10 @@ export default function RackDesignerDrawer({ open, onClose, nodeId, nodes, monit
         : d.type === "switch"
         ? `${(d.switchPorts||[]).filter((p: any)=>p.connected).length}/${d.portCount||24}`
         : "—";
-      const si = getDeviceStatusInfo(d.monitorId);
-      const statusHtml = d.monitorId ? `<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${si.color};margin-right:4px;vertical-align:middle"></span>` : "";
       return `<tr style="border-bottom:1px solid rgba(255,255,255,0.05);background:${i%2===0?"transparent":"rgba(255,255,255,0.02)"}">
         <td style="padding:7px 8px;font-family:monospace;color:rgba(255,255,255,0.5);font-size:11px">U${d.unit}${d.sizeUnits>1?`-${d.unit+d.sizeUnits-1}`:""}</td>
         <td style="padding:7px 8px">${icon}</td>
-        <td style="padding:7px 8px;font-weight:600;color:#fff;font-size:11px">${statusHtml}${d.label}</td>
+        <td style="padding:7px 8px;font-weight:600;color:#fff;font-size:11px">${d.label}</td>
         <td style="padding:7px 8px;color:${color};font-size:10px;font-weight:600">${label}</td>
         <td style="padding:7px 8px;color:rgba(255,255,255,0.4);font-size:10px">${d.model||"—"}</td>
         <td style="padding:7px 8px;font-family:monospace;color:rgba(255,255,255,0.4);font-size:10px">${d.managementIp||"—"}</td>
@@ -559,7 +558,7 @@ export default function RackDesignerDrawer({ open, onClose, nodeId, nodes, monit
     const container = document.createElement("div");
     container.style.cssText = `
       position:fixed; left:-9999px; top:0;
-      width:1100px; background:#0f0f0f; padding:36px;
+      width:1200px; background:#0f0f0f; padding:36px;
       font-family:'Segoe UI',-apple-system,BlinkMacSystemFont,sans-serif;
       color:#fff;
     `;
@@ -589,7 +588,10 @@ export default function RackDesignerDrawer({ open, onClose, nodeId, nodes, monit
             <div style="width:${rackX}px;display:flex;flex-direction:column">${uLabelsHtml}</div>
             <div style="width:${rackW}px;border:3px solid #2a2a2a;border-radius:6px;overflow:hidden;background:#1c1c1c;box-shadow:inset 0 2px 8px rgba(0,0,0,0.6),0 4px 20px rgba(0,0,0,0.5);display:flex;flex-direction:column;position:relative">${rackUnitsHtml}</div>
           </div>
-          <div style="font-size:9px;color:rgba(255,255,255,0.2);text-align:center;margin-top:6px;font-family:monospace">▼ U1 (abajo)</div>
+          <div style="display:flex;justify-content:center;gap:10px;margin-top:8px">
+            <span style="font-size:10px;font-weight:600;color:rgba(255,255,255,0.35);padding:3px 8px;border-radius:4px;background:rgba(255,255,255,0.04)">${usedUnits}U usadas</span>
+            <span style="font-size:10px;font-weight:600;color:rgba(255,255,255,0.2);padding:3px 8px;border-radius:4px;background:rgba(255,255,255,0.02)">${freeUnits}U libres</span>
+          </div>
         </div>
 
         <!-- Device table -->
@@ -675,8 +677,19 @@ export default function RackDesignerDrawer({ open, onClose, nodeId, nodes, monit
               <Server className="w-4 h-4 text-blue-400" />
             </div>
             <div>
-              <div className="flex items-center gap-2">
-                <h2 className="text-[15px] font-semibold text-white/90 leading-none">{rackName}</h2>
+              <div className="flex items-center gap-1.5 group/name">
+                <input
+                  type="text"
+                  value={rackName}
+                  onChange={e => setRackName(e.target.value)}
+                  onBlur={() => { if (!rackName.trim()) setRackName("Rack"); }}
+                  className="text-[15px] font-semibold text-white/90 leading-none bg-transparent border-none outline-none p-0 m-0 w-auto min-w-[60px]"
+                  style={{ maxWidth: 200, borderBottom: "1px dashed rgba(255,255,255,0.1)" }}
+                  spellCheck={false}
+                />
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-white/20 group-hover/name:text-white/50 transition-colors shrink-0">
+                  <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" /><path d="m15 5 4 4" />
+                </svg>
               </div>
               <div className="flex items-center gap-2 mt-0.5">
                 <p className="text-[11px] text-white/40">

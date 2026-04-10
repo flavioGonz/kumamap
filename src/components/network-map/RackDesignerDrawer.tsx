@@ -5,6 +5,7 @@ import {
   X, Download, Server, Network, Zap, Settings, Trash2, Plus, Phone,
   Inbox, Router, Cable, Lock, Unlock, Save, Search, FileText, ChevronLeft, ChevronRight,
   FileSpreadsheet, Printer, FileDown, Upload, ImageIcon, Camera as CameraIcon, ZoomIn, Trash,
+  Eye, EyeOff, Copy, PhoneIncoming, Activity,
 } from "lucide-react";
 import html2canvas from "html2canvas";
 import { motion, AnimatePresence } from "framer-motion";
@@ -60,6 +61,23 @@ export interface PbxExtension {
   model?: string;
   location?: string;
   notes?: string;
+  monitorId?: number | null;
+  webUser?: string;
+  webPassword?: string;
+}
+
+export interface PbxTrunkLine {
+  id: string;
+  provider: string;
+  number: string;
+  type: "SIP" | "PRI" | "BRI" | "FXO" | "FXS" | "IAX" | "other";
+  channels?: number;
+  sipServer?: string;
+  sipUser?: string;
+  sipPassword?: string;
+  codec?: string;
+  status?: "active" | "inactive" | "backup";
+  notes?: string;
 }
 
 export interface RackDevice {
@@ -93,6 +111,7 @@ export interface RackDevice {
   pduInputCount?: number;
   // PBX
   pbxExtensions?: PbxExtension[];
+  pbxTrunkLines?: PbxTrunkLine[];
 }
 
 interface RackDesignerDrawerProps {
@@ -2222,9 +2241,17 @@ function DeviceEditor({
   onDelete?: () => void;
   onCancel: () => void;
 }) {
-  const [activeTab, setActiveTab] = useState<"ports" | "general">("ports");
+  const [activeTab, setActiveTab] = useState<"ports" | "trunks" | "general">("ports");
   const meta = TYPE_META[device.type] || TYPE_META.other;
   const hasPorts = ["patchpanel", "switch", "router", "pbx"].includes(device.type);
+
+  const getStatusInfo = useCallback((monitorId?: number | null) => {
+    if (!monitorId || !monitors) return { color: "#6b7280", name: "" };
+    const m = monitors.find((x: any) => x.id === monitorId);
+    if (!m) return { color: "#6b7280", name: "" };
+    const up = m.status === 1;
+    return { color: up ? "#22c55e" : "#ef4444", name: m.name || "" };
+  }, [monitors]);
 
   const makeDefaultPatchPorts = (count: number): PatchPort[] =>
     Array.from({ length: count }, (_, i) => ({ port: i + 1, label: `P${i + 1}`, connected: false }));
@@ -2317,11 +2344,12 @@ function DeviceEditor({
         <div className="shrink-0 flex border-b border-white/[0.06]" style={{ background: "rgba(0,0,0,0.2)" }}>
           {[
             { id: "ports", label: device.type === "router" ? "Interfaces" : device.type === "pbx" ? "Extensiones" : `Puertos${device.type === "patchpanel" ? " del Panel" : ""}` },
+            ...(device.type === "pbx" ? [{ id: "trunks", label: "Líneas" }] : []),
             { id: "general", label: "General" },
           ].map((tab) => (
             <button
               key={tab.id}
-              onClick={() => setActiveTab(tab.id as "ports" | "general")}
+              onClick={() => setActiveTab(tab.id as "ports" | "trunks" | "general")}
               className="px-5 py-2.5 text-xs font-semibold transition-all cursor-pointer relative"
               style={{
                 color: activeTab === tab.id ? "#fff" : "rgba(255,255,255,0.35)",
@@ -2360,6 +2388,16 @@ function DeviceEditor({
           <PbxExtensionsEditor
             extensions={device.pbxExtensions || []}
             onChange={pbxExtensions => onChange({ ...device, pbxExtensions })}
+            monitors={monitors}
+            getStatusInfo={getStatusInfo}
+          />
+        )}
+
+        {/* Trunk lines tab */}
+        {activeTab === "trunks" && device.type === "pbx" && (
+          <PbxTrunkLinesEditor
+            trunkLines={device.pbxTrunkLines || []}
+            onChange={pbxTrunkLines => onChange({ ...device, pbxTrunkLines })}
           />
         )}
 
@@ -3249,7 +3287,41 @@ function RouterEditor({ interfaces, onChange }: { interfaces: RouterInterface[];
 
 // ── PBX Extensions Editor ─────────────────────────────────────────────────────
 
-function PbxExtensionsEditor({ extensions, onChange }: { extensions: PbxExtension[]; onChange: (e: PbxExtension[]) => void }) {
+function SecureField({ label, value, onChange, placeholder }: { label: string; value: string; onChange: (v: string) => void; placeholder?: string }) {
+  const [visible, setVisible] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const fStyle: React.CSSProperties = { width: "100%", padding: "6px 10px", paddingRight: 56, borderRadius: 8, fontSize: 11, color: "#ddd", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)", outline: "none", fontFamily: "monospace" };
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(value || "");
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
+
+  return (
+    <div>
+      <label className="text-[9px] text-white/30 font-bold uppercase tracking-wider block mb-0.5">{label}</label>
+      <div className="relative">
+        <input type={visible ? "text" : "password"} value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder} style={fStyle} />
+        <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-0.5">
+          <button type="button" onClick={() => setVisible(v => !v)} className="w-6 h-6 flex items-center justify-center rounded hover:bg-white/10 transition-all cursor-pointer" title={visible ? "Ocultar" : "Mostrar"}>
+            {visible ? <EyeOff className="w-3 h-3 text-white/40" /> : <Eye className="w-3 h-3 text-white/40" />}
+          </button>
+          <button type="button" onClick={handleCopy} className="w-6 h-6 flex items-center justify-center rounded hover:bg-white/10 transition-all cursor-pointer" title="Copiar">
+            <Copy className="w-3 h-3" style={{ color: copied ? "#22d3ee" : "rgba(255,255,255,0.4)" }} />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PbxExtensionsEditor({ extensions, onChange, monitors, getStatusInfo }: {
+  extensions: PbxExtension[];
+  onChange: (e: PbxExtension[]) => void;
+  monitors?: any[];
+  getStatusInfo: (monitorId?: number | null) => { color: string; name: string };
+}) {
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
   const [search, setSearch] = useState("");
 
@@ -3299,26 +3371,30 @@ function PbxExtensionsEditor({ extensions, onChange }: { extensions: PbxExtensio
       )}
 
       {/* Table header */}
-      <div className="grid gap-1 px-2 py-1" style={{ gridTemplateColumns: "60px 1fr 110px 40px", fontSize: 9, color: "rgba(255,255,255,0.3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em" }}>
-        <span>Ext.</span><span>Nombre / Usuario</span><span>IP Teléfono</span><span></span>
+      <div className="grid gap-1 px-2 py-1" style={{ gridTemplateColumns: "60px 1fr 110px 18px 40px", fontSize: 9, color: "rgba(255,255,255,0.3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+        <span>Ext.</span><span>Nombre / Usuario</span><span>IP Teléfono</span><span></span><span></span>
       </div>
 
       <div className="flex flex-col gap-1">
         {filtered.map((ext) => {
           const idx = ext._idx;
           const isExpanded = expandedIdx === idx;
+          const si = getStatusInfo(ext.monitorId);
           return (
             <div key={idx} className="rounded-xl overflow-hidden transition-all" style={{ background: isExpanded ? "rgba(6,182,212,0.04)" : "rgba(255,255,255,0.02)", border: `1px solid ${isExpanded ? "rgba(6,182,212,0.15)" : "rgba(255,255,255,0.04)"}` }}>
               {/* Row summary */}
               <div onClick={() => setExpandedIdx(isExpanded ? null : idx)}
                 className="grid gap-1 px-2.5 py-2 cursor-pointer hover:bg-white/[0.03] transition-all items-center"
-                style={{ gridTemplateColumns: "60px 1fr 110px 40px" }}>
+                style={{ gridTemplateColumns: "60px 1fr 110px 18px 40px" }}>
                 <span className="text-xs font-mono font-bold" style={{ color: "#22d3ee" }}>{ext.extension || "—"}</span>
                 <div className="min-w-0">
                   <span className="text-[11px] text-white/70 truncate block">{ext.name || "Sin nombre"}</span>
                   {ext.username && <span className="text-[9px] text-white/25 font-mono">{ext.username}</span>}
                 </div>
                 <span className="text-[10px] font-mono text-white/35 truncate">{ext.ipPhone || "—"}</span>
+                {ext.monitorId ? (
+                  <span className="w-2 h-2 rounded-full" style={{ background: si.color, boxShadow: `0 0 6px ${si.color}` }} title={si.name} />
+                ) : <span />}
                 <button onClick={(e) => { e.stopPropagation(); removeExtension(idx); }}
                   className="w-6 h-6 flex items-center justify-center rounded text-red-400/50 hover:text-red-400 hover:bg-red-500/10 transition-all cursor-pointer">
                   <Trash2 className="w-3 h-3" />
@@ -3353,14 +3429,32 @@ function PbxExtensionsEditor({ extensions, onChange }: { extensions: PbxExtensio
                       <label className="text-[9px] text-white/30 font-bold uppercase tracking-wider block mb-0.5">Ubicación</label>
                       <input type="text" value={ext.location || ""} onChange={e => updateExtension(idx, { location: e.target.value })} placeholder="Oficina 2" style={fStyle} />
                     </div>
+
+                    {/* Sensor association */}
+                    <div style={{ gridColumn: "span 2" }}>
+                      <label className="text-[9px] text-white/30 font-bold uppercase tracking-wider flex items-center gap-1 mb-0.5">
+                        <Activity className="w-3 h-3" style={{ color: "#06b6d4" }} />Sensor Uptime Kuma
+                      </label>
+                      <select value={ext.monitorId ?? ""} onChange={e => updateExtension(idx, { monitorId: e.target.value ? Number(e.target.value) : null })}
+                        style={{ ...fStyle, cursor: "pointer" }}>
+                        <option value="" style={{ background: "#1a1a1a" }}>— Sin sensor —</option>
+                        {(monitors || []).map((m: any) => (
+                          <option key={m.id} value={m.id} style={{ background: "#1a1a1a" }}>{m.name} ({m.type})</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* SIP credentials */}
                     <div>
                       <label className="text-[9px] text-white/30 font-bold uppercase tracking-wider block mb-0.5">Usuario SIP</label>
                       <input type="text" value={ext.username || ""} onChange={e => updateExtension(idx, { username: e.target.value })} placeholder="ext100" style={{ ...fStyle, fontFamily: "monospace" }} />
                     </div>
-                    <div>
-                      <label className="text-[9px] text-white/30 font-bold uppercase tracking-wider block mb-0.5">Contraseña SIP</label>
-                      <input type="text" value={ext.password || ""} onChange={e => updateExtension(idx, { password: e.target.value })} placeholder="••••••" style={{ ...fStyle, fontFamily: "monospace" }} />
-                    </div>
+                    <SecureField label="Contraseña SIP" value={ext.password || ""} onChange={v => updateExtension(idx, { password: v })} placeholder="••••••" />
+
+                    {/* Web credentials */}
+                    <SecureField label="Usuario Web Teléfono" value={ext.webUser || ""} onChange={v => updateExtension(idx, { webUser: v })} placeholder="admin" />
+                    <SecureField label="Contraseña Web Teléfono" value={ext.webPassword || ""} onChange={v => updateExtension(idx, { webPassword: v })} placeholder="••••••" />
+
                     <div style={{ gridColumn: "span 2" }}>
                       <label className="text-[9px] text-white/30 font-bold uppercase tracking-wider block mb-0.5">Notas</label>
                       <input type="text" value={ext.notes || ""} onChange={e => updateExtension(idx, { notes: e.target.value })} placeholder="Notas adicionales..." style={fStyle} />
@@ -3378,6 +3472,135 @@ function PbxExtensionsEditor({ extensions, onChange }: { extensions: PbxExtensio
       )}
       {extensions.length === 0 && !search && (
         <div className="text-center py-6 text-[11px] text-white/20">Sin extensiones — agregá una para comenzar</div>
+      )}
+    </div>
+  );
+}
+
+// ── PBX Trunk Lines Editor ───────────────────────────────────────────────────
+
+function PbxTrunkLinesEditor({ trunkLines, onChange }: { trunkLines: PbxTrunkLine[]; onChange: (t: PbxTrunkLine[]) => void }) {
+  const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
+
+  const addTrunk = () => {
+    const id = `trunk-${Date.now()}`;
+    onChange([...trunkLines, { id, provider: "", number: "", type: "SIP", status: "active" }]);
+    setExpandedIdx(trunkLines.length);
+  };
+
+  const removeTrunk = (idx: number) => {
+    onChange(trunkLines.filter((_, i) => i !== idx));
+    if (expandedIdx === idx) setExpandedIdx(null);
+  };
+
+  const updateTrunk = (idx: number, upd: Partial<PbxTrunkLine>) => {
+    onChange(trunkLines.map((t, i) => i === idx ? { ...t, ...upd } : t));
+  };
+
+  const fStyle: React.CSSProperties = { width: "100%", padding: "6px 10px", borderRadius: 8, fontSize: 11, color: "#ddd", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)", outline: "none" };
+  const statusColors: Record<string, string> = { active: "#22c55e", inactive: "#ef4444", backup: "#f59e0b" };
+  const statusLabels: Record<string, string> = { active: "Activa", inactive: "Inactiva", backup: "Backup" };
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <PhoneIncoming className="w-4 h-4" style={{ color: "#06b6d4" }} />
+          <span className="text-xs font-bold text-white/60">{trunkLines.length} líneas</span>
+        </div>
+        <button onClick={addTrunk} className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[10px] font-bold transition-all hover:scale-105 active:scale-95 cursor-pointer"
+          style={{ background: "rgba(6,182,212,0.1)", color: "#22d3ee", border: "1px solid rgba(6,182,212,0.2)" }}>
+          <Plus className="w-3 h-3" />Agregar Línea
+        </button>
+      </div>
+
+      {/* Table header */}
+      <div className="grid gap-1 px-2 py-1" style={{ gridTemplateColumns: "1fr 100px 60px 50px 40px", fontSize: 9, color: "rgba(255,255,255,0.3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+        <span>Proveedor / Número</span><span>Tipo</span><span>Canales</span><span>Estado</span><span></span>
+      </div>
+
+      <div className="flex flex-col gap-1">
+        {trunkLines.map((trunk, idx) => {
+          const isExpanded = expandedIdx === idx;
+          const sColor = statusColors[trunk.status || "active"] || "#6b7280";
+          return (
+            <div key={trunk.id} className="rounded-xl overflow-hidden transition-all" style={{ background: isExpanded ? "rgba(6,182,212,0.04)" : "rgba(255,255,255,0.02)", border: `1px solid ${isExpanded ? "rgba(6,182,212,0.15)" : "rgba(255,255,255,0.04)"}` }}>
+              {/* Row summary */}
+              <div onClick={() => setExpandedIdx(isExpanded ? null : idx)}
+                className="grid gap-1 px-2.5 py-2 cursor-pointer hover:bg-white/[0.03] transition-all items-center"
+                style={{ gridTemplateColumns: "1fr 100px 60px 50px 40px" }}>
+                <div className="min-w-0">
+                  <span className="text-[11px] text-white/70 truncate block">{trunk.provider || "Sin proveedor"}</span>
+                  <span className="text-[10px] font-mono text-white/30">{trunk.number || "—"}</span>
+                </div>
+                <span className="text-[10px] font-mono text-cyan-300/60">{trunk.type}</span>
+                <span className="text-[10px] font-mono text-white/35">{trunk.channels || "—"}</span>
+                <span className="w-2 h-2 rounded-full" style={{ background: sColor, boxShadow: `0 0 4px ${sColor}` }} title={statusLabels[trunk.status || "active"]} />
+                <button onClick={(e) => { e.stopPropagation(); removeTrunk(idx); }}
+                  className="w-6 h-6 flex items-center justify-center rounded text-red-400/50 hover:text-red-400 hover:bg-red-500/10 transition-all cursor-pointer">
+                  <Trash2 className="w-3 h-3" />
+                </button>
+              </div>
+
+              {/* Expanded detail */}
+              {isExpanded && (
+                <div className="px-3 pb-3 pt-1 border-t border-white/[0.04]">
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="text-[9px] text-white/30 font-bold uppercase tracking-wider block mb-0.5">Proveedor</label>
+                      <input type="text" value={trunk.provider} onChange={e => updateTrunk(idx, { provider: e.target.value })} placeholder="Antel / Claro / VoIP..." style={fStyle} />
+                    </div>
+                    <div>
+                      <label className="text-[9px] text-white/30 font-bold uppercase tracking-wider block mb-0.5">Número / DID</label>
+                      <input type="text" value={trunk.number} onChange={e => updateTrunk(idx, { number: e.target.value })} placeholder="+598 2XXX XXXX" style={{ ...fStyle, fontFamily: "monospace" }} />
+                    </div>
+                    <div>
+                      <label className="text-[9px] text-white/30 font-bold uppercase tracking-wider block mb-0.5">Tipo de Línea</label>
+                      <select value={trunk.type} onChange={e => updateTrunk(idx, { type: e.target.value as PbxTrunkLine["type"] })} style={{ ...fStyle, cursor: "pointer" }}>
+                        {["SIP", "PRI", "BRI", "FXO", "FXS", "IAX", "other"].map(t => (
+                          <option key={t} value={t} style={{ background: "#1a1a1a" }}>{t === "other" ? "Otro" : t}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[9px] text-white/30 font-bold uppercase tracking-wider block mb-0.5">Canales</label>
+                      <input type="number" value={trunk.channels || ""} onChange={e => updateTrunk(idx, { channels: e.target.value ? Number(e.target.value) : undefined })} placeholder="2" style={{ ...fStyle, fontFamily: "monospace" }} />
+                    </div>
+                    <div>
+                      <label className="text-[9px] text-white/30 font-bold uppercase tracking-wider block mb-0.5">Servidor SIP</label>
+                      <input type="text" value={trunk.sipServer || ""} onChange={e => updateTrunk(idx, { sipServer: e.target.value })} placeholder="sip.proveedor.com" style={{ ...fStyle, fontFamily: "monospace" }} />
+                    </div>
+                    <div>
+                      <label className="text-[9px] text-white/30 font-bold uppercase tracking-wider block mb-0.5">Códec</label>
+                      <input type="text" value={trunk.codec || ""} onChange={e => updateTrunk(idx, { codec: e.target.value })} placeholder="G.711 / G.729 / Opus" style={fStyle} />
+                    </div>
+                    <div>
+                      <label className="text-[9px] text-white/30 font-bold uppercase tracking-wider block mb-0.5">Usuario SIP Trunk</label>
+                      <input type="text" value={trunk.sipUser || ""} onChange={e => updateTrunk(idx, { sipUser: e.target.value })} placeholder="trunk_user" style={{ ...fStyle, fontFamily: "monospace" }} />
+                    </div>
+                    <SecureField label="Contraseña SIP Trunk" value={trunk.sipPassword || ""} onChange={v => updateTrunk(idx, { sipPassword: v })} placeholder="••••••" />
+                    <div>
+                      <label className="text-[9px] text-white/30 font-bold uppercase tracking-wider block mb-0.5">Estado</label>
+                      <select value={trunk.status || "active"} onChange={e => updateTrunk(idx, { status: e.target.value as PbxTrunkLine["status"] })} style={{ ...fStyle, cursor: "pointer" }}>
+                        <option value="active" style={{ background: "#1a1a1a" }}>Activa</option>
+                        <option value="inactive" style={{ background: "#1a1a1a" }}>Inactiva</option>
+                        <option value="backup" style={{ background: "#1a1a1a" }}>Backup</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[9px] text-white/30 font-bold uppercase tracking-wider block mb-0.5">Notas</label>
+                      <input type="text" value={trunk.notes || ""} onChange={e => updateTrunk(idx, { notes: e.target.value })} placeholder="Notas..." style={fStyle} />
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {trunkLines.length === 0 && (
+        <div className="text-center py-6 text-[11px] text-white/20">Sin líneas — agregá una para comenzar</div>
       )}
     </div>
   );

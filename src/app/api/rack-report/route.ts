@@ -26,6 +26,13 @@ interface RouterInterface {
 interface PbxExtension {
   extension: string; name: string; ipPhone?: string; macAddress?: string;
   username?: string; password?: string; model?: string; location?: string; notes?: string;
+  webUser?: string; webPassword?: string;
+}
+
+interface PbxTrunkLine {
+  id: string; provider: string; number: string; type: string;
+  channels?: number; sipServer?: string; sipUser?: string; sipPassword?: string;
+  codec?: string; status?: string; notes?: string;
 }
 
 interface RackDevice {
@@ -33,6 +40,7 @@ interface RackDevice {
   type: string; color?: string; monitorId?: number | null;
   ports?: PatchPort[]; switchPorts?: SwitchPort[]; routerInterfaces?: RouterInterface[];
   pbxExtensions?: PbxExtension[];
+  pbxTrunkLines?: PbxTrunkLine[];
   portCount?: number; managementIp?: string; model?: string;
   serial?: string; cableLength?: number; isPoeCapable?: boolean; notes?: string;
 }
@@ -222,6 +230,11 @@ function buildRackReport(rackName: string, totalUnits: number, devices: RackDevi
         children.push(...buildRouterTable(d.routerInterfaces, CW));
       } else if (d.type === "pbx" && d.pbxExtensions) {
         children.push(...buildPbxTable(d.pbxExtensions, CW));
+      }
+
+      // Add trunk lines section for PBX devices
+      if (d.type === "pbx" && (d.pbxTrunkLines || []).length > 0) {
+        children.push(...buildTrunkTable(d.pbxTrunkLines!, CW));
       }
 
       children.push(new Paragraph({ children: [], spacing: { before: 160, after: 0 } }));
@@ -416,6 +429,44 @@ function buildRouterTable(interfaces: RouterInterface[], CW: number): any[] {
   ];
 
   return [
+    new Table({ width: { size: CW, type: WidthType.DXA }, columnWidths: cols, rows }),
+  ];
+}
+
+function buildTrunkTable(trunks: PbxTrunkLine[], CW: number): any[] {
+  const cols = [1400, 1200, 700, 700, 1600, 1200, 700, 1526]; // = 9026
+  const headers = ["Proveedor", "Número/DID", "Tipo", "Canales", "Servidor SIP", "Códec", "Estado", "Notas"];
+  const statusLabels: Record<string, string> = { active: "Activa", inactive: "Inactiva", backup: "Backup" };
+  const statusColors: Record<string, string> = { active: "059669", inactive: "DC2626", backup: "D97706" };
+
+  const rows = [
+    new TableRow({
+      tableHeader: true,
+      children: headers.map((h, i) => headerCell(h, cols[i])),
+    }),
+    ...trunks.map((t, ri) => {
+      const shade = ri % 2 === 0 ? "FFFFFF" : "F3F4F6";
+      return new TableRow({ children: [
+        dataCell(t.provider || "—", cols[0], { shade }),
+        dataCell(t.number || "—", cols[1], { mono: true, shade }),
+        dataCell(t.type, cols[2], { mono: true, shade, color: "0891B2" }),
+        dataCell(t.channels ? String(t.channels) : "—", cols[3], { mono: true, shade }),
+        dataCell(t.sipServer || "—", cols[4], { mono: true, shade }),
+        dataCell(t.codec || "—", cols[5], { shade }),
+        dataCell(statusLabels[t.status || "active"] || "—", cols[6], { shade, color: statusColors[t.status || "active"] || "555555" }),
+        dataCell(t.notes || "", cols[7], { shade }),
+      ]});
+    }),
+  ];
+
+  return [
+    new Paragraph({
+      children: [
+        new TextRun({ text: `Líneas del proveedor`, size: 20, font: "Arial", color: "0891B2", bold: true }),
+        new TextRun({ text: `  ·  ${trunks.length} líneas`, size: 18, font: "Arial", color: "888888" }),
+      ],
+      spacing: { before: 200, after: 100 },
+    }),
     new Table({ width: { size: CW, type: WidthType.DXA }, columnWidths: cols, rows }),
   ];
 }

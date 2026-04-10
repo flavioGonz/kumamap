@@ -21,6 +21,13 @@ interface RouterInterface {
 interface PbxExtension {
   extension: string; name: string; ipPhone?: string; macAddress?: string;
   username?: string; password?: string; model?: string; location?: string; notes?: string;
+  webUser?: string; webPassword?: string;
+}
+
+interface PbxTrunkLine {
+  id: string; provider: string; number: string; type: string;
+  channels?: number; sipServer?: string; sipUser?: string; sipPassword?: string;
+  codec?: string; status?: string; notes?: string;
 }
 
 interface RackDevice {
@@ -28,6 +35,7 @@ interface RackDevice {
   type: string; color?: string; monitorId?: number | null;
   ports?: PatchPort[]; switchPorts?: SwitchPort[]; routerInterfaces?: RouterInterface[];
   pbxExtensions?: PbxExtension[];
+  pbxTrunkLines?: PbxTrunkLine[];
   portCount?: number; managementIp?: string; model?: string;
   serial?: string; cableLength?: number; isPoeCapable?: boolean; notes?: string;
 }
@@ -170,6 +178,47 @@ function generatePDFHtml(rackName: string, totalUnits: number, devices: RackDevi
             </tr>
           </thead>
           <tbody>${extRows}</tbody>
+        </table>`;
+      }).join("")}`;
+    })()}
+
+    ${(() => {
+      const trunkDevs = sorted.filter(d => d.type === "pbx" && (d.pbxTrunkLines || []).length > 0);
+      if (trunkDevs.length === 0) return "";
+      return `
+      <h2 style="color: #1e3a5f; margin-top: 30px; margin-bottom: 15px; border-bottom: 1px solid #ddd; padding-bottom: 10px;">Líneas del Proveedor</h2>
+      ${trunkDevs.map(d => {
+        const trunks = d.pbxTrunkLines || [];
+        const statusLabels: Record<string, string> = { active: "Activa", inactive: "Inactiva", backup: "Backup" };
+        const statusColors: Record<string, string> = { active: "#10b981", inactive: "#ef4444", backup: "#f59e0b" };
+        const trunkRows = trunks.map((t: any, ti: number) => `
+          <tr style="border-bottom: 1px solid #ddd; background: ${ti%2===0?'#fff':'#f9f9f9'}">
+            <td style="padding: 8px; font-weight: 600">${t.provider || "—"}</td>
+            <td style="padding: 8px; font-family: monospace; font-size: 12px">${t.number || "—"}</td>
+            <td style="padding: 8px; color: #0891b2; font-weight: 600">${t.type}</td>
+            <td style="padding: 8px; text-align: center">${t.channels || "—"}</td>
+            <td style="padding: 8px; font-family: monospace; font-size: 12px">${t.sipServer || "—"}</td>
+            <td style="padding: 8px">${t.codec || "—"}</td>
+            <td style="padding: 8px; color: ${statusColors[t.status || 'active'] || '#666'}; font-weight: 600">${statusLabels[t.status || 'active'] || "—"}</td>
+            <td style="padding: 8px; font-size: 12px">${t.notes || "—"}</td>
+          </tr>
+        `).join("");
+        return `
+        <h3 style="color: #0891b2; margin: 20px 0 10px 0; font-size: 16px">${d.label} · ${trunks.length} líneas</h3>
+        <table>
+          <thead>
+            <tr>
+              <th style="background: #0891b2">Proveedor</th>
+              <th style="background: #0891b2">Número / DID</th>
+              <th style="background: #0891b2">Tipo</th>
+              <th style="background: #0891b2">Canales</th>
+              <th style="background: #0891b2">Servidor SIP</th>
+              <th style="background: #0891b2">Códec</th>
+              <th style="background: #0891b2">Estado</th>
+              <th style="background: #0891b2">Notas</th>
+            </tr>
+          </thead>
+          <tbody>${trunkRows}</tbody>
         </table>`;
       }).join("")}`;
     })()}

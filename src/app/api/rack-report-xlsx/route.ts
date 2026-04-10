@@ -22,6 +22,13 @@ interface RouterInterface {
 interface PbxExtension {
   extension: string; name: string; ipPhone?: string; macAddress?: string;
   username?: string; password?: string; model?: string; location?: string; notes?: string;
+  webUser?: string; webPassword?: string;
+}
+
+interface PbxTrunkLine {
+  id: string; provider: string; number: string; type: string;
+  channels?: number; sipServer?: string; sipUser?: string; sipPassword?: string;
+  codec?: string; status?: string; notes?: string;
 }
 
 interface RackDevice {
@@ -29,6 +36,7 @@ interface RackDevice {
   type: string; color?: string; monitorId?: number | null;
   ports?: PatchPort[]; switchPorts?: SwitchPort[]; routerInterfaces?: RouterInterface[];
   pbxExtensions?: PbxExtension[];
+  pbxTrunkLines?: PbxTrunkLine[];
   portCount?: number; managementIp?: string; model?: string;
   serial?: string; cableLength?: number; isPoeCapable?: boolean; notes?: string;
 }
@@ -47,7 +55,7 @@ const ALL_BORDERS = { top: BORDER_THIN, left: BORDER_THIN, bottom: BORDER_THIN, 
 
 const TYPE_LABELS: Record<string, string> = {
   server: "Servidor", switch: "Switch", patchpanel: "Patch Panel",
-  ups: "UPS / Energía", router: "Router", pdu: "PDU",
+  ups: "UPS / Energía", router: "Router", pdu: "PDU", pbx: "PBX / Telefonía",
   "tray-fiber": "Bandeja de Fibra", "tray-1u": "Bandeja 1U",
   "tray-2u": "Bandeja 2U", other: "Otro",
 };
@@ -292,6 +300,8 @@ export async function POST(request: NextRequest) {
         { header: "Ubicación",  key: "location",  width: 18 },
         { header: "Usuario SIP", key: "username", width: 14 },
         { header: "Contraseña SIP", key: "password", width: 14 },
+        { header: "User Web",   key: "webUser",   width: 14 },
+        { header: "Pass Web",   key: "webPassword", width: 14 },
         { header: "Notas",      key: "notes",     width: 28 },
       ];
       // Style header
@@ -303,7 +313,7 @@ export async function POST(request: NextRequest) {
         cell.alignment = { horizontal: "center", vertical: "middle" };
         cell.border = { bottom: { style: "thin", color: { argb: "FF06B6D4" } } };
       });
-      wsPbx.autoFilter = { from: "A1", to: "J1" };
+      wsPbx.autoFilter = { from: "A1", to: "L1" };
 
       pbxDevices.forEach((dev: RackDevice) => {
         (dev.pbxExtensions || []).forEach((ext: PbxExtension) => {
@@ -317,6 +327,8 @@ export async function POST(request: NextRequest) {
             location: ext.location || "",
             username: ext.username || "",
             password: ext.password || "",
+            webUser: ext.webUser || "",
+            webPassword: ext.webPassword || "",
             notes: ext.notes || "",
           });
           row.getCell("extension").font = { bold: true, family: 3 };
@@ -325,6 +337,56 @@ export async function POST(request: NextRequest) {
           row.getCell("mac").font = { family: 3, size: 9 };
           row.getCell("username").font = { family: 3 };
           row.getCell("password").font = { family: 3 };
+        });
+      });
+    }
+
+    // ── PBX Trunk Lines sheet ──────────────────────────────────────────────
+    const trunkDevices = sorted.filter((d: RackDevice) => d.type === "pbx" && d.pbxTrunkLines && d.pbxTrunkLines.length > 0);
+    if (trunkDevices.length > 0) {
+      const wsTrunk = wb.addWorksheet("Líneas PBX");
+      wsTrunk.columns = [
+        { header: "Equipo",       key: "device",    width: 22 },
+        { header: "Proveedor",    key: "provider",  width: 22 },
+        { header: "Número / DID", key: "number",    width: 18 },
+        { header: "Tipo",         key: "type",      width: 10 },
+        { header: "Canales",      key: "channels",  width: 10 },
+        { header: "Servidor SIP", key: "sipServer", width: 22 },
+        { header: "Usuario SIP",  key: "sipUser",   width: 16 },
+        { header: "Contraseña",   key: "sipPassword", width: 14 },
+        { header: "Códec",        key: "codec",     width: 16 },
+        { header: "Estado",       key: "status",    width: 12 },
+        { header: "Notas",        key: "notes",     width: 28 },
+      ];
+      const trunkHeaderRow = wsTrunk.getRow(1);
+      trunkHeaderRow.height = 26;
+      trunkHeaderRow.eachCell((cell) => {
+        cell.font = { bold: true, color: { argb: "FFFFFFFF" }, size: 10 };
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF0891B2" } };
+        cell.alignment = { horizontal: "center", vertical: "middle" };
+        cell.border = { bottom: { style: "thin", color: { argb: "FF06B6D4" } } };
+      });
+      wsTrunk.autoFilter = { from: "A1", to: "K1" };
+
+      trunkDevices.forEach((dev: RackDevice) => {
+        (dev.pbxTrunkLines || []).forEach((trunk: PbxTrunkLine) => {
+          const row = wsTrunk.addRow({
+            device: dev.label,
+            provider: trunk.provider,
+            number: trunk.number,
+            type: trunk.type,
+            channels: trunk.channels || "",
+            sipServer: trunk.sipServer || "",
+            sipUser: trunk.sipUser || "",
+            sipPassword: trunk.sipPassword || "",
+            codec: trunk.codec || "",
+            status: trunk.status === "active" ? "Activa" : trunk.status === "inactive" ? "Inactiva" : trunk.status === "backup" ? "Backup" : "",
+            notes: trunk.notes || "",
+          });
+          row.getCell("number").font = { bold: true, family: 3 };
+          row.getCell("sipServer").font = { family: 3 };
+          row.getCell("sipUser").font = { family: 3 };
+          row.getCell("sipPassword").font = { family: 3 };
         });
       });
     }

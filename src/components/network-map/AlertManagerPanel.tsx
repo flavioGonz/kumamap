@@ -820,6 +820,17 @@ export default function AlertManagerPanel({ open, onClose, sidebarWidth, onCount
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [showDatePicker, setShowDatePicker] = useState(false);
+  // Grouping by monitor
+  const [groupByMonitor, setGroupByMonitor] = useState(false);
+  const [expandedMonitors, setExpandedMonitors] = useState<Set<number>>(new Set());
+  // Sound notifications
+  const [soundMuted, setSoundMuted] = useState(() => {
+    if (typeof window === "undefined") return false;
+    try { return localStorage.getItem("kumamap-sound-muted") === "1"; } catch { return false; }
+  });
+  const prevGraveKeysRef = useRef<Set<string>>(new Set());
+  const audioCtxRef = useRef<AudioContext | null>(null);
+
   const scrollRef = useRef<HTMLDivElement>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const datePickerRef = useRef<HTMLDivElement>(null);
@@ -900,6 +911,71 @@ export default function AlertManagerPanel({ open, onClose, sidebarWidth, onCount
     onCountChange?.(downCount);
   }, [events, onCountChange, acknowledgedKeys]);
 
+  // Compute downtime durations for DOWN events (needed for sound + grouping)
+  const downtimes = useMemo(() => computeDowntimes(events), [events]);
+
+  // ── Sound notification for new GRAVE alerts ──
+  const playBeep = useCallback(() => {
+    try {
+      if (!audioCtxRef.current) audioCtxRef.current = new AudioContext();
+      const ctx = audioCtxRef.current;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(880, ctx.currentTime);
+      gain.gain.setValueAtTime(0.3, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.25);
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.25);
+    } catch { /* audio not supported */ }
+  }, []);
+
+  useEffect(() => {
+    if (events.length === 0) return;
+    // Build current GRAVE keys (DOWN events with severity grave, not acknowledged)
+    const currentGraveKeys = new Set<string>();
+    for (const ev of events) {
+      if (ev.status !== 0) continue;
+      const key = `${ev.monitorId}-${ev.time}`;
+      if (acknowledgedKeys.has(key)) continue;
+      const dt = downtimes.get(key);
+      const sev = getSeverity(dt);
+      if (sev.level === "grave") currentGraveKeys.add(key);
+    }
+    // Detect new GRAVE alerts (not in previous set)
+    const prevKeys = prevGraveKeysRef.current;
+    if (prevKeys.size > 0 && !open && !soundMuted) {
+      for (const k of currentGraveKeys) {
+        if (!prevKeys.has(k)) {
+          playBeep();
+          break; // one beep per poll cycle
+        }
+      }
+    }
+    prevGraveKeysRef.current = currentGraveKeys;
+  }, [events, downtimes, acknowledgedKeys, open, soundMuted, playBeep]);
+
+  // Persist sound mute preference
+  const toggleSoundMute = useCallback(() => {
+    setSoundMuted(prev => {
+      const next = !prev;
+      try { localStorage.setItem("kumamap-sound-muted", next ? "1" : "0"); } catch {}
+      return next;
+    });
+  }, []);
+
+  // ── Toggle group accordion ──
+  const toggleMonitorExpand = useCallback((monitorId: number) => {
+    setExpandedMonitors(prev => {
+      const next = new Set(prev);
+      if (next.has(monitorId)) next.delete(monitorId);
+      else next.add(monitorId);
+      return next;
+    });
+  }, []);
+
   // ── Filter logic ──
   const filtered = events.filter(e => {
     if (filterStatus !== null && e.status !== filterStatus) return false;
@@ -910,9 +986,6 @@ export default function AlertManagerPanel({ open, onClose, sidebarWidth, onCount
 
   const filteredLenRef = useRef(filtered.length);
   filteredLenRef.current = filtered.length;
-
-  // Compute downtime durations for DOWN events
-  const downtimes = useMemo(() => computeDowntimes(events), [events]);
 
   // Count how many are on map vs not
   const onMapCount = useMemo(() => filtered.filter(e => mapMonitorSet.has(e.monitorId)).length, [filtered, mapMonitorSet]);
@@ -929,6 +1002,25 @@ export default function AlertManagerPanel({ open, onClose, sidebarWidth, onCount
   useEffect(() => { setVisibleCount(PAGE_SIZE); }, [filterStatus, searchText, hours, useCustomDates, dateFrom, dateTo, filterOnMap]);
 
   const visible = filtered.slice(0, visibleCount);
+
+  // ── Grouped data for accordion mode ──
+  const monitorGroups = useMemo(() => {
+    if (!groupByMonitor) return [];
+    const map = new Map<number, { monitorId: number; monitorName: string; events: TimelineEvent[]; downCount: number; graveCount: number }>();
+    for (const ev of filtered) {
+      let g = map.get(ev.monitorId);
+      if (!g) { g = { monitorId: ev.monitorId, monitorName: ev.monitorName, events: [], downCount: 0, graveCount: 0 }; map.set(ev.monitorId, g); }
+      g.events.push(ev);
+      if (ev.status === 0) {
+        g.downCount++;
+        const dt = downtimes.get(`${ev.monitorId}-${ev.time}`);
+        const sev = getSeverity(dt);
+        if (sev.level === "grave") g.graveCount++;
+      }
+    }
+    // Sort by downCount desc, then name
+    return [...map.values()].sort((a, b) => b.downCount - a.downCount || a.monitorName.localeCompare(b.monitorName));
+  }, [groupByMonitor, filtered, downtimes]);
 
   // ── Event handlers ──
   const handleEventSelect = useCallback((ev: TimelineEvent) => {
@@ -1029,9 +1121,39 @@ export default function AlertManagerPanel({ open, onClose, sidebarWidth, onCount
             {filtered.length} eventos
           </span>
         </div>
+        <div className="flex items-center gap-1">
+          {/* Sound mute toggle */}
+          <button
+            onClick={toggleSoundMute}
+            className="h-6 w-6 flex items-center justify-center rounded-md hover:bg-white/10 transition-all"
+            style={{ color: soundMuted ? "rgba(255,255,255,0.2)" : "#f59e0b" }}
+            title={soundMuted ? "Activar sonido de alertas" : "Silenciar alertas"}
+          >
+            {soundMuted ? (
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M11 5 6 9H2v6h4l5 4V5Z"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/>
+              </svg>
+            ) : (
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M11 5 6 9H2v6h4l5 4V5Z"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>
+              </svg>
+            )}
+          </button>
+          {/* Group toggle */}
+          <button
+            onClick={() => setGroupByMonitor(v => !v)}
+            className="h-6 w-6 flex items-center justify-center rounded-md hover:bg-white/10 transition-all"
+            style={{ color: groupByMonitor ? "#a5b4fc" : "rgba(255,255,255,0.3)" }}
+            title={groupByMonitor ? "Vista lista plana" : "Agrupar por monitor"}
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+            </svg>
+          </button>
         <button onClick={onClose} className="h-6 w-6 flex items-center justify-center rounded-md hover:bg-white/10 text-white/40 hover:text-white/80 transition-all">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
         </button>
+        </div>
       </div>
 
       {/* ── Filters ── */}
@@ -1220,117 +1342,231 @@ export default function AlertManagerPanel({ open, onClose, sidebarWidth, onCount
           </div>
         )}
 
-        {visible.map((ev, i) => {
-          const st = STATUS_MAP[ev.status] || STATUS_MAP[2];
-          const prevSt = STATUS_MAP[ev.prevStatus] || STATUS_MAP[2];
-          const date = new Date(ev.time);
-          const isOnMap = mapMonitorSet.has(ev.monitorId);
-          const evKey = `${ev.monitorId}-${ev.time}`;
-          const isAck = acknowledgedKeys.has(evKey);
-          return (
-            <div
-              key={`${ev.monitorId}-${ev.time}-${i}`}
-              onClick={() => handleEventSelect(ev)}
-              className="group rounded-lg px-3 py-2.5 mb-1 transition-all hover:bg-white/[0.06] cursor-pointer active:scale-[0.99]"
-              style={{ borderLeft: `3px solid ${isAck ? "rgba(255,255,255,0.15)" : st.color}`, opacity: isAck ? 0.45 : isOnMap ? 1 : 0.55 }}
-            >
-              {/* Top row: monitor name + badges + time ago */}
-              <div className="flex items-center justify-between mb-1">
-                <div className="flex items-center gap-1.5 min-w-0 flex-1">
-                  <span className="text-[11px] font-semibold text-white/85 truncate max-w-[180px]">
-                    {ev.monitorName}
-                  </span>
-                  {isAck && (
-                    <span
-                      className="shrink-0 flex items-center gap-0.5 text-[7px] font-bold px-1 py-px rounded"
-                      style={{ background: "rgba(34,197,94,0.1)", color: "#4ade80", border: "1px solid rgba(34,197,94,0.15)" }}
-                      title="Alerta aceptada"
+        {/* ── Grouped accordion view ── */}
+        {groupByMonitor ? (
+          <>
+            {monitorGroups.map(group => {
+              const isExpanded = expandedMonitors.has(group.monitorId);
+              const latestEv = group.events[0];
+              const latestSt = STATUS_MAP[latestEv?.status] || STATUS_MAP[2];
+              return (
+                <div key={group.monitorId} className="mb-1">
+                  {/* Accordion header */}
+                  <div
+                    onClick={() => toggleMonitorExpand(group.monitorId)}
+                    className="flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer transition-all hover:bg-white/[0.06]"
+                    style={{ borderLeft: `3px solid ${group.downCount > 0 ? "#ef4444" : "#22c55e"}` }}
+                  >
+                    <svg
+                      width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"
+                      className="text-white/30 shrink-0 transition-transform"
+                      style={{ transform: isExpanded ? "rotate(90deg)" : "rotate(0deg)" }}
                     >
-                      <svg width="7" height="7" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>
-                      ACK
+                      <path d="m9 18 6-6-6-6" />
+                    </svg>
+                    <span className="text-[11px] font-semibold text-white/85 truncate flex-1">
+                      {group.monitorName}
                     </span>
-                  )}
-                  {!isOnMap && (
-                    <span
-                      className="shrink-0 text-[7px] font-bold px-1 py-px rounded"
-                      style={{ background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.2)", border: "1px solid rgba(255,255,255,0.06)" }}
-                      title="Este sensor no está en el mapa actual"
-                    >
-                      NO EN MAPA
+                    {group.graveCount > 0 && (
+                      <span className="text-[8px] font-black px-1.5 py-0.5 rounded" style={{ background: "rgba(239,68,68,0.12)", color: "#ef4444", border: "1px solid rgba(239,68,68,0.2)" }}>
+                        {group.graveCount} GRAVE
+                      </span>
+                    )}
+                    {group.downCount > 0 && (
+                      <span className="text-[8px] font-bold px-1.5 py-0.5 rounded" style={{ background: "rgba(239,68,68,0.08)", color: "#f87171" }}>
+                        {group.downCount} caídas
+                      </span>
+                    )}
+                    <span className="text-[9px] text-white/20 font-mono shrink-0">
+                      {group.events.length}
                     </span>
+                  </div>
+
+                  {/* Expanded events */}
+                  {isExpanded && (
+                    <div className="ml-3 border-l border-white/5 pl-1">
+                      {group.events.map((ev, i) => {
+                        const st = STATUS_MAP[ev.status] || STATUS_MAP[2];
+                        const prevSt = STATUS_MAP[ev.prevStatus] || STATUS_MAP[2];
+                        const date = new Date(ev.time);
+                        const evKey = `${ev.monitorId}-${ev.time}`;
+                        const isAck = acknowledgedKeys.has(evKey);
+                        const isOnMap = mapMonitorSet.has(ev.monitorId);
+                        return (
+                          <div
+                            key={`${ev.monitorId}-${ev.time}-${i}`}
+                            onClick={(e) => { e.stopPropagation(); handleEventSelect(ev); }}
+                            className="group rounded-lg px-3 py-2 mb-0.5 transition-all hover:bg-white/[0.06] cursor-pointer active:scale-[0.99]"
+                            style={{ borderLeft: `2px solid ${isAck ? "rgba(255,255,255,0.15)" : st.color}`, opacity: isAck ? 0.45 : isOnMap ? 1 : 0.55 }}
+                          >
+                            <div className="flex items-center justify-between mb-1">
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded" style={{ color: prevSt.color, background: prevSt.bg }}>
+                                  {prevSt.icon} {prevSt.label}
+                                </span>
+                                <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" className="text-white/15">
+                                  <path d="M5 12h14" /><path d="m12 5 7 7-7 7" />
+                                </svg>
+                                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded" style={{ color: st.color, background: st.bg }}>
+                                  {st.icon} {st.label}
+                                </span>
+                                {isAck && (
+                                  <span className="shrink-0 flex items-center gap-0.5 text-[7px] font-bold px-1 py-px rounded"
+                                    style={{ background: "rgba(34,197,94,0.1)", color: "#4ade80", border: "1px solid rgba(34,197,94,0.15)" }}>
+                                    <svg width="7" height="7" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>
+                                    ACK
+                                  </span>
+                                )}
+                              </div>
+                              <span className="text-[10px] text-white/25 font-mono shrink-0 ml-2" title={formatTime(date)}>
+                                {timeAgo(date)}
+                              </span>
+                            </div>
+                            {ev.status === 0 && (() => {
+                              const dtKey = `${ev.monitorId}-${ev.time}`;
+                              const dt = downtimes.get(dtKey);
+                              if (dt == null) return null;
+                              const isOngoing = dt === -1;
+                              const severity = getSeverity(dt);
+                              return (
+                                <div className="flex items-center gap-1.5 mb-0.5">
+                                  <span className="text-[9px] font-mono font-semibold" style={{ color: severity.color }}>
+                                    {isOngoing ? "Aún caído" : `Caída: ${formatDuration(dt)}`}
+                                  </span>
+                                  <span className="text-[7px] font-black px-1 py-px rounded" style={{ background: severity.bg, color: severity.color, border: `1px solid ${severity.color}33` }}>
+                                    {severity.label}
+                                  </span>
+                                </div>
+                              );
+                            })()}
+                            {ev.msg && (
+                              <div className="text-[10px] text-white/30 truncate leading-relaxed" title={ev.msg}>{ev.msg}</div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
                   )}
                 </div>
-                <span className="text-[10px] text-white/25 font-mono shrink-0 ml-2" title={formatTime(date)}>
-                  {timeAgo(date)}
-                </span>
-              </div>
-
-              {/* Status transition */}
-              <div className="flex items-center gap-1.5 mb-1">
-                <span
-                  className="text-[9px] font-bold px-1.5 py-0.5 rounded"
-                  style={{ color: prevSt.color, background: prevSt.bg }}
+              );
+            })}
+          </>
+        ) : (
+          <>
+            {/* ── Flat list view ── */}
+            {visible.map((ev, i) => {
+              const st = STATUS_MAP[ev.status] || STATUS_MAP[2];
+              const prevSt = STATUS_MAP[ev.prevStatus] || STATUS_MAP[2];
+              const date = new Date(ev.time);
+              const isOnMap = mapMonitorSet.has(ev.monitorId);
+              const evKey = `${ev.monitorId}-${ev.time}`;
+              const isAck = acknowledgedKeys.has(evKey);
+              return (
+                <div
+                  key={`${ev.monitorId}-${ev.time}-${i}`}
+                  onClick={() => handleEventSelect(ev)}
+                  className="group rounded-lg px-3 py-2.5 mb-1 transition-all hover:bg-white/[0.06] cursor-pointer active:scale-[0.99]"
+                  style={{ borderLeft: `3px solid ${isAck ? "rgba(255,255,255,0.15)" : st.color}`, opacity: isAck ? 0.45 : isOnMap ? 1 : 0.55 }}
                 >
-                  {prevSt.icon} {prevSt.label}
-                </span>
-                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" className="text-white/15">
-                  <path d="M5 12h14" /><path d="m12 5 7 7-7 7" />
-                </svg>
-                <span
-                  className="text-[9px] font-bold px-1.5 py-0.5 rounded"
-                  style={{ color: st.color, background: st.bg }}
-                >
-                  {st.icon} {st.label}
-                </span>
-                {ev.ping != null && ev.ping > 0 && (
-                  <span className="text-[9px] text-white/20 font-mono ml-auto">{ev.ping}ms</span>
-                )}
-              </div>
+                  {/* Top row: monitor name + badges + time ago */}
+                  <div className="flex items-center justify-between mb-1">
+                    <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                      <span className="text-[11px] font-semibold text-white/85 truncate max-w-[180px]">
+                        {ev.monitorName}
+                      </span>
+                      {isAck && (
+                        <span
+                          className="shrink-0 flex items-center gap-0.5 text-[7px] font-bold px-1 py-px rounded"
+                          style={{ background: "rgba(34,197,94,0.1)", color: "#4ade80", border: "1px solid rgba(34,197,94,0.15)" }}
+                          title="Alerta aceptada"
+                        >
+                          <svg width="7" height="7" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>
+                          ACK
+                        </span>
+                      )}
+                      {!isOnMap && (
+                        <span
+                          className="shrink-0 text-[7px] font-bold px-1 py-px rounded"
+                          style={{ background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.2)", border: "1px solid rgba(255,255,255,0.06)" }}
+                          title="Este sensor no está en el mapa actual"
+                        >
+                          NO EN MAPA
+                        </span>
+                      )}
+                    </div>
+                    <span className="text-[10px] text-white/25 font-mono shrink-0 ml-2" title={formatTime(date)}>
+                      {timeAgo(date)}
+                    </span>
+                  </div>
 
-              {/* Downtime duration + severity for DOWN events */}
-              {ev.status === 0 && (() => {
-                const key = `${ev.monitorId}-${ev.time}`;
-                const dt = downtimes.get(key);
-                if (dt == null) return null;
-                const isOngoing = dt === -1;
-                const severity = getSeverity(dt);
-                return (
+                  {/* Status transition */}
                   <div className="flex items-center gap-1.5 mb-1">
-                    <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke={severity.color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                      <circle cx="12" cy="12" r="10" /><path d="M12 6v6l4 2" />
+                    <span
+                      className="text-[9px] font-bold px-1.5 py-0.5 rounded"
+                      style={{ color: prevSt.color, background: prevSt.bg }}
+                    >
+                      {prevSt.icon} {prevSt.label}
+                    </span>
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" className="text-white/15">
+                      <path d="M5 12h14" /><path d="m12 5 7 7-7 7" />
                     </svg>
-                    <span className="text-[9px] font-mono font-semibold" style={{ color: severity.color }}>
-                      {isOngoing ? "Aún caído" : `Caída: ${formatDuration(dt)}`}
+                    <span
+                      className="text-[9px] font-bold px-1.5 py-0.5 rounded"
+                      style={{ color: st.color, background: st.bg }}
+                    >
+                      {st.icon} {st.label}
                     </span>
-                    <span className="text-[7px] font-black px-1 py-px rounded" style={{ background: severity.bg, color: severity.color, border: `1px solid ${severity.color}33` }}>
-                      {severity.label}
-                    </span>
-                    {isOngoing && (
-                      <span className="inline-block h-1.5 w-1.5 rounded-full bg-red-500" style={{ animation: "am-spin 2s linear infinite", boxShadow: "0 0 6px #ef4444" }} />
+                    {ev.ping != null && ev.ping > 0 && (
+                      <span className="text-[9px] text-white/20 font-mono ml-auto">{ev.ping}ms</span>
                     )}
                   </div>
-                );
-              })()}
 
-              {/* Message */}
-              {ev.msg && (
-                <div className="text-[10px] text-white/30 truncate leading-relaxed" title={ev.msg}>
-                  {ev.msg}
+                  {/* Downtime duration + severity for DOWN events */}
+                  {ev.status === 0 && (() => {
+                    const key = `${ev.monitorId}-${ev.time}`;
+                    const dt = downtimes.get(key);
+                    if (dt == null) return null;
+                    const isOngoing = dt === -1;
+                    const severity = getSeverity(dt);
+                    return (
+                      <div className="flex items-center gap-1.5 mb-1">
+                        <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke={severity.color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                          <circle cx="12" cy="12" r="10" /><path d="M12 6v6l4 2" />
+                        </svg>
+                        <span className="text-[9px] font-mono font-semibold" style={{ color: severity.color }}>
+                          {isOngoing ? "Aún caído" : `Caída: ${formatDuration(dt)}`}
+                        </span>
+                        <span className="text-[7px] font-black px-1 py-px rounded" style={{ background: severity.bg, color: severity.color, border: `1px solid ${severity.color}33` }}>
+                          {severity.label}
+                        </span>
+                        {isOngoing && (
+                          <span className="inline-block h-1.5 w-1.5 rounded-full bg-red-500" style={{ animation: "am-spin 2s linear infinite", boxShadow: "0 0 6px #ef4444" }} />
+                        )}
+                      </div>
+                    );
+                  })()}
+
+                  {/* Message */}
+                  {ev.msg && (
+                    <div className="text-[10px] text-white/30 truncate leading-relaxed" title={ev.msg}>
+                      {ev.msg}
+                    </div>
+                  )}
+
+                  {/* Exact time on hover */}
+                  <div className="text-[9px] text-white/15 font-mono mt-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    {formatTime(date)}
+                  </div>
                 </div>
-              )}
+              );
+            })}
 
-              {/* Exact time on hover */}
-              <div className="text-[9px] text-white/15 font-mono mt-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                {formatTime(date)}
+            {visibleCount < filtered.length && (
+              <div className="flex justify-center py-3">
+                <div className="h-4 w-4 rounded-full border-2 border-white/10 border-t-white/30" style={{ animation: "am-spin 0.8s linear infinite" }} />
               </div>
-            </div>
-          );
-        })}
-
-        {visibleCount < filtered.length && (
-          <div className="flex justify-center py-3">
-            <div className="h-4 w-4 rounded-full border-2 border-white/10 border-t-white/30" style={{ animation: "am-spin 0.8s linear infinite" }} />
-          </div>
+            )}
+          </>
         )}
       </div>
 

@@ -153,6 +153,7 @@ export default function AlertsPage() {
   const [expandedMonitors, setExpandedMonitors] = useState<Set<number>>(new Set());
   const [nocMode, setNocMode] = useState(false);
   const [showDatePicker, setShowDatePicker] = useState(false);
+  const [showFollowedOnly, setShowFollowedOnly] = useState(false);
   const datePickerRef = useRef<HTMLDivElement>(null);
 
   // ── Sound ──
@@ -329,8 +330,9 @@ export default function AlertsPage() {
   const filtered = useMemo(() => events.filter(e => {
     if (filterStatus !== null && e.status !== filterStatus) return false;
     if (searchText && !e.monitorName.toLowerCase().includes(searchText.toLowerCase()) && !e.msg.toLowerCase().includes(searchText.toLowerCase())) return false;
+    if (showFollowedOnly && !followedKeys.has(`${e.monitorId}-${e.time}`)) return false;
     return true;
-  }), [events, filterStatus, searchText]);
+  }), [events, filterStatus, searchText, showFollowedOnly, followedKeys]);
 
   // ── KPIs ──
   const kpis = useMemo(() => {
@@ -462,19 +464,29 @@ export default function AlertsPage() {
   return (
     <div className={`h-screen w-screen bg-[#0a0a0a] flex flex-col overflow-hidden ${nocMode ? "" : ""}`}>
       {/* ── Top bar ── */}
-      <header className={`shrink-0 border-b border-white/[0.06] ${nocMode ? "px-6 py-2" : "px-6 py-3"}`} style={{ background: "rgba(10,10,10,0.95)", backdropFilter: "blur(12px)" }}>
+      <header className={`shrink-0 border-b border-white/[0.06] ${nocMode ? "px-6 py-2" : "px-6 py-3"}`} style={{ background: "linear-gradient(180deg, rgba(15,15,20,0.98) 0%, rgba(10,10,10,0.95) 100%)", backdropFilter: "blur(16px)" }}>
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: "linear-gradient(135deg, #ef444488, #f97316aa)" }}>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <div className="w-9 h-9 rounded-xl flex items-center justify-center relative" style={{ background: "linear-gradient(135deg, #ef4444, #f97316)", boxShadow: kpis.unackDown > 0 ? "0 0 20px rgba(239,68,68,0.3)" : "none" }}>
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" /><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />
               </svg>
+              {kpis.unackDown > 0 && (
+                <span className="absolute -top-1 -right-1 min-w-[16px] h-4 flex items-center justify-center rounded-full text-[9px] font-black text-white px-1"
+                  style={{ background: "#ef4444", boxShadow: "0 0 8px rgba(239,68,68,0.5)", animation: "noc-pulse 2s ease-in-out infinite" }}>
+                  {kpis.unackDown}
+                </span>
+              )}
             </div>
             <div>
-              <h1 className="text-[15px] font-bold text-white/90 leading-none">Centro de Alertas</h1>
-              <p className="text-[10px] text-white/30 mt-0.5">
-                KumaMap · {monitors.length} monitores · {activeRangeLabel}
-                {loading && <span className="ml-2 text-blue-400">actualizando...</span>}
+              <h1 className="text-[15px] font-bold text-white/95 leading-none tracking-tight">Centro de Alertas</h1>
+              <p className="text-[10px] text-white/30 mt-0.5 flex items-center gap-1.5">
+                <span className="text-white/20">KumaMap</span>
+                <span className="text-white/10">·</span>
+                <span>{monitors.length} monitores</span>
+                <span className="text-white/10">·</span>
+                <span>{activeRangeLabel}</span>
+                {loading && <span className="ml-1 inline-flex items-center gap-1 text-blue-400"><span className="inline-block h-1 w-1 rounded-full bg-blue-400 animate-pulse"/>actualizando</span>}
               </p>
             </div>
           </div>
@@ -520,9 +532,12 @@ export default function AlertsPage() {
 
         {/* ── Trend mini-chart ── */}
         {trendData.length > 1 && (
-          <div className="mt-3 rounded-xl overflow-hidden" style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.04)" }}>
+          <div className="mt-3 rounded-xl overflow-hidden" style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.05)" }}>
             <div className="px-4 py-2 flex items-center justify-between">
-              <span className="text-[10px] text-white/30 font-semibold uppercase tracking-wider">Tendencia de alertas</span>
+              <span className="text-[10px] text-white/30 font-semibold uppercase tracking-wider flex items-center gap-1.5">
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="text-white/20"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/></svg>
+                Tendencia de alertas
+              </span>
               <span className="text-[9px] text-white/20 font-mono">{activeRangeLabel}</span>
             </div>
             <div className="px-4 pb-3 h-16 flex items-end gap-[2px]">
@@ -531,8 +546,16 @@ export default function AlertsPage() {
                 const h = Math.max(4, (d.count / maxCount) * 52);
                 const gravePct = d.count > 0 ? d.grave / d.count : 0;
                 return (
-                  <div key={i} className="flex-1 flex flex-col items-center gap-0.5" title={`${d.hour}: ${d.count} alertas (${d.grave} graves)`}>
-                    <div className="w-full rounded-sm" style={{ height: h, background: gravePct > 0.5 ? "rgba(239,68,68,0.5)" : d.count > 0 ? "rgba(245,158,11,0.4)" : "rgba(255,255,255,0.06)", transition: "height 0.3s ease" }} />
+                  <div key={i} className="flex-1 flex flex-col items-center gap-0.5 group/bar" title={`${d.hour}: ${d.count} alertas (${d.grave} graves)`}>
+                    <div className="w-full rounded-sm transition-all duration-300 group-hover/bar:opacity-80" style={{
+                      height: h,
+                      background: gravePct > 0.5
+                        ? "linear-gradient(180deg, rgba(239,68,68,0.7), rgba(239,68,68,0.3))"
+                        : d.count > 0
+                        ? "linear-gradient(180deg, rgba(245,158,11,0.6), rgba(245,158,11,0.2))"
+                        : "rgba(255,255,255,0.04)",
+                      boxShadow: d.count > 0 ? `0 2px 8px ${gravePct > 0.5 ? "rgba(239,68,68,0.2)" : "rgba(245,158,11,0.15)"}` : "none",
+                    }} />
                   </div>
                 );
               })}
@@ -569,6 +592,17 @@ export default function AlertsPage() {
             {chip.label}
           </button>
         ))}
+
+        <button onClick={() => setShowFollowedOnly(v => !v)}
+          className="px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all flex items-center gap-1"
+          style={{
+            background: showFollowedOnly ? "rgba(59,130,246,0.15)" : "rgba(255,255,255,0.03)",
+            color: showFollowedOnly ? "#60a5fa" : "rgba(255,255,255,0.4)",
+            border: `1px solid ${showFollowedOnly ? "rgba(59,130,246,0.3)" : "rgba(255,255,255,0.04)"}`,
+          }}>
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+          Seguidos {followedKeys.size > 0 && `(${followedKeys.size})`}
+        </button>
 
         <div className="w-px h-5 bg-white/[0.06]" />
 
@@ -714,35 +748,35 @@ export default function AlertsPage() {
         </div>
 
         {/* ── Right: Detail panel ── */}
-        <div className="w-[380px] shrink-0 rounded-xl overflow-hidden flex flex-col" style={{ background: "rgba(255,255,255,0.015)", border: "1px solid rgba(255,255,255,0.04)" }}>
+        <div className="w-[400px] shrink-0 rounded-xl overflow-hidden flex flex-col" style={{ background: "linear-gradient(180deg, rgba(255,255,255,0.025) 0%, rgba(255,255,255,0.01) 100%)", border: "1px solid rgba(255,255,255,0.05)" }}>
           {selectedEvent ? (
             <EventDetailPanel event={selectedEvent} downtimes={downtimes} allEvents={events}
               acknowledgedKeys={acknowledgedKeys} followedKeys={followedKeys} onAck={handleAcknowledge} onFollow={handleFollow} onClose={() => setSelectedEvent(null)}
               onSelectEvent={setSelectedEvent} />
           ) : (
-            <div className="flex-1 flex flex-col items-center justify-center gap-3 text-white/15">
-              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" strokeLinecap="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
-              <span className="text-xs">Seleccioná un evento para ver detalle</span>
-            </div>
+            <FollowedEventsHub events={events} downtimes={downtimes} followedKeys={followedKeys} acknowledgedKeys={acknowledgedKeys}
+              onSelectEvent={setSelectedEvent} onFollow={handleFollow} onShowFollowedOnly={() => setShowFollowedOnly(true)} />
           )}
         </div>
       </div>
 
       {/* ── Footer status bar ── */}
-      <footer className="shrink-0 px-6 py-1.5 border-t border-white/[0.04] flex items-center justify-between" style={{ background: "rgba(10,10,10,0.95)" }}>
+      <footer className="shrink-0 px-6 py-1.5 border-t border-white/[0.06] flex items-center justify-between" style={{ background: "linear-gradient(180deg, rgba(12,12,16,0.98) 0%, rgba(8,8,10,0.99) 100%)" }}>
         <div className="flex items-center gap-4">
           {[0, 1].map(s => { const c = events.filter(e => e.status === s).length; const st = STATUS_MAP[s]; return (
-            <span key={s} className="flex items-center gap-1 text-[10px] font-mono" style={{ color: st.color + "88" }}>
-              <span className="inline-block h-1.5 w-1.5 rounded-full" style={{ background: st.color }}/>{c}
+            <span key={s} className="flex items-center gap-1.5 text-[10px] font-mono" style={{ color: st.color + "88" }}>
+              <span className="inline-block h-1.5 w-1.5 rounded-full" style={{ background: st.color, boxShadow: `0 0 4px ${st.color}66` }}/>{c} {st.label.toLowerCase()}
             </span>
           ); })}
-          {(() => { const ac = events.filter(e => e.status === 0 && acknowledgedKeys.has(`${e.monitorId}-${e.time}`)).length; return ac > 0 ? <span className="flex items-center gap-1 text-[10px] font-mono" style={{ color: "rgba(74,222,128,0.5)" }}><svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5"/></svg>{ac}</span> : null; })()}
-          {(() => { const fc = followedKeys.size; return fc > 0 ? <span className="flex items-center gap-1 text-[10px] font-mono" style={{ color: "rgba(96,165,250,0.5)" }}><svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>{fc}</span> : null; })()}
+          <span className="w-px h-3 bg-white/[0.06]"/>
+          {(() => { const ac = events.filter(e => e.status === 0 && acknowledgedKeys.has(`${e.monitorId}-${e.time}`)).length; return ac > 0 ? <span className="flex items-center gap-1 text-[10px] font-mono" style={{ color: "rgba(74,222,128,0.5)" }}><svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5"/></svg>{ac} ack</span> : null; })()}
+          {(() => { const fc = followedKeys.size; return fc > 0 ? <span className="flex items-center gap-1 text-[10px] font-mono" style={{ color: "rgba(96,165,250,0.5)" }}><svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>{fc} seguidos</span> : null; })()}
         </div>
         <div className="flex items-center gap-3">
-          <span className="text-[9px] text-white/15 font-mono">
+          <span className="text-[9px] text-white/20 font-mono flex items-center gap-1.5">
+            <span className="inline-block h-1 w-1 rounded-full bg-green-500/50 animate-pulse"/>
             Auto-refresh {POLL_INTERVAL / 1000}s
-            {lastFetchRef.current > 0 && ` · Último: ${new Date(lastFetchRef.current).toLocaleTimeString("es-UY", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}`}
+            {lastFetchRef.current > 0 && <><span className="text-white/10">·</span> {new Date(lastFetchRef.current).toLocaleTimeString("es-UY", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</>}
           </span>
           {nocMode && <span className="text-[9px] text-blue-400/50 font-mono">ESC para salir</span>}
         </div>
@@ -750,6 +784,9 @@ export default function AlertsPage() {
 
       <style>{`
         @keyframes noc-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        @keyframes slide-up { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes glow-pulse { 0%, 100% { box-shadow: 0 0 8px rgba(59,130,246,0.15); } 50% { box-shadow: 0 0 16px rgba(59,130,246,0.3); } }
       `}</style>
     </div>
   );
@@ -758,10 +795,15 @@ export default function AlertsPage() {
 // ═══════════════════════════════════════════════════════════════════
 // KPI Card
 // ═══════════════════════════════════════════════════════════════════
-function KpiCard({ label, value, color, subtitle, pulse }: { label: string; value: string | number; color: string; subtitle?: string; pulse?: boolean }) {
+function KpiCard({ label, value, color, subtitle, pulse, icon }: { label: string; value: string | number; color: string; subtitle?: string; pulse?: boolean; icon?: React.ReactNode }) {
   return (
-    <div className="rounded-xl px-4 py-3 flex flex-col" style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.04)" }}>
-      <span className="text-[9px] text-white/30 font-semibold uppercase tracking-wider mb-1">{label}</span>
+    <div className="rounded-xl px-4 py-3 flex flex-col relative overflow-hidden group transition-all hover:scale-[1.01]"
+      style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.05)", boxShadow: pulse ? `0 0 24px ${color}15` : undefined }}>
+      <div className="absolute top-0 left-0 w-full h-[2px] opacity-60" style={{ background: `linear-gradient(90deg, ${color}00, ${color}, ${color}00)` }} />
+      <div className="flex items-center justify-between mb-1">
+        <span className="text-[9px] text-white/35 font-semibold uppercase tracking-wider">{label}</span>
+        {icon && <span className="text-white/10 group-hover:text-white/20 transition-colors">{icon}</span>}
+      </div>
       <div className="flex items-baseline gap-1.5">
         <span className="text-xl font-black tracking-tight" style={{ color, animation: pulse ? "noc-pulse 2s ease-in-out infinite" : undefined }}>{value}</span>
         {subtitle && <span className="text-[10px] text-white/20">{subtitle}</span>}
@@ -867,6 +909,158 @@ function EventRow({ ev, downtimes, acknowledgedKeys, followedKeys, onSelect, onA
 }
 
 // ═══════════════════════════════════════════════════════════════════
+// Followed Events Hub (shown when no event selected)
+// ═══════════════════════════════════════════════════════════════════
+function FollowedEventsHub({ events, downtimes, followedKeys, acknowledgedKeys, onSelectEvent, onFollow, onShowFollowedOnly }: {
+  events: TimelineEvent[]; downtimes: Map<string, number>; followedKeys: Set<string>; acknowledgedKeys: Set<string>;
+  onSelectEvent: (ev: TimelineEvent) => void; onFollow: (key: string) => void; onShowFollowedOnly: () => void;
+}) {
+  const followedEvents = useMemo(() => {
+    return events.filter(e => followedKeys.has(`${e.monitorId}-${e.time}`));
+  }, [events, followedKeys]);
+
+  const activeDown = useMemo(() => {
+    return events.filter(e => e.status === 0 && !acknowledgedKeys.has(`${e.monitorId}-${e.time}`));
+  }, [events, acknowledgedKeys]);
+
+  const followedGrave = useMemo(() => {
+    return followedEvents.filter(e => {
+      const dt = downtimes.get(`${e.monitorId}-${e.time}`);
+      return getSeverity(dt).level === "grave";
+    });
+  }, [followedEvents, downtimes]);
+
+  const followedOngoing = useMemo(() => {
+    return followedEvents.filter(e => {
+      const dt = downtimes.get(`${e.monitorId}-${e.time}`);
+      return dt === -1;
+    });
+  }, [followedEvents, downtimes]);
+
+  if (followedEvents.length === 0) {
+    return (
+      <div className="flex-1 flex flex-col items-center justify-center px-6" style={{ animation: "fade-in 0.3s ease" }}>
+        {/* Quick overview */}
+        <div className="w-full mb-8">
+          <div className="text-center mb-6">
+            <div className="w-14 h-14 rounded-2xl mx-auto flex items-center justify-center mb-3" style={{ background: "linear-gradient(135deg, rgba(59,130,246,0.1), rgba(99,102,241,0.1))", border: "1px solid rgba(59,130,246,0.1)" }}>
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="rgba(96,165,250,0.5)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+            </div>
+            <p className="text-[13px] font-semibold text-white/50 mb-1">Sin seguimientos activos</p>
+            <p className="text-[11px] text-white/25 leading-relaxed max-w-[260px] mx-auto">Seleccioná un evento de la lista y pulsá &quot;Seguir&quot; para monitorear alertas específicas desde aquí.</p>
+          </div>
+        </div>
+
+        {/* Quick stats summary */}
+        {activeDown.length > 0 && (
+          <div className="w-full rounded-xl p-3 mb-3" style={{ background: "rgba(239,68,68,0.04)", border: "1px solid rgba(239,68,68,0.08)" }}>
+            <div className="flex items-center gap-2 mb-2">
+              <span className="inline-block h-2 w-2 rounded-full bg-red-500 animate-pulse" style={{ boxShadow: "0 0 6px #ef4444" }}/>
+              <span className="text-[11px] font-bold text-red-400/80">{activeDown.length} alertas activas sin aceptar</span>
+            </div>
+            <div className="space-y-1">
+              {activeDown.slice(0, 3).map((ev, i) => {
+                const evKey = `${ev.monitorId}-${ev.time}`;
+                const dt = downtimes.get(evKey);
+                const sev = getSeverity(dt);
+                return (
+                  <div key={i} onClick={() => onSelectEvent(ev)}
+                    className="flex items-center gap-2 px-2 py-1.5 rounded-lg cursor-pointer hover:bg-white/[0.04] transition-all">
+                    <span className="text-[10px] font-semibold text-white/60 truncate flex-1">{ev.monitorName}</span>
+                    {sev.level !== "none" && <span className="text-[7px] font-black px-1 rounded" style={{ background: sev.bg, color: sev.color }}>{sev.label}</span>}
+                    {dt === -1 && <span className="text-[9px] font-mono font-bold text-red-400"><LiveTimer since={ev.time} /></span>}
+                  </div>
+                );
+              })}
+              {activeDown.length > 3 && <p className="text-[9px] text-white/20 text-center pt-1">+{activeDown.length - 3} más</p>}
+            </div>
+          </div>
+        )}
+
+        <p className="text-[10px] text-white/15 mt-2">Seleccioná un evento para ver detalle</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex-1 flex flex-col h-full" style={{ animation: "fade-in 0.3s ease" }}>
+      {/* Header */}
+      <div className="shrink-0 px-4 py-3 border-b border-white/[0.06] relative" style={{ background: "rgba(255,255,255,0.02)" }}>
+        <div className="absolute top-0 left-0 w-full h-[2px]" style={{ background: "linear-gradient(90deg, rgba(59,130,246,0) 0%, rgba(59,130,246,0.6) 50%, rgba(59,130,246,0) 100%)" }} />
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: "rgba(59,130,246,0.1)", border: "1px solid rgba(59,130,246,0.15)" }}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#60a5fa" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+            </div>
+            <div>
+              <span className="text-[12px] font-bold text-white/80">Seguimientos</span>
+              <span className="ml-2 text-[10px] font-mono text-blue-400/60">{followedEvents.length}</span>
+            </div>
+          </div>
+          <button onClick={onShowFollowedOnly}
+            className="text-[10px] font-medium px-2 py-1 rounded-lg transition-all hover:bg-white/[0.06]"
+            style={{ color: "rgba(96,165,250,0.6)", border: "1px solid rgba(59,130,246,0.1)" }}>
+            Filtrar lista
+          </button>
+        </div>
+
+        {/* Quick stat pills */}
+        {(followedGrave.length > 0 || followedOngoing.length > 0) && (
+          <div className="flex items-center gap-2 mt-2">
+            {followedOngoing.length > 0 && (
+              <span className="flex items-center gap-1 text-[9px] font-bold px-2 py-0.5 rounded-full"
+                style={{ background: "rgba(239,68,68,0.1)", color: "#f87171", border: "1px solid rgba(239,68,68,0.15)" }}>
+                <span className="inline-block h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse"/>{followedOngoing.length} en curso
+              </span>
+            )}
+            {followedGrave.length > 0 && (
+              <span className="flex items-center gap-1 text-[9px] font-bold px-2 py-0.5 rounded-full"
+                style={{ background: "rgba(239,68,68,0.08)", color: "#ef4444" }}>
+                {followedGrave.length} grave{followedGrave.length > 1 ? "s" : ""}
+              </span>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Followed events list */}
+      <div className="flex-1 overflow-y-auto px-3 py-2" style={{ scrollbarWidth: "thin", scrollbarColor: "rgba(255,255,255,0.08) transparent" }}>
+        {followedEvents.map((ev, i) => {
+          const evKey = `${ev.monitorId}-${ev.time}`;
+          const st = STATUS_MAP[ev.status] || STATUS_MAP[2];
+          const dt = downtimes.get(evKey);
+          const sev = getSeverity(dt);
+          const isOngoing = dt === -1;
+          const date = new Date(ev.time);
+
+          return (
+            <div key={`${evKey}-${i}`} onClick={() => onSelectEvent(ev)}
+              className="rounded-lg px-3 py-2.5 mb-1.5 cursor-pointer transition-all hover:bg-white/[0.05] active:scale-[0.995] group"
+              style={{ background: "rgba(59,130,246,0.03)", borderLeft: `3px solid #3b82f6`, animation: `slide-up 0.2s ease ${i * 0.05}s both` }}>
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-[11px] font-semibold text-white/80 truncate flex-1">{ev.monitorName}</span>
+                <button onClick={(e) => { e.stopPropagation(); onFollow(evKey); }}
+                  className="shrink-0 opacity-0 group-hover:opacity-100 h-5 w-5 flex items-center justify-center rounded hover:bg-white/10 transition-all"
+                  title="Dejar de seguir">
+                  <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" className="text-white/30"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded" style={{ color: st.color, background: st.bg }}>{st.icon} {st.label}</span>
+                {sev.level !== "none" && <span className="text-[7px] font-black px-1 py-px rounded" style={{ background: sev.bg, color: sev.color }}>{sev.label}</span>}
+                {isOngoing && <span className="text-[9px] font-mono font-bold text-red-400 ml-auto"><LiveTimer since={ev.time} /></span>}
+                {!isOngoing && dt != null && dt > 0 && <span className="text-[9px] font-mono text-white/25 ml-auto">{formatDuration(dt)}</span>}
+                {ev.status === 1 && <span className="text-[9px] text-white/25 font-mono ml-auto">{timeAgo(date)}</span>}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
 // Event Detail Panel (right side)
 // ═══════════════════════════════════════════════════════════════════
 function EventDetailPanel({ event, downtimes, allEvents, acknowledgedKeys, followedKeys, onAck, onFollow, onClose, onSelectEvent }: {
@@ -889,10 +1083,14 @@ function EventDetailPanel({ event, downtimes, allEvents, acknowledgedKeys, follo
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="shrink-0 px-4 py-3 border-b border-white/[0.06] flex items-center justify-between" style={{ background: "rgba(255,255,255,0.02)" }}>
+      <div className="shrink-0 px-4 py-3 border-b border-white/[0.06] flex items-center justify-between relative" style={{ background: "rgba(255,255,255,0.02)" }}>
+        <div className="absolute top-0 left-0 w-full h-[2px]" style={{ background: `linear-gradient(90deg, ${st.color}00, ${st.color}88, ${st.color}00)` }} />
         <div className="min-w-0 flex-1">
-          <div className="text-[13px] font-bold text-white/90 truncate">{event.monitorName}</div>
-          <div className="text-[10px] text-white/30 font-mono mt-0.5">{formatFullDate(date)}</div>
+          <div className="flex items-center gap-2">
+            <span className="inline-block h-2 w-2 rounded-full shrink-0" style={{ background: st.color, boxShadow: `0 0 6px ${st.color}66` }}/>
+            <span className="text-[13px] font-bold text-white/90 truncate">{event.monitorName}</span>
+          </div>
+          <div className="text-[10px] text-white/30 font-mono mt-0.5 ml-4">{formatFullDate(date)}</div>
         </div>
         <button onClick={onClose} className="h-7 w-7 flex items-center justify-center rounded-lg hover:bg-white/10 text-white/30 hover:text-white/70 transition-all shrink-0">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>

@@ -367,6 +367,19 @@ export default function MapListView({
           </button>
           </Tooltip>
 
+          {/* ── Alert Manager ── */}
+          <Tooltip content="Centro de Alertas" placement="bottom">
+          <a
+            href="/alerts"
+            className="flex h-8 w-8 items-center justify-center rounded-lg transition-all"
+            style={{ color: "#f87171", border: "1px solid transparent" }}
+            onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.borderColor = "rgba(239,68,68,0.25)"; (e.currentTarget as HTMLElement).style.background = "rgba(239,68,68,0.08)"; }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.borderColor = "transparent"; (e.currentTarget as HTMLElement).style.background = "transparent"; }}
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
+          </a>
+          </Tooltip>
+
           {/* divider */}
           <div className="h-5 w-px mx-0.5" style={{ background: "rgba(255,255,255,0.08)" }} />
 

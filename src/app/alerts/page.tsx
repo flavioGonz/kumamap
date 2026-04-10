@@ -121,6 +121,7 @@ function interpretEvent(ev: TimelineEvent): { translated: string; explanation: s
 // ── Constants ────────────────────────────────────────────────────
 const POLL_INTERVAL = 20000;
 const QUICK_RANGES = [
+  { value: 0.25, label: "15m" }, { value: 0.5, label: "30m" },
   { value: 1, label: "1h" }, { value: 6, label: "6h" }, { value: 24, label: "24h" },
   { value: 72, label: "3d" }, { value: 168, label: "7d" }, { value: 720, label: "30d" },
 ];
@@ -161,6 +162,15 @@ export default function AlertsPage() {
   });
   const prevGraveKeysRef = useRef<Set<string>>(new Set());
   const audioCtxRef = useRef<AudioContext | null>(null);
+
+  // ── Followed (tracked) alerts ──
+  const [followedKeys, setFollowedKeys] = useState<Set<string>>(() => {
+    if (typeof window === "undefined") return new Set();
+    try {
+      const stored = sessionStorage.getItem("kumamap-follow-alerts");
+      return stored ? new Set(JSON.parse(stored)) : new Set();
+    } catch { return new Set(); }
+  });
 
   // ── Acknowledged ──
   const [acknowledgedKeys, setAcknowledgedKeys] = useState<Set<string>>(() => {
@@ -272,6 +282,16 @@ export default function AlertsPage() {
     });
   }, [events]);
 
+  // ── Follow handlers ──
+  const handleFollow = useCallback((key: string) => {
+    setFollowedKeys(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      try { sessionStorage.setItem("kumamap-follow-alerts", JSON.stringify([...next])); } catch {}
+      return next;
+    });
+  }, []);
+
   // ── Filters ──
   const filtered = useMemo(() => events.filter(e => {
     if (filterStatus !== null && e.status !== filterStatus) return false;
@@ -296,8 +316,9 @@ export default function AlertsPage() {
     const totalMonitors = monitors.length;
     const monitorsUp = totalMonitors - monitorsDown;
     const uptimePct = totalMonitors > 0 ? ((monitorsUp / totalMonitors) * 100) : 100;
-    return { total, down, unackDown, grave, leve, monitorsDown, totalMonitors, monitorsUp, uptimePct };
-  }, [events, monitors, downtimes, acknowledgedKeys]);
+    const followed = events.filter(e => followedKeys.has(`${e.monitorId}-${e.time}`)).length;
+    return { total, down, unackDown, grave, leve, monitorsDown, totalMonitors, monitorsUp, uptimePct, followed };
+  }, [events, monitors, downtimes, acknowledgedKeys, followedKeys]);
 
   // ── Trend data (alerts per hour in the selected range) ──
   const trendData = useMemo(() => {
@@ -453,11 +474,12 @@ export default function AlertsPage() {
 
       {/* ── KPI Cards ── */}
       <div className={`shrink-0 ${nocMode ? "px-6 py-3" : "px-6 py-4"}`}>
-        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3">
           <KpiCard label="Eventos totales" value={kpis.total} color="#94a3b8" />
           <KpiCard label="Alertas activas" value={kpis.unackDown} color="#ef4444" pulse={kpis.unackDown > 0} />
           <KpiCard label="Graves" value={kpis.grave} color="#ef4444" />
           <KpiCard label="Leves" value={kpis.leve} color="#f59e0b" />
+          <KpiCard label="En seguimiento" value={kpis.followed} color="#3b82f6" />
           <KpiCard label="Monitores caídos" value={kpis.monitorsDown} color="#f97316" subtitle={`de ${kpis.totalMonitors}`} />
           <KpiCard label="Monitores activos" value={kpis.monitorsUp} color="#22c55e" subtitle={`de ${kpis.totalMonitors}`} />
           <KpiCard label="Disponibilidad" value={`${kpis.uptimePct.toFixed(1)}%`} color={kpis.uptimePct >= 99 ? "#22c55e" : kpis.uptimePct >= 95 ? "#f59e0b" : "#ef4444"} />
@@ -637,7 +659,7 @@ export default function AlertsPage() {
                       <div className="ml-4 pl-3 border-l border-white/[0.04]">
                         {group.events.map((ev, i) => (
                           <EventRow key={`${ev.monitorId}-${ev.time}-${i}`} ev={ev} downtimes={downtimes}
-                            acknowledgedKeys={acknowledgedKeys} onSelect={setSelectedEvent} onAck={handleAcknowledge}
+                            acknowledgedKeys={acknowledgedKeys} followedKeys={followedKeys} onSelect={setSelectedEvent} onAck={handleAcknowledge} onFollow={handleFollow}
                             showMonitorName={false} />
                         ))}
                       </div>
@@ -651,7 +673,7 @@ export default function AlertsPage() {
             <div className="p-2">
               {filtered.map((ev, i) => (
                 <EventRow key={`${ev.monitorId}-${ev.time}-${i}`} ev={ev} downtimes={downtimes}
-                  acknowledgedKeys={acknowledgedKeys} onSelect={setSelectedEvent} onAck={handleAcknowledge}
+                  acknowledgedKeys={acknowledgedKeys} followedKeys={followedKeys} onSelect={setSelectedEvent} onAck={handleAcknowledge} onFollow={handleFollow}
                   showMonitorName={true} />
               ))}
             </div>
@@ -662,7 +684,7 @@ export default function AlertsPage() {
         <div className="w-[380px] shrink-0 rounded-xl overflow-hidden flex flex-col" style={{ background: "rgba(255,255,255,0.015)", border: "1px solid rgba(255,255,255,0.04)" }}>
           {selectedEvent ? (
             <EventDetailPanel event={selectedEvent} downtimes={downtimes} allEvents={events}
-              acknowledgedKeys={acknowledgedKeys} onAck={handleAcknowledge} onClose={() => setSelectedEvent(null)}
+              acknowledgedKeys={acknowledgedKeys} followedKeys={followedKeys} onAck={handleAcknowledge} onFollow={handleFollow} onClose={() => setSelectedEvent(null)}
               onSelectEvent={setSelectedEvent} />
           ) : (
             <div className="flex-1 flex flex-col items-center justify-center gap-3 text-white/15">
@@ -682,6 +704,7 @@ export default function AlertsPage() {
             </span>
           ); })}
           {(() => { const ac = events.filter(e => e.status === 0 && acknowledgedKeys.has(`${e.monitorId}-${e.time}`)).length; return ac > 0 ? <span className="flex items-center gap-1 text-[10px] font-mono" style={{ color: "rgba(74,222,128,0.5)" }}><svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5"/></svg>{ac}</span> : null; })()}
+          {(() => { const fc = followedKeys.size; return fc > 0 ? <span className="flex items-center gap-1 text-[10px] font-mono" style={{ color: "rgba(96,165,250,0.5)" }}><svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>{fc}</span> : null; })()}
         </div>
         <div className="flex items-center gap-3">
           <span className="text-[9px] text-white/15 font-mono">
@@ -715,25 +738,62 @@ function KpiCard({ label, value, color, subtitle, pulse }: { label: string; valu
 }
 
 // ═══════════════════════════════════════════════════════════════════
+// Live Timer (animates every second for ongoing DOWN events)
+// ═══════════════════════════════════════════════════════════════════
+function LiveTimer({ since }: { since: string }) {
+  const [elapsed, setElapsed] = useState("");
+  useEffect(() => {
+    const t0 = new Date(since).getTime();
+    const tick = () => {
+      const ms = Date.now() - t0;
+      const s = Math.floor(ms / 1000);
+      const m = Math.floor(s / 60);
+      const h = Math.floor(m / 60);
+      const d = Math.floor(h / 24);
+      if (d > 0) setElapsed(`${d}d ${h % 24}h ${m % 60}m ${s % 60}s`);
+      else if (h > 0) setElapsed(`${h}h ${m % 60}m ${s % 60}s`);
+      else if (m > 0) setElapsed(`${m}m ${s % 60}s`);
+      else setElapsed(`${s}s`);
+    };
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [since]);
+  return <>{elapsed}</>;
+}
+
+// ═══════════════════════════════════════════════════════════════════
 // Event Row (reusable for both flat and grouped)
 // ═══════════════════════════════════════════════════════════════════
-function EventRow({ ev, downtimes, acknowledgedKeys, onSelect, onAck, showMonitorName }: {
-  ev: TimelineEvent; downtimes: Map<string, number>; acknowledgedKeys: Set<string>;
-  onSelect: (ev: TimelineEvent) => void; onAck: (key: string) => void; showMonitorName: boolean;
+function EventRow({ ev, downtimes, acknowledgedKeys, followedKeys, onSelect, onAck, onFollow, showMonitorName }: {
+  ev: TimelineEvent; downtimes: Map<string, number>; acknowledgedKeys: Set<string>; followedKeys: Set<string>;
+  onSelect: (ev: TimelineEvent) => void; onAck: (key: string) => void; onFollow: (key: string) => void; showMonitorName: boolean;
 }) {
   const st = STATUS_MAP[ev.status] || STATUS_MAP[2];
   const prevSt = STATUS_MAP[ev.prevStatus] || STATUS_MAP[2];
   const date = new Date(ev.time);
   const evKey = `${ev.monitorId}-${ev.time}`;
   const isAck = acknowledgedKeys.has(evKey);
+  const isFollowed = followedKeys.has(evKey);
 
   return (
     <div onClick={() => onSelect(ev)}
       className="group rounded-lg px-4 py-2.5 mb-1 transition-all hover:bg-white/[0.04] cursor-pointer active:scale-[0.995]"
-      style={{ borderLeft: `3px solid ${isAck ? "rgba(255,255,255,0.12)" : st.color}`, opacity: isAck ? 0.4 : 1 }}>
+      style={{
+        borderLeft: `3px solid ${isFollowed ? "#3b82f6" : isAck ? "rgba(255,255,255,0.12)" : st.color}`,
+        opacity: isAck && !isFollowed ? 0.4 : 1,
+        background: isFollowed ? "rgba(59,130,246,0.04)" : undefined,
+      }}>
       <div className="flex items-center justify-between mb-1">
         <div className="flex items-center gap-1.5 min-w-0 flex-1">
           {showMonitorName && <span className="text-[11px] font-semibold text-white/85 truncate max-w-[220px]">{ev.monitorName}</span>}
+          {isFollowed && (
+            <span className="shrink-0 flex items-center gap-0.5 text-[7px] font-bold px-1 py-px rounded"
+              style={{ background: "rgba(59,130,246,0.12)", color: "#60a5fa", border: "1px solid rgba(59,130,246,0.2)" }}>
+              <svg width="7" height="7" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v8"/><path d="M8 12h8"/></svg>
+              SEGUIM.
+            </span>
+          )}
           {isAck && (
             <span className="shrink-0 flex items-center gap-0.5 text-[7px] font-bold px-1 py-px rounded"
               style={{ background: "rgba(34,197,94,0.1)", color: "#4ade80", border: "1px solid rgba(34,197,94,0.15)" }}>
@@ -757,7 +817,11 @@ function EventRow({ ev, downtimes, acknowledgedKeys, onSelect, onAck, showMonito
         return (
           <div className="flex items-center gap-1.5 mb-1">
             <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke={sev.color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
-            <span className="text-[9px] font-mono font-semibold" style={{ color: sev.color }}>{isOngoing ? "Aún caído" : `Caída: ${formatDuration(dt)}`}</span>
+            {isOngoing ? (
+              <span className="text-[9px] font-mono font-bold" style={{ color: sev.color }}><LiveTimer since={ev.time} /></span>
+            ) : (
+              <span className="text-[9px] font-mono font-semibold" style={{ color: sev.color }}>Caída: {formatDuration(dt)}</span>
+            )}
             <span className="text-[7px] font-black px-1 py-px rounded" style={{ background: sev.bg, color: sev.color, border: `1px solid ${sev.color}33` }}>{sev.label}</span>
             {isOngoing && <span className="inline-block h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse" style={{ boxShadow: "0 0 6px #ef4444" }}/>}
           </div>
@@ -772,15 +836,16 @@ function EventRow({ ev, downtimes, acknowledgedKeys, onSelect, onAck, showMonito
 // ═══════════════════════════════════════════════════════════════════
 // Event Detail Panel (right side)
 // ═══════════════════════════════════════════════════════════════════
-function EventDetailPanel({ event, downtimes, allEvents, acknowledgedKeys, onAck, onClose, onSelectEvent }: {
+function EventDetailPanel({ event, downtimes, allEvents, acknowledgedKeys, followedKeys, onAck, onFollow, onClose, onSelectEvent }: {
   event: TimelineEvent; downtimes: Map<string, number>; allEvents: TimelineEvent[];
-  acknowledgedKeys: Set<string>; onAck: (key: string) => void; onClose: () => void;
+  acknowledgedKeys: Set<string>; followedKeys: Set<string>; onAck: (key: string) => void; onFollow: (key: string) => void; onClose: () => void;
   onSelectEvent: (ev: TimelineEvent) => void;
 }) {
   const st = STATUS_MAP[event.status] || STATUS_MAP[2];
   const date = new Date(event.time);
   const evKey = `${event.monitorId}-${event.time}`;
   const isAck = acknowledgedKeys.has(evKey);
+  const isFollowed = followedKeys.has(evKey);
   const dtMs = event.status === 0 ? downtimes.get(evKey) : undefined;
   const severity = getSeverity(dtMs);
   const interp = interpretEvent(event);
@@ -803,19 +868,30 @@ function EventDetailPanel({ event, downtimes, allEvents, acknowledgedKeys, onAck
 
       {/* Scrollable content */}
       <div className="flex-1 overflow-y-auto px-4 py-3" style={{ scrollbarWidth: "thin", scrollbarColor: "rgba(255,255,255,0.08) transparent" }}>
+        {/* Follow banner */}
+        {isFollowed && (
+          <div className="mb-3 rounded-lg px-3 py-2 flex items-center gap-2" style={{ background: "rgba(59,130,246,0.08)", border: "1px solid rgba(59,130,246,0.15)" }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#60a5fa" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+            <span className="text-[11px] font-semibold text-blue-400/80">EN SEGUIMIENTO</span>
+          </div>
+        )}
+
         {/* ACK banner */}
-        {isAck && (
+        {isAck && !isFollowed && (
           <div className="mb-3 rounded-lg px-3 py-2 flex items-center gap-2" style={{ background: "rgba(34,197,94,0.08)", border: "1px solid rgba(34,197,94,0.12)" }}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#4ade80" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
             <span className="text-[11px] font-semibold text-green-400/80">ALARMA ACEPTADA</span>
           </div>
         )}
 
-        {/* Status + severity */}
+        {/* Status + severity + live timer */}
         <div className="flex items-center gap-2 mb-3">
           <span className="text-[10px] font-bold px-2 py-1 rounded-lg" style={{ color: st.color, background: st.bg }}>{st.icon} {st.label}</span>
           {severity.level !== "none" && <span className="text-[9px] font-black px-2 py-1 rounded-lg" style={{ background: severity.bg, color: severity.color, border: `1px solid ${severity.color}33` }}>{severity.label}</span>}
-          {dtMs != null && <span className="text-[10px] font-mono text-white/40">{dtMs === -1 ? "En curso" : formatDuration(dtMs)}</span>}
+          {dtMs != null && dtMs === -1 && (
+            <span className="text-[10px] font-mono font-bold text-red-400"><LiveTimer since={event.time} /></span>
+          )}
+          {dtMs != null && dtMs !== -1 && <span className="text-[10px] font-mono text-white/40">{formatDuration(dtMs)}</span>}
         </div>
 
         {/* Interpretation */}
@@ -836,14 +912,28 @@ function EventDetailPanel({ event, downtimes, allEvents, acknowledgedKeys, onAck
           </div>
         )}
 
-        {/* ACK button */}
-        {event.status === 0 && !isAck && (
-          <button onClick={() => onAck(evKey)}
-            className="w-full mb-4 py-2 rounded-lg text-[11px] font-bold flex items-center justify-center gap-2 transition-all hover:scale-[1.01] active:scale-[0.99]"
-            style={{ background: "rgba(34,197,94,0.1)", color: "#4ade80", border: "1px solid rgba(34,197,94,0.15)" }}>
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
-            Aceptar alerta
-          </button>
+        {/* Action buttons */}
+        {event.status === 0 && (
+          <div className="flex gap-2 mb-4">
+            {!isAck && (
+              <button onClick={() => onAck(evKey)}
+                className="flex-1 py-2 rounded-lg text-[11px] font-bold flex items-center justify-center gap-2 transition-all hover:scale-[1.01] active:scale-[0.99]"
+                style={{ background: "rgba(34,197,94,0.1)", color: "#4ade80", border: "1px solid rgba(34,197,94,0.15)" }}>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+                Aceptar
+              </button>
+            )}
+            <button onClick={() => onFollow(evKey)}
+              className="flex-1 py-2 rounded-lg text-[11px] font-bold flex items-center justify-center gap-2 transition-all hover:scale-[1.01] active:scale-[0.99]"
+              style={{
+                background: isFollowed ? "rgba(59,130,246,0.15)" : "rgba(59,130,246,0.06)",
+                color: isFollowed ? "#60a5fa" : "#93c5fd",
+                border: `1px solid ${isFollowed ? "rgba(59,130,246,0.3)" : "rgba(59,130,246,0.12)"}`,
+              }}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+              {isFollowed ? "Dejar de seguir" : "Seguir"}
+            </button>
+          </div>
         )}
 
         {/* Monitor timeline */}

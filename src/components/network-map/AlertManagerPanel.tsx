@@ -265,6 +265,8 @@ const PAGE_SIZE = 50;
 const POLL_INTERVAL = 30000;
 
 const QUICK_RANGES = [
+  { value: 0.25, label: "15m" },
+  { value: 0.5, label: "30m" },
   { value: 1, label: "1h" },
   { value: 6, label: "6h" },
   { value: 24, label: "24h" },

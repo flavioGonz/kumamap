@@ -402,6 +402,17 @@ function EventDetailCard({ event, onBack, onLocate, isOnMap, downtime, allEvents
         </button>
       </div>
 
+      {/* Acknowledged banner */}
+      {isAcknowledged && (
+        <div className="mx-4 mb-2 flex items-center gap-2 px-3 py-2 rounded-lg" style={{ background: "rgba(34,197,94,0.1)", border: "1px solid rgba(34,197,94,0.2)" }}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#4ade80" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><path d="m9 11 3 3L22 4" />
+          </svg>
+          <span className="text-[11px] font-bold" style={{ color: "#4ade80" }}>ALARMA ACEPTADA</span>
+          <span className="text-[9px] text-white/30 ml-auto">No cuenta en el badge</span>
+        </div>
+      )}
+
       {/* Event header with big status */}
       <div className="px-4 pb-3">
         <div
@@ -423,6 +434,11 @@ function EventDetailCard({ event, onBack, onLocate, isOnMap, downtime, allEvents
               <div className="text-sm font-bold text-white/90 truncate">{event.monitorName}</div>
               <div className="flex items-center gap-2">
                 <span className="text-[10px] font-semibold" style={{ color: st.color }}>{st.label}</span>
+                {isAcknowledged && (
+                  <span className="text-[8px] font-bold px-1.5 py-0.5 rounded" style={{ background: "rgba(34,197,94,0.1)", color: "#4ade80", border: "1px solid rgba(34,197,94,0.2)" }}>
+                    ACK
+                  </span>
+                )}
                 {!isOnMap && (
                   <span className="text-[8px] font-bold px-1.5 py-0.5 rounded" style={{ background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.25)", border: "1px solid rgba(255,255,255,0.08)" }}>
                     NO EN MAPA

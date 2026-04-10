@@ -376,7 +376,11 @@ export default function LeafletMapView({
 }: LeafletMapViewProps) {
   const isImageMode = !!imageBackground;
   const [alertOpen, setAlertOpen] = useState(false);
-  const alertCount = useAlertCount(60000);
+  const polledAlertCount = useAlertCount(60000);
+  const [liveAlertCount, setLiveAlertCount] = useState<number | null>(null);
+  const alertCount = liveAlertCount ?? polledAlertCount;
+  // Sync polled count when it updates (reset live override)
+  useEffect(() => { setLiveAlertCount(null); }, [polledAlertCount]);
   // When alerts panel is open it replaces the monitor sidebar
   const sidebarWidth = readonly ? 0 : alertOpen ? 380 : panelCollapsed ? 40 : 320;
   const monitorsRef = useRef<KumaMonitor[]>(kumaMonitors);
@@ -4149,6 +4153,7 @@ export default function LeafletMapView({
         open={alertOpen}
         onClose={() => setAlertOpen(false)}
         sidebarWidth={sidebarWidth}
+        onCountChange={setLiveAlertCount}
         onEventClick={handleAlertEventClick}
         mapMonitorIds={mapMonitorIds}
       />

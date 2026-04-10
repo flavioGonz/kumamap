@@ -530,6 +530,24 @@ export default function RackDesignerDrawer({ open, onClose, nodeId, nodes, monit
       container.querySelectorAll("img").forEach(img => {
         if (img.src.length > 50000) img.remove();
       });
+      // Sanitize oklab/oklch/color-mix() CSS functions that html2canvas doesn't support
+      container.querySelectorAll("*").forEach(el => {
+        const htmlEl = el as HTMLElement;
+        const cs = getComputedStyle(htmlEl);
+        const propsToCheck = ["color", "backgroundColor", "borderColor", "borderTopColor", "borderBottomColor", "borderLeftColor", "borderRightColor", "outlineColor", "boxShadow", "textDecorationColor"];
+        for (const prop of propsToCheck) {
+          const val = cs.getPropertyValue(prop);
+          if (val && (/oklab|oklch|color-mix/i.test(val))) {
+            // Replace with fallback: transparent for bg, white for text
+            const fallback = prop === "color" || prop === "textDecorationColor" ? "#ffffff" : "transparent";
+            htmlEl.style.setProperty(prop, fallback);
+          }
+        }
+        // Also strip Tailwind classes that might trigger computed oklab
+        if (htmlEl.className && typeof htmlEl.className === "string") {
+          htmlEl.className = htmlEl.className.replace(/\b\S*\[oklch[^\]]*\]\S*/g, "");
+        }
+      });
       const canvas = await html2canvas(container, {
         backgroundColor: "#0f0f0f",
         scale: 2,

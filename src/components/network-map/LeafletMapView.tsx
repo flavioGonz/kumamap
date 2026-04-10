@@ -394,7 +394,7 @@ export default function LeafletMapView({
     // Fetch real down-since times from DB whenever monitors update and some are DOWN
     const downIds = kumaMonitors.filter(m => m.status === 0 && m.active).map(m => m.id);
     if (downIds.length > 0) {
-      fetch("/api/kuma/down-since")
+      fetch(apiUrl("/api/kuma/down-since"))
         .then(r => r.ok ? r.json() : {})
         .then((data: Record<string, string>) => {
           for (const [idStr, isoTs] of Object.entries(data)) {
@@ -3973,7 +3973,7 @@ export default function LeafletMapView({
                     setImportMapPickerOpen(false);
                     setImportingMapId(m.id);
                     try {
-                      const res = await fetch(`/api/maps/${m.id}/export`);
+                      const res = await fetch(apiUrl(`/api/maps/${m.id}/export`));
                       const data = await res.json();
                       const ts = Date.now();
                       const idMap: Record<string, string> = {};

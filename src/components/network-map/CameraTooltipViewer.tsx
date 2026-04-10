@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback, type CSSProperties } from "react";
 import { X, Maximize2, Camera, RefreshCw } from "lucide-react";
+import { apiUrl } from "@/lib/api";
 import type { CameraStreamConfig } from "./CameraStreamConfigModal";
 
 interface CameraTooltipViewerProps {
@@ -21,7 +22,7 @@ const ARROW_H = 8;
 
 /** Build proxy URL for snapshot mode */
 function proxySnapshotUrl(cameraUrl: string, cacheBust: number): string {
-  return `/api/camera/snapshot?url=${encodeURIComponent(cameraUrl)}&_t=${cacheBust}`;
+  return apiUrl(`/api/camera/snapshot?url=${encodeURIComponent(cameraUrl)}&_t=${cacheBust}`);
 }
 
 export default function CameraTooltipViewer({

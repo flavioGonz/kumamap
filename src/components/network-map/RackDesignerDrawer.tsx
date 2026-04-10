@@ -8,6 +8,7 @@ import {
   Eye, EyeOff, Copy, PhoneIncoming, Activity,
 } from "lucide-react";
 import html2canvas from "html2canvas";
+import { apiUrl } from "@/lib/api";
 import { motion, AnimatePresence } from "framer-motion";
 import { Tooltip } from "react-tooltip";
 import "react-tooltip/dist/react-tooltip.css";
@@ -350,7 +351,7 @@ export default function RackDesignerDrawer({ open, onClose, nodeId, nodes, monit
     }
 
     try {
-      const res = await fetch("/api/rack-report", {
+      const res = await fetch(apiUrl("/api/rack-report"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ rackName, totalUnits, devices: currentDevices }),
@@ -375,7 +376,7 @@ export default function RackDesignerDrawer({ open, onClose, nodeId, nodes, monit
       currentDevices = idx >= 0 ? currentDevices.map((d, i) => (i === idx ? editingDevice : d)) : [...currentDevices, editingDevice];
     }
     try {
-      const res = await fetch("/api/rack-template", {
+      const res = await fetch(apiUrl("/api/rack-template"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ rackName, totalUnits, devices: currentDevices }),
@@ -406,7 +407,7 @@ export default function RackDesignerDrawer({ open, onClose, nodeId, nodes, monit
       const formData = new FormData();
       formData.append("file", file);
       formData.append("devices", JSON.stringify(currentDevices));
-      const res = await fetch("/api/rack-import", { method: "POST", body: formData });
+      const res = await fetch(apiUrl("/api/rack-import"), { method: "POST", body: formData });
       if (!res.ok) throw new Error(await res.text());
       const data = await res.json();
       setDevices(data.devices);
@@ -536,11 +537,11 @@ export default function RackDesignerDrawer({ open, onClose, nodeId, nodes, monit
           <div style="position:relative;height:${h}px;background:${color};display:flex;align-items:center;overflow:hidden">
             <div style="position:absolute;left:0;top:0;bottom:0;width:${railW}px;background:#1a1a1a;border-right:1px solid #0a0a0a"></div>
             <div style="position:absolute;right:0;top:0;bottom:0;width:${railW}px;background:#1a1a1a;border-left:1px solid #0a0a0a"></div>
-            <div style="position:absolute;left:${railW}px;right:${railW}px;top:0;bottom:0;display:flex;align-items:center;justify-content:center;gap:6px">
-              ${icon}
-              <div style="text-align:center">
-                <div style="font-size:12px;font-weight:700;color:#fff;white-space:nowrap">${dev.label}</div>
-                ${dev.model ? `<div style="font-size:9px;color:rgba(255,255,255,0.5);white-space:nowrap">${dev.model}</div>` : ""}
+            <div style="position:absolute;left:${railW}px;right:${railW}px;top:0;bottom:0;display:flex;align-items:center;justify-content:center">
+              <span style="display:inline-block;margin-right:6px;vertical-align:middle;line-height:0">${icon}</span>
+              <div style="text-align:center;display:inline-block;vertical-align:middle">
+                <div style="font-size:12px;font-weight:700;color:#fff;white-space:nowrap;line-height:1.2">${dev.label}</div>
+                ${dev.model ? `<div style="font-size:9px;color:rgba(255,255,255,0.5);white-space:nowrap;line-height:1.2">${dev.model}</div>` : ""}
               </div>
             </div>
             ${statusDot}
@@ -577,14 +578,14 @@ export default function RackDesignerDrawer({ open, onClose, nodeId, nodes, monit
         ? `${(d.switchPorts||[]).filter((p: any)=>p.connected).length}/${d.portCount||24}`
         : "—";
       return `<tr style="border-bottom:1px solid rgba(255,255,255,0.05);background:${i%2===0?"transparent":"rgba(255,255,255,0.02)"}">
-        <td style="padding:7px 8px;font-family:monospace;color:rgba(255,255,255,0.5);font-size:11px;vertical-align:middle">U${d.unit}${d.sizeUnits>1?`-${d.unit+d.sizeUnits-1}`:""}</td>
-        <td style="padding:7px 8px;vertical-align:middle"><div style="display:flex;align-items:center;justify-content:center;height:16px">${icon}</div></td>
-        <td style="padding:7px 8px;font-weight:600;color:#fff;font-size:11px;vertical-align:middle">${d.label}</td>
-        <td style="padding:7px 8px;color:${color};font-size:10px;font-weight:600;vertical-align:middle">${label}</td>
-        <td style="padding:7px 8px;color:rgba(255,255,255,0.4);font-size:10px;vertical-align:middle">${d.model||"—"}</td>
-        <td style="padding:7px 8px;font-family:monospace;color:rgba(255,255,255,0.4);font-size:10px;vertical-align:middle">${d.managementIp||"—"}</td>
-        <td style="padding:7px 8px;font-family:monospace;color:rgba(255,255,255,0.4);font-size:10px;vertical-align:middle">${connPorts}</td>
-        <td style="padding:7px 8px;color:${d.isPoeCapable?"#f59e0b":"rgba(255,255,255,0.3)"};font-size:10px;vertical-align:middle">${d.isPoeCapable?"⚡ Sí":"—"}</td>
+        <td style="padding:7px 8px;font-family:monospace;color:rgba(255,255,255,0.5);font-size:11px;vertical-align:middle;line-height:20px">U${d.unit}${d.sizeUnits>1?`-${d.unit+d.sizeUnits-1}`:""}</td>
+        <td style="padding:7px 4px;vertical-align:middle;text-align:center;line-height:20px;width:28px">${icon}</td>
+        <td style="padding:7px 8px;font-weight:600;color:#fff;font-size:11px;vertical-align:middle;line-height:20px">${d.label}</td>
+        <td style="padding:7px 8px;color:${color};font-size:10px;font-weight:600;vertical-align:middle;line-height:20px">${label}</td>
+        <td style="padding:7px 8px;color:rgba(255,255,255,0.4);font-size:10px;vertical-align:middle;line-height:20px">${d.model||"—"}</td>
+        <td style="padding:7px 8px;font-family:monospace;color:rgba(255,255,255,0.4);font-size:10px;vertical-align:middle;line-height:20px">${d.managementIp||"—"}</td>
+        <td style="padding:7px 8px;font-family:monospace;color:rgba(255,255,255,0.4);font-size:10px;vertical-align:middle;line-height:20px">${connPorts}</td>
+        <td style="padding:7px 8px;color:${d.isPoeCapable?"#f59e0b":"rgba(255,255,255,0.3)"};font-size:10px;vertical-align:middle;line-height:20px">${d.isPoeCapable?"⚡ Sí":"—"}</td>
         <td style="padding:7px 8px;color:rgba(255,255,255,0.35);font-size:10px;max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:middle">${d.notes||""}</td>
       </tr>`;
     }).join("");
@@ -3758,7 +3759,7 @@ function ExportModal({
     setError(null);
     try {
       if (type === "word") {
-        const res = await fetch("/api/rack-report", {
+        const res = await fetch(apiUrl("/api/rack-report"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ rackName, totalUnits, devices }),
@@ -3766,7 +3767,7 @@ function ExportModal({
         if (!res.ok) throw new Error(await res.text());
         triggerDownload(await res.blob(), `rack-${safeName}-report.docx`);
       } else if (type === "excel") {
-        const res = await fetch("/api/rack-report-xlsx", {
+        const res = await fetch(apiUrl("/api/rack-report-xlsx"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ rackName, totalUnits, devices }),
@@ -3774,7 +3775,7 @@ function ExportModal({
         if (!res.ok) throw new Error(await res.text());
         triggerDownload(await res.blob(), `rack-${safeName}-report.xlsx`);
       } else if (type === "pdf") {
-        const res = await fetch("/api/rack-report-pdf", {
+        const res = await fetch(apiUrl("/api/rack-report-pdf"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ rackName, totalUnits, devices }),

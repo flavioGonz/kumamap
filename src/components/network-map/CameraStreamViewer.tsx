@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { X, Maximize2, Minimize2, Camera, RefreshCw } from "lucide-react";
+import { apiUrl } from "@/lib/api";
 import type { CameraStreamConfig } from "./CameraStreamConfigModal";
 
 interface CameraStreamViewerProps {
@@ -12,7 +13,7 @@ interface CameraStreamViewerProps {
 
 /** Build proxy URL for snapshot mode — avoids CORS / Basic-Auth browser restrictions */
 function proxySnapshotUrl(cameraUrl: string, cacheBust: number): string {
-  return `/api/camera/snapshot?url=${encodeURIComponent(cameraUrl)}&_t=${cacheBust}`;
+  return apiUrl(`/api/camera/snapshot?url=${encodeURIComponent(cameraUrl)}&_t=${cacheBust}`);
 }
 
 export default function CameraStreamViewer({ config, cameraName, onClose }: CameraStreamViewerProps) {

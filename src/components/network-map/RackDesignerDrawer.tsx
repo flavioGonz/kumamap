@@ -542,15 +542,15 @@ export default function RackDesignerDrawer({ open, onClose, nodeId, nodes, monit
         ? `${(d.switchPorts||[]).filter((p: any)=>p.connected).length}/${d.portCount||24}`
         : "—";
       return `<tr style="border-bottom:1px solid rgba(255,255,255,0.05);background:${i%2===0?"transparent":"rgba(255,255,255,0.02)"}">
-        <td style="padding:7px 8px;font-family:monospace;color:rgba(255,255,255,0.5);font-size:11px">U${d.unit}${d.sizeUnits>1?`-${d.unit+d.sizeUnits-1}`:""}</td>
-        <td style="padding:7px 8px">${icon}</td>
-        <td style="padding:7px 8px;font-weight:600;color:#fff;font-size:11px">${d.label}</td>
-        <td style="padding:7px 8px;color:${color};font-size:10px;font-weight:600">${label}</td>
-        <td style="padding:7px 8px;color:rgba(255,255,255,0.4);font-size:10px">${d.model||"—"}</td>
-        <td style="padding:7px 8px;font-family:monospace;color:rgba(255,255,255,0.4);font-size:10px">${d.managementIp||"—"}</td>
-        <td style="padding:7px 8px;font-family:monospace;color:rgba(255,255,255,0.4);font-size:10px">${connPorts}</td>
-        <td style="padding:7px 8px;color:${d.isPoeCapable?"#f59e0b":"rgba(255,255,255,0.3)"};font-size:10px">${d.isPoeCapable?"⚡ Sí":"—"}</td>
-        <td style="padding:7px 8px;color:rgba(255,255,255,0.35);font-size:10px;max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${d.notes||""}</td>
+        <td style="padding:7px 8px;font-family:monospace;color:rgba(255,255,255,0.5);font-size:11px;vertical-align:middle">U${d.unit}${d.sizeUnits>1?`-${d.unit+d.sizeUnits-1}`:""}</td>
+        <td style="padding:7px 8px;vertical-align:middle"><div style="display:flex;align-items:center;justify-content:center;height:16px">${icon}</div></td>
+        <td style="padding:7px 8px;font-weight:600;color:#fff;font-size:11px;vertical-align:middle">${d.label}</td>
+        <td style="padding:7px 8px;color:${color};font-size:10px;font-weight:600;vertical-align:middle">${label}</td>
+        <td style="padding:7px 8px;color:rgba(255,255,255,0.4);font-size:10px;vertical-align:middle">${d.model||"—"}</td>
+        <td style="padding:7px 8px;font-family:monospace;color:rgba(255,255,255,0.4);font-size:10px;vertical-align:middle">${d.managementIp||"—"}</td>
+        <td style="padding:7px 8px;font-family:monospace;color:rgba(255,255,255,0.4);font-size:10px;vertical-align:middle">${connPorts}</td>
+        <td style="padding:7px 8px;color:${d.isPoeCapable?"#f59e0b":"rgba(255,255,255,0.3)"};font-size:10px;vertical-align:middle">${d.isPoeCapable?"⚡ Sí":"—"}</td>
+        <td style="padding:7px 8px;color:rgba(255,255,255,0.35);font-size:10px;max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:middle">${d.notes||""}</td>
       </tr>`;
     }).join("");
 
@@ -594,7 +594,7 @@ export default function RackDesignerDrawer({ open, onClose, nodeId, nodes, monit
             <thead>
               <tr style="border-bottom:1px solid rgba(255,255,255,0.1)">
                 ${["U","","Nombre","Tipo","Modelo","IP Gestión","Puertos","PoE","Notas"].map(h =>
-                  `<th style="text-align:left;padding:7px 8px;color:rgba(255,255,255,0.35);font-weight:600;text-transform:uppercase;font-size:8px;letter-spacing:0.06em">${h}</th>`
+                  `<th style="text-align:left;padding:7px 8px;color:rgba(255,255,255,0.35);font-weight:600;text-transform:uppercase;font-size:8px;letter-spacing:0.06em;vertical-align:middle">${h}</th>`
                 ).join("")}
               </tr>
             </thead>
@@ -609,7 +609,7 @@ export default function RackDesignerDrawer({ open, onClose, nodeId, nodes, monit
         <div style="display:flex;gap:12px">
           ${Object.entries(TYPE_COLOR).filter(([k]) => devices.some(d => d.type === k)).map(([k, c]) => {
             const fn = TYPE_ICON[k] || TYPE_ICON.other;
-            return `<span style="display:flex;align-items:center;gap:4px;font-size:9px;color:rgba(255,255,255,0.35)">${fn(c, 12)} ${TYPE_LABEL[k]||k}</span>`;
+            return `<span style="display:inline-flex;align-items:center;gap:4px;font-size:9px;color:rgba(255,255,255,0.35);line-height:1">${fn(c, 12)} ${TYPE_LABEL[k]||k}</span>`;
           }).join("")}
         </div>
       </div>

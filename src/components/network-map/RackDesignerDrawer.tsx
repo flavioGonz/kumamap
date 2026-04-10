@@ -501,9 +501,9 @@ export default function RackDesignerDrawer({ open, onClose, nodeId, nodes, monit
           <div style="position:relative;height:${h}px;background:${color};display:flex;align-items:center;overflow:hidden">
             <div style="position:absolute;left:0;top:0;bottom:0;width:${railW}px;background:#1a1a1a;border-right:1px solid #0a0a0a"></div>
             <div style="position:absolute;right:0;top:0;bottom:0;width:${railW}px;background:#1a1a1a;border-left:1px solid #0a0a0a"></div>
-            <div style="margin-left:${railW + 8}px;display:flex;align-items:center;gap:6px;flex:1;padding-right:${railW + 24}px">
+            <div style="position:absolute;left:${railW}px;right:${railW}px;top:0;bottom:0;display:flex;align-items:center;justify-content:center;gap:6px">
               ${icon}
-              <div>
+              <div style="text-align:center">
                 <div style="font-size:12px;font-weight:700;color:#fff;white-space:nowrap">${dev.label}</div>
                 ${dev.model ? `<div style="font-size:9px;color:rgba(255,255,255,0.5);white-space:nowrap">${dev.model}</div>` : ""}
               </div>
@@ -567,11 +567,7 @@ export default function RackDesignerDrawer({ open, onClose, nodeId, nodes, monit
       <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:24px;padding-bottom:16px;border-bottom:1px solid rgba(255,255,255,0.08)">
         <div>
           <div style="font-size:24px;font-weight:800;color:#fff;letter-spacing:-0.02em">${rackName}</div>
-          <div style="font-size:12px;color:rgba(255,255,255,0.4);margin-top:6px">
-            <span style="display:inline-block;padding:3px 8px;border-radius:6px;background:rgba(255,255,255,0.06);margin-right:6px;font-weight:600">${totalUnits}U total</span>
-            <span style="display:inline-block;padding:3px 8px;border-radius:6px;background:rgba(16,185,129,0.1);color:#10b981;margin-right:6px;font-weight:600">${usedUnits}U usadas</span>
-            <span style="display:inline-block;padding:3px 8px;border-radius:6px;background:rgba(255,255,255,0.04);color:rgba(255,255,255,0.3);font-weight:600">${freeUnits}U libres</span>
-          </div>
+          <div style="font-size:12px;color:rgba(255,255,255,0.35);margin-top:4px">${totalUnits}U · ${devices.length} equipos</div>
         </div>
         <div style="text-align:right">
           <div style="font-size:11px;color:rgba(255,255,255,0.3)">Exportado ${now}</div>
@@ -588,10 +584,7 @@ export default function RackDesignerDrawer({ open, onClose, nodeId, nodes, monit
             <div style="width:${rackX}px;display:flex;flex-direction:column">${uLabelsHtml}</div>
             <div style="width:${rackW}px;border:3px solid #2a2a2a;border-radius:6px;overflow:hidden;background:#1c1c1c;box-shadow:inset 0 2px 8px rgba(0,0,0,0.6),0 4px 20px rgba(0,0,0,0.5);display:flex;flex-direction:column;position:relative">${rackUnitsHtml}</div>
           </div>
-          <div style="display:flex;justify-content:center;gap:10px;margin-top:8px">
-            <span style="font-size:10px;font-weight:600;color:rgba(255,255,255,0.35);padding:3px 8px;border-radius:4px;background:rgba(255,255,255,0.04)">${usedUnits}U usadas</span>
-            <span style="font-size:10px;font-weight:600;color:rgba(255,255,255,0.2);padding:3px 8px;border-radius:4px;background:rgba(255,255,255,0.02)">${freeUnits}U libres</span>
-          </div>
+          <div style="text-align:center;margin-top:6px;font-size:10px;color:rgba(255,255,255,0.25)">${usedUnits}U usadas · ${freeUnits}U libres</div>
         </div>
 
         <!-- Device table -->

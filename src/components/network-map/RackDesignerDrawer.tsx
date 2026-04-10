@@ -446,108 +446,168 @@ export default function RackDesignerDrawer({ open, onClose, nodeId, nodes, monit
   };
 
   const handleDownloadImage = async () => {
-    // Build a professional export container off-screen
-    const container = document.createElement("div");
-    container.style.cssText = `
-      position:fixed; left:-9999px; top:0;
-      width:900px; background:#0f0f0f; padding:32px;
-      font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
-      color:#fff; border-radius:16px;
-    `;
+    // ── Icon map (text-based, html2canvas-safe) ──
+    const TYPE_ICON: Record<string, string> = {
+      server: "🖥", switch: "🔀", patchpanel: "🔌", ups: "🔋", router: "📡",
+      pdu: "⚡", "tray-fiber": "💎", "tray-1u": "📦", "tray-2u": "📦",
+      "cable-organizer": "🔗", other: "⚙",
+    };
+    const TYPE_LABEL: Record<string, string> = {
+      server: "Servidor", switch: "Switch", patchpanel: "Patch Panel", ups: "UPS",
+      router: "Router", pdu: "PDU", "tray-fiber": "Bandeja Fibra", "tray-1u": "Bandeja 1U",
+      "tray-2u": "Bandeja 2U", "cable-organizer": "Organizador", other: "Otro",
+    };
+    const TYPE_COLOR: Record<string, string> = {
+      server: "#3b82f6", switch: "#10b981", patchpanel: "#8b5cf6", ups: "#f59e0b",
+      router: "#ef4444", pdu: "#f97316", "tray-fiber": "#d946ef", "tray-1u": "#52525b",
+      "tray-2u": "#52525b", "cable-organizer": "#78716c", other: "#6b7280",
+    };
 
-    // Header
+    // Build occupancy lookup
+    const occMap = new Map<number, RackDevice>();
+    devices.forEach(d => { for (let i = 0; i < d.sizeUnits; i++) occMap.set(d.unit + i, d); });
+
+    const unitH = 30; // px per U
+    const rackW = 260;
+    const rackX = 48; // left margin for U numbers
+    const railW = 10;
     const now = new Date().toLocaleDateString("es-UY", { day:"2-digit", month:"2-digit", year:"numeric" });
-    container.innerHTML = `
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:24px;padding-bottom:16px;border-bottom:1px solid rgba(255,255,255,0.1)">
-        <div>
-          <div style="font-size:22px;font-weight:700;color:#fff">${rackName}</div>
-          <div style="font-size:12px;color:rgba(255,255,255,0.4);margin-top:4px">${totalUnits}U total · ${usedUnits}U ocupadas · ${freeUnits}U libres</div>
-        </div>
-        <div style="font-size:11px;color:rgba(255,255,255,0.3);text-align:right">
-          Exportado ${now}<br/>
-          <span style="font-size:10px;color:rgba(255,255,255,0.2)">KumaMap Rack Designer</span>
-        </div>
-      </div>
-      <div style="display:flex;gap:24px;align-items:flex-start">
-        <div id="rack-export-visual" style="flex-shrink:0"></div>
-        <div id="rack-export-table" style="flex:1;min-width:0"></div>
-      </div>
-    `;
-    document.body.appendChild(container);
 
-    // Clone rack visual
-    if (rackRef.current) {
-      const clone = rackRef.current.cloneNode(true) as HTMLElement;
-      clone.style.cssText = "width:200px;border-radius:8px;overflow:hidden;";
-      container.querySelector("#rack-export-visual")!.appendChild(clone);
+    // Build rack units HTML — bottom to top (U1 at bottom)
+    let rackUnitsHtml = "";
+    const rendered = new Set<string>();
+    for (let u = totalUnits; u >= 1; u--) {
+      const dev = occMap.get(u);
+      if (dev && !rendered.has(dev.id)) {
+        rendered.add(dev.id);
+        const h = dev.sizeUnits * unitH;
+        const color = dev.color || TYPE_COLOR[dev.type] || "#6b7280";
+        const icon = TYPE_ICON[dev.type] || "⚙";
+        const si = getDeviceStatusInfo(dev.monitorId);
+        const statusDot = dev.monitorId ? `<span style="position:absolute;right:8px;top:50%;transform:translateY(-50%);width:8px;height:8px;border-radius:50%;background:${si.color};box-shadow:0 0 6px ${si.color}"></span>` : "";
+        rackUnitsHtml += `
+          <div style="position:relative;height:${h}px;background:${color};display:flex;align-items:center;overflow:hidden">
+            <div style="position:absolute;left:0;top:0;bottom:0;width:${railW}px;background:#1a1a1a;border-right:1px solid #0a0a0a"></div>
+            <div style="position:absolute;right:0;top:0;bottom:0;width:${railW}px;background:#1a1a1a;border-left:1px solid #0a0a0a"></div>
+            <div style="margin-left:${railW + 8}px;display:flex;align-items:center;gap:6px;min-width:0;flex:1;padding-right:${railW + 20}px">
+              <span style="font-size:14px;flex-shrink:0">${icon}</span>
+              <div style="min-width:0;flex:1">
+                <div style="font-size:11px;font-weight:700;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${dev.label}</div>
+                ${dev.model ? `<div style="font-size:8px;color:rgba(255,255,255,0.5);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${dev.model}</div>` : ""}
+              </div>
+            </div>
+            ${statusDot}
+            <span style="position:absolute;right:${railW + 2}px;bottom:1px;font-size:8px;color:rgba(255,255,255,0.4);font-family:monospace">U${dev.unit}${dev.sizeUnits > 1 ? `-${dev.unit + dev.sizeUnits - 1}` : ""}</span>
+          </div>`;
+        // Skip the remaining units of this device
+        for (let skip = 1; skip < dev.sizeUnits; skip++) u--;
+      } else if (!dev) {
+        rackUnitsHtml += `
+          <div style="height:${unitH}px;background:#1c1c1c;border-bottom:1px solid #252525;display:flex;align-items:center">
+            <div style="position:absolute;left:0;width:${railW}px;height:${unitH}px;background:#1a1a1a;border-right:1px solid #0a0a0a"></div>
+            <div style="position:absolute;right:0;width:${railW}px;height:${unitH}px;background:#1a1a1a;border-left:1px solid #0a0a0a"></div>
+          </div>`;
+      }
+    }
+
+    // Build U number labels (right side of rack, bottom-to-top)
+    let uLabelsHtml = "";
+    for (let u = totalUnits; u >= 1; u--) {
+      uLabelsHtml += `<div style="height:${unitH}px;display:flex;align-items:center;justify-content:flex-end;padding-right:6px;font-size:9px;font-family:monospace;color:rgba(255,255,255,0.3)">${u}</div>`;
     }
 
     // Build device table
     const sorted = [...devices].sort((a, b) => b.unit - a.unit);
-    const tableHtml = `
-      <table style="width:100%;border-collapse:collapse;font-size:11px;">
-        <thead>
-          <tr style="border-bottom:1px solid rgba(255,255,255,0.12)">
-            ${["U","Nombre","Tipo","Modelo","IP Gestión","Puertos","Cable","PoE","Notas"].map(h =>
-              `<th style="text-align:left;padding:6px 8px;color:rgba(255,255,255,0.4);font-weight:600;text-transform:uppercase;font-size:9px;letter-spacing:0.06em">${h}</th>`
-            ).join("")}
-          </tr>
-        </thead>
-        <tbody>
-          ${sorted.map((d, i) => {
-            const meta = TYPE_META[d.type] || TYPE_META.other;
-            const connPorts = d.type === "patchpanel"
-              ? `${(d.ports||[]).filter(p=>p.connected).length}/${d.portCount||24}`
-              : d.type === "switch"
-              ? `${(d.switchPorts||[]).filter(p=>p.connected).length}/${d.portCount||24}`
-              : "—";
-            return `<tr style="border-bottom:1px solid rgba(255,255,255,0.05);background:${i%2===0?"transparent":"rgba(255,255,255,0.02)"}">
-              <td style="padding:6px 8px;font-family:monospace;color:rgba(255,255,255,0.5)">U${d.unit}${d.sizeUnits>1?`-${d.unit+d.sizeUnits-1}`:""}</td>
-              <td style="padding:6px 8px;font-weight:600;color:#fff">${d.label}</td>
-              <td style="padding:6px 8px;color:rgba(255,255,255,0.5)">${meta.label}</td>
-              <td style="padding:6px 8px;color:rgba(255,255,255,0.4)">${d.model||"—"}</td>
-              <td style="padding:6px 8px;font-family:monospace;color:rgba(255,255,255,0.4)">${d.managementIp||"—"}</td>
-              <td style="padding:6px 8px;font-family:monospace;color:rgba(255,255,255,0.4)">${connPorts}</td>
-              <td style="padding:6px 8px;color:rgba(255,255,255,0.4);font-family:monospace">${d.cableLength != null ? d.cableLength+"m" : "—"}</td>
-              <td style="padding:6px 8px;color:${d.isPoeCapable?"#f59e0b":"rgba(255,255,255,0.3)"}">${d.isPoeCapable?"✓":"—"}</td>
-              <td style="padding:6px 8px;color:rgba(255,255,255,0.35);max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${d.notes||""}</td>
-            </tr>`;
-          }).join("")}
-        </tbody>
-      </table>
+    const tableRows = sorted.map((d, i) => {
+      const icon = TYPE_ICON[d.type] || "⚙";
+      const label = TYPE_LABEL[d.type] || "Otro";
+      const color = d.color || TYPE_COLOR[d.type] || "#6b7280";
+      const connPorts = d.type === "patchpanel"
+        ? `${(d.ports||[]).filter((p: any)=>p.connected).length}/${d.portCount||24}`
+        : d.type === "switch"
+        ? `${(d.switchPorts||[]).filter((p: any)=>p.connected).length}/${d.portCount||24}`
+        : "—";
+      const si = getDeviceStatusInfo(d.monitorId);
+      const statusHtml = d.monitorId ? `<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${si.color};margin-right:4px;vertical-align:middle"></span>` : "";
+      return `<tr style="border-bottom:1px solid rgba(255,255,255,0.05);background:${i%2===0?"transparent":"rgba(255,255,255,0.02)"}">
+        <td style="padding:7px 8px;font-family:monospace;color:rgba(255,255,255,0.5);font-size:11px">U${d.unit}${d.sizeUnits>1?`-${d.unit+d.sizeUnits-1}`:""}</td>
+        <td style="padding:7px 8px;font-size:12px">${icon}</td>
+        <td style="padding:7px 8px;font-weight:600;color:#fff;font-size:11px">${statusHtml}${d.label}</td>
+        <td style="padding:7px 8px;color:${color};font-size:10px;font-weight:600">${label}</td>
+        <td style="padding:7px 8px;color:rgba(255,255,255,0.4);font-size:10px">${d.model||"—"}</td>
+        <td style="padding:7px 8px;font-family:monospace;color:rgba(255,255,255,0.4);font-size:10px">${d.managementIp||"—"}</td>
+        <td style="padding:7px 8px;font-family:monospace;color:rgba(255,255,255,0.4);font-size:10px">${connPorts}</td>
+        <td style="padding:7px 8px;color:${d.isPoeCapable?"#f59e0b":"rgba(255,255,255,0.3)"};font-size:10px">${d.isPoeCapable?"⚡ Sí":"—"}</td>
+        <td style="padding:7px 8px;color:rgba(255,255,255,0.35);font-size:10px;max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${d.notes||""}</td>
+      </tr>`;
+    }).join("");
+
+    // Build full container
+    const container = document.createElement("div");
+    container.style.cssText = `
+      position:fixed; left:-9999px; top:0;
+      width:1100px; background:#0f0f0f; padding:36px;
+      font-family:'Segoe UI',-apple-system,BlinkMacSystemFont,sans-serif;
+      color:#fff;
     `;
-    container.querySelector("#rack-export-table")!.innerHTML = tableHtml;
+    container.innerHTML = `
+      <!-- Header -->
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:24px;padding-bottom:16px;border-bottom:1px solid rgba(255,255,255,0.08)">
+        <div>
+          <div style="font-size:24px;font-weight:800;color:#fff;letter-spacing:-0.02em">${rackName}</div>
+          <div style="font-size:12px;color:rgba(255,255,255,0.4);margin-top:6px">
+            <span style="display:inline-block;padding:3px 8px;border-radius:6px;background:rgba(255,255,255,0.06);margin-right:6px;font-weight:600">${totalUnits}U total</span>
+            <span style="display:inline-block;padding:3px 8px;border-radius:6px;background:rgba(16,185,129,0.1);color:#10b981;margin-right:6px;font-weight:600">${usedUnits}U usadas</span>
+            <span style="display:inline-block;padding:3px 8px;border-radius:6px;background:rgba(255,255,255,0.04);color:rgba(255,255,255,0.3);font-weight:600">${freeUnits}U libres</span>
+          </div>
+        </div>
+        <div style="text-align:right">
+          <div style="font-size:11px;color:rgba(255,255,255,0.3)">Exportado ${now}</div>
+          <div style="font-size:10px;color:rgba(255,255,255,0.15);margin-top:2px">KumaMap Rack Designer</div>
+        </div>
+      </div>
+
+      <!-- Body: rack + table -->
+      <div style="display:flex;gap:28px;align-items:flex-start">
+        <!-- Rack visual -->
+        <div style="flex-shrink:0;width:${rackX + rackW + 10}px">
+          <div style="font-size:9px;color:rgba(255,255,255,0.2);text-align:center;margin-bottom:6px;font-family:monospace">▲ U${totalUnits} (arriba)</div>
+          <div style="display:flex;position:relative">
+            <div style="width:${rackX}px;display:flex;flex-direction:column">${uLabelsHtml}</div>
+            <div style="width:${rackW}px;border:3px solid #2a2a2a;border-radius:6px;overflow:hidden;background:#1c1c1c;box-shadow:inset 0 2px 8px rgba(0,0,0,0.6),0 4px 20px rgba(0,0,0,0.5);display:flex;flex-direction:column;position:relative">${rackUnitsHtml}</div>
+          </div>
+          <div style="font-size:9px;color:rgba(255,255,255,0.2);text-align:center;margin-top:6px;font-family:monospace">▼ U1 (abajo)</div>
+        </div>
+
+        <!-- Device table -->
+        <div style="flex:1;min-width:0">
+          <div style="font-size:11px;color:rgba(255,255,255,0.3);font-weight:600;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:8px">${devices.length} Equipos instalados</div>
+          <table style="width:100%;border-collapse:collapse">
+            <thead>
+              <tr style="border-bottom:1px solid rgba(255,255,255,0.1)">
+                ${["U","","Nombre","Tipo","Modelo","IP Gestión","Puertos","PoE","Notas"].map(h =>
+                  `<th style="text-align:left;padding:7px 8px;color:rgba(255,255,255,0.35);font-weight:600;text-transform:uppercase;font-size:8px;letter-spacing:0.06em">${h}</th>`
+                ).join("")}
+              </tr>
+            </thead>
+            <tbody>${tableRows}</tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Footer -->
+      <div style="margin-top:24px;padding-top:12px;border-top:1px solid rgba(255,255,255,0.06);display:flex;justify-content:space-between;align-items:center">
+        <div style="font-size:10px;color:rgba(255,255,255,0.15)">KumaMap Network Monitoring · Rack Designer</div>
+        <div style="display:flex;gap:12px">
+          ${Object.entries(TYPE_COLOR).filter(([k]) => devices.some(d => d.type === k)).map(([k, c]) =>
+            `<span style="display:flex;align-items:center;gap:4px;font-size:9px;color:rgba(255,255,255,0.3)"><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${c}"></span>${TYPE_LABEL[k]||k}</span>`
+          ).join("")}
+        </div>
+      </div>
+    `;
+    document.body.appendChild(container);
 
     try {
-      // Remove any SVG elements from clone that html2canvas can't handle
-      container.querySelectorAll("svg").forEach(svg => {
-        const placeholder = document.createElement("span");
-        placeholder.textContent = "●";
-        placeholder.style.cssText = "color:rgba(255,255,255,0.3);font-size:10px";
-        svg.replaceWith(placeholder);
-      });
-      // Remove any base64 images that are too large (photos)
-      container.querySelectorAll("img").forEach(img => {
-        if (img.src.length > 50000) img.remove();
-      });
-      // Sanitize oklab/oklch/color-mix() CSS functions that html2canvas doesn't support
-      container.querySelectorAll("*").forEach(el => {
-        const htmlEl = el as HTMLElement;
-        const cs = getComputedStyle(htmlEl);
-        const propsToCheck = ["color", "backgroundColor", "borderColor", "borderTopColor", "borderBottomColor", "borderLeftColor", "borderRightColor", "outlineColor", "boxShadow", "textDecorationColor"];
-        for (const prop of propsToCheck) {
-          const val = cs.getPropertyValue(prop);
-          if (val && (/oklab|oklch|color-mix/i.test(val))) {
-            // Replace with fallback: transparent for bg, white for text
-            const fallback = prop === "color" || prop === "textDecorationColor" ? "#ffffff" : "transparent";
-            htmlEl.style.setProperty(prop, fallback);
-          }
-        }
-        // Also strip Tailwind classes that might trigger computed oklab
-        if (htmlEl.className && typeof htmlEl.className === "string") {
-          htmlEl.className = htmlEl.className.replace(/\b\S*\[oklch[^\]]*\]\S*/g, "");
-        }
-      });
       const canvas = await html2canvas(container, {
         backgroundColor: "#0f0f0f",
         scale: 2,

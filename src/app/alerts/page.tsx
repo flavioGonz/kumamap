@@ -138,7 +138,7 @@ export default function AlertsPage() {
   const [events, setEvents] = useState<TimelineEvent[]>([]);
   const [monitors, setMonitors] = useState<MonitorInfo[]>([]);
   const [loading, setLoading] = useState(false);
-  const [hours, setHours] = useState(24);
+  const [hours, setHours] = useState(6);
   const [useCustomDates, setUseCustomDates] = useState(false);
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
@@ -146,7 +146,7 @@ export default function AlertsPage() {
   const lastFetchRef = useRef<number>(0);
 
   // ── UI State ──
-  const [filterStatus, setFilterStatus] = useState<number | null>(null);
+  const [filterStatus, setFilterStatus] = useState<number | null>(0);
   const [searchText, setSearchText] = useState("");
   const [selectedEvent, setSelectedEvent] = useState<TimelineEvent | null>(null);
   const [groupByMonitor, setGroupByMonitor] = useState(true);

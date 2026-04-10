@@ -40,7 +40,7 @@ interface RackDevice {
   serial?: string; cableLength?: number; isPoeCapable?: boolean; notes?: string;
 }
 
-// ── Colors ────────────────────────────────────────────────────────────────────
+// ── Constants ────────────────────────────────────────────────────────────────
 
 const TYPE_LABELS: Record<string, string> = {
   server: "Servidor", switch: "Switch", patchpanel: "Patch Panel",
@@ -49,7 +49,12 @@ const TYPE_LABELS: Record<string, string> = {
   "tray-2u": "Bandeja 2U", other: "Otro",
 };
 
-// ── Markdown to HTML converter (simple) ──────────────────────────────────────
+const SPEED_COLORS: Record<string, string> = { "10": "#555", "100": "#2563EB", "1G": "#059669", "10G": "#D97706" };
+const TYPE_COLORS: Record<string, string> = { WAN: "#DC2626", LAN: "#059669", MGMT: "#D97706", DMZ: "#EA580C", VPN: "#7C3AED", other: "#6B7280" };
+const STATUS_LABELS: Record<string, string> = { active: "Activa", inactive: "Inactiva", backup: "Backup" };
+const STATUS_COLORS: Record<string, string> = { active: "#059669", inactive: "#DC2626", backup: "#D97706" };
+
+// ── HTML builder ─────────────────────────────────────────────────────────────
 
 function generatePDFHtml(rackName: string, totalUnits: number, devices: RackDevice[]): string {
   const now = new Date();
@@ -58,178 +63,255 @@ function generatePDFHtml(rackName: string, totalUnits: number, devices: RackDevi
   const freeUnits = totalUnits - usedUnits;
   const sorted = [...devices].sort((a, b) => b.unit - a.unit);
 
-  const tableRows = sorted.map((d, i) => {
-    const meta = TYPE_LABELS[d.type] || "Otro";
+  // ── Inventory rows ──
+  const inventoryRows = sorted.map((d, i) => {
     const connPorts = d.type === "patchpanel"
-      ? `${(d.ports||[]).filter(p=>p.connected).length}/${d.portCount||24}`
+      ? `${(d.ports || []).filter(p => p.connected).length}/${d.portCount || 24}`
       : d.type === "switch"
-      ? `${(d.switchPorts||[]).filter(p=>p.connected).length}/${d.portCount||24}`
+      ? `${(d.switchPorts || []).filter(p => p.connected).length}/${d.portCount || 24}`
       : "—";
-    return `
-      <tr style="border-bottom: 1px solid #ddd; background: ${i%2===0?'#fff':'#f9f9f9'}">
-        <td style="padding: 8px; text-align: left">U${d.unit}${d.sizeUnits>1?`-${d.unit+d.sizeUnits-1}`:""}</td>
-        <td style="padding: 8px; font-weight: 600">${d.label}</td>
-        <td style="padding: 8px">${meta}</td>
-        <td style="padding: 8px; font-family: monospace; font-size: 12px">${d.model||"—"}</td>
-        <td style="padding: 8px; font-family: monospace; font-size: 12px">${d.managementIp||"—"}</td>
-        <td style="padding: 8px; font-family: monospace">${connPorts}</td>
-        <td style="padding: 8px">${d.notes||"—"}</td>
-      </tr>
-    `;
+    const unitStr = `U${d.unit}${d.sizeUnits > 1 ? `–${d.unit + d.sizeUnits - 1}` : ""}`;
+    const modelSerial = [d.model, d.serial ? `S/N: ${d.serial}` : ""].filter(Boolean).join("  ·  ") || "—";
+    const bg = i % 2 === 0 ? "#fff" : "#F3F4F6";
+    return `<tr style="background:${bg}">
+      <td class="c mono">${unitStr}</td>
+      <td class="c">${d.label}</td>
+      <td class="c">${TYPE_LABELS[d.type] || d.type}</td>
+      <td class="c">${modelSerial}</td>
+      <td class="c mono">${d.managementIp || "—"}</td>
+      <td class="c mono">${connPorts}</td>
+      <td class="c mono">${d.cableLength != null ? `${d.cableLength}m` : "—"}</td>
+      <td class="c" style="color:${d.isPoeCapable ? "#D97706" : "#aaa"}">${d.isPoeCapable ? "✓" : "—"}</td>
+      <td class="c">${d.notes || ""}</td>
+    </tr>`;
   }).join("");
 
-  return `
-<!DOCTYPE html>
+  // ── Port detail sections ──
+  const devicesWithPorts = sorted.filter(d =>
+    (d.type === "patchpanel" && (d.ports || []).length > 0) ||
+    (d.type === "switch" && (d.switchPorts || []).length > 0) ||
+    (d.type === "router" && (d.routerInterfaces || []).length > 0) ||
+    (d.type === "pbx" && ((d.pbxExtensions || []).length > 0 || (d.pbxTrunkLines || []).length > 0))
+  );
+
+  let portDetailsHtml = "";
+  if (devicesWithPorts.length > 0) {
+    portDetailsHtml += `<div class="page-break"></div><h2>Detalle de Puertos e Interfaces</h2>`;
+
+    for (const d of devicesWithPorts) {
+      const unitStr = `U${d.unit}${d.sizeUnits > 1 ? `–${d.unit + d.sizeUnits - 1}` : ""}`;
+      portDetailsHtml += `<h3>${d.label}  ·  ${TYPE_LABELS[d.type] || d.type}  ·  ${unitStr}</h3>`;
+
+      if (d.type === "patchpanel" && d.ports) {
+        const connected = d.ports.filter(p => p.connected).length;
+        const free = d.ports.filter(p => !p.connected).length;
+        portDetailsHtml += `<p class="port-summary"><span style="color:#059669">${connected} conectados</span> · <span style="color:#888">${free} libres</span> · <span style="color:#aaa">Total ${d.ports.length} puertos</span></p>`;
+        portDetailsHtml += `<table><thead><tr>${["Puerto","Etiqueta","Destino","Dispositivo","MAC","Cable","Long.","PoE","Notas"].map(h => `<th>${h}</th>`).join("")}</tr></thead><tbody>`;
+        d.ports.forEach((p, ri) => {
+          const bg = ri % 2 === 0 ? "#fff" : "#F3F4F6";
+          portDetailsHtml += `<tr style="background:${bg}">
+            <td class="c mono">${p.port}</td>
+            <td class="c">${p.label || `P${p.port}`}</td>
+            <td class="c">${p.destination || "—"}</td>
+            <td class="c">${p.connectedDevice || "—"}</td>
+            <td class="c mono">${p.macAddress || "—"}</td>
+            <td class="c">${p.cableColor ? `<span style="color:${p.cableColor}">●</span>` : "—"}</td>
+            <td class="c mono">${p.cableLength || "—"}</td>
+            <td class="c" style="color:${p.isPoe ? "#D97706" : "#aaa"}">${p.isPoe ? (p.poeType || "✓") : "—"}</td>
+            <td class="c">${p.notes || ""}</td>
+          </tr>`;
+        });
+        portDetailsHtml += `</tbody></table>`;
+      }
+
+      if (d.type === "switch" && d.switchPorts) {
+        const connected = d.switchPorts.filter(p => p.connected).length;
+        portDetailsHtml += `<p class="port-summary"><span style="color:#059669">${connected} conectados</span> · <span style="color:#aaa">Total ${d.switchPorts.length} puertos</span></p>`;
+        portDetailsHtml += `<table><thead><tr>${["Puerto","Etiqueta","Velocidad","Dispositivo","MAC","VLAN","PoE","W","Uplink","Notas"].map(h => `<th>${h}</th>`).join("")}</tr></thead><tbody>`;
+        d.switchPorts.forEach((p, ri) => {
+          const bg = ri % 2 === 0 ? "#fff" : "#F3F4F6";
+          const sc = p.speed ? (SPEED_COLORS[p.speed] || "#555") : "#aaa";
+          portDetailsHtml += `<tr style="background:${bg}">
+            <td class="c mono">${p.port}</td>
+            <td class="c">${p.label || p.port}</td>
+            <td class="c mono" style="color:${sc}">${p.speed || "—"}</td>
+            <td class="c">${p.connectedDevice || "—"}</td>
+            <td class="c mono">${p.macAddress || "—"}</td>
+            <td class="c mono">${p.vlan || "—"}</td>
+            <td class="c" style="color:${p.isPoe ? "#D97706" : "#aaa"}">${p.isPoe ? "✓" : "—"}</td>
+            <td class="c mono">${p.poeWatts ? `${p.poeWatts}W` : "—"}</td>
+            <td class="c" style="color:${p.uplink ? "#2563EB" : "#aaa"}">${p.uplink ? "↑" : "—"}</td>
+            <td class="c">${p.notes || ""}</td>
+          </tr>`;
+        });
+        portDetailsHtml += `</tbody></table>`;
+      }
+
+      if (d.type === "router" && d.routerInterfaces) {
+        portDetailsHtml += `<table><thead><tr>${["#","Nombre","Tipo","Dirección IP","Estado","Notas"].map(h => `<th>${h}</th>`).join("")}</tr></thead><tbody>`;
+        d.routerInterfaces.forEach((iface, ri) => {
+          const bg = ri % 2 === 0 ? "#fff" : "#F3F4F6";
+          const tc = TYPE_COLORS[iface.type] || "#555";
+          portDetailsHtml += `<tr style="background:${bg}">
+            <td class="c mono">${ri}</td>
+            <td class="c mono">${iface.name}</td>
+            <td class="c" style="color:${tc};font-weight:600">${iface.type}</td>
+            <td class="c mono">${iface.ipAddress || "—"}</td>
+            <td class="c" style="color:${iface.connected ? "#059669" : "#888"}">${iface.connected ? "Activo" : "Inactivo"}</td>
+            <td class="c">${iface.notes || ""}</td>
+          </tr>`;
+        });
+        portDetailsHtml += `</tbody></table>`;
+      }
+
+      if (d.type === "pbx" && d.pbxExtensions && d.pbxExtensions.length > 0) {
+        portDetailsHtml += `<p class="port-summary" style="color:#0891B2">${d.pbxExtensions.length} extensiones</p>`;
+        portDetailsHtml += `<table><thead><tr>${["Ext.","Nombre","IP Teléfono","MAC","Modelo","Ubicación","Usuario SIP","Notas"].map(h => `<th>${h}</th>`).join("")}</tr></thead><tbody>`;
+        d.pbxExtensions.forEach((ext, ri) => {
+          const bg = ri % 2 === 0 ? "#fff" : "#F3F4F6";
+          portDetailsHtml += `<tr style="background:${bg}">
+            <td class="c mono">${ext.extension}</td>
+            <td class="c">${ext.name || "—"}</td>
+            <td class="c mono">${ext.ipPhone || "—"}</td>
+            <td class="c mono">${ext.macAddress || "—"}</td>
+            <td class="c">${ext.model || "—"}</td>
+            <td class="c">${ext.location || "—"}</td>
+            <td class="c mono">${ext.username || "—"}</td>
+            <td class="c">${ext.notes || ""}</td>
+          </tr>`;
+        });
+        portDetailsHtml += `</tbody></table>`;
+      }
+
+      if (d.type === "pbx" && d.pbxTrunkLines && d.pbxTrunkLines.length > 0) {
+        portDetailsHtml += `<p class="trunk-title"><strong style="color:#0891B2">Líneas del proveedor</strong> · <span style="color:#888">${d.pbxTrunkLines.length} líneas</span></p>`;
+        portDetailsHtml += `<table><thead><tr>${["Proveedor","Número/DID","Tipo","Canales","Servidor SIP","Códec","Estado","Notas"].map(h => `<th>${h}</th>`).join("")}</tr></thead><tbody>`;
+        d.pbxTrunkLines.forEach((t, ri) => {
+          const bg = ri % 2 === 0 ? "#fff" : "#F3F4F6";
+          const sc = STATUS_COLORS[t.status || "active"] || "#555";
+          portDetailsHtml += `<tr style="background:${bg}">
+            <td class="c">${t.provider || "—"}</td>
+            <td class="c mono">${t.number || "—"}</td>
+            <td class="c mono" style="color:#0891B2">${t.type}</td>
+            <td class="c mono">${t.channels || "—"}</td>
+            <td class="c mono">${t.sipServer || "—"}</td>
+            <td class="c">${t.codec || "—"}</td>
+            <td class="c" style="color:${sc};font-weight:600">${STATUS_LABELS[t.status || "active"] || "—"}</td>
+            <td class="c">${t.notes || ""}</td>
+          </tr>`;
+        });
+        portDetailsHtml += `</tbody></table>`;
+      }
+    }
+  }
+
+  return `<!DOCTYPE html>
 <html lang="es">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${rackName} - Reporte</title>
+  <title>${rackName} - Reporte de Rack</title>
   <style>
-    body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; margin: 0; padding: 20px; }
-    .container { max-width: 1000px; margin: 0 auto; }
-    .header { border-bottom: 3px solid #1e3a5f; padding-bottom: 20px; margin-bottom: 30px; }
-    h1 { color: #1e3a5f; margin: 0 0 10px 0; font-size: 28px; }
-    .meta { font-size: 12px; color: #666; }
-    .summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-bottom: 30px; }
-    .summary-box { background: #f5f5f5; padding: 15px; border-radius: 8px; border-left: 4px solid #1e3a5f; }
-    .summary-box strong { display: block; font-size: 18px; color: #1e3a5f; }
-    .summary-box small { color: #888; display: block; margin-top: 5px; }
-    table { width: 100%; border-collapse: collapse; margin-bottom: 30px; }
-    th { background: #1e3a5f; color: white; padding: 12px; text-align: left; font-weight: 700; font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; }
-    .footer { border-top: 1px solid #ddd; padding-top: 15px; font-size: 11px; color: #999; text-align: right; }
-    @media print { body { padding: 0; } }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: Arial, Helvetica, sans-serif; font-size: 9pt; color: #333; line-height: 1.4; }
+    .page { max-width: 210mm; margin: 0 auto; padding: 15mm 15mm 20mm 15mm; }
+
+    /* Header / footer */
+    .doc-header { display: flex; justify-content: space-between; align-items: center; padding-bottom: 6px; border-bottom: 1px solid #eee; margin-bottom: 20px; font-size: 8pt; color: #aaa; }
+    .doc-footer { border-top: 1px solid #eee; padding-top: 8px; margin-top: 30px; font-size: 8pt; color: #aaa; text-align: right; }
+
+    /* Title block */
+    .title { font-size: 24pt; font-weight: 700; color: #1E3A5F; margin-bottom: 6px; }
+    .subtitle { font-size: 11pt; color: #888; padding-bottom: 8px; border-bottom: 3px solid #1E3A5F; margin-bottom: 18px; }
+
+    /* Summary stats */
+    .summary { display: flex; gap: 0; margin-bottom: 24px; }
+    .summary-box { flex: 1; background: #F8FAFF; padding: 14px 18px; }
+    .summary-box .label { font-size: 8pt; color: #888; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
+    .summary-box .value { font-size: 22pt; font-weight: 700; margin-top: 4px; }
+
+    /* Section headings */
+    h2 { font-size: 14pt; font-weight: 700; color: #1E3A5F; padding-bottom: 6px; border-bottom: 2px solid #C5D5E8; margin: 24px 0 14px 0; }
+    h3 { font-size: 11pt; font-weight: 700; color: #374151; margin: 18px 0 8px 0; }
+
+    /* Tables */
+    table { width: 100%; border-collapse: collapse; margin-bottom: 16px; font-size: 9pt; }
+    th { background: #1E3A5F; color: #fff; padding: 6px 8px; text-align: left; font-weight: 700; font-size: 8pt; text-transform: uppercase; letter-spacing: 0.03em; border: 1px solid #ddd; }
+    td { padding: 5px 8px; border: 1px solid #ddd; vertical-align: middle; }
+    .c { } /* cell base */
+    .mono { font-family: 'Courier New', Courier, monospace; font-size: 8pt; }
+
+    /* Port summary line */
+    .port-summary { font-size: 9pt; margin-bottom: 8px; }
+    .trunk-title { font-size: 10pt; margin: 16px 0 8px 0; }
+
+    /* Print */
+    .page-break { page-break-before: always; }
+    @media print {
+      .page { padding: 10mm; max-width: none; }
+      .page-break { page-break-before: always; }
+    }
   </style>
 </head>
 <body>
-  <div class="container">
-    <div class="header">
-      <h1>${rackName}</h1>
-      <div class="meta">Reporte generado ${dateStr}</div>
+  <div class="page">
+    <!-- Header -->
+    <div class="doc-header">
+      <span>KumaMap · ${rackName}</span>
+      <span>${dateStr}</span>
     </div>
 
+    <!-- Title -->
+    <div class="title">${rackName}</div>
+    <div class="subtitle">Reporte de Rack  ·  ${dateStr}</div>
+
+    <!-- Summary stats -->
     <div class="summary">
       <div class="summary-box">
-        <strong>${totalUnits}U</strong>
-        <small>Total del Rack</small>
+        <div class="label">Total</div>
+        <div class="value" style="color:#1E3A5F">${totalUnits}U</div>
       </div>
       <div class="summary-box">
-        <strong style="color: #f59e0b">${usedUnits}U</strong>
-        <small>Espacios Ocupados</small>
+        <div class="label">Ocupadas</div>
+        <div class="value" style="color:#D97706">${usedUnits}U</div>
       </div>
       <div class="summary-box">
-        <strong style="color: #10b981">${freeUnits}U</strong>
-        <small>Espacios Libres</small>
+        <div class="label">Libres</div>
+        <div class="value" style="color:#059669">${freeUnits}U</div>
       </div>
     </div>
 
-    <h2 style="color: #1e3a5f; margin-top: 30px; margin-bottom: 15px; border-bottom: 1px solid #ddd; padding-bottom: 10px;">Equipos Instalados</h2>
+    <!-- Inventory -->
+    <h2>Inventario de Equipos</h2>
     <table>
       <thead>
         <tr>
-          <th>Posición</th>
+          <th>U</th>
           <th>Nombre</th>
           <th>Tipo</th>
-          <th>Modelo</th>
-          <th>IP Gestión</th>
+          <th>Modelo / Serie</th>
+          <th>IP de Gestión</th>
           <th>Puertos</th>
+          <th>Cable</th>
+          <th>PoE</th>
           <th>Notas</th>
         </tr>
       </thead>
       <tbody>
-        ${tableRows}
+        ${inventoryRows}
       </tbody>
     </table>
 
-    ${(() => {
-      const pbxDevices = sorted.filter(d => d.type === "pbx" && (d.pbxExtensions || []).length > 0);
-      if (pbxDevices.length === 0) return "";
-      return `
-      <h2 style="color: #1e3a5f; margin-top: 30px; margin-bottom: 15px; border-bottom: 1px solid #ddd; padding-bottom: 10px;">Extensiones PBX</h2>
-      ${pbxDevices.map(d => {
-        const exts = d.pbxExtensions || [];
-        const extRows = exts.map((ext, ei) => `
-          <tr style="border-bottom: 1px solid #ddd; background: ${ei%2===0?'#fff':'#f9f9f9'}">
-            <td style="padding: 8px; font-family: monospace; font-weight: 600">${ext.extension}</td>
-            <td style="padding: 8px">${ext.name || "—"}</td>
-            <td style="padding: 8px; font-family: monospace; font-size: 12px">${ext.ipPhone || "—"}</td>
-            <td style="padding: 8px; font-family: monospace; font-size: 12px">${ext.macAddress || "—"}</td>
-            <td style="padding: 8px">${ext.model || "—"}</td>
-            <td style="padding: 8px">${ext.location || "—"}</td>
-            <td style="padding: 8px; font-family: monospace; font-size: 12px">${ext.username || "—"}</td>
-            <td style="padding: 8px; font-family: monospace; font-size: 12px">${ext.password || "—"}</td>
-            <td style="padding: 8px; font-size: 12px">${ext.notes || "—"}</td>
-          </tr>
-        `).join("");
-        return `
-        <h3 style="color: #0891b2; margin: 20px 0 10px 0; font-size: 16px">${d.label} · U${d.unit}${d.sizeUnits>1?`-${d.unit+d.sizeUnits-1}`:""} · ${exts.length} extensiones</h3>
-        <table>
-          <thead>
-            <tr>
-              <th style="background: #0891b2">Ext.</th>
-              <th style="background: #0891b2">Nombre</th>
-              <th style="background: #0891b2">IP Teléfono</th>
-              <th style="background: #0891b2">MAC</th>
-              <th style="background: #0891b2">Modelo</th>
-              <th style="background: #0891b2">Ubicación</th>
-              <th style="background: #0891b2">Usuario SIP</th>
-              <th style="background: #0891b2">Contraseña SIP</th>
-              <th style="background: #0891b2">Notas</th>
-            </tr>
-          </thead>
-          <tbody>${extRows}</tbody>
-        </table>`;
-      }).join("")}`;
-    })()}
+    <!-- Port details -->
+    ${portDetailsHtml}
 
-    ${(() => {
-      const trunkDevs = sorted.filter(d => d.type === "pbx" && (d.pbxTrunkLines || []).length > 0);
-      if (trunkDevs.length === 0) return "";
-      return `
-      <h2 style="color: #1e3a5f; margin-top: 30px; margin-bottom: 15px; border-bottom: 1px solid #ddd; padding-bottom: 10px;">Líneas del Proveedor</h2>
-      ${trunkDevs.map(d => {
-        const trunks = d.pbxTrunkLines || [];
-        const statusLabels: Record<string, string> = { active: "Activa", inactive: "Inactiva", backup: "Backup" };
-        const statusColors: Record<string, string> = { active: "#10b981", inactive: "#ef4444", backup: "#f59e0b" };
-        const trunkRows = trunks.map((t: any, ti: number) => `
-          <tr style="border-bottom: 1px solid #ddd; background: ${ti%2===0?'#fff':'#f9f9f9'}">
-            <td style="padding: 8px; font-weight: 600">${t.provider || "—"}</td>
-            <td style="padding: 8px; font-family: monospace; font-size: 12px">${t.number || "—"}</td>
-            <td style="padding: 8px; color: #0891b2; font-weight: 600">${t.type}</td>
-            <td style="padding: 8px; text-align: center">${t.channels || "—"}</td>
-            <td style="padding: 8px; font-family: monospace; font-size: 12px">${t.sipServer || "—"}</td>
-            <td style="padding: 8px">${t.codec || "—"}</td>
-            <td style="padding: 8px; color: ${statusColors[t.status || 'active'] || '#666'}; font-weight: 600">${statusLabels[t.status || 'active'] || "—"}</td>
-            <td style="padding: 8px; font-size: 12px">${t.notes || "—"}</td>
-          </tr>
-        `).join("");
-        return `
-        <h3 style="color: #0891b2; margin: 20px 0 10px 0; font-size: 16px">${d.label} · ${trunks.length} líneas</h3>
-        <table>
-          <thead>
-            <tr>
-              <th style="background: #0891b2">Proveedor</th>
-              <th style="background: #0891b2">Número / DID</th>
-              <th style="background: #0891b2">Tipo</th>
-              <th style="background: #0891b2">Canales</th>
-              <th style="background: #0891b2">Servidor SIP</th>
-              <th style="background: #0891b2">Códec</th>
-              <th style="background: #0891b2">Estado</th>
-              <th style="background: #0891b2">Notas</th>
-            </tr>
-          </thead>
-          <tbody>${trunkRows}</tbody>
-        </table>`;
-      }).join("")}`;
-    })()}
-
-    <div class="footer">
-      <p>KumaMap Rack Designer | Reporte confidencial</p>
+    <!-- Footer -->
+    <div class="doc-footer">
+      Rack Report — KumaMap
     </div>
   </div>
 </body>
-</html>
-  `;
+</html>`;
 }
 
 // ── Main handler ─────────────────────────────────────────────────────────────
@@ -237,11 +319,8 @@ function generatePDFHtml(rackName: string, totalUnits: number, devices: RackDevi
 export async function POST(request: NextRequest) {
   try {
     const { rackName, totalUnits, devices } = await request.json();
-
-    // Generate HTML
     const html = generatePDFHtml(rackName, totalUnits, devices);
 
-    // For now, return HTML as blob that browser can print to PDF
     return new Response(html, {
       status: 200,
       headers: {

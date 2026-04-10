@@ -224,19 +224,40 @@ export default function AlertsPage() {
   const downtimes = useMemo(() => computeDowntimes(events), [events]);
 
   // ── Sound ──
+  // Unlock AudioContext on first user interaction (browsers block autoplay)
+  useEffect(() => {
+    const unlock = () => {
+      if (!audioCtxRef.current) audioCtxRef.current = new AudioContext();
+      if (audioCtxRef.current.state === "suspended") audioCtxRef.current.resume();
+      window.removeEventListener("click", unlock);
+      window.removeEventListener("keydown", unlock);
+    };
+    window.addEventListener("click", unlock);
+    window.addEventListener("keydown", unlock);
+    return () => { window.removeEventListener("click", unlock); window.removeEventListener("keydown", unlock); };
+  }, []);
+
   const playBeep = useCallback(() => {
     try {
       if (!audioCtxRef.current) audioCtxRef.current = new AudioContext();
       const ctx = audioCtxRef.current;
+      if (ctx.state === "suspended") ctx.resume();
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
       osc.connect(gain); gain.connect(ctx.destination);
-      osc.type = "sine"; osc.frequency.setValueAtTime(880, ctx.currentTime);
-      gain.gain.setValueAtTime(0.3, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.25);
-      osc.start(ctx.currentTime); osc.stop(ctx.currentTime + 0.25);
-    } catch {}
+      osc.type = "square"; osc.frequency.setValueAtTime(880, ctx.currentTime);
+      gain.gain.setValueAtTime(0.25, ctx.currentTime);
+      // Two-tone beep: 880Hz then 660Hz
+      osc.frequency.setValueAtTime(880, ctx.currentTime);
+      osc.frequency.setValueAtTime(660, ctx.currentTime + 0.12);
+      gain.gain.setValueAtTime(0.25, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
+      osc.start(ctx.currentTime); osc.stop(ctx.currentTime + 0.3);
+    } catch (e) { console.warn("[AlertSound] beep failed:", e); }
   }, []);
+
+  // Track whether initial load is done (skip beep on first data load)
+  const initialLoadDoneRef = useRef(false);
 
   useEffect(() => {
     if (events.length === 0) return;
@@ -248,9 +269,21 @@ export default function AlertsPage() {
       const dt = downtimes.get(key);
       if (getSeverity(dt).level === "grave") currentGraveKeys.add(key);
     }
+    if (!initialLoadDoneRef.current) {
+      // First load — just store keys, don't beep
+      initialLoadDoneRef.current = true;
+      prevGraveKeysRef.current = currentGraveKeys;
+      return;
+    }
+    // Detect new GRAVE alerts not in previous set
     const prev = prevGraveKeysRef.current;
-    if (prev.size > 0 && !soundMuted) {
-      for (const k of currentGraveKeys) { if (!prev.has(k)) { playBeep(); break; } }
+    if (!soundMuted) {
+      for (const k of currentGraveKeys) {
+        if (!prev.has(k)) {
+          playBeep();
+          break; // one beep per poll cycle
+        }
+      }
     }
     prevGraveKeysRef.current = currentGraveKeys;
   }, [events, downtimes, acknowledgedKeys, soundMuted, playBeep]);

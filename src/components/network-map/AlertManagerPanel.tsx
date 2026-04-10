@@ -832,6 +832,7 @@ export default function AlertManagerPanel({ open, onClose, sidebarWidth, onCount
   });
   const prevGraveKeysRef = useRef<Set<string>>(new Set());
   const audioCtxRef = useRef<AudioContext | null>(null);
+  const initialLoadDoneRef = useRef(false);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -849,6 +850,19 @@ export default function AlertManagerPanel({ open, onClose, sidebarWidth, onCount
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, [showDatePicker]);
+
+  // Unlock AudioContext on first user interaction (browser autoplay policy)
+  useEffect(() => {
+    const unlock = () => {
+      if (!audioCtxRef.current) audioCtxRef.current = new AudioContext();
+      if (audioCtxRef.current.state === "suspended") audioCtxRef.current.resume();
+      window.removeEventListener("click", unlock);
+      window.removeEventListener("keydown", unlock);
+    };
+    window.addEventListener("click", unlock);
+    window.addEventListener("keydown", unlock);
+    return () => { window.removeEventListener("click", unlock); window.removeEventListener("keydown", unlock); };
+  }, []);
 
   // ── Fetch events ──
   const fetchHours = useMemo(() => {
@@ -921,17 +935,19 @@ export default function AlertManagerPanel({ open, onClose, sidebarWidth, onCount
     try {
       if (!audioCtxRef.current) audioCtxRef.current = new AudioContext();
       const ctx = audioCtxRef.current;
+      if (ctx.state === "suspended") ctx.resume();
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
       osc.connect(gain);
       gain.connect(ctx.destination);
-      osc.type = "sine";
+      osc.type = "square";
       osc.frequency.setValueAtTime(880, ctx.currentTime);
-      gain.gain.setValueAtTime(0.3, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.25);
+      osc.frequency.setValueAtTime(660, ctx.currentTime + 0.12);
+      gain.gain.setValueAtTime(0.25, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
       osc.start(ctx.currentTime);
-      osc.stop(ctx.currentTime + 0.25);
-    } catch { /* audio not supported */ }
+      osc.stop(ctx.currentTime + 0.3);
+    } catch (e) { console.warn("[AlertSound] beep failed:", e); }
   }, []);
 
   useEffect(() => {
@@ -946,18 +962,24 @@ export default function AlertManagerPanel({ open, onClose, sidebarWidth, onCount
       const sev = getSeverity(dt);
       if (sev.level === "grave") currentGraveKeys.add(key);
     }
+    // Skip first load — just record baseline
+    if (!initialLoadDoneRef.current) {
+      initialLoadDoneRef.current = true;
+      prevGraveKeysRef.current = currentGraveKeys;
+      return;
+    }
     // Detect new GRAVE alerts (not in previous set)
-    const prevKeys = prevGraveKeysRef.current;
-    if (prevKeys.size > 0 && !open && !soundMuted) {
+    const prev = prevGraveKeysRef.current;
+    if (!soundMuted) {
       for (const k of currentGraveKeys) {
-        if (!prevKeys.has(k)) {
+        if (!prev.has(k)) {
           playBeep();
           break; // one beep per poll cycle
         }
       }
     }
     prevGraveKeysRef.current = currentGraveKeys;
-  }, [events, downtimes, acknowledgedKeys, open, soundMuted, playBeep]);
+  }, [events, downtimes, acknowledgedKeys, soundMuted, playBeep]);
 
   // Persist sound mute preference
   const toggleSoundMute = useCallback(() => {

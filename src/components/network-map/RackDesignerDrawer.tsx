@@ -446,11 +446,21 @@ export default function RackDesignerDrawer({ open, onClose, nodeId, nodes, monit
   };
 
   const handleDownloadImage = async () => {
-    // ── Icon map (text-based, html2canvas-safe) ──
-    const TYPE_ICON: Record<string, string> = {
-      server: "🖥", switch: "🔀", patchpanel: "🔌", ups: "🔋", router: "📡",
-      pdu: "⚡", "tray-fiber": "💎", "tray-1u": "📦", "tray-2u": "📦",
-      "cable-organizer": "🔗", other: "⚙",
+    // ── Inline SVG icons (lucide-style, html2canvas-safe) ──
+    const svgI = (paths: string, color: string, size = 16) =>
+      `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0">${paths}</svg>`;
+    const TYPE_ICON: Record<string, (c: string, s?: number) => string> = {
+      server:           (c, s) => svgI('<rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><circle cx="6" cy="6" r="1" fill="'+c+'"/><circle cx="6" cy="18" r="1" fill="'+c+'"/>', c, s),
+      switch:           (c, s) => svgI('<rect x="2" y="6" width="20" height="12" rx="2"/><line x1="6" y1="10" x2="6" y2="14"/><line x1="10" y1="10" x2="10" y2="14"/><line x1="14" y1="10" x2="14" y2="14"/><line x1="18" y1="10" x2="18" y2="14"/>', c, s),
+      patchpanel:       (c, s) => svgI('<rect x="2" y="8" width="20" height="8" rx="1"/><circle cx="6" cy="12" r="1.5"/><circle cx="10" cy="12" r="1.5"/><circle cx="14" cy="12" r="1.5"/><circle cx="18" cy="12" r="1.5"/>', c, s),
+      ups:              (c, s) => svgI('<rect x="6" y="2" width="12" height="20" rx="2"/><line x1="10" y1="9" x2="14" y2="9"/><line x1="12" y1="7" x2="12" y2="11"/><line x1="10" y1="15" x2="14" y2="15"/>', c, s),
+      router:           (c, s) => svgI('<rect x="2" y="8" width="20" height="8" rx="2"/><circle cx="7" cy="12" r="1" fill="'+c+'"/><circle cx="11" cy="12" r="1" fill="'+c+'"/><path d="M6 8V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v3"/><line x1="12" y1="16" x2="12" y2="20"/><line x1="8" y1="20" x2="16" y2="20"/>', c, s),
+      pdu:              (c, s) => svgI('<rect x="8" y="2" width="8" height="20" rx="2"/><line x1="12" y1="6" x2="12" y2="8"/><line x1="11" y1="7" x2="13" y2="7"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="17" r="1.5"/>', c, s),
+      "tray-fiber":     (c, s) => svgI('<rect x="2" y="8" width="20" height="8" rx="1"/><path d="M6 8V5"/><path d="M10 8V4"/><path d="M14 8V4"/><path d="M18 8V5"/><line x1="6" y1="16" x2="6" y2="19"/><line x1="18" y1="16" x2="18" y2="19"/>', c, s),
+      "tray-1u":        (c, s) => svgI('<rect x="2" y="8" width="20" height="8" rx="1"/><line x1="7" y1="12" x2="17" y2="12"/>', c, s),
+      "tray-2u":        (c, s) => svgI('<rect x="2" y="6" width="20" height="12" rx="1"/><line x1="7" y1="10" x2="17" y2="10"/><line x1="7" y1="14" x2="17" y2="14"/>', c, s),
+      "cable-organizer":(c, s) => svgI('<rect x="2" y="9" width="20" height="6" rx="1"/><path d="M6 9c0-2 2-4 6-4s6 2 6 4"/><circle cx="8" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="16" cy="12" r="1"/>', c, s),
+      other:            (c, s) => svgI('<circle cx="12" cy="12" r="3"/><path d="M12 1v2"/><path d="M12 21v2"/><path d="M4.22 4.22l1.42 1.42"/><path d="M18.36 18.36l1.42 1.42"/><path d="M1 12h2"/><path d="M21 12h2"/><path d="M4.22 19.78l1.42-1.42"/><path d="M18.36 5.64l1.42-1.42"/>', c, s),
     };
     const TYPE_LABEL: Record<string, string> = {
       server: "Servidor", switch: "Switch", patchpanel: "Patch Panel", ups: "UPS",
@@ -482,7 +492,8 @@ export default function RackDesignerDrawer({ open, onClose, nodeId, nodes, monit
         rendered.add(dev.id);
         const h = dev.sizeUnits * unitH;
         const color = dev.color || TYPE_COLOR[dev.type] || "#6b7280";
-        const icon = TYPE_ICON[dev.type] || "⚙";
+        const iconFn = TYPE_ICON[dev.type] || TYPE_ICON.other;
+        const icon = iconFn("rgba(255,255,255,0.7)", 14);
         const si = getDeviceStatusInfo(dev.monitorId);
         const statusDot = dev.monitorId ? `<span style="position:absolute;right:8px;top:50%;transform:translateY(-50%);width:8px;height:8px;border-radius:50%;background:${si.color};box-shadow:0 0 6px ${si.color}"></span>` : "";
         rackUnitsHtml += `
@@ -490,7 +501,7 @@ export default function RackDesignerDrawer({ open, onClose, nodeId, nodes, monit
             <div style="position:absolute;left:0;top:0;bottom:0;width:${railW}px;background:#1a1a1a;border-right:1px solid #0a0a0a"></div>
             <div style="position:absolute;right:0;top:0;bottom:0;width:${railW}px;background:#1a1a1a;border-left:1px solid #0a0a0a"></div>
             <div style="margin-left:${railW + 8}px;display:flex;align-items:center;gap:6px;min-width:0;flex:1;padding-right:${railW + 20}px">
-              <span style="font-size:14px;flex-shrink:0">${icon}</span>
+              ${icon}
               <div style="min-width:0;flex:1">
                 <div style="font-size:11px;font-weight:700;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${dev.label}</div>
                 ${dev.model ? `<div style="font-size:8px;color:rgba(255,255,255,0.5);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${dev.model}</div>` : ""}
@@ -519,9 +530,11 @@ export default function RackDesignerDrawer({ open, onClose, nodeId, nodes, monit
     // Build device table
     const sorted = [...devices].sort((a, b) => b.unit - a.unit);
     const tableRows = sorted.map((d, i) => {
-      const icon = TYPE_ICON[d.type] || "⚙";
+      const typeColor = TYPE_COLOR[d.type] || "#6b7280";
+      const iconFn = TYPE_ICON[d.type] || TYPE_ICON.other;
+      const icon = iconFn(typeColor, 14);
       const label = TYPE_LABEL[d.type] || "Otro";
-      const color = d.color || TYPE_COLOR[d.type] || "#6b7280";
+      const color = d.color || typeColor;
       const connPorts = d.type === "patchpanel"
         ? `${(d.ports||[]).filter((p: any)=>p.connected).length}/${d.portCount||24}`
         : d.type === "switch"
@@ -531,7 +544,7 @@ export default function RackDesignerDrawer({ open, onClose, nodeId, nodes, monit
       const statusHtml = d.monitorId ? `<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${si.color};margin-right:4px;vertical-align:middle"></span>` : "";
       return `<tr style="border-bottom:1px solid rgba(255,255,255,0.05);background:${i%2===0?"transparent":"rgba(255,255,255,0.02)"}">
         <td style="padding:7px 8px;font-family:monospace;color:rgba(255,255,255,0.5);font-size:11px">U${d.unit}${d.sizeUnits>1?`-${d.unit+d.sizeUnits-1}`:""}</td>
-        <td style="padding:7px 8px;font-size:12px">${icon}</td>
+        <td style="padding:7px 8px">${icon}</td>
         <td style="padding:7px 8px;font-weight:600;color:#fff;font-size:11px">${statusHtml}${d.label}</td>
         <td style="padding:7px 8px;color:${color};font-size:10px;font-weight:600">${label}</td>
         <td style="padding:7px 8px;color:rgba(255,255,255,0.4);font-size:10px">${d.model||"—"}</td>
@@ -599,9 +612,10 @@ export default function RackDesignerDrawer({ open, onClose, nodeId, nodes, monit
       <div style="margin-top:24px;padding-top:12px;border-top:1px solid rgba(255,255,255,0.06);display:flex;justify-content:space-between;align-items:center">
         <div style="font-size:10px;color:rgba(255,255,255,0.15)">KumaMap Network Monitoring · Rack Designer</div>
         <div style="display:flex;gap:12px">
-          ${Object.entries(TYPE_COLOR).filter(([k]) => devices.some(d => d.type === k)).map(([k, c]) =>
-            `<span style="display:flex;align-items:center;gap:4px;font-size:9px;color:rgba(255,255,255,0.3)"><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${c}"></span>${TYPE_LABEL[k]||k}</span>`
-          ).join("")}
+          ${Object.entries(TYPE_COLOR).filter(([k]) => devices.some(d => d.type === k)).map(([k, c]) => {
+            const fn = TYPE_ICON[k] || TYPE_ICON.other;
+            return `<span style="display:flex;align-items:center;gap:4px;font-size:9px;color:rgba(255,255,255,0.35)">${fn(c, 12)} ${TYPE_LABEL[k]||k}</span>`;
+          }).join("")}
         </div>
       </div>
     `;

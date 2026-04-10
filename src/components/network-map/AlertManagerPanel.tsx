@@ -966,6 +966,18 @@ export default function AlertManagerPanel({ open, onClose, sidebarWidth, onCount
     });
   }, []);
 
+  // ── Acknowledge all DOWN events for a monitor group ──
+  const handleAcknowledgeGroup = useCallback((groupEvents: TimelineEvent[]) => {
+    setAcknowledgedKeys(prev => {
+      const next = new Set(prev);
+      for (const ev of groupEvents) {
+        if (ev.status === 0) next.add(`${ev.monitorId}-${ev.time}`);
+      }
+      try { sessionStorage.setItem("kumamap-ack-alerts", JSON.stringify([...next])); } catch {}
+      return next;
+    });
+  }, []);
+
   // ── Toggle group accordion ──
   const toggleMonitorExpand = useCallback((monitorId: number) => {
     setExpandedMonitors(prev => {
@@ -1376,6 +1388,18 @@ export default function AlertManagerPanel({ open, onClose, sidebarWidth, onCount
                       <span className="text-[8px] font-bold px-1.5 py-0.5 rounded" style={{ background: "rgba(239,68,68,0.08)", color: "#f87171" }}>
                         {group.downCount} caídas
                       </span>
+                    )}
+                    {/* ACK all button — only show if there are unacknowledged DOWN events */}
+                    {group.events.some(ev => ev.status === 0 && !acknowledgedKeys.has(`${ev.monitorId}-${ev.time}`)) && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleAcknowledgeGroup(group.events); }}
+                        className="shrink-0 flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[8px] font-bold transition-all hover:scale-105 active:scale-95"
+                        style={{ background: "rgba(34,197,94,0.1)", color: "#4ade80", border: "1px solid rgba(34,197,94,0.15)" }}
+                        title="Aceptar todas las alertas de este monitor"
+                      >
+                        <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>
+                        ACK todo
+                      </button>
                     )}
                     <span className="text-[9px] text-white/20 font-mono shrink-0">
                       {group.events.length}

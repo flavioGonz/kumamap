@@ -370,7 +370,7 @@ export default function MapListView({
           {/* ── Alert Manager ── */}
           <Tooltip content="Centro de Alertas" placement="bottom">
           <a
-            href="/alerts"
+            href={`${process.env.NEXT_PUBLIC_BASE_PATH || ""}/alerts`}
             className="flex h-8 w-8 items-center justify-center rounded-lg transition-all"
             style={{ color: "#f87171", border: "1px solid transparent" }}
             onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.borderColor = "rgba(239,68,68,0.25)"; (e.currentTarget as HTMLElement).style.background = "rgba(239,68,68,0.08)"; }}

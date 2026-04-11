@@ -12,7 +12,7 @@ import {
   Signal,
   Download,
   Lock,
-  Check,
+  Save,
   Loader2,
   Activity,
   Server,
@@ -429,6 +429,10 @@ export default function LeafletMapView({
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [editMode, setEditMode] = useState(false);
+  // Effective readonly: true when prop readonly OR editMode is off
+  const isLocked = readonly || !editMode;
+  const isLockedRef = useRef(isLocked);
+  isLockedRef.current = isLocked;
   const [eventDetail, setEventDetail] = useState<{ nodeLabel: string; monitorId: number; msg: string; time: Date; type: string; ping: number | null; status: number } | null>(null);
 
   // Alert event tooltip state (shown when clicking an event in AlertManager)
@@ -549,6 +553,13 @@ export default function LeafletMapView({
     }
     toast.success("Deshecho");
   }
+
+  // Re-render nodes when editMode changes so draggable flag updates
+  useEffect(() => {
+    if (LRef.current && mapRef.current) {
+      renderNodes(LRef.current, mapRef.current);
+    }
+  }, [editMode]);
 
   // Keep ref in sync with state for closures
   useEffect(() => { linkSourceRef.current = linkSource; }, [linkSource]);
@@ -1042,7 +1053,7 @@ export default function LeafletMapView({
             }
           });
           map.on("contextmenu", (e: any) => {
-            if (readonly) return;
+            if (isLockedRef.current) return;
             e.originalEvent?.preventDefault?.();
             // Defer so edge/node/polygon handlers (which fire synchronously on the
             // same event) have a chance to set ctxHandledRef before we act.
@@ -1121,7 +1132,7 @@ export default function LeafletMapView({
           }
         });
         map.on("contextmenu", (e: any) => {
-          if (readonly) return;
+          if (isLockedRef.current) return;
           e.originalEvent?.preventDefault?.();
           setTimeout(() => {
             if (ctxHandledRef.current) { ctxHandledRef.current = false; return; }
@@ -1476,7 +1487,7 @@ export default function LeafletMapView({
 
       const marker = L.marker([node.x, node.y], {
         icon: nodeIcon,
-        draggable: !readonly && node.icon !== '_polygon',
+        draggable: !isLocked && node.icon !== '_polygon',
       });
 
       // Camera FOV cone + interactive handles
@@ -1575,7 +1586,7 @@ export default function LeafletMapView({
             html: `<div style="width:14px;height:14px;border-radius:50%;background:rgba(59,130,246,0.8);border:2px solid #60a5fa;box-shadow:0 0 8px rgba(59,130,246,0.6);cursor:grab;"></div>`,
             iconSize: [14, 14], iconAnchor: [7, 7],
           }),
-          draggable: !readonly,
+          draggable: !isLocked,
         });
         rotHandle.bindTooltip("Rotar", { direction: "top", offset: [0, -10], className: "leaflet-label-dark" });
         rotHandle.on("drag", () => {
@@ -1605,7 +1616,7 @@ export default function LeafletMapView({
             html: `<div style="width:12px;height:12px;border-radius:2px;background:rgba(34,197,94,0.8);border:2px solid #4ade80;box-shadow:0 0 8px rgba(34,197,94,0.5);cursor:ns-resize;transform:rotate(45deg);"></div>`,
             iconSize: [12, 12], iconAnchor: [6, 6],
           }),
-          draggable: !readonly,
+          draggable: !isLocked,
         });
         rangeHandle.bindTooltip("Alcance", { direction: "top", offset: [0, -10], className: "leaflet-label-dark" });
         rangeHandle.on("drag", () => {
@@ -1638,7 +1649,7 @@ export default function LeafletMapView({
             html: `<div style="width:12px;height:12px;border-radius:2px;background:rgba(250,204,21,0.85);border:2px solid #facc15;box-shadow:0 0 8px rgba(250,204,21,0.5);cursor:ew-resize;transform:rotate(45deg);"></div>`,
             iconSize: [12, 12], iconAnchor: [6, 6],
           }),
-          draggable: !readonly,
+          draggable: !isLocked,
         });
         fovHandle.bindTooltip("Apertura", { direction: "top", offset: [0, -10], className: "leaflet-label-dark" });
         fovHandle.on("drag", () => {
@@ -1663,7 +1674,7 @@ export default function LeafletMapView({
       }
 
       // ── Label rotation handle (◆ above the label, drag to rotate) ──
-      if (isLabel && !readonly) {
+      if (isLabel && !isLockedRef.current) {
         const labelRotation = cd.rotation || 0;
         const radConst2 = Math.PI / 180;
         const handleOffset = 0.0003; // geo offset; scaled for image mode below
@@ -1745,7 +1756,7 @@ export default function LeafletMapView({
               renderNodes(L, map);
             }
           }
-        } else if (isRack && !readonly) {
+        } else if (isRack && !isLockedRef.current) {
           // Double clicking a rack opens the Rack Designer Drawer!
           setRackDrawerNodeId(node.id);
         } else if (!isWaypoint) {
@@ -1760,7 +1771,7 @@ export default function LeafletMapView({
           } else if (linked.length > 1) {
             if (readonly) window.open(apiUrl(`/view/${linked[0].id}`), "_blank");
             else setNodeMapModalNodeId(node.id);
-          } else if (!readonly) {
+          } else if (!isLockedRef.current) {
             if (isCamera) {
               // Camera: open stream config modal
               setStreamConfigNodeId(node.id);
@@ -1778,7 +1789,7 @@ export default function LeafletMapView({
         e.originalEvent.preventDefault();
         e.originalEvent.stopPropagation();
         ctxHandledRef.current = true;
-        if (readonly) return;
+        if (isLockedRef.current) return;
         map.closePopup();
 
         // Link mode is handled by overlay — skip context menu
@@ -1809,7 +1820,7 @@ export default function LeafletMapView({
                 <div style="white-space:pre-wrap;color:#c0c0c0;">${labelCd.description.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
               </div>`)
               .openOn(map);
-          } else if (!readonly) {
+          } else if (!isLockedRef.current) {
             // No description — show rotation handle in edit mode
             camHandlesRef.current.forEach((handle, key) => {
               if (key.endsWith("-labelrot")) {
@@ -2169,7 +2180,7 @@ export default function LeafletMapView({
           }
 
           const trafficLabel = L.marker([posLat, posLng], {
-            draggable: !readonly,
+            draggable: !isLocked,
             icon: L.divIcon({
               className: "traffic-label",
               html: `<div style="
@@ -2181,7 +2192,7 @@ export default function LeafletMapView({
                 padding:4px 8px;border-radius:8px;
                 white-space:nowrap;
                 box-shadow:0 4px 16px rgba(0,0,0,0.6), 0 0 12px ${statusColor}15;
-                cursor:${readonly ? "default" : "grab"};
+                cursor:${isLockedRef.current ? "default" : "grab"};
                 min-width:80px;
               ">
                 <div style="display:flex;align-items:center;gap:4px;">
@@ -4140,18 +4151,18 @@ export default function LeafletMapView({
             disabled={saving}
             className="flex items-center justify-center rounded-lg p-1.5 transition-all disabled:opacity-30 active:scale-95"
             style={{
-              color: saving ? "#60a5fa" : "#22c55e",
+              color: saving ? "#60a5fa" : "#60a5fa",
               background: saving ? "rgba(59,130,246,0.1)" : "transparent",
             }}
           >
-            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
           </button>
           </Tooltip>
         </div>
       </div>}
 
       {/* Context Menu */}
-      {!readonly && ctxMenu && (() => {
+      {!isLocked && ctxMenu && (() => {
         const items = ctxMenu.nodeId
           ? getNodeCtxItems(ctxMenu.nodeId)
           : ctxMenu.edgeId
@@ -4826,15 +4837,18 @@ export default function LeafletMapView({
           border-top-color: rgba(10,10,10,0.9) !important;
         }
         .leaflet-popup-dark .leaflet-popup-content-wrapper {
-          background: transparent !important;
-          box-shadow: none !important;
-          padding: 0 !important;
+          background: rgba(14,14,14,0.95) !important;
+          backdrop-filter: blur(16px) !important;
+          border: 1px solid rgba(255,255,255,0.1) !important;
+          border-radius: 12px !important;
+          box-shadow: 0 8px 32px rgba(0,0,0,0.6) !important;
+          padding: 10px 14px !important;
         }
         .leaflet-popup-dark .leaflet-popup-content {
           margin: 0 !important;
         }
         .leaflet-popup-dark .leaflet-popup-tip {
-          background: #111 !important;
+          background: rgba(14,14,14,0.95) !important;
         }
         .leaflet-popup-close-button {
           color: #888 !important;

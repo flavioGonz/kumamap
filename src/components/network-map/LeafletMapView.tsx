@@ -1793,21 +1793,35 @@ export default function LeafletMapView({
       // Click — open popup or stream viewer for cameras
       marker.on("click", () => {
         if (isWaypoint || isPolygon) return;
-        // Label click: show/hide rotation handle for the selected label
+        // Label click: show description tooltip if it has one
         if (isLabel) {
-          if (readonly) return;
-          // Hide all other rotation handles
-          camHandlesRef.current.forEach((handle, key) => {
-            if (key.endsWith("-labelrot")) {
-              const el = handle.getElement();
-              if (el) el.style.display = "none";
+          const labelCd = (() => { try { return JSON.parse(nodesRef.current.find(n => n.id === node.id)?.custom_data || "{}"); } catch { return {}; } })();
+          if (labelCd.description) {
+            const currentNode = nodesRef.current.find(n => n.id === node.id);
+            const popup = L.popup({
+              className: "leaflet-popup-dark",
+              maxWidth: 320,
+              closeButton: true,
+            })
+              .setLatLng(marker.getLatLng())
+              .setContent(`<div style="font-size:12px;color:#ededed;line-height:1.5;padding:4px 0;">
+                <div style="font-weight:600;font-size:13px;margin-bottom:6px;color:#60a5fa;">${currentNode?.label || node.label}</div>
+                <div style="white-space:pre-wrap;color:#c0c0c0;">${labelCd.description.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
+              </div>`)
+              .openOn(map);
+          } else if (!readonly) {
+            // No description — show rotation handle in edit mode
+            camHandlesRef.current.forEach((handle, key) => {
+              if (key.endsWith("-labelrot")) {
+                const el = handle.getElement();
+                if (el) el.style.display = "none";
+              }
+            });
+            const thisHandle = camHandlesRef.current.get(node.id + "-labelrot");
+            if (thisHandle) {
+              const el = thisHandle.getElement();
+              if (el) el.style.display = "";
             }
-          });
-          // Show this label's handle
-          const thisHandle = camHandlesRef.current.get(node.id + "-labelrot");
-          if (thisHandle) {
-            const el = thisHandle.getElement();
-            if (el) el.style.display = "";
           }
           return;
         }
@@ -2778,7 +2792,7 @@ export default function LeafletMapView({
       ];
     }
 
-    // Labels: edit text, font size, color, delete
+    // Labels: edit text, description, font size, color, rotation, delete
     if (isLabel) {
       const cd = node?.custom_data ? JSON.parse(node.custom_data) : {};
       const labelSizes = [
@@ -2799,6 +2813,17 @@ export default function LeafletMapView({
       ];
       const currentColor = cd.color || "#ededed";
       const currentSize = cd.fontSize || 13;
+
+      const updateLabelCd = (updates: Record<string, any>) => {
+        const idx = nodesRef.current.findIndex((n) => n.id === nodeId);
+        if (idx >= 0) {
+          const prev = nodesRef.current[idx];
+          const prevCd = prev.custom_data ? JSON.parse(prev.custom_data) : {};
+          nodesRef.current[idx] = { ...prev, custom_data: JSON.stringify({ ...prevCd, type: "textLabel", ...updates }) };
+          if (LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current);
+        }
+      };
+
       return [
         {
           label: "Editar texto",
@@ -2814,39 +2839,65 @@ export default function LeafletMapView({
             }
           },
         },
-        // Font sizes
-        ...labelSizes.filter(s => s.value !== currentSize).map(s => ({
-          label: `Tamaño: ${s.label}`,
-          icon: menuIcons.Pencil,
+        {
+          label: cd.description ? "Editar descripción" : "Agregar descripción",
+          icon: menuIcons.AlignLeft,
           onClick: () => {
-            const idx = nodesRef.current.findIndex((n) => n.id === nodeId);
-            if (idx >= 0) {
-              const prev = nodesRef.current[idx];
-              const prevCd = prev.custom_data ? JSON.parse(prev.custom_data) : {};
-              nodesRef.current[idx] = { ...prev, custom_data: JSON.stringify({ ...prevCd, type: "textLabel", fontSize: s.value }) };
-              if (LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current);
+            const desc = prompt("Descripción (se muestra al hacer clic):", cd.description || "");
+            if (desc !== null) {
+              updateLabelCd({ description: desc.trim() || undefined });
             }
           },
-        })),
-        // Colors
-        ...labelColors.filter(c => c.hex !== currentColor).map(c => ({
-          label: `Color: ${c.label}`,
-          icon: menuIcons.Pencil,
-          colorDot: c.hex,
+        },
+        // Font size submenu
+        {
+          label: `Tamaño (${currentSize}px)`,
+          icon: menuIcons.Scaling,
+          onClick: () => {},
+          children: labelSizes.map(s => ({
+            label: s.label,
+            icon: menuIcons.Type,
+            active: s.value === currentSize,
+            onClick: () => updateLabelCd({ fontSize: s.value }),
+          })),
+        },
+        // Color submenu
+        {
+          label: "Color",
+          icon: menuIcons.Palette,
+          onClick: () => {},
+          children: labelColors.map(c => ({
+            label: c.label,
+            icon: menuIcons.Palette,
+            colorDot: c.hex,
+            active: c.hex === currentColor,
+            onClick: () => updateLabelCd({ color: c.hex }),
+          })),
+        },
+        // Rotation
+        {
+          label: "Rotar etiqueta",
+          icon: menuIcons.RotateCcw,
           onClick: () => {
-            const idx = nodesRef.current.findIndex((n) => n.id === nodeId);
-            if (idx >= 0) {
-              const prev = nodesRef.current[idx];
-              const prevCd = prev.custom_data ? JSON.parse(prev.custom_data) : {};
-              nodesRef.current[idx] = { ...prev, custom_data: JSON.stringify({ ...prevCd, type: "textLabel", color: c.hex }) };
-              if (LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current);
+            // Show the rotation handle for this label
+            camHandlesRef.current.forEach((handle, key) => {
+              if (key.endsWith("-labelrot")) {
+                const el = handle.getElement();
+                if (el) el.style.display = "none";
+              }
+            });
+            const thisHandle = camHandlesRef.current.get(nodeId + "-labelrot");
+            if (thisHandle) {
+              const el = thisHandle.getElement();
+              if (el) el.style.display = "";
             }
+            toast("Arrastrá el punto violeta para rotar", { icon: "↻" });
           },
-        })),
+        },
         // Reset rotation if rotated
         ...(cd.rotation ? [{
           label: "Restablecer rotación",
-          icon: menuIcons.Pencil,
+          icon: menuIcons.RotateCcw,
           onClick: () => {
             const idx = nodesRef.current.findIndex((n) => n.id === nodeId);
             if (idx >= 0) {
@@ -2976,7 +3027,14 @@ export default function LeafletMapView({
       ];
     }
 
+    // ── Build normal/camera node context menu (consolidated) ──
+    const isCamera = node?.icon === "_camera";
+    const isSpecial = node?.icon === "_waypoint" || node?.icon === "_polygon";
+    const ncd = node?.custom_data ? (() => { try { return JSON.parse(node.custom_data!); } catch { return {}; } })() : {};
+    const linked: { id: string; name: string }[] = ncd.linkedMaps || [];
+
     return [
+      // ── Primary actions ──
       {
         label: linkSource ? "Cancelar enlace" : "Nuevo link",
         icon: menuIcons.Link2,
@@ -2994,7 +3052,7 @@ export default function LeafletMapView({
           setInputModalOpen(true);
         },
       },
-      // Assign / reassign monitor
+      // ── Monitor ──
       {
         label: node?.kuma_monitor_id ? "Reasignar monitor" : "Asignar monitor",
         icon: menuIcons.Signal,
@@ -3004,7 +3062,6 @@ export default function LeafletMapView({
           setAssignModalOpen(true);
         },
       },
-      // Unassign if has monitor
       ...(node?.kuma_monitor_id ? [{
         label: "Desasignar monitor",
         icon: menuIcons.Trash2,
@@ -3020,119 +3077,100 @@ export default function LeafletMapView({
           }
         },
       }] : []),
-      // Icon & Size options (for non-special nodes + cameras)
-      ...(node?.icon !== "_waypoint" && node?.icon !== "_polygon" ? [
-        {
-          label: "Cambiar icono",
-          icon: menuIcons.Palette,
-          onClick: () => setIconPickerNodeId(nodeId),
-        },
-        {
-          label: "Tamaño",
-          icon: menuIcons.Scaling,
-          onClick: () => setSizePickerNodeId(nodeId),
-        },
-      ] : []),
-      // Camera-specific options
-      ...(node?.icon === "_camera" ? [
-        {
-          label: "Configurar stream",
-          icon: menuIcons.Signal,
-          onClick: () => {
-            setStreamConfigNodeId(nodeId);
+      // ── Appearance (submenu) ──
+      ...(!isSpecial ? [{
+        label: "Apariencia",
+        icon: menuIcons.Palette,
+        onClick: () => {},
+        children: [
+          {
+            label: "Cambiar icono",
+            icon: menuIcons.Palette,
+            onClick: () => setIconPickerNodeId(nodeId),
           },
-        },
-        ...(() => {
-          const camCd = node?.custom_data ? JSON.parse(node.custom_data) : {};
-          return camCd.streamUrl ? [{
+          {
+            label: "Tamaño",
+            icon: menuIcons.Scaling,
+            onClick: () => setSizePickerNodeId(nodeId),
+          },
+          ...(isCamera ? [{
+            label: "Color y estilo",
+            icon: menuIcons.Palette,
+            onClick: () => {
+              setColorPickerNodeId(nodeId);
+              setColorPickerOpen(true);
+            },
+          }] : []),
+        ],
+      }] : []),
+      // ── Camera-specific (submenu) ──
+      ...(isCamera ? [{
+        label: "Cámara",
+        icon: menuIcons.Signal,
+        divider: true,
+        onClick: () => {},
+        children: [
+          {
+            label: "Configurar stream",
+            icon: menuIcons.Signal,
+            onClick: () => setStreamConfigNodeId(nodeId),
+          },
+          ...(ncd.streamUrl ? [{
             label: "Ver stream",
             icon: menuIcons.Signal,
+            onClick: () => setStreamViewerNodeId(nodeId),
+          }] : []),
+          {
+            label: "Lente / FOV",
+            icon: menuIcons.Maximize2,
             onClick: () => {
-              setStreamViewerNodeId(nodeId);
+              setLensPickerNodeId(nodeId);
+              setLensPickerOpen(true);
             },
-          }] : [];
-        })(),
-        {
-          label: "Lente / FOV",
-          icon: menuIcons.Maximize2,
-          submenu: true,
-          onClick: () => {
-            setLensPickerNodeId(nodeId);
-            setLensPickerOpen(true);
           },
-        },
-        {
-          label: isImageMode ? "Alcance (píxeles)" : "Distancia focal",
-          icon: menuIcons.Maximize2,
-          onClick: () => {
-            const camCd = node?.custom_data ? JSON.parse(node.custom_data) : {};
-            if (isImageMode) {
-              // Image mode: fovRange stored in pixels
-              const rawR = camCd.fovRange ?? 200;
-              const currentPx = rawR < 1 ? Math.round(rawR * 100000) : Math.round(rawR);
-              const input = prompt("Alcance de la cámara (píxeles):\n• 50 = muy cerca\n• 200 = normal\n• 500 = lejos", String(currentPx));
-              if (input) {
-                const px = parseFloat(input);
-                if (!isNaN(px) && px > 0) {
-                  const idx = nodesRef.current.findIndex((n) => n.id === nodeId);
-                  if (idx >= 0) {
-                    const ncd = nodesRef.current[idx].custom_data ? JSON.parse(nodesRef.current[idx].custom_data!) : {};
-                    ncd.fovRange = px;
-                    nodesRef.current[idx] = { ...nodesRef.current[idx], custom_data: JSON.stringify(ncd) };
-                    if (LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current);
+          {
+            label: isImageMode ? "Alcance (px)" : "Distancia focal",
+            icon: menuIcons.Maximize2,
+            onClick: () => {
+              const camCd = node?.custom_data ? JSON.parse(node.custom_data) : {};
+              if (isImageMode) {
+                const rawR = camCd.fovRange ?? 200;
+                const currentPx = rawR < 1 ? Math.round(rawR * 100000) : Math.round(rawR);
+                const input = prompt("Alcance (píxeles):\n• 50 = cerca\n• 200 = normal\n• 500 = lejos", String(currentPx));
+                if (input) {
+                  const px = parseFloat(input);
+                  if (!isNaN(px) && px > 0) {
+                    const idx = nodesRef.current.findIndex((n) => n.id === nodeId);
+                    if (idx >= 0) {
+                      const nc = nodesRef.current[idx].custom_data ? JSON.parse(nodesRef.current[idx].custom_data!) : {};
+                      nc.fovRange = px;
+                      nodesRef.current[idx] = { ...nodesRef.current[idx], custom_data: JSON.stringify(nc) };
+                      if (LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current);
+                    }
+                  }
+                }
+              } else {
+                const current = camCd.fovRange || 0.002;
+                const input = prompt("Distancia focal (metros):\n• 50 = cerca\n• 200 = normal\n• 500+ = lejos", String(Math.round(current * 100000)));
+                if (input) {
+                  const meters = parseFloat(input);
+                  if (!isNaN(meters) && meters > 0) {
+                    const newRange = Math.max(0.00005, meters / 100000);
+                    const idx = nodesRef.current.findIndex((n) => n.id === nodeId);
+                    if (idx >= 0) {
+                      const nc = nodesRef.current[idx].custom_data ? JSON.parse(nodesRef.current[idx].custom_data!) : {};
+                      nc.fovRange = parseFloat(newRange.toFixed(6));
+                      nodesRef.current[idx] = { ...nodesRef.current[idx], custom_data: JSON.stringify(nc) };
+                      if (LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current);
+                    }
                   }
                 }
               }
-            } else {
-              // Livemap mode: fovRange in degrees (~0.002 = 200m)
-              const current = camCd.fovRange || 0.002;
-              const input = prompt("Distancia focal (metros aprox):\n• 50 = muy cerca\n• 200 = normal\n• 500 = lejos\n• 1000+ = muy lejos", String(Math.round(current * 100000)));
-              if (input) {
-                const meters = parseFloat(input);
-                if (!isNaN(meters) && meters > 0) {
-                  const newRange = Math.max(0.00005, meters / 100000);
-                  const idx = nodesRef.current.findIndex((n) => n.id === nodeId);
-                  if (idx >= 0) {
-                    const ncd = nodesRef.current[idx].custom_data ? JSON.parse(nodesRef.current[idx].custom_data!) : {};
-                    ncd.fovRange = parseFloat(newRange.toFixed(6));
-                    nodesRef.current[idx] = { ...nodesRef.current[idx], custom_data: JSON.stringify(ncd) };
-                    if (LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current);
-                  }
-                }
-              }
-            }
+            },
           },
-        },
-        {
-          label: "Color y estilo",
-          icon: menuIcons.Palette,
-          onClick: () => {
-            setColorPickerNodeId(nodeId);
-            setColorPickerOpen(true);
-          },
-        },
-        {
-          label: "Duplicar camara",
-          icon: menuIcons.Plus,
-          onClick: () => {
-            const cd = node.custom_data ? JSON.parse(node.custom_data) : {};
-            const newId = `node-${Date.now()}`;
-            const offset = 0.0003; // slight offset so it doesn't overlap
-            nodesRef.current = [...nodesRef.current, {
-              id: newId,
-              kuma_monitor_id: node.kuma_monitor_id,
-              label: node.label + " (copia)",
-              x: node.x + offset,
-              y: node.y + offset,
-              icon: "_camera",
-              custom_data: JSON.stringify({ ...cd }),
-            }];
-            if (LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current);
-            toast.success("Camara duplicada");
-          },
-        },
-      ] : []),
-      // Copy node to cross-map clipboard
+        ],
+      }] : []),
+      // ── Copiar / Duplicar ──
       {
         label: "Copiar nodo",
         icon: menuIcons.Copy,
@@ -3143,27 +3181,24 @@ export default function LeafletMapView({
               label: node?.label ?? null,
               icon: node?.icon || "server",
               kuma_monitor_id: node?.kuma_monitor_id ?? null,
-              x: node?.x ?? 0,
-              y: node?.y ?? 0,
-              width:  node?.width  ?? undefined,
-              height: node?.height ?? undefined,
-              color:  node?.color  ?? null,
-              custom_data: node?.custom_data || null,
+              x: node?.x ?? 0, y: node?.y ?? 0,
+              width: node?.width ?? undefined, height: node?.height ?? undefined,
+              color: node?.color ?? null, custom_data: node?.custom_data || null,
             }));
-            toast.success(`"${node?.label || node?.icon}" copiado al portapapeles`);
+            toast.success(`"${node?.label || node?.icon}" copiado`);
           } catch { toast.error("No se pudo copiar"); }
         },
       },
-      // Duplicate node (non-cameras — cameras have their own duplicate)
-      ...(node?.icon !== "_camera" ? [{
+      {
         label: "Duplicar nodo",
         icon: menuIcons.Plus,
         onClick: () => {
           pushUndo();
           const newId = `node-${Date.now()}`;
+          const cd = node?.custom_data ? JSON.parse(node.custom_data) : {};
           nodesRef.current = [...nodesRef.current, {
             id: newId,
-            kuma_monitor_id: null,
+            kuma_monitor_id: isCamera ? node?.kuma_monitor_id : null,
             label: (node?.label || "Nodo") + " (copia)",
             x: (node?.x || 0) + 0.0003,
             y: (node?.y || 0) + 0.0003,
@@ -3173,8 +3208,8 @@ export default function LeafletMapView({
           if (LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current);
           toast.success("Nodo duplicado");
         },
-      }] : []),
-      // TimeMachine: open pre-filtered to this sensor
+      },
+      // ── TimeMachine ──
       ...(node?.kuma_monitor_id ? [{
         label: "TimeMachine",
         icon: menuIcons.Clock,
@@ -3184,12 +3219,9 @@ export default function LeafletMapView({
           setTimeMachineOpen(true);
         },
       }] : []),
-      // Linked maps for this node — show quick-open entries + manage option
+      // ── Linked maps ──
       ...(() => {
-        const ncd = node?.custom_data ? (() => { try { return JSON.parse(node.custom_data!); } catch { return {}; } })() : {};
-        const linked: { id: string; name: string }[] = ncd.linkedMaps || [];
         const items: any[] = [];
-        // Quick-open each linked map
         linked.forEach(lm => {
           items.push({
             label: `Abrir: ${lm.name}`,
@@ -3202,11 +3234,10 @@ export default function LeafletMapView({
             },
           });
         });
-        // Manage maps option
         items.push({
           label: linked.length > 0 ? "Gestionar mapas" : "Asignar mapa",
           icon: menuIcons.FolderOpen,
-          divider: linked.length === 0, // divider if no maps yet
+          divider: linked.length === 0,
           onClick: () => setNodeMapModalNodeId(nodeId),
         });
         return items;

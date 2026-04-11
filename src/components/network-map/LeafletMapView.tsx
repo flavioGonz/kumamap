@@ -2909,11 +2909,31 @@ export default function LeafletMapView({
             }
           },
         }] : []),
+        // Duplicate label
+        {
+          label: "Duplicar etiqueta",
+          icon: menuIcons.Copy,
+          divider: true,
+          onClick: () => {
+            pushUndo();
+            const newId = `label-${Date.now()}`;
+            nodesRef.current = [...nodesRef.current, {
+              id: newId,
+              kuma_monitor_id: null,
+              label: node?.label || "Etiqueta",
+              x: (node?.x || 0) + (isImageMode ? 30 : 0.0003),
+              y: (node?.y || 0) + (isImageMode ? 30 : 0.0003),
+              icon: "_textLabel",
+              custom_data: node?.custom_data || null,
+            }];
+            if (LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current);
+            toast.success("Etiqueta duplicada");
+          },
+        },
         {
           label: "Eliminar etiqueta",
           icon: menuIcons.Trash2,
           danger: true,
-          divider: true,
           onClick: () => {
             pushUndo();
             nodesRef.current = nodesRef.current.filter((n) => n.id !== nodeId);

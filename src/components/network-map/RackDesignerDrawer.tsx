@@ -121,6 +121,7 @@ interface RackDesignerDrawerProps {
   nodeId: string | null;
   nodes: any[];
   monitors?: any[];
+  readonly?: boolean;
   onSave: (nodeId: string, customData: any) => void;
 }
 
@@ -202,14 +203,15 @@ const toggleThumb = (on: boolean): React.CSSProperties => ({
 
 // ── Main component ─────────────────────────────────────────────────────────────
 
-export default function RackDesignerDrawer({ open, onClose, nodeId, nodes, monitors, onSave }: RackDesignerDrawerProps) {
+export default function RackDesignerDrawer({ open, onClose, nodeId, nodes, monitors, readonly = false, onSave }: RackDesignerDrawerProps) {
   const [totalUnits, setTotalUnits] = useState(42);
   const [devices, setDevices] = useState<RackDevice[]>([]);
   const [rackName, setRackName] = useState("Rack");
   const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null);
   const [editingDevice, setEditingDevice] = useState<RackDevice | null>(null);
   const [isAddingNew, setIsAddingNew] = useState(false);
-  const [isLocked, setIsLocked] = useState(true);
+  const [isLockedInternal, setIsLocked] = useState(true);
+  const isLocked = readonly || isLockedInternal;
   const [isRackCollapsed, setIsRackCollapsed] = useState(false);
   const [selectedEmptyUnit, setSelectedEmptyUnit] = useState<number | null>(null);
   const [dragDeviceId, setDragDeviceId] = useState<string | null>(null);
@@ -827,7 +829,8 @@ export default function RackDesignerDrawer({ open, onClose, nodeId, nodes, monit
             >
               <Download className="w-3.5 h-3.5" />
             </button>
-            {/* Lock / Unlock — icon only */}
+            {/* Lock / Unlock — icon only (hidden in readonly mode) */}
+            {!readonly && (
             <button
               data-tooltip-id="rack-tip"
               data-tooltip-content={isLocked ? "Desbloquear para editar" : "Bloquear edición"}
@@ -846,7 +849,9 @@ export default function RackDesignerDrawer({ open, onClose, nodeId, nodes, monit
             >
               {isLocked ? <Lock className="w-3.5 h-3.5" /> : <Unlock className="w-3.5 h-3.5" />}
             </button>
+            )}
 
+            {!readonly && (
             <button
               data-tooltip-id="rack-tip"
               data-tooltip-content="Guardar Rack"
@@ -856,6 +861,7 @@ export default function RackDesignerDrawer({ open, onClose, nodeId, nodes, monit
             >
               <Save className="w-4 h-4" />
             </button>
+            )}
             <button
               data-tooltip-id="rack-tip"
               data-tooltip-content="Cerrar"

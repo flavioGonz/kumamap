@@ -1053,7 +1053,11 @@ export default function LeafletMapView({
             }
           });
           map.on("contextmenu", (e: any) => {
-            if (isLockedRef.current) return;
+            if (isLockedRef.current) {
+              e.originalEvent?.preventDefault?.();
+              toast.info("Activa el modo edición (icono lápiz) para modificar el mapa", { id: "edit-lock-hint" });
+              return;
+            }
             e.originalEvent?.preventDefault?.();
             // Defer so edge/node/polygon handlers (which fire synchronously on the
             // same event) have a chance to set ctxHandledRef before we act.
@@ -1132,7 +1136,11 @@ export default function LeafletMapView({
           }
         });
         map.on("contextmenu", (e: any) => {
-          if (isLockedRef.current) return;
+          if (isLockedRef.current) {
+            e.originalEvent?.preventDefault?.();
+            toast.info("Activa el modo edición (icono lápiz) para modificar el mapa", { id: "edit-lock-hint" });
+            return;
+          }
           e.originalEvent?.preventDefault?.();
           setTimeout(() => {
             if (ctxHandledRef.current) { ctxHandledRef.current = false; return; }
@@ -1756,8 +1764,8 @@ export default function LeafletMapView({
               renderNodes(L, map);
             }
           }
-        } else if (isRack && !isLockedRef.current) {
-          // Double clicking a rack opens the Rack Designer Drawer!
+        } else if (isRack) {
+          // Double clicking a rack opens the Rack Designer Drawer (view-only when locked)
           setRackDrawerNodeId(node.id);
         } else if (!isWaypoint) {
           // If node has linked maps, navigate directly (1 map) or show modal (multiple)
@@ -1789,7 +1797,10 @@ export default function LeafletMapView({
         e.originalEvent.preventDefault();
         e.originalEvent.stopPropagation();
         ctxHandledRef.current = true;
-        if (isLockedRef.current) return;
+        if (isLockedRef.current) {
+          toast.info("Activa el modo edición (icono lápiz) para modificar el mapa", { id: "edit-lock-hint" });
+          return;
+        }
         map.closePopup();
 
         // Link mode is handled by overlay — skip context menu
@@ -4975,6 +4986,7 @@ export default function LeafletMapView({
         nodeId={rackDrawerNodeId}
         nodes={nodesRef.current}
         monitors={monitorsRef.current}
+        readonly={isLocked}
         onSave={(nodeId, cd) => {
           const idx = nodesRef.current.findIndex(n => n.id === nodeId);
           if (idx >= 0) {

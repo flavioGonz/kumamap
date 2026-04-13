@@ -19,9 +19,9 @@ function isPublicPath(pathname: string): boolean {
   return PUBLIC_PATHS.some((p) => pathname.startsWith(p));
 }
 
-/** Convert a string to Uint8Array (UTF-8) */
-function encode(str: string): Uint8Array {
-  return new TextEncoder().encode(str);
+/** Convert a string to ArrayBuffer (UTF-8) */
+function encode(str: string): ArrayBuffer {
+  return new TextEncoder().encode(str).buffer as ArrayBuffer;
 }
 
 /** Base64url decode → string */

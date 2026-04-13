@@ -33,6 +33,7 @@ import NodeSizeModal from "./NodeSizeModal";
 import LeafletMapView from "./LeafletMapView";
 import MapErrorBoundary from "./MapErrorBoundary";
 import { apiUrl } from "@/lib/api";
+import { safeFetch } from "@/lib/error-handler";
 import { Pencil, Type, Plus } from "lucide-react";
 import Tooltip from "./Tooltip";
 import EditorSidebarControls from "./EditorSidebarControls";
@@ -110,16 +111,15 @@ function CanvasInner({
 
   // Load all maps (for submap picker)
   useEffect(() => {
-    fetch(apiUrl("/api/maps")).then(r => r.json()).then((data: any[]) => {
-      setAllMaps(data.map(m => ({ id: m.id, name: m.name })));
-    }).catch(err => console.error("[NetworkMapEditor] Failed to load maps:", err));
+    safeFetch<{ id: string; name: string }[]>(apiUrl("/api/maps"), undefined, "LoadMaps").then(data => {
+      if (data) setAllMaps(data.map(m => ({ id: m.id, name: m.name })));
+    });
   }, []);
 
   // Load map
   useEffect(() => {
-    fetch(apiUrl(`/api/maps/${mapId}`))
-      .then((r) => r.json())
-      .then((data: MapData) => {
+    safeFetch<MapData>(apiUrl(`/api/maps/${mapId}`), undefined, "LoadMap").then((data) => {
+      if (!data) return;
         setMapData(data);
         const rfNodes: Node[] = (data.nodes || []).map((n: any) => {
           // Check if it's a text label node
@@ -729,10 +729,10 @@ function CanvasInner({
         };
       });
       const viewState = JSON.stringify({ straightEdges });
-      await fetch(apiUrl(`/api/maps/${mapId}/state`), {
+      await safeFetch(apiUrl(`/api/maps/${mapId}/state`), {
         method: "PUT", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ nodes: saveNodes, edges: saveEdges, view_state: viewState }),
-      });
+      }, "SaveState");
       toast.success("Mapa guardado");
     } catch { toast.error("Error al guardar"); }
     finally { setSaving(false); }
@@ -758,9 +758,9 @@ function CanvasInner({
     if (!file) return;
     const fd = new FormData();
     fd.append("background", file);
-    await fetch(apiUrl(`/api/maps/${mapId}/background`), { method: "POST", body: fd });
-    const res = await fetch(apiUrl(`/api/maps/${mapId}`));
-    setMapData(await res.json());
+    await safeFetch(apiUrl(`/api/maps/${mapId}/background`), { method: "POST", body: fd }, "UploadBg");
+    const updated = await safeFetch<MapData>(apiUrl(`/api/maps/${mapId}`), undefined, "ReloadMap");
+    if (updated) setMapData(updated);
     toast.success("Fondo actualizado");
     e.target.value = "";
   }, [mapId]);
@@ -768,12 +768,12 @@ function CanvasInner({
   // handleSetGrid removed — grid type no longer supported
 
   const handleSetLiveMap = useCallback(async () => {
-    await fetch(apiUrl(`/api/maps/${mapId}`), {
+    await safeFetch(apiUrl(`/api/maps/${mapId}`), {
       method: "PUT", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ background_type: "livemap", background_image: null }),
-    });
-    const res = await fetch(apiUrl(`/api/maps/${mapId}`));
-    setMapData(await res.json());
+    }, "SetLiveMap");
+    const updated = await safeFetch<MapData>(apiUrl(`/api/maps/${mapId}`), undefined, "ReloadMap");
+    if (updated) setMapData(updated);
     toast.success("Fondo: mapa real OpenStreetMap");
   }, [mapId]);
 
@@ -987,11 +987,11 @@ function CanvasInner({
           initialViewState={mapData.view_state ? JSON.parse(mapData.view_state) : undefined}
           onSave={async (savedNodes, savedEdges, viewState) => {
             try {
-              await fetch(apiUrl(`/api/maps/${mapId}/state`), {
+              await safeFetch(apiUrl(`/api/maps/${mapId}/state`), {
                 method: "PUT",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ nodes: savedNodes, edges: savedEdges, view_state: viewState ? JSON.stringify(viewState) : null }),
-              });
+              }, "SaveState");
               toast.success("Mapa guardado");
             } catch { toast.error("Error al guardar"); }
           }}
@@ -1151,13 +1151,13 @@ function CanvasInner({
                 <button onClick={() => {
                   const ns = Math.max(0.1, bgScale - 0.1);
                   setMapData((prev) => prev ? { ...prev, background_scale: ns } : prev);
-                  fetch(apiUrl(`/api/maps/${mapId}`), { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ background_scale: ns }) });
+                  safeFetch(apiUrl(`/api/maps/${mapId}`), { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ background_scale: ns }) }, "BgScale");
                 }} className="rounded-xl px-1.5 py-1 text-[#888] hover:text-[#ededed] hover:bg-white/[0.06] transition-all text-[11px] font-bold">−</button>
                 <span className="text-[9px] text-[#666] font-mono min-w-[30px] text-center">{Math.round(bgScale * 100)}%</span>
                 <button onClick={() => {
                   const ns = Math.min(5, bgScale + 0.1);
                   setMapData((prev) => prev ? { ...prev, background_scale: ns } : prev);
-                  fetch(apiUrl(`/api/maps/${mapId}`), { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ background_scale: ns }) });
+                  safeFetch(apiUrl(`/api/maps/${mapId}`), { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ background_scale: ns }) }, "BgScale");
                 }} className="rounded-xl px-1.5 py-1 text-[#888] hover:text-[#ededed] hover:bg-white/[0.06] transition-all text-[11px] font-bold">+</button>
               </div>
             </>
@@ -1212,8 +1212,8 @@ function CanvasInner({
                       setImportMapPickerOpen(false);
                       setImportingMapId(m.id);
                       try {
-                        const res = await fetch(apiUrl(`/api/maps/${m.id}/export`));
-                        const data = await res.json();
+                        const data = await safeFetch<Record<string, any>>(apiUrl(`/api/maps/${m.id}/export`), undefined, "ImportMap");
+                        if (!data) throw new Error("Export failed");
                         const ts = Date.now(); const idMap: Record<string, string> = {};
                         const importedNodes = (data.nodes || []).map((n: any) => { const newId = `imp-${ts}-${n.id}`; idMap[n.id] = newId; return { ...n, id: newId }; });
                         const importedEdges = (data.edges || []).map((e: any) => ({ ...e, id: `imp-${ts}-${e.id}`, source: idMap[e.source_node_id] || e.source_node_id, target: idMap[e.target_node_id] || e.target_node_id }));
@@ -1350,11 +1350,11 @@ function CanvasInner({
             onSave={async (savedNodes, savedEdges, viewState) => {
               setSaving(true);
               try {
-                await fetch(apiUrl(`/api/maps/${mapId}/state`), {
+                await safeFetch(apiUrl(`/api/maps/${mapId}/state`), {
                   method: "PUT",
                   headers: { "Content-Type": "application/json" },
                   body: JSON.stringify({ nodes: savedNodes, edges: savedEdges, view_state: viewState ? JSON.stringify(viewState) : null }),
-                });
+                }, "SaveState");
                 toast.success("Mapa guardado");
               } catch { toast.error("Error al guardar"); }
               finally { setSaving(false); }

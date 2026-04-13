@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { apiUrl } from "@/lib/api";
+import { safeFetch } from "@/lib/error-handler";
 
 // ── Report data type (from EventReportModal) ─────────────────────
 interface ReportData {
@@ -376,9 +377,8 @@ function EventDetailCard({ event, onBack, onLocate, isOnMap, downtime, allEvents
 
   useEffect(() => {
     setReportLoading(true);
-    fetch(apiUrl(`/api/kuma/report/${event.monitorId}?hours=${reportHours}`))
-      .then(r => r.json())
-      .then(d => { setReportData(d); setReportLoading(false); })
+    safeFetch<ReportData>(apiUrl(`/api/kuma/report/${event.monitorId}?hours=${reportHours}`), undefined, "AlertReport")
+      .then(d => { if (d) setReportData(d); setReportLoading(false); })
       .catch(() => setReportLoading(false));
   }, [event.monitorId, reportHours]);
 
@@ -876,9 +876,8 @@ export default function AlertManagerPanel({ open, onClose, sidebarWidth, onCount
       if (useCustomDates && dateFrom && dateTo) {
         url = apiUrl(`/api/kuma/timeline?hours=${h}&from=${encodeURIComponent(dateFrom)}&to=${encodeURIComponent(dateTo)}`);
       }
-      const res = await fetch(url);
-      const data = await res.json();
-      let sorted: TimelineEvent[] = (data.events || []).sort(
+      const data = await safeFetch<{ events?: TimelineEvent[] }>(url, undefined, "AlertTimeline");
+      let sorted: TimelineEvent[] = (data?.events || []).sort(
         (a: TimelineEvent, b: TimelineEvent) => new Date(b.time).getTime() - new Date(a.time).getTime()
       );
       // Client-side date filter for custom range
@@ -1680,9 +1679,8 @@ export function useAlertCount(pollMs = 60000) {
     let alive = true;
     async function poll() {
       try {
-        const res = await fetch(apiUrl("/api/kuma/timeline?hours=24"));
-        const data = await res.json();
-        if (!alive) return;
+        const data = await safeFetch<{ events?: Array<{ status: number; monitorId: number; time: string }> }>(apiUrl("/api/kuma/timeline?hours=24"), undefined, "AlertCount");
+        if (!alive || !data) return;
         // Read acknowledged keys from sessionStorage
         let ackSet = new Set<string>();
         try {

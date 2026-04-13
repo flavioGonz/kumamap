@@ -7,6 +7,7 @@ import {
   ArrowUpRight, ArrowDownRight, Gauge, BarChart3,
 } from "lucide-react";
 import { apiUrl } from "@/lib/api";
+import { safeFetch } from "@/lib/error-handler";
 
 interface ReportData {
   monitor: { id: number; name: string; type: string; url: string; status: number; tags: { name: string; color: string }[] };
@@ -94,9 +95,8 @@ export default function EventReportModal({ monitorId, nodeLabel, onClose }: Prop
 
   useEffect(() => {
     setLoading(true);
-    fetch(apiUrl(`/api/kuma/report/${monitorId}?hours=${hours}`))
-      .then(r => r.json())
-      .then(d => { setData(d); setLoading(false); })
+    safeFetch<ReportData>(apiUrl(`/api/kuma/report/${monitorId}?hours=${hours}`), undefined, "Report")
+      .then(d => { if (d) setData(d); setLoading(false); })
       .catch(() => setLoading(false));
   }, [monitorId, hours]);
 

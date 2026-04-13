@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { Clock, Play, Pause, Radio, Gauge, Calendar, Zap, ChevronRight, Crosshair, ChevronLeft } from "lucide-react";
 import { apiUrl } from "@/lib/api";
+import { safeFetch } from "@/lib/error-handler";
 
 interface TimelineEvent {
   monitorId: number;
@@ -12,6 +13,15 @@ interface TimelineEvent {
   prevStatus: number;
   ping: number | null;
   msg: string;
+}
+
+interface TimelineResponse {
+  events: TimelineEvent[];
+  statusChanges: Record<number, { t: number; s: number }[]>;
+}
+
+interface BadDatesResponse {
+  badDates?: string[];
 }
 
 interface MonitorInfo { id: number; name: string; type: string; status?: number; }
@@ -93,11 +103,10 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
     if (ids) {
       setLoading(true);
       const url = apiUrl(`/api/kuma/timeline?from=${encodeURIComponent(fromStr)}&to=${encodeURIComponent(toStr)}&monitorIds=${ids}`);
-      fetch(url)
-        .then(r => r.json())
+      safeFetch<TimelineResponse>(url, undefined, "TimeMachine")
         .then(d => {
-          setAllEvents(d.events || []);
-          setStatusChanges(d.statusChanges || {});
+          setAllEvents(d?.events || []);
+          setStatusChanges(d?.statusChanges || {});
           setLoading(false);
           setLoaded(true);
           // Restore position after data loads (in case anything reset it)
@@ -164,11 +173,10 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
     } else {
       url = apiUrl(`/api/kuma/timeline?hours=${hoursBack}&monitorIds=${ids}`);
     }
-    fetch(url)
-      .then(r => r.json())
+    safeFetch<TimelineResponse>(url, undefined, "TimeMachine")
       .then(d => {
-        setAllEvents(d.events || []);
-        setStatusChanges(d.statusChanges || {});
+        setAllEvents(d?.events || []);
+        setStatusChanges(d?.statusChanges || {});
         setLoading(false);
         setLoaded(true);
       })
@@ -187,12 +195,10 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
       return;
     }
     const ids = Array.from(mapMonitorSet).join(",");
-    fetch(apiUrl(`/api/kuma/timeline/summary?monitorIds=${ids}`))
-      .then(res => res.json())
+    safeFetch<BadDatesResponse>(apiUrl(`/api/kuma/timeline/summary?monitorIds=${ids}`), undefined, "TimeMachine Summary")
       .then(d => {
-        if (d.badDates) setBadDates(new Set(d.badDates));
-      })
-      .catch(console.error);
+        if (d?.badDates) setBadDates(new Set(d.badDates));
+      });
   }, [mapMonitorKey, open]);
 
   // Refresh every 2 min

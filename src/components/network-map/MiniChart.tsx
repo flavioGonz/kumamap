@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useRef, useMemo } from "react";
 import { apiUrl } from "@/lib/api";
+import { safeFetch } from "@/lib/error-handler";
 
 interface MiniChartProps {
   monitorId: number;
@@ -31,11 +32,8 @@ export default function MiniChart({
   useEffect(() => {
     let mounted = true;
     const fetchHistory = async () => {
-      try {
-        const res = await fetch(apiUrl(`/api/kuma/history/${monitorId}`));
-        if (!res.ok || !mounted) return;
-        setPoints(await res.json());
-      } catch {}
+      const data = await safeFetch<HeartbeatPoint[]>(apiUrl(`/api/kuma/history/${monitorId}`));
+      if (data && mounted) setPoints(data);
     };
     fetchHistory();
     const interval = setInterval(fetchHistory, 8000);

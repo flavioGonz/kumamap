@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { safeJsonParse } from "@/lib/error-handler";
 
 // ── Types (must match RackDesignerDrawer) ─────────────────────────────────────
 
@@ -39,7 +40,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "No file provided" }, { status: 400 });
     }
 
-    const existingDevices: RackDevice[] = existingDevicesJson ? JSON.parse(existingDevicesJson) : [];
+    const existingDevices: RackDevice[] = safeJsonParse<RackDevice[]>(existingDevicesJson, []);
 
     // Read file buffer
     const arrayBuffer = await file.arrayBuffer();

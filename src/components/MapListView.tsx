@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import type { KumaMonitor } from "@/components/network-map/MonitorPanel";
 import { apiUrl } from "@/lib/api";
+import { safeFetch } from "@/lib/error-handler";
 import Tooltip from "@/components/network-map/Tooltip";
 import { ChangelogBadge, ChangelogModal } from "@/components/ChangelogModal";
 
@@ -79,19 +80,19 @@ export default function MapListView({
   );
 
   const fetchMaps = useCallback(async () => {
-    const res = await fetch(apiUrl("/api/maps"));
-    setMaps(await res.json());
+    const data = await safeFetch<MapSummary[]>(apiUrl("/api/maps"));
+    if (data) setMaps(data);
   }, []);
 
   useEffect(() => { fetchMaps(); }, [fetchMaps]);
 
   const createMap = async (name: string) => {
-    const res = await fetch(apiUrl("/api/maps"), {
+    const map = await safeFetch<{ id: string }>(apiUrl("/api/maps"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name, kuma_group_id: newMapGroup || null, background_type: newMapBgType }),
-    });
-    const map = await res.json();
+    }, "CreateMap");
+    if (!map) return;
     toast.success("Mapa creado", { description: name });
     setNewMapName(""); setNewMapGroup(""); setNewMapBgType("livemap");
     onOpenMap(map.id);
@@ -99,12 +100,12 @@ export default function MapListView({
 
   const createSubmap = async (parentId: string, name: string, bgType: "livemap" | "image" = "livemap") => {
     if (!name.trim()) return;
-    const res = await fetch(apiUrl("/api/maps"), {
+    const map = await safeFetch<{ id: string }>(apiUrl("/api/maps"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name: name.trim(), parent_id: parentId, background_type: bgType }),
-    });
-    const map = await res.json();
+    }, "CreateSubmap");
+    if (!map) return;
     toast.success("Submap creado", { description: name.trim() });
     setExpandedMaps(prev => new Set([...prev, parentId]));
     fetchMaps();
@@ -135,13 +136,13 @@ export default function MapListView({
   };
 
   const deleteMap = async (id: string, name: string) => {
-    await fetch(apiUrl(`/api/maps/${id}`), { method: "DELETE" });
+    await safeFetch(apiUrl(`/api/maps/${id}`), { method: "DELETE" }, "DeleteMap");
     toast.success("Mapa eliminado", { description: name });
     fetchMaps();
   };
 
   const renameMap = async (id: string, name: string) => {
-    await fetch(apiUrl(`/api/maps/${id}`), { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) });
+    await safeFetch(apiUrl(`/api/maps/${id}`), { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) }, "RenameMap");
     setEditingId(null);
     fetchMaps();
   };
@@ -149,11 +150,11 @@ export default function MapListView({
   // ── Reparent map (drag-and-drop) ──
   const reparentMap = async (draggedId: string, newParentId: string | null) => {
     if (draggedId === newParentId) return;
-    await fetch(apiUrl(`/api/maps/${draggedId}`), {
+    await safeFetch(apiUrl(`/api/maps/${draggedId}`), {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ parent_id: newParentId }),
-    });
+    }, "ReparentMap");
     fetchMaps();
     if (newParentId) {
       setExpandedMaps(prev => new Set([...prev, newParentId]));
@@ -169,14 +170,14 @@ export default function MapListView({
   // ── Clone map ──
   const cloneMap = async (map: MapSummary) => {
     try {
-      const res = await fetch(apiUrl(`/api/maps/${map.id}/export`));
-      const data = await res.json();
-      const cloneRes = await fetch(apiUrl("/api/maps/import"), {
+      const data = await safeFetch<Record<string, unknown>>(apiUrl(`/api/maps/${map.id}/export`), undefined, "CloneExport");
+      if (!data) { toast.error("Error al clonar mapa"); return; }
+      const imported = await safeFetch(apiUrl("/api/maps/import"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...data, map: { ...data.map, name: `${data.map?.name || map.name} (copia)` } }),
-      });
-      if (cloneRes.ok) {
+        body: JSON.stringify({ ...data, map: { ...(data.map as Record<string, unknown>), name: `${(data.map as Record<string, unknown>)?.name || map.name} (copia)` } }),
+      }, "CloneImport");
+      if (imported) {
         toast.success("Mapa clonado", { description: `${map.name} (copia)` });
         fetchMaps();
       } else {
@@ -193,8 +194,7 @@ export default function MapListView({
     try {
       const allData = await Promise.all(
         maps.map(async (m) => {
-          const res = await fetch(apiUrl(`/api/maps/${m.id}/export`));
-          return await res.json();
+          return await safeFetch(apiUrl(`/api/maps/${m.id}/export`), undefined, "ExportAll");
         })
       );
       const blob = new Blob([JSON.stringify(allData, null, 2)], { type: "application/json" });
@@ -234,12 +234,12 @@ export default function MapListView({
     let ok = 0, failed = 0;
     for (const mapData of importPreview.maps) {
       try {
-        const res = await fetch(apiUrl("/api/maps/import"), {
+        const result = await safeFetch(apiUrl("/api/maps/import"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(mapData),
-        });
-        if (res.ok) ok++;
+        }, "Import");
+        if (result) ok++;
         else failed++;
       } catch {
         failed++;
@@ -412,7 +412,7 @@ export default function MapListView({
           <button
             onClick={() => {
               localStorage.removeItem("kumamap_user");
-              fetch(apiUrl("/api/auth"), { method: "DELETE" });
+              safeFetch(apiUrl("/api/auth"), { method: "DELETE" }, "Logout");
               onLogout();
             }}
             className="flex h-8 w-8 items-center justify-center rounded-lg transition-all"

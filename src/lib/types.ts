@@ -32,6 +32,85 @@ export interface KumaHeartbeat {
   duration: number;
 }
 
+// ── Node / Edge Custom Data (parsed from JSON stored in custom_data column) ──
+
+/** Parsed shape of `node.custom_data` for regular nodes, cameras, labels, polygons, racks, etc. */
+export interface NodeCustomData {
+  // Common
+  type?: string;              // e.g. "rack", "polygon", "camera"
+  ip?: string;
+  mac?: string;
+  nodeSize?: number;
+  nodeColor?: string;
+  labelHidden?: boolean;
+  labelSize?: number;
+  description?: string;
+
+  // Camera / FOV
+  rotation?: number;
+  fov?: number;
+  fovRange?: number;
+  fovColor?: string;
+  fovOpacity?: number;
+  streamType?: string;
+  streamUrl?: string;
+  snapshotInterval?: number;
+
+  // Text label
+  fontSize?: number;
+  color?: string;
+  bgEnabled?: boolean;
+
+  // Polygon
+  points?: [number, number][];
+  fillOpacity?: number;
+
+  // Linked maps / submaps
+  linkedMaps?: { id: string; name: string }[];
+  submapId?: string;
+  submapName?: string;
+
+  // Rack
+  devices?: RackDeviceSummary[];
+  totalUnits?: number;
+
+  // Credentials (stored locally)
+  credUser?: string;
+  credPass?: string;
+
+  // SNMP
+  snmpMonitorId?: number;
+
+  // Allow additional dynamic fields
+  [key: string]: unknown;
+}
+
+/** Minimal rack device shape used in map node custom_data (full type lives in RackDesignerDrawer). */
+export interface RackDeviceSummary {
+  label?: string;
+  type?: string;
+  unit?: number;
+  sizeUnits?: number;
+  monitorId?: number;
+  brand?: string;
+  model?: string;
+  switchPorts?: { port: number; label?: string; speed?: string; connected?: boolean; vlan?: string }[];
+  ports?: { port: number; label?: string; connected?: boolean; destination?: string }[];
+  routerInterfaces?: { id: string; name: string; type?: string; ipAddress?: string; connected?: boolean }[];
+  [key: string]: unknown;
+}
+
+/** Parsed shape of `edge.custom_data` for link/edge metadata. */
+export interface EdgeCustomData {
+  linkType?: "ethernet" | "fiber" | "wireless" | "vpn" | string;
+  sourceInterface?: string;
+  targetInterface?: string;
+  snmpMonitorId?: number;
+  hideTraffic?: boolean;
+  trafficLabelPos?: [number, number];
+  [key: string]: unknown;
+}
+
 // ── Map Data Types ──
 
 export interface SavedNode {

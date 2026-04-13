@@ -35,6 +35,8 @@ import CameraTooltipViewer from "./CameraTooltipViewer";
 import IconPickerModal from "./IconPickerModal";
 import NodeSizeModal from "./NodeSizeModal";
 import RackDesignerDrawer from "./RackDesignerDrawer";
+import { safeJsonParse, safeFetch } from "@/lib/error-handler";
+import type { NodeCustomData, EdgeCustomData, RackDeviceSummary } from "@/lib/types";
 import { formatTraffic } from "@/utils/format";
 import { statusColors, getStatusColor as _getStatusColor, getMonitorData as _getMonitorData } from "@/utils/status";
 import { iconSvgPaths, getIconSvg, createMarkerIcon } from "@/utils/map-icons";
@@ -118,15 +120,15 @@ function RackDevicePickerModal({
   onCancel,
   getMonitorData,
 }: {
-  devices: any[];
+  devices: RackDeviceSummary[];
   rackName: string;
   isSrc: boolean;
   onSelect: (hint: string) => void;
   onCancel: () => void;
-  getMonitorData: (id: number) => any;
+  getMonitorData: (id: number) => KumaMonitor | undefined;
 }) {
   const [query, setQuery] = React.useState("");
-  const [selectedDevice, setSelectedDevice] = React.useState<any>(null); // step 2
+  const [selectedDevice, setSelectedDevice] = React.useState<RackDeviceSummary | null>(null); // step 2
 
   const TYPE_ICON: Record<string, React.ReactNode> = {
     server:        <Server className="w-3.5 h-3.5" />,
@@ -150,16 +152,16 @@ function RackDevicePickerModal({
     "tray-fiber": "#06b6d4", other: "#6b7280",
   };
 
-  const filtered = devices.filter((d: any) =>
-    !query || d.label?.toLowerCase().includes(query.toLowerCase()) || TYPE_LABEL[d.type]?.toLowerCase().includes(query.toLowerCase())
+  const filtered = devices.filter((d) =>
+    !query || d.label?.toLowerCase().includes(query.toLowerCase()) || TYPE_LABEL[d.type || ""]?.toLowerCase().includes(query.toLowerCase())
   );
 
-  const deviceBaseHint = (d: any) => `${d.label} (U${d.unit}${d.sizeUnits > 1 ? `-${d.unit + d.sizeUnits - 1}` : ""})`;
+  const deviceBaseHint = (d: RackDeviceSummary) => `${d.label} (U${d.unit}${(d.sizeUnits || 1) > 1 ? `-${(d.unit || 0) + (d.sizeUnits || 1) - 1}` : ""})`;
 
   // Determine if a device has selectable interfaces/ports
-  const getDeviceInterfaces = (d: any): { id: string; label: string; sub: string; connected: boolean }[] => {
+  const getDeviceInterfaces = (d: RackDeviceSummary): { id: string; label: string; sub: string; connected: boolean }[] => {
     if (d.type === "switch" && d.switchPorts?.length) {
-      return d.switchPorts.map((p: any) => ({
+      return d.switchPorts.map((p) => ({
         id: String(p.port),
         label: p.label && p.label !== String(p.port) ? `Puerto ${p.port} — ${p.label}` : `Puerto ${p.port}`,
         sub: [p.speed || "", p.connected ? "conectado" : "libre", p.vlan ? `VLAN ${p.vlan}` : ""].filter(Boolean).join(" · "),
@@ -167,7 +169,7 @@ function RackDevicePickerModal({
       }));
     }
     if (d.type === "patchpanel" && d.ports?.length) {
-      return d.ports.map((p: any) => ({
+      return d.ports.map((p) => ({
         id: String(p.port),
         label: p.label && p.label !== `P${p.port}` ? `Puerto ${p.port} — ${p.label}` : `Puerto ${p.port}`,
         sub: [p.connected ? "conectado" : "libre", p.destination || ""].filter(Boolean).join(" · "),
@@ -175,7 +177,7 @@ function RackDevicePickerModal({
       }));
     }
     if (d.type === "router" && d.routerInterfaces?.length) {
-      return d.routerInterfaces.map((iface: any) => ({
+      return d.routerInterfaces.map((iface) => ({
         id: iface.id,
         label: iface.name,
         sub: [iface.type, iface.ipAddress || "", iface.connected ? "conectado" : "libre"].filter(Boolean).join(" · "),
@@ -185,7 +187,7 @@ function RackDevicePickerModal({
     return [];
   };
 
-  const handleDeviceClick = (d: any) => {
+  const handleDeviceClick = (d: RackDeviceSummary) => {
     const ifaces = getDeviceInterfaces(d);
     if (ifaces.length === 0) {
       // No ports — select directly
@@ -198,7 +200,7 @@ function RackDevicePickerModal({
   // ── Step 2: Port / Interface picker ─────────────────────────────────────────
   if (selectedDevice) {
     const ifaces = getDeviceInterfaces(selectedDevice);
-    const col = TYPE_COLOR[selectedDevice.type] || "#6b7280";
+    const col = TYPE_COLOR[selectedDevice.type || ""] || "#6b7280";
     return (
       <div className="fixed inset-0 z-[99999] flex items-center justify-center" style={{ background: "rgba(0,0,0,0.65)", backdropFilter: "blur(6px)" }}>
         <div className="rounded-2xl border border-white/10 overflow-hidden" style={{ background: "#111", width: 420, maxWidth: "92vw", boxShadow: "0 24px 64px rgba(0,0,0,0.7)" }}>
@@ -394,9 +396,9 @@ export default function LeafletMapView({
     // Fetch real down-since times from DB whenever monitors update and some are DOWN
     const downIds = kumaMonitors.filter(m => m.status === 0 && m.active).map(m => m.id);
     if (downIds.length > 0) {
-      fetch(apiUrl("/api/kuma/down-since"))
-        .then(r => r.ok ? r.json() : {})
-        .then((data: Record<string, string>) => {
+      safeFetch<Record<string, string>>(apiUrl("/api/kuma/down-since"), undefined, "DownSince")
+        .then((data) => {
+          if (!data) return;
           for (const [idStr, isoTs] of Object.entries(data)) {
             const id = Number(idStr);
             const ts = new Date(isoTs).getTime();
@@ -914,7 +916,7 @@ export default function LeafletMapView({
       const st = statuses.get(node.kuma_monitor_id);
       if (st === undefined) return;
       const color = st === 0 ? "#ef4444" : st === 1 ? "#22c55e" : st === 3 ? "#8b5cf6" : "#f59e0b";
-      const ncd = node.custom_data ? JSON.parse(node.custom_data) : {};
+      const ncd = safeJsonParse<NodeCustomData>(node.custom_data);
       marker.setIcon(createMarkerIcon(L, color, st === 0, false, ncd.nodeSize || 1.0, node.icon || "server"));
 
       // Show dramatic red fail popup for DOWN nodes
@@ -1236,14 +1238,14 @@ export default function LeafletMapView({
     totalDevices: number;
     deviceStatuses: Array<{ label: string; type: string; status: number; color: string; ping: number | null; uptime24: number | null }>;
   } {
-    const cd = node.custom_data ? (() => { try { return JSON.parse(node.custom_data!); } catch { return {}; } })() : {};
-    const devices: any[] = cd.devices || [];
-    const monitored = devices.filter((d: any) => d.monitorId);
+    const cd = safeJsonParse<NodeCustomData>(node.custom_data);
+    const devices: RackDeviceSummary[] = cd.devices || [];
+    const monitored = devices.filter((d) => d.monitorId);
     if (monitored.length === 0) {
       return { status: -1, color: "#6b7280", pulse: false, monitoredCount: 0, totalDevices: devices.length, deviceStatuses: [] };
     }
-    const deviceStatuses = monitored.map((d: any) => {
-      const m = getMonitorData(d.monitorId);
+    const deviceStatuses = monitored.map((d) => {
+      const m = getMonitorData(d.monitorId!);
       const s = m?.status ?? 2;
       return { label: d.label || "Equipo", type: d.type || "other", status: s, color: statusColors[s] || "#6b7280", ping: m?.ping ?? null, uptime24: m?.uptime24 ?? null };
     });
@@ -1291,7 +1293,7 @@ export default function LeafletMapView({
   const pingHistoryRef = useRef<Map<number, number[]>>(new Map());
 
   function createPopupContent(node: SavedNode): string {
-    const cd = node.custom_data ? (() => { try { return JSON.parse(node.custom_data!); } catch { return {}; } })() : {};
+    const cd = safeJsonParse<NodeCustomData>(node.custom_data);
 
     // ── Rack popup — aggregated status from all device monitors ──────────────
     if (node.icon === "_rack" && cd.type === "rack") {
@@ -1357,10 +1359,11 @@ export default function LeafletMapView({
 
     // Async fetch history (updates for next popup open)
     if (node.kuma_monitor_id) {
-      fetch(apiUrl(`/api/kuma/history/${node.kuma_monitor_id}`)).then(r => r.json()).then((data: any[]) => {
-        const pings = data.filter((h: any) => h.ping != null).map((h: any) => h.ping).slice(-30);
+      safeFetch<{ ping: number | null }[]>(apiUrl(`/api/kuma/history/${node.kuma_monitor_id}`), undefined, "PingHistory").then(data => {
+        if (!data) return;
+        const pings = data.filter(h => h.ping != null).map(h => h.ping!).slice(-30);
         pingHistoryRef.current.set(node.kuma_monitor_id!, pings);
-      }).catch(() => {});
+      });
     }
 
     return `
@@ -1407,7 +1410,7 @@ export default function LeafletMapView({
     if (nodesRef.current.some(n => n.icon === "_submap")) {
       nodesRef.current = nodesRef.current.map(n => {
         if (n.icon !== "_submap") return n;
-        const mcd = n.custom_data ? (() => { try { return JSON.parse(n.custom_data!); } catch { return {}; } })() : {};
+        const mcd = safeJsonParse<NodeCustomData>(n.custom_data);
         if (mcd.submapId && !(mcd.linkedMaps?.length)) {
           mcd.linkedMaps = [{ id: mcd.submapId, name: mcd.submapName || n.label || "Submap" }];
         }
@@ -1421,7 +1424,7 @@ export default function LeafletMapView({
       const isWaypoint = node.icon === "_waypoint";
       const isPolygon = node.icon === "_polygon";
       const isRack = node.icon === "_rack";
-      const cd = node.custom_data ? JSON.parse(node.custom_data) : {};
+      const cd = safeJsonParse<NodeCustomData>(node.custom_data);
       let color = getStatusColor(node.kuma_monitor_id);
       const m = getMonitorData(node.kuma_monitor_id);
       let pulse = !isLabel && (m?.status === 0 || m?.status === 2);
@@ -1434,7 +1437,7 @@ export default function LeafletMapView({
 
 
       // Render polygon zone
-      if (isPolygon && cd.points?.length >= 3) {
+      if (isPolygon && cd.points && cd.points.length >= 3) {
         const polyColor = cd.color || "#3b82f6";
         const polyOpacity = cd.fillOpacity ?? 0.15;
         const poly = L.polygon(cd.points, {
@@ -1617,7 +1620,7 @@ export default function LeafletMapView({
           const angle = Math.atan2(hp.lng - mp.lng, hp.lat - mp.lat) * (180 / Math.PI);
           const idx = nodesRef.current.findIndex((n) => n.id === node.id);
           if (idx >= 0) {
-            const ncd = nodesRef.current[idx].custom_data ? JSON.parse(nodesRef.current[idx].custom_data!) : {};
+            const ncd = safeJsonParse<NodeCustomData>(nodesRef.current[idx].custom_data);
             ncd.rotation = Math.round(angle);
             nodesRef.current[idx] = { ...nodesRef.current[idx], custom_data: JSON.stringify(ncd) };
             fovPoly.setLatLngs(buildFovPoints(mp.lat, mp.lng, Math.round(angle), ncd.fovRange || fovRange, ncd.fov || fov));
@@ -1648,7 +1651,7 @@ export default function LeafletMapView({
           const newRange = Math.max(0.00005, dist);
           const idx = nodesRef.current.findIndex((n) => n.id === node.id);
           if (idx >= 0) {
-            const ncd = nodesRef.current[idx].custom_data ? JSON.parse(nodesRef.current[idx].custom_data!) : {};
+            const ncd = safeJsonParse<NodeCustomData>(nodesRef.current[idx].custom_data);
             ncd.fovRange = parseFloat(newRange.toFixed(6));
             nodesRef.current[idx] = { ...nodesRef.current[idx], custom_data: JSON.stringify(ncd) };
             const rot = ncd.rotation || rotation;
@@ -1680,7 +1683,7 @@ export default function LeafletMapView({
           const angleToHandle = Math.atan2(fp.lng - mp.lng, fp.lat - mp.lat) * (180 / Math.PI);
           const idx = nodesRef.current.findIndex((n) => n.id === node.id);
           if (idx >= 0) {
-            const ncd = nodesRef.current[idx].custom_data ? JSON.parse(nodesRef.current[idx].custom_data!) : {};
+            const ncd = safeJsonParse<NodeCustomData>(nodesRef.current[idx].custom_data);
             const rot = ncd.rotation ?? rotation;
             // FOV = 2 * angle difference between handle and center direction
             const diff = Math.abs(((angleToHandle - rot + 540) % 360) - 180);
@@ -1721,7 +1724,7 @@ export default function LeafletMapView({
           const newRotation = Math.round(((angleRad * 180 / Math.PI) + 90 + 360) % 360);
           const idx = nodesRef.current.findIndex((n) => n.id === node.id);
           if (idx >= 0) {
-            const ncd = nodesRef.current[idx].custom_data ? JSON.parse(nodesRef.current[idx].custom_data!) : {};
+            const ncd = safeJsonParse<NodeCustomData>(nodesRef.current[idx].custom_data);
             ncd.rotation = newRotation;
             nodesRef.current[idx] = { ...nodesRef.current[idx], custom_data: JSON.stringify(ncd) };
             // Update the label span rotation live without full re-render
@@ -1746,7 +1749,7 @@ export default function LeafletMapView({
 
       // Label tooltip (always visible) — only for non-label/camera nodes
       if (!isLabel && !isWaypoint) {
-        const cd_label = node.custom_data ? (() => { try { return JSON.parse(node.custom_data!); } catch { return {}; } })() : {};
+        const cd_label = safeJsonParse<NodeCustomData>(node.custom_data);
         if (!cd_label.labelHidden) {
           const labelFontSizePx = cd_label.labelSize ? `${cd_label.labelSize}px` : "11px";
           marker.bindTooltip(node.label, {
@@ -1783,7 +1786,7 @@ export default function LeafletMapView({
           setRackDrawerNodeId(node.id);
         } else if (!isWaypoint) {
           // If node has linked maps, navigate directly (1 map) or show modal (multiple)
-          const cd = node.custom_data ? (() => { try { return JSON.parse(node.custom_data!); } catch { return {}; } })() : {};
+          const cd = safeJsonParse<NodeCustomData>(node.custom_data);
           const linked: { id: string; name: string }[] = cd.linkedMaps || [];
           if (linked.length === 1) {
             // Single linked map — navigate directly
@@ -1831,7 +1834,7 @@ export default function LeafletMapView({
         if (isWaypoint || isPolygon) return;
         // Label click: show description tooltip if it has one
         if (isLabel) {
-          const labelCd = (() => { try { return JSON.parse(nodesRef.current.find(n => n.id === node.id)?.custom_data || "{}"); } catch { return {}; } })();
+          const labelCd = safeJsonParse<NodeCustomData>(nodesRef.current.find(n => n.id === node.id)?.custom_data);
           if (labelCd.description) {
             const currentNode = nodesRef.current.find(n => n.id === node.id);
             const popup = L.popup({
@@ -1863,7 +1866,7 @@ export default function LeafletMapView({
         }
         // Camera click: open stream tooltip if configured
         if (isCamera) {
-          const camCd = node.custom_data ? JSON.parse(node.custom_data) : {};
+          const camCd = safeJsonParse<NodeCustomData>(node.custom_data);
           if (camCd.streamUrl) {
             // Compute screen position of the marker for tooltip anchor
             const map = mapRef.current;
@@ -1905,7 +1908,7 @@ export default function LeafletMapView({
         }
 
         if (isCamera) {
-          const cd2 = nodesRef.current[idx]?.custom_data ? JSON.parse(nodesRef.current[idx].custom_data!) : {};
+          const cd2 = safeJsonParse<NodeCustomData>(nodesRef.current[idx]?.custom_data);
           const rot = cd2.rotation ?? 0;
           const rawRange2 = cd2.fovRange ?? (isImageMode ? 200 : 0.003);
           const range = isImageMode && rawRange2 < 1 ? rawRange2 * 100000 : rawRange2;
@@ -2024,7 +2027,7 @@ export default function LeafletMapView({
       const tgtNode = nodesRef.current.find((n) => n.id === edge.target_node_id);
       if (!srcNode || !tgtNode) return;
 
-      const cd = edge.custom_data ? JSON.parse(edge.custom_data) : {};
+      const cd = safeJsonParse<EdgeCustomData>(edge.custom_data);
 
       // Find real endpoints through waypoint chains
       const { srcStatus, tgtStatus } = findRealEndpoints(edge.id);
@@ -2176,9 +2179,9 @@ export default function LeafletMapView({
 
           // Fetch heartbeat data and compute throughput from SNMP counter deltas
           if (!cachedData.throughputs.length || cachedData.lastValue !== snmpMon.msg) {
-            fetch(apiUrl(`/api/kuma/history/${cd.snmpMonitorId}`))
-              .then(r => r.json())
-              .then((beats: any[]) => {
+            safeFetch<{ msg?: string }[]>(apiUrl(`/api/kuma/history/${cd.snmpMonitorId}`), undefined, "SNMPHistory")
+              .then((beats) => {
+                if (!beats) return;
                 // Extract counter values from each heartbeat msg
                 const counters: number[] = [];
                 for (const b of beats) {
@@ -2237,7 +2240,7 @@ export default function LeafletMapView({
             const pos = trafficLabel.getLatLng();
             const idx = edgesRef.current.findIndex((e) => e.id === edge.id);
             if (idx >= 0) {
-              const oldCd = edgesRef.current[idx].custom_data ? JSON.parse(edgesRef.current[idx].custom_data!) : {};
+              const oldCd = safeJsonParse<EdgeCustomData>(edgesRef.current[idx].custom_data);
               oldCd.trafficLabelPos = [pos.lat, pos.lng];
               edgesRef.current[idx] = { ...edgesRef.current[idx], custom_data: JSON.stringify(oldCd) };
             }
@@ -2352,7 +2355,7 @@ export default function LeafletMapView({
       let downTimestamp: number;
       if (node.icon === "_rack") {
         // FIX: iterate devices directly using monitorId (not status value)
-        const cd2 = node.custom_data ? (() => { try { return JSON.parse(node.custom_data!); } catch { return {}; } })() : {};
+        const cd2 = safeJsonParse<NodeCustomData>(node.custom_data);
         const rackDevices: any[] = cd2.devices || [];
         let earliest = now;
         for (const d of rackDevices) {
@@ -2373,7 +2376,7 @@ export default function LeafletMapView({
       const sinceStr = formatSince(downTimestamp);
 
       // ── Node visual size (for anchor placement) ──────────────────────────────
-      const cd = node.custom_data ? (() => { try { return JSON.parse(node.custom_data!); } catch { return {}; } })() : {};
+      const cd = safeJsonParse<NodeCustomData>(node.custom_data);
       const scale: number = cd.nodeSize || 1.0;
       const containerPx = Math.round(28 * scale);
 
@@ -2488,7 +2491,7 @@ export default function LeafletMapView({
       let color = getStatusColor(node.kuma_monitor_id);
       const m = getMonitorData(node.kuma_monitor_id);
       let pulse = m?.status === 0 || m?.status === 2;
-      const cd = node.custom_data ? JSON.parse(node.custom_data) : {};
+      const cd = safeJsonParse<NodeCustomData>(node.custom_data);
       const ns: number = cd.nodeSize || 1.0;
 
       // Rack nodes: aggregate status from all device monitors
@@ -2531,7 +2534,7 @@ export default function LeafletMapView({
       const marker = markersRef.current.get(nodeId);
       if (marker) {
         const color = getStatusColor(node?.kuma_monitor_id ?? null);
-        const ncd = node?.custom_data ? JSON.parse(node.custom_data) : {};
+        const ncd = safeJsonParse<NodeCustomData>(node?.custom_data);
         marker.setIcon(createMarkerIcon(LRef.current, color, false, true, ncd.nodeSize || 1.0, node?.icon || "server"));
       }
     }
@@ -2730,7 +2733,7 @@ export default function LeafletMapView({
       color?: string | null;
       custom_data: string | null;
     } | null = null;
-    try { const s = localStorage.getItem("kumamap_node_clipboard"); clipboard = s ? JSON.parse(s) : null; } catch {}
+    try { const s = localStorage.getItem("kumamap_node_clipboard"); clipboard = s ? JSON.parse(s) : null; } catch { clipboard = null; }
     if (!clipboard) return [];
     return [
       {
@@ -2830,7 +2833,7 @@ export default function LeafletMapView({
 
     // Labels: edit text, description, font size, color, rotation, delete
     if (isLabel) {
-      const cd = node?.custom_data ? JSON.parse(node.custom_data) : {};
+      const cd = safeJsonParse<NodeCustomData>(node?.custom_data);
       const labelSizes = [
         { label: "Pequeño (10px)", value: 10 },
         { label: "Normal (13px)", value: 13 },
@@ -2854,7 +2857,7 @@ export default function LeafletMapView({
         const idx = nodesRef.current.findIndex((n) => n.id === nodeId);
         if (idx >= 0) {
           const prev = nodesRef.current[idx];
-          const prevCd = prev.custom_data ? JSON.parse(prev.custom_data) : {};
+          const prevCd = safeJsonParse<NodeCustomData>(prev.custom_data);
           nodesRef.current[idx] = { ...prev, custom_data: JSON.stringify({ ...prevCd, type: "textLabel", ...updates }) };
           if (LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current);
         }
@@ -2938,7 +2941,7 @@ export default function LeafletMapView({
             const idx = nodesRef.current.findIndex((n) => n.id === nodeId);
             if (idx >= 0) {
               const prev = nodesRef.current[idx];
-              const prevCd = prev.custom_data ? JSON.parse(prev.custom_data) : {};
+              const prevCd = safeJsonParse<NodeCustomData>(prev.custom_data);
               delete prevCd.rotation;
               nodesRef.current[idx] = { ...prev, custom_data: JSON.stringify(prevCd) };
               if (LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current);
@@ -2999,7 +3002,7 @@ export default function LeafletMapView({
           label: "Editar Nombre",
           icon: menuIcons.Pencil,
           onClick: () => {
-            const cd = node?.custom_data ? JSON.parse(node.custom_data) : {};
+            const cd = safeJsonParse<NodeCustomData>(node?.custom_data);
             setInputModalConfig({ nodeId, initial: node?.label || "", mac: cd.mac || "", ip: cd.ip || "", credUser: cd.credUser || "", credPass: cd.credPass || "", labelHidden: cd.labelHidden ?? false, labelSize: cd.labelSize ?? 12, nodeColor: cd.nodeColor || "" });
             setInputModalOpen(true);
           },
@@ -3045,7 +3048,7 @@ export default function LeafletMapView({
           },
         },
         ...(() => {
-          const ncd = node?.custom_data ? (() => { try { return JSON.parse(node.custom_data!); } catch { return {}; } })() : {};
+          const ncd = safeJsonParse<NodeCustomData>(node?.custom_data);
           const linked: { id: string; name: string }[] = ncd.linkedMaps || [];
           const items: any[] = [];
           linked.forEach(lm => {
@@ -3086,7 +3089,7 @@ export default function LeafletMapView({
     // ── Build normal/camera node context menu (consolidated) ──
     const isCamera = node?.icon === "_camera";
     const isSpecial = node?.icon === "_waypoint" || node?.icon === "_polygon";
-    const ncd = node?.custom_data ? (() => { try { return JSON.parse(node.custom_data!); } catch { return {}; } })() : {};
+    const ncd = safeJsonParse<NodeCustomData>(node?.custom_data);
     const linked: { id: string; name: string }[] = ncd.linkedMaps || [];
 
     return [
@@ -3103,7 +3106,7 @@ export default function LeafletMapView({
         label: "Editar nodo",
         icon: menuIcons.Pencil,
         onClick: () => {
-          const cd = node?.custom_data ? JSON.parse(node.custom_data) : {};
+          const cd = safeJsonParse<NodeCustomData>(node?.custom_data);
           setInputModalConfig({ nodeId, initial: node?.label || "", mac: cd.mac || "", ip: cd.ip || "", credUser: cd.credUser || "", credPass: cd.credPass || "", labelHidden: cd.labelHidden ?? false, labelSize: cd.labelSize ?? 12, nodeColor: cd.nodeColor || "" });
           setInputModalOpen(true);
         },
@@ -3188,7 +3191,7 @@ export default function LeafletMapView({
             label: isImageMode ? "Alcance (px)" : "Distancia focal",
             icon: menuIcons.Maximize2,
             onClick: () => {
-              const camCd = node?.custom_data ? JSON.parse(node.custom_data) : {};
+              const camCd = safeJsonParse<NodeCustomData>(node?.custom_data);
               if (isImageMode) {
                 const rawR = camCd.fovRange ?? 200;
                 const currentPx = rawR < 1 ? Math.round(rawR * 100000) : Math.round(rawR);
@@ -3198,7 +3201,7 @@ export default function LeafletMapView({
                   if (!isNaN(px) && px > 0) {
                     const idx = nodesRef.current.findIndex((n) => n.id === nodeId);
                     if (idx >= 0) {
-                      const nc = nodesRef.current[idx].custom_data ? JSON.parse(nodesRef.current[idx].custom_data!) : {};
+                      const nc = safeJsonParse<NodeCustomData>(nodesRef.current[idx].custom_data);
                       nc.fovRange = px;
                       nodesRef.current[idx] = { ...nodesRef.current[idx], custom_data: JSON.stringify(nc) };
                       if (LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current);
@@ -3214,7 +3217,7 @@ export default function LeafletMapView({
                     const newRange = Math.max(0.00005, meters / 100000);
                     const idx = nodesRef.current.findIndex((n) => n.id === nodeId);
                     if (idx >= 0) {
-                      const nc = nodesRef.current[idx].custom_data ? JSON.parse(nodesRef.current[idx].custom_data!) : {};
+                      const nc = safeJsonParse<NodeCustomData>(nodesRef.current[idx].custom_data);
                       nc.fovRange = parseFloat(newRange.toFixed(6));
                       nodesRef.current[idx] = { ...nodesRef.current[idx], custom_data: JSON.stringify(nc) };
                       if (LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current);
@@ -3251,7 +3254,7 @@ export default function LeafletMapView({
         onClick: () => {
           pushUndo();
           const newId = `node-${Date.now()}`;
-          const cd = node?.custom_data ? JSON.parse(node.custom_data) : {};
+          const cd = safeJsonParse<NodeCustomData>(node?.custom_data);
           nodesRef.current = [...nodesRef.current, {
             id: newId,
             kuma_monitor_id: isCamera ? node?.kuma_monitor_id : null,
@@ -3321,7 +3324,7 @@ export default function LeafletMapView({
 
   function getEdgeCtxItems(edgeId: string) {
     const edge = edgesRef.current.find((e) => e.id === edgeId);
-    const cd = edge?.custom_data ? JSON.parse(edge.custom_data) : {};
+    const cd = safeJsonParse<EdgeCustomData>(edge?.custom_data);
     const srcNode = nodesRef.current.find((n) => n.id === edge?.source_node_id);
     const tgtNode = nodesRef.current.find((n) => n.id === edge?.target_node_id);
     return [
@@ -3349,7 +3352,7 @@ export default function LeafletMapView({
         onClick: () => {
           const idx = edgesRef.current.findIndex((e) => e.id === edgeId);
           if (idx >= 0) {
-            const oldCd = edgesRef.current[idx].custom_data ? JSON.parse(edgesRef.current[idx].custom_data!) : {};
+            const oldCd = safeJsonParse<EdgeCustomData>(edgesRef.current[idx].custom_data);
             oldCd.linkType = t.type;
             edgesRef.current[idx] = { ...edgesRef.current[idx], custom_data: JSON.stringify(oldCd) };
             if (LRef.current && mapRef.current) renderEdges(LRef.current, mapRef.current);
@@ -3364,7 +3367,7 @@ export default function LeafletMapView({
         onClick: () => {
           const idx = edgesRef.current.findIndex((e) => e.id === edgeId);
           if (idx >= 0) {
-            const oldCd = edgesRef.current[idx].custom_data ? JSON.parse(edgesRef.current[idx].custom_data!) : {};
+            const oldCd = safeJsonParse<EdgeCustomData>(edgesRef.current[idx].custom_data);
             oldCd.hideTraffic = !oldCd.hideTraffic;
             edgesRef.current[idx] = { ...edgesRef.current[idx], custom_data: JSON.stringify(oldCd) };
             if (LRef.current && mapRef.current) renderEdges(LRef.current, mapRef.current);
@@ -3393,7 +3396,7 @@ export default function LeafletMapView({
     const raw = event.dataTransfer.getData("application/kuma-monitor");
     if (!raw || !mapRef.current || !LRef.current) return;
 
-    const monitor: KumaMonitor = JSON.parse(raw);
+    const monitor = safeJsonParse<KumaMonitor>(raw);
 
     // Prevent duplicates
     if (nodesRef.current.some((n) => n.kuma_monitor_id === monitor.id)) {
@@ -3480,7 +3483,7 @@ export default function LeafletMapView({
     const q = searchQuery.toLowerCase();
     const match = nodesRef.current.find(n =>
       n.label?.toLowerCase().includes(q) ||
-      (() => { try { const cd = JSON.parse(n.custom_data || "{}"); return cd.ip?.includes(q) || cd.mac?.toLowerCase().includes(q); } catch { return false; } })()
+      (() => { const cd = safeJsonParse<NodeCustomData>(n.custom_data); return cd.ip?.includes(q) || cd.mac?.toLowerCase().includes(q); })()
     );
     if (match) {
       mapRef.current.setView([match.x, match.y], Math.max(mapRef.current.getZoom(), isImageMode ? mapRef.current.getZoom() : 16), { animate: true });
@@ -3498,12 +3501,12 @@ export default function LeafletMapView({
     // Livemap only: fall back to Nominatim geocoding
     if (isImageMode) { toast.error("No se encontró ningún nodo con ese nombre"); return; }
     try {
-      const res = await fetch(
+      const results = await safeFetch<{ lat: string; lon: string; display_name: string }[]>(
         `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchQuery)}&limit=1`,
-        { headers: { "User-Agent": "KumaMap/1.0" } }
+        { headers: { "User-Agent": "KumaMap/1.0" } },
+        "Geocode"
       );
-      const results = await res.json();
-      if (results.length > 0) {
+      if (results && results.length > 0) {
         const { lat, lon, display_name } = results[0];
         mapRef.current.setView([parseFloat(lat), parseFloat(lon)], 16, { animate: true });
         toast.success("Ubicacion encontrada", { description: display_name.substring(0, 60) });
@@ -4060,8 +4063,8 @@ export default function LeafletMapView({
                     setImportMapPickerOpen(false);
                     setImportingMapId(m.id);
                     try {
-                      const res = await fetch(apiUrl(`/api/maps/${m.id}/export`));
-                      const data = await res.json();
+                      const data = await safeFetch<Record<string, any>>(apiUrl(`/api/maps/${m.id}/export`), undefined, "ImportNodes");
+                      if (!data) throw new Error("Export failed");
                       const ts = Date.now();
                       const idMap: Record<string, string> = {};
                       const importedNodes = (data.nodes || []).map((n: any) => {
@@ -4260,7 +4263,7 @@ export default function LeafletMapView({
       {/* ═══ Node Edit Modal (unified: Name + Label + MAC + IP + Credentials + Color) ═══ */}
       {inputModalOpen && (() => {
         const cd = inputModalConfig.nodeId
-          ? (nodesRef.current.find(n => n.id === inputModalConfig.nodeId)?.custom_data ? JSON.parse(nodesRef.current.find(n => n.id === inputModalConfig.nodeId)!.custom_data!) : {})
+          ? safeJsonParse<NodeCustomData>(nodesRef.current.find(n => n.id === inputModalConfig.nodeId)?.custom_data)
           : {};
 
         const [editName, setEditName] = [inputModalConfig.initial, (v: string) => setInputModalConfig(c => ({ ...c, initial: v }))];
@@ -4291,7 +4294,7 @@ export default function LeafletMapView({
           if (editName.trim()) {
             const idx = nodesRef.current.findIndex((n) => n.id === inputModalConfig.nodeId);
             if (idx >= 0) {
-              const ncd = nodesRef.current[idx].custom_data ? JSON.parse(nodesRef.current[idx].custom_data!) : {};
+              const ncd = safeJsonParse<NodeCustomData>(nodesRef.current[idx].custom_data);
               ncd.mac = editMac.trim() || undefined;
               ncd.ip = editIp.trim() || undefined;
               ncd.credUser = editUser.trim() || undefined;
@@ -4510,12 +4513,12 @@ export default function LeafletMapView({
       <FOVColorPickerModal
         open={colorPickerOpen}
         onClose={() => setColorPickerOpen(false)}
-        currentColor={(() => { const n = nodesRef.current.find(n => n.id === colorPickerNodeId); const cd = n?.custom_data ? JSON.parse(n.custom_data) : {}; return cd.fovColor || "#22c55e"; })()}
-        currentOpacity={(() => { const n = nodesRef.current.find(n => n.id === colorPickerNodeId); const cd = n?.custom_data ? JSON.parse(n.custom_data) : {}; return cd.fovOpacity ?? 0.18; })()}
+        currentColor={(() => { const n = nodesRef.current.find(n => n.id === colorPickerNodeId); const cd = safeJsonParse<NodeCustomData>(n?.custom_data); return cd.fovColor || "#22c55e"; })()}
+        currentOpacity={(() => { const n = nodesRef.current.find(n => n.id === colorPickerNodeId); const cd = safeJsonParse<NodeCustomData>(n?.custom_data); return cd.fovOpacity ?? 0.18; })()}
         onChangeColor={(color) => {
           const idx = nodesRef.current.findIndex((n) => n.id === colorPickerNodeId);
           if (idx >= 0) {
-            const ncd = nodesRef.current[idx].custom_data ? JSON.parse(nodesRef.current[idx].custom_data!) : {};
+            const ncd = safeJsonParse<NodeCustomData>(nodesRef.current[idx].custom_data);
             ncd.fovColor = color;
             nodesRef.current[idx] = { ...nodesRef.current[idx], custom_data: JSON.stringify(ncd) };
             if (LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current);
@@ -4524,7 +4527,7 @@ export default function LeafletMapView({
         onChangeOpacity={(opacity) => {
           const idx = nodesRef.current.findIndex((n) => n.id === colorPickerNodeId);
           if (idx >= 0) {
-            const ncd = nodesRef.current[idx].custom_data ? JSON.parse(nodesRef.current[idx].custom_data!) : {};
+            const ncd = safeJsonParse<NodeCustomData>(nodesRef.current[idx].custom_data);
             ncd.fovOpacity = opacity;
             nodesRef.current[idx] = { ...nodesRef.current[idx], custom_data: JSON.stringify(ncd) };
             if (LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current);
@@ -4536,11 +4539,11 @@ export default function LeafletMapView({
       <LensPickerModal
         open={lensPickerOpen}
         onClose={() => setLensPickerOpen(false)}
-        currentFov={(() => { const n = nodesRef.current.find(n => n.id === lensPickerNodeId); const cd = n?.custom_data ? JSON.parse(n.custom_data) : {}; return cd.fov || 60; })()}
+        currentFov={(() => { const n = nodesRef.current.find(n => n.id === lensPickerNodeId); const cd = safeJsonParse<NodeCustomData>(n?.custom_data); return cd.fov || 60; })()}
         onSelectFov={(fov) => {
           const idx = nodesRef.current.findIndex((n) => n.id === lensPickerNodeId);
           if (idx >= 0) {
-            const ncd = nodesRef.current[idx].custom_data ? JSON.parse(nodesRef.current[idx].custom_data!) : {};
+            const ncd = safeJsonParse<NodeCustomData>(nodesRef.current[idx].custom_data);
             ncd.fov = fov;
             nodesRef.current[idx] = { ...nodesRef.current[idx], custom_data: JSON.stringify(ncd) };
             if (LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current);
@@ -4631,9 +4634,9 @@ export default function LeafletMapView({
       {/* ── Camera Stream Config Modal ── */}
       {streamConfigNodeId && (() => {
         const camNode = nodesRef.current.find((n) => n.id === streamConfigNodeId);
-        const camCd = camNode?.custom_data ? JSON.parse(camNode.custom_data) : {};
+        const camCd = safeJsonParse<NodeCustomData>(camNode?.custom_data);
         const currentCfg: CameraStreamConfig = {
-          streamType: camCd.streamType || "",
+          streamType: (camCd.streamType || "") as CameraStreamConfig["streamType"],
           streamUrl: camCd.streamUrl || "",
           snapshotInterval: camCd.snapshotInterval,
         };
@@ -4644,9 +4647,7 @@ export default function LeafletMapView({
             onSave={(config) => {
               const idx = nodesRef.current.findIndex((n) => n.id === streamConfigNodeId);
               if (idx >= 0) {
-                const ncd = nodesRef.current[idx].custom_data
-                  ? JSON.parse(nodesRef.current[idx].custom_data!)
-                  : {};
+                const ncd = safeJsonParse<NodeCustomData>(nodesRef.current[idx].custom_data);
                 ncd.streamType = config.streamType || undefined;
                 ncd.streamUrl = config.streamUrl || undefined;
                 ncd.snapshotInterval = config.snapshotInterval || undefined;
@@ -4668,10 +4669,10 @@ export default function LeafletMapView({
       {/* ── Camera Stream Viewer (Tooltip or PiP) ── */}
       {streamViewerNodeId && (() => {
         const camNode = nodesRef.current.find((n) => n.id === streamViewerNodeId);
-        const camCd = camNode?.custom_data ? JSON.parse(camNode.custom_data) : {};
+        const camCd = safeJsonParse<NodeCustomData>(camNode?.custom_data);
         if (!camCd.streamUrl) return null;
         const viewCfg: CameraStreamConfig = {
-          streamType: camCd.streamType || "mjpeg",
+          streamType: (camCd.streamType || "mjpeg") as CameraStreamConfig["streamType"],
           streamUrl: camCd.streamUrl,
           snapshotInterval: camCd.snapshotInterval,
         };
@@ -4718,7 +4719,7 @@ export default function LeafletMapView({
       {/* ── Node Size Modal (Leaflet) ── */}
       {sizePickerNodeId && (() => {
         const sizeNode = nodesRef.current.find((n) => n.id === sizePickerNodeId);
-        const scd = sizeNode?.custom_data ? JSON.parse(sizeNode.custom_data) : {};
+        const scd = safeJsonParse<NodeCustomData>(sizeNode?.custom_data);
         return (
           <NodeSizeModal
             currentSize={scd.nodeSize || 1.0}
@@ -4726,9 +4727,7 @@ export default function LeafletMapView({
             onSelect={(size) => {
               const idx = nodesRef.current.findIndex((n) => n.id === sizePickerNodeId);
               if (idx >= 0) {
-                const ncd = nodesRef.current[idx].custom_data
-                  ? JSON.parse(nodesRef.current[idx].custom_data!)
-                  : {};
+                const ncd = safeJsonParse<NodeCustomData>(nodesRef.current[idx].custom_data);
                 ncd.nodeSize = size;
                 nodesRef.current[idx] = {
                   ...nodesRef.current[idx],
@@ -4747,12 +4746,12 @@ export default function LeafletMapView({
       {nodeMapModalNodeId && (() => {
         const node = nodesRef.current.find(n => n.id === nodeMapModalNodeId);
         if (!node) { setNodeMapModalNodeId(null); return null; }
-        const cd = node.custom_data ? (() => { try { return JSON.parse(node.custom_data!); } catch { return {}; } })() : {};
+        const cd = safeJsonParse<NodeCustomData>(node.custom_data);
         const linkedMaps: { id: string; name: string }[] = cd.linkedMaps || [];
         const addLinkedMap = (mapId: string, mapName: string) => {
           const idx = nodesRef.current.findIndex(n => n.id === nodeMapModalNodeId);
           if (idx < 0) return;
-          const ncd = nodesRef.current[idx].custom_data ? JSON.parse(nodesRef.current[idx].custom_data!) : {};
+          const ncd = safeJsonParse<NodeCustomData>(nodesRef.current[idx].custom_data);
           const existing: { id: string; name: string }[] = ncd.linkedMaps || [];
           if (existing.some(m => m.id === mapId)) { toast.info("Este mapa ya está vinculado"); return; }
           ncd.linkedMaps = [...existing, { id: mapId, name: mapName }];
@@ -4764,7 +4763,7 @@ export default function LeafletMapView({
         const removeLinkedMap = (mapId: string) => {
           const idx = nodesRef.current.findIndex(n => n.id === nodeMapModalNodeId);
           if (idx < 0) return;
-          const ncd = nodesRef.current[idx].custom_data ? JSON.parse(nodesRef.current[idx].custom_data!) : {};
+          const ncd = safeJsonParse<NodeCustomData>(nodesRef.current[idx].custom_data);
           ncd.linkedMaps = (ncd.linkedMaps || []).filter((m: any) => m.id !== mapId);
           nodesRef.current[idx] = { ...nodesRef.current[idx], custom_data: JSON.stringify(ncd) };
           if (LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current);
@@ -4980,7 +4979,7 @@ export default function LeafletMapView({
       {/* ── Rack Device Picker — shown when linking from/to a rack node ── */}
       {rackPickerState && (() => {
         const rackNode = nodesRef.current.find(n => n.id === rackPickerState.rackNodeId);
-        const cd = rackNode?.custom_data ? (() => { try { return JSON.parse(rackNode.custom_data!); } catch { return {}; } })() : {};
+        const cd = safeJsonParse<NodeCustomData>(rackNode?.custom_data);
         const devices: any[] = (cd.devices || []).sort((a: any, b: any) => b.unit - a.unit);
         return (
           <RackDevicePickerModal

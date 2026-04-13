@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { useParams } from "next/navigation";
 import { apiUrl } from "@/lib/api";
+import { safeJsonParse, safeFetch } from "@/lib/error-handler";
 import { Network, MapIcon } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useKumaMonitorsSimple } from "@/hooks/useKumaMonitors";
@@ -32,10 +33,9 @@ export default function MapViewPage() {
 
   // Fetch map data
   useEffect(() => {
-    fetch(apiUrl(`/api/maps/${mapId}`))
-      .then((r) => r.json())
+    safeFetch<MapData>(apiUrl(`/api/maps/${mapId}`), undefined, "ViewMap")
       .then((data) => {
-        setMapData(data);
+        if (data) setMapData(data);
         setLoading(false);
       })
       .catch(() => setLoading(false));
@@ -105,7 +105,7 @@ export default function MapViewPage() {
         initialEdges={mapData.edges}
         kumaMonitors={monitors}
         kumaConnected={connected}
-        initialViewState={mapData.view_state ? JSON.parse(mapData.view_state) : undefined}
+        initialViewState={mapData.view_state ? safeJsonParse(mapData.view_state) : undefined}
         onSave={() => {}}
         readonly={true}
       />

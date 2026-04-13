@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { apiUrl } from "@/lib/api";
+import { safeFetch } from "@/lib/error-handler";
 import { ChangelogBadge, ChangelogModal } from "@/components/ChangelogModal";
 
 // ── Types ────────────────────────────────────────────────────────
@@ -194,9 +195,8 @@ export default function AlertsPage() {
       if (useCustomDates && dateFrom && dateTo) {
         url = apiUrl(`/api/kuma/timeline?hours=${h}&from=${encodeURIComponent(dateFrom)}&to=${encodeURIComponent(dateTo)}`);
       }
-      const res = await fetch(url);
-      const data = await res.json();
-      let sorted: TimelineEvent[] = (data.events || []).sort(
+      const data = await safeFetch<{ events?: TimelineEvent[]; monitors?: any[] }>(url, undefined, "AlertsPage");
+      let sorted: TimelineEvent[] = (data?.events || []).sort(
         (a: TimelineEvent, b: TimelineEvent) => new Date(b.time).getTime() - new Date(a.time).getTime()
       );
       if (useCustomDates && dateFrom && dateTo) {
@@ -205,7 +205,7 @@ export default function AlertsPage() {
         sorted = sorted.filter(e => { const t = new Date(e.time).getTime(); return t >= fromMs && t <= toMs; });
       }
       setEvents(sorted);
-      setMonitors(data.monitors || []);
+      setMonitors(data?.monitors || []);
       lastFetchRef.current = Date.now();
     } catch { /* silent */ }
     finally { setLoading(false); }

@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import html2canvas from "html2canvas";
 import { apiUrl } from "@/lib/api";
+import { safeFetch } from "@/lib/error-handler";
 import { motion, AnimatePresence } from "framer-motion";
 import { Tooltip } from "react-tooltip";
 import "react-tooltip/dist/react-tooltip.css";
@@ -409,9 +410,8 @@ export default function RackDesignerDrawer({ open, onClose, nodeId, nodes, monit
       const formData = new FormData();
       formData.append("file", file);
       formData.append("devices", JSON.stringify(currentDevices));
-      const res = await fetch(apiUrl("/api/rack-import"), { method: "POST", body: formData });
-      if (!res.ok) throw new Error(await res.text());
-      const data = await res.json();
+      const data = await safeFetch<{ devices: typeof devices }>(apiUrl("/api/rack-import"), { method: "POST", body: formData }, "RackImport");
+      if (!data) throw new Error("Import failed");
       setDevices(data.devices);
       setEditingDevice(null);
       setSelectedDeviceId(null);

@@ -9,9 +9,27 @@ export interface ChangelogEntry {
   items: string[];
 }
 
-export const APP_VERSION = "2.0.0";
+export const APP_VERSION = "2.1.0";
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: "2.1.0",
+    date: "2026-04-13",
+    title: "Robustez y Refactoring",
+    items: [
+      "safeFetch centralizado: ~45 fetch() reemplazados con manejo de errores unificado",
+      "safeJsonParse tipado: 55+ JSON.parse inseguros reemplazados con tipos TypeScript estrictos",
+      "Interfaces NodeCustomData, EdgeCustomData, RackDeviceSummary para custom_data tipado",
+      "Fix: navegación a mapas enlazados — la página parpadeaba sin abrir el mapa",
+      "Custom hooks extraídos: useUndoHistory, useMapVisibility, useAnimationTimers, useAlertSound, useMapKeyboard",
+      "Reducción de ~60 a ~35 usos de 'any' en LeafletMapView",
+      "Reducción de ~100 líneas en LeafletMapView via extracción de hooks",
+      "Middleware de autenticación: todas las rutas API ahora requieren sesión válida",
+      "Tokens de sesión criptográficos (HMAC-SHA256) en vez de base64 predecible",
+      "Rate limiting en login: 5 intentos / 15 min por IP",
+      "RackDesignerDrawer modularizado: constantes, formularios y ExportModal extraídos a rack/",
+    ],
+  },
   {
     version: "2.0.0",
     date: "2026-04-10",

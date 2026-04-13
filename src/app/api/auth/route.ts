@@ -1,7 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 import { loginSchema } from "@/lib/validation";
+import {
+  createSessionToken,
+  checkLoginRateLimit,
+  resetLoginRateLimit,
+} from "@/lib/auth";
 
 export async function POST(req: NextRequest) {
+  // Rate limiting by IP
+  const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
+  if (!checkLoginRateLimit(ip)) {
+    return NextResponse.json(
+      { error: "Demasiados intentos. Intente de nuevo en 15 minutos." },
+      { status: 429 }
+    );
+  }
+
   const body = await req.json();
   const parsed = loginSchema.safeParse(body);
   if (!parsed.success) {
@@ -13,9 +27,6 @@ export async function POST(req: NextRequest) {
   const { username, password } = parsed.data;
 
   // Validate against KUMA_USER/KUMA_PASS env vars.
-  // The main server already authenticates against Kuma on startup via Socket.IO,
-  // so we trust these credentials are correct. This avoids opening a second
-  // Socket.IO connection per login which times out in Kuma 2.0.
   const validUser = process.env.KUMA_USER || "";
   const validPass = process.env.KUMA_PASS || "";
 
@@ -25,14 +36,16 @@ export async function POST(req: NextRequest) {
   }
 
   if (username !== validUser || password !== validPass) {
-    console.warn(`[Auth] Failed login attempt for user: ${username}`);
+    console.warn(`[Auth] Failed login attempt for user: ${username} from ${ip}`);
     return NextResponse.json({ error: "Credenciales incorrectas" }, { status: 401 });
   }
 
-  // Generate a simple session token (base64 of username:timestamp)
-  const token = Buffer.from(`${username}:${Date.now()}`).toString("base64");
+  // Success — reset rate limit and create secure token
+  resetLoginRateLimit(ip);
 
+  const token = createSessionToken(username);
   console.log(`[Auth] Successful login for user: ${username}`);
+
   const response = NextResponse.json({ success: true, username });
   response.cookies.set("kumamap_session", token, {
     httpOnly: true,
@@ -48,4 +61,3 @@ export async function DELETE() {
   response.cookies.delete("kumamap_session");
   return response;
 }
-

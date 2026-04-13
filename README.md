@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Version-1.8.0-3b82f6?style=flat-square" alt="v1.8.0" />
+  <img src="https://img.shields.io/badge/Version-2.1.0-3b82f6?style=flat-square" alt="v2.1.0" />
   <img src="https://img.shields.io/badge/Next.js-16-black?style=flat-square&logo=next.js" alt="Next.js 16" />
   <img src="https://img.shields.io/badge/React-19-61DAFB?style=flat-square&logo=react" alt="React 19" />
   <img src="https://img.shields.io/badge/TypeScript-5-3178C6?style=flat-square&logo=typescript" alt="TypeScript" />
@@ -368,6 +368,13 @@ kumamap/
 │   │       ├── ContextMenu.tsx       # Menú contextual
 │   │       ├── AlertBadge.tsx        # Alertas con timer real
 │   │       └── ...
+│   ├── hooks/
+│   │   ├── useKumaMonitors.ts       # WebSocket de monitores Kuma
+│   │   ├── useUndoHistory.ts        # Historial de undo genérico
+│   │   ├── useMapVisibility.ts      # Toggles de visibilidad de capas
+│   │   ├── useAnimationTimers.ts    # setTimeout con auto-limpieza
+│   │   ├── useAlertSound.ts         # Beep de notificación Web Audio
+│   │   └── useMapKeyboard.ts        # Atajos de teclado del editor
 │   └── lib/
 │       ├── db.ts                     # SQLite local (mapas)
 │       ├── kuma-db.ts                # Acceso a DB Uptime Kuma
@@ -400,10 +407,33 @@ KumaMap actúa como proxy: el browser nunca se conecta directamente a Kuma. Toda
 
 ## Changelog
 
-### v1.8.0 — Accordion de Puertos + 9U *(actual)*
+### v2.1.0 — Robustez y Refactoring *(actual)*
 
-- **Accordion inline de puertos**: al seleccionar un puerto en la tabla (Switch o Patch Panel), el panel de propiedades se expande directamente debajo de esa fila con animación suave. Antes el panel aparecía al final del modal sin importar qué fila se seleccionara.
-- **Rack 9U**: agregado a las opciones de tamaño junto con 3, 6, 12, 18, 22, 24, 42, 45 y 48 U.
+- **safeFetch centralizado**: ~45 llamadas `fetch()` reemplazadas con wrapper unificado de manejo de errores y logging
+- **safeJsonParse tipado**: 55+ `JSON.parse` inseguros reemplazados con parsing tipado (`NodeCustomData`, `EdgeCustomData`, `RackDeviceSummary`)
+- **Fix navegación de mapas enlazados**: corregido bug donde la página parpadeaba sin abrir el mapa al hacer click en un nodo con mapa asignado
+- **Custom hooks extraídos**: `useUndoHistory`, `useMapVisibility`, `useAnimationTimers`, `useAlertSound`, `useMapKeyboard` — reducen ~100 líneas de LeafletMapView
+- **Reducción de `any`**: de ~60 a ~35 usos en el componente principal
+
+---
+
+### v2.0.0 — Centro de Alertas Profesional
+
+- Nueva página completa de Centro de Alertas (/alerts) con modo NOC
+- Hub de seguimiento de alertas en panel lateral
+- Timer animado en tiempo real para caídas activas
+- Notificación sonora para alertas GRAVE
+- Aceptación masiva (ACK) de alertas por grupo
+- KPIs en tiempo real: disponibilidad, graves, leves, seguidos
+- Gráfico de tendencia de alertas por hora
+- Filtros rápidos 15m / 30m / 1h / 6h / 24h / 3d / 7d / 30d
+
+---
+
+### v1.8.0 — Accordion de Puertos + 9U
+
+- **Accordion inline de puertos**: panel de propiedades expandible directamente debajo de la fila seleccionada
+- **Rack 9U**: agregado a las opciones de tamaño
 
 ---
 

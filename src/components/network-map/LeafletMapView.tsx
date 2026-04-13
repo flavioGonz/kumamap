@@ -47,6 +47,11 @@ import AlertManagerPanel, { useAlertCount, type TimelineEvent } from "./AlertMan
 import FOVColorPickerModal from "./FOVColorPickerModal";
 import LensPickerModal from "./LensPickerModal";
 import NewMonitorModal from "./NewMonitorModal";
+import { useUndoHistory } from "@/hooks/useUndoHistory";
+import { useAnimationTimers } from "@/hooks/useAnimationTimers";
+import { useMapVisibility } from "@/hooks/useMapVisibility";
+import { useAlertSound } from "@/hooks/useAlertSound";
+import { useMapKeyboard } from "@/hooks/useMapKeyboard";
 
 
 interface SavedNode {
@@ -420,8 +425,8 @@ export default function LeafletMapView({
   const downSinceFetchedRef = useRef(false); // flag to avoid duplicate fetches
   const downtimeMarkersRef = useRef<Map<string, any>>(new Map()); // edgeId → L.marker with timer
   const downtimeIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  // Track animation timers to prevent accumulation on rapid events
-  const animTimersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
+  // Track animation timers to prevent accumulation on rapid events (extracted hook)
+  const { safeTimeout } = useAnimationTimers();
   const polylinesRef = useRef<Map<string, any>>(new Map());
   const fovLayersRef = useRef<Map<string, any>>(new Map());
   const camHandlesRef = useRef<Map<string, any>>(new Map());
@@ -491,21 +496,21 @@ export default function LeafletMapView({
   // New Monitor creation
   const [newMonitorModalOpen, setNewMonitorModalOpen] = useState(false);
   const [sizePickerNodeId, setSizePickerNodeId] = useState<string | null>(null);
-  const [overlayOpacity, setOverlayOpacity] = useState(initialViewState?.overlayOpacity ?? 0);
   const [assignModalOpen, setAssignModalOpen] = useState(false);
   const [assignNodeId, setAssignNodeId] = useState<string>("");
   const [assignSearch, setAssignSearch] = useState("");
   const [colorPickerOpen, setColorPickerOpen] = useState(false);
   const [autoSaveEnabled, setAutoSaveEnabled] = useState(false);
-  const [straightEdges, setStraightEdges] = useState(initialViewState?.straightEdges ?? false);
-  const straightEdgesRef = useRef(initialViewState?.straightEdges ?? false);
-  useEffect(() => { straightEdgesRef.current = straightEdges; }, [straightEdges]);
-  const [showNodes, setShowNodes] = useState(initialViewState?.showNodes ?? true);
-  const [showLinks, setShowLinks] = useState(true);
-  const [showCameras, setShowCameras] = useState(true);
-  const [showFOV, setShowFOV] = useState(true);
-  const [showLabels, setShowLabels] = useState(initialViewState?.showLabels ?? true);
-  const [mapRotation, setMapRotation] = useState(0);
+  // ── Visibility, rotation, opacity, straight-edges (extracted hook) ──
+  const visibility = useMapVisibility(
+    { markersRef, polylinesRef, fovLayersRef, camHandlesRef, mapRef, nodesRef: nodesRef as any, containerRef },
+    { showNodes: initialViewState?.showNodes, showLabels: initialViewState?.showLabels, straightEdges: initialViewState?.straightEdges, overlayOpacity: initialViewState?.overlayOpacity },
+  );
+  const {
+    showNodes, setShowNodes, showLinks, setShowLinks, showCameras, setShowCameras,
+    showFOV, setShowFOV, showLabels, setShowLabels, mapRotation, setMapRotation,
+    overlayOpacity, setOverlayOpacity, straightEdges, setStraightEdges, straightEdgesRef,
+  } = visibility;
   const [timeDragging, setTimeDragging] = useState(false);
   const [polygonMode, setPolygonMode] = useState(false);
   const polygonPointsRef = useRef<[number, number][]>([]);
@@ -534,41 +539,17 @@ export default function LeafletMapView({
   const [lensPickerOpen, setLensPickerOpen] = useState(false);
   const [lensPickerNodeId, setLensPickerNodeId] = useState<string>("");
 
-  // Undo history
-  const undoStackRef = useRef<Array<{ nodes: SavedNode[]; edges: SavedEdge[] }>>([]);
-  // Tracked setTimeout — auto-removes from set when fired, cleaned up on unmount
-  const safeTimeout = (fn: () => void, delay: number) => {
-    const id = setTimeout(() => { animTimersRef.current.delete(id); fn(); }, delay);
-    animTimersRef.current.add(id);
-    return id;
-  };
-
-  // Cleanup all animation timers on unmount
-  useEffect(() => {
-    return () => { animTimersRef.current.forEach(id => clearTimeout(id)); animTimersRef.current.clear(); };
-  }, []);
-
-  const MAX_UNDO = 30;
-
-  function pushUndo() {
-    undoStackRef.current.push({
-      nodes: structuredClone(nodesRef.current),
-      edges: structuredClone(edgesRef.current),
-    });
-    if (undoStackRef.current.length > MAX_UNDO) undoStackRef.current.shift();
-  }
-
-  function performUndo() {
-    const prev = undoStackRef.current.pop();
-    if (!prev) { toast.info("Nada que deshacer"); return; }
-    nodesRef.current = prev.nodes;
-    edgesRef.current = prev.edges;
-    if (LRef.current && mapRef.current) {
-      renderNodes(LRef.current, mapRef.current);
-      renderEdges(LRef.current, mapRef.current);
-    }
-    toast.success("Deshecho");
-  }
+  // ── Undo history (extracted hook) ──
+  const { pushUndo, performUndo } = useUndoHistory<SavedNode, SavedEdge>(
+    nodesRef,
+    edgesRef,
+    () => {
+      if (LRef.current && mapRef.current) {
+        renderNodes(LRef.current, mapRef.current);
+        renderEdges(LRef.current, mapRef.current);
+      }
+    },
+  );
 
   // Re-render nodes when editMode changes so draggable flag updates
   useEffect(() => {
@@ -580,110 +561,22 @@ export default function LeafletMapView({
   // Keep ref in sync with state for closures
   useEffect(() => { linkSourceRef.current = linkSource; }, [linkSource]);
 
-  // Visibility toggles — show/hide layers without re-rendering
-  useEffect(() => {
-    markersRef.current.forEach((marker, nodeId) => {
-      const node = nodesRef.current.find(n => n.id === nodeId);
-      const isCamera = node?.icon === "_camera";
-      const isLabel = node?.icon === "_textLabel";
-      const isWaypoint = node?.icon === "_waypoint";
+  // Visibility toggles + map rotation are handled by useMapVisibility hook
 
-      const setMarkerVisible = (visible: boolean) => {
-        marker.getElement()?.style.setProperty("display", visible ? "" : "none");
-        // Tooltip sigue la visibilidad del nodo
-        const tooltip = marker.getTooltip();
-        const tooltipEl = tooltip?.getElement?.();
-        if (tooltipEl) tooltipEl.style.setProperty("display", visible ? "" : "none");
-      };
+  // ── Keyboard shortcuts (extracted hook) ──
+  useMapKeyboard({
+    onEscape: () => {
+      if (linkSourceRef.current) cancelLinkCreation();
+      if (polygonPointsRef.current.length > 0) cancelPolygon();
+      setPolygonMode(false);
+      setCtxMenu(null);
+    },
+    onUndo: performUndo,
+    onSave: () => handleSave(),
+  });
 
-      if (isCamera) {
-        setMarkerVisible(showCameras);
-      } else if (isWaypoint) {
-        // Waypoints son nodos intermedios sin monitor — no tienen sentido sin los links
-        setMarkerVisible(showLinks);
-      } else if (isLabel) {
-        // Labels tipo texto: solo se ocultan con el toggle de etiquetas
-        setMarkerVisible(showLabels);
-      } else {
-        // Nodos normales: ícono sigue showNodes; el tooltip de nombre sigue showLabels
-        marker.getElement()?.style.setProperty("display", showNodes ? "" : "none");
-        const tooltip = marker.getTooltip();
-        const tooltipEl = tooltip?.getElement?.();
-        if (tooltipEl) tooltipEl.style.setProperty("display", (showNodes && showLabels) ? "" : "none");
-      }
-    });
-    // FOV polygons
-    fovLayersRef.current.forEach((layer) => {
-      if (showFOV && showCameras) {
-        try { if (!mapRef.current?.hasLayer(layer)) mapRef.current?.addLayer(layer); } catch {}
-      } else {
-        try { mapRef.current?.removeLayer(layer); } catch {}
-      }
-    });
-    // Camera edit handles (rotation, range, fov angle)
-    camHandlesRef.current.forEach((handle, key) => {
-      const shouldShow = showCameras && showFOV;
-      if (shouldShow) {
-        try { if (!mapRef.current?.hasLayer(handle)) mapRef.current?.addLayer(handle); } catch {}
-      } else {
-        try { mapRef.current?.removeLayer(handle); } catch {}
-      }
-    });
-    // Links
-    polylinesRef.current.forEach((line) => {
-      if (showLinks) {
-        try { if (!mapRef.current?.hasLayer(line)) mapRef.current?.addLayer(line); } catch {}
-      } else {
-        try { mapRef.current?.removeLayer(line); } catch {}
-      }
-    });
-  }, [showNodes, showLinks, showCameras, showFOV, showLabels]);
-
-  // Map rotation — applies to both livemap and image mode
-  useEffect(() => {
-    if (containerRef.current) {
-      containerRef.current.style.transform = mapRotation ? `rotate(${mapRotation}deg)` : "";
-      containerRef.current.style.transformOrigin = "center center";
-    }
-  }, [mapRotation]);
-
-  // Keyboard shortcuts: Escape = cancel link, Ctrl+Z = undo, Ctrl+S = save
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        if (linkSourceRef.current) { cancelLinkCreation(); e.preventDefault(); }
-        if (polygonPointsRef.current.length > 0) { cancelPolygon(); e.preventDefault(); }
-        setPolygonMode(false);
-        setCtxMenu(null);
-      }
-      if ((e.ctrlKey || e.metaKey) && e.key === "z") {
-        e.preventDefault();
-        performUndo();
-      }
-      if ((e.ctrlKey || e.metaKey) && e.key === "s") {
-        e.preventDefault();
-        handleSave();
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, []);
-
-  const playAlertSound = useCallback(() => {
-    try {
-      const ctx = new AudioContext();
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.frequency.value = 800;
-      osc.type = "sine";
-      gain.gain.value = 0.15;
-      osc.start();
-      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.5);
-      osc.stop(ctx.currentTime + 0.5);
-    } catch {}
-  }, []);
+  // ── Alert sound (extracted hook) ──
+  const playAlertSound = useAlertSound();
 
   const handleTimeDragging = useCallback((d: boolean) => setTimeDragging(d), []);
 

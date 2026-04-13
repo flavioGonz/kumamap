@@ -36,12 +36,7 @@ interface AlertManagerPanelProps {
 }
 
 // ── Helpers ────────────────────────────────────────────────────────
-const STATUS_MAP: Record<number, { label: string; color: string; bg: string; icon: string }> = {
-  0: { label: "CAÍDO", color: "#ef4444", bg: "rgba(239,68,68,0.12)", icon: "▼" },
-  1: { label: "ACTIVO", color: "#22c55e", bg: "rgba(34,197,94,0.10)", icon: "▲" },
-  2: { label: "PENDIENTE", color: "#f59e0b", bg: "rgba(245,158,11,0.10)", icon: "●" },
-  3: { label: "MANT.", color: "#6366f1", bg: "rgba(99,102,241,0.10)", icon: "◆" },
-};
+import { STATUS_MAP } from "@/constants/ui";
 
 function timeAgo(date: Date): string {
   const now = Date.now();
@@ -896,8 +891,8 @@ export default function AlertManagerPanel({ open, onClose, sidebarWidth, onCount
         });
       }
       setEvents(sorted);
-    } catch {
-      /* silently fail */
+    } catch (err) {
+      console.error("[AlertManager] Error fetching events:", err);
     } finally {
       setLoading(false);
     }

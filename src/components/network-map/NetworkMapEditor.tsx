@@ -112,7 +112,7 @@ function CanvasInner({
   useEffect(() => {
     fetch(apiUrl("/api/maps")).then(r => r.json()).then((data: any[]) => {
       setAllMaps(data.map(m => ({ id: m.id, name: m.name })));
-    }).catch(() => {});
+    }).catch(err => console.error("[NetworkMapEditor] Failed to load maps:", err));
   }, []);
 
   // Load map

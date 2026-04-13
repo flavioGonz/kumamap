@@ -550,8 +550,8 @@ export default function LeafletMapView({
 
   function pushUndo() {
     undoStackRef.current.push({
-      nodes: JSON.parse(JSON.stringify(nodesRef.current)),
-      edges: JSON.parse(JSON.stringify(edgesRef.current)),
+      nodes: structuredClone(nodesRef.current),
+      edges: structuredClone(edgesRef.current),
     });
     if (undoStackRef.current.length > MAX_UNDO) undoStackRef.current.shift();
   }
@@ -883,7 +883,7 @@ export default function LeafletMapView({
         failPopupsRef.current.set(`alert-${ev.monitorId}`, popup);
 
         // Auto-remove after 12s
-        setTimeout(() => { try { map.removeLayer(popup); failPopupsRef.current.delete(`alert-${ev.monitorId}`); } catch {} }, 12000);
+        safeTimeout(() => { try { map.removeLayer(popup); failPopupsRef.current.delete(`alert-${ev.monitorId}`); } catch {} }, 12000);
       }, 1000);
     }
   }, [kumaMonitors, readonly]);

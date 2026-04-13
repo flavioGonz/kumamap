@@ -13,11 +13,12 @@ export const STATUS_COLORS: Record<number, string> = {
 };
 
 // ── Status Labels & UI Metadata ──
-export const STATUS_META: Record<number, { label: string; color: string; bg: string; icon: string }> = {
-  0: { label: "Caído",        color: "#ef4444", bg: "rgba(239,68,68,0.1)",  icon: "▼" },
-  1: { label: "Activo",       color: "#22c55e", bg: "rgba(34,197,94,0.1)",  icon: "▲" },
-  2: { label: "Pendiente",    color: "#f59e0b", bg: "rgba(245,158,11,0.1)", icon: "●" },
-  3: { label: "Mantenimiento", color: "#8b5cf6", bg: "rgba(139,92,246,0.1)", icon: "◆" },
+// Used by AlertManagerPanel, alerts page, and timeline components
+export const STATUS_MAP: Record<number, { label: string; color: string; bg: string; icon: string }> = {
+  0: { label: "CAÍDO",     color: "#ef4444", bg: "rgba(239,68,68,0.12)",  icon: "▼" },
+  1: { label: "ACTIVO",    color: "#22c55e", bg: "rgba(34,197,94,0.10)",  icon: "▲" },
+  2: { label: "PENDIENTE", color: "#f59e0b", bg: "rgba(245,158,11,0.10)", icon: "●" },
+  3: { label: "MANT.",     color: "#6366f1", bg: "rgba(99,102,241,0.10)", icon: "◆" },
 };
 
 // ── Default gray for unknown status ──

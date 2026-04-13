@@ -31,6 +31,7 @@ import InputModal from "./InputModal";
 import IconPickerModal from "./IconPickerModal";
 import NodeSizeModal from "./NodeSizeModal";
 import LeafletMapView from "./LeafletMapView";
+import MapErrorBoundary from "./MapErrorBoundary";
 import { apiUrl } from "@/lib/api";
 import { Pencil, Type, Plus } from "lucide-react";
 import Tooltip from "./Tooltip";
@@ -952,6 +953,7 @@ function CanvasInner({
     return (
       <div className="h-screen w-screen relative">
         <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleFileChange} />
+        <MapErrorBoundary>
         <LeafletMapView
           mapId={mapId}
           mapName={mapData.name}
@@ -994,6 +996,7 @@ function CanvasInner({
             } catch { toast.error("Error al guardar"); }
           }}
         />
+        </MapErrorBoundary>
         <MonitorPanel
           monitors={filteredMonitors}
           connected={kumaConnected}
@@ -1315,6 +1318,7 @@ function CanvasInner({
             </div>
           </div>
         ) : bgType === "livemap" ? (
+          <MapErrorBoundary>
           <LeafletMapView
             mapId={mapId}
             mapName={mapData?.name}
@@ -1356,6 +1360,7 @@ function CanvasInner({
               finally { setSaving(false); }
             }}
           />
+          </MapErrorBoundary>
         ) : (
           <ReactFlow
             nodes={visibleNodes}

@@ -20,22 +20,9 @@ import {
   ServerCog,
 } from "lucide-react";
 
-export interface KumaMonitor {
-  id: number;
-  name: string;
-  type: string;
-  url: string;
-  hostname: string;
-  active: boolean;
-  interval?: number;
-  parent?: number | null;
-  status?: number;
-  ping?: number | null;
-  msg?: string;
-  uptime24?: number;
-  tags?: { name: string; color: string }[];
-  downTime?: string; // ISO timestamp of when this monitor first went DOWN in the current streak
-}
+// Import from centralized types, re-export for backward compatibility
+import type { KumaMonitor } from "@/lib/types";
+export type { KumaMonitor } from "@/lib/types";
 
 interface MonitorPanelProps {
   monitors: KumaMonitor[];

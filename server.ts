@@ -30,12 +30,16 @@ app.prepare().then(() => {
   let lastMonitors: KumaMonitor[] = [];
   let lastConnected: boolean = false;
 
-  // Poll kuma monitors and emit to clients (kuma fires monitorList on changes)
+  // Poll kuma monitors and emit to clients — uses lightweight hash instead of JSON.stringify
+  let lastHash = "";
   setInterval(() => {
     const monitors = kuma.getMonitors();
     const isConnected = kuma.isConnected;
+    // Build a fast hash from id:status:ping for change detection
+    const hash = `${isConnected}|${monitors.map(m => `${m.id}:${m.status}:${m.ping ?? ""}`).join(",")}`;
 
-    if (isConnected !== lastConnected || JSON.stringify(monitors) !== JSON.stringify(lastMonitors)) {
+    if (hash !== lastHash) {
+      lastHash = hash;
       lastConnected = isConnected;
       lastMonitors = monitors;
       io.emit("kuma:monitors", { connected: isConnected, monitors });

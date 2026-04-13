@@ -1,31 +1,8 @@
 import { io, Socket } from "socket.io-client";
+import type { KumaMonitor, KumaHeartbeat } from "./types";
 
-export interface KumaMonitor {
-  id: number;
-  name: string;
-  type: string;
-  url: string;
-  hostname: string;
-  port: number;
-  interval: number;
-  active: boolean;
-  parent: number | null; // parent group monitor ID
-  tags: { name: string; color: string }[];
-  status?: number; // 0=down, 1=up, 2=pending, 3=maintenance
-  ping?: number | null;
-  msg?: string;
-  uptime24?: number;
-  downTime?: string; // ISO timestamp of when this monitor first went DOWN in the current streak
-}
-
-export interface KumaHeartbeat {
-  monitorID: number;
-  status: number;
-  time: string;
-  msg: string;
-  ping: number | null;
-  duration: number;
-}
+// Re-export types for backward compatibility
+export type { KumaMonitor, KumaHeartbeat } from "./types";
 
 const MAX_HISTORY = 1440; // Keep last 1440 heartbeats per monitor (~24h at 60s intervals)
 
@@ -37,6 +14,7 @@ class KumaClient {
   private connected = false;
   private authenticated = false;
   private initPromise: Promise<void> | null = null;
+  private pollIntervalId: ReturnType<typeof setInterval> | null = null;
 
   get isConnected() {
     return this.connected && this.authenticated;
@@ -191,7 +169,8 @@ class KumaClient {
 
       // Periodic monitor list refresh — ensures new sensors are detected
       // even if Kuma doesn't fire monitorList for additions
-      setInterval(() => {
+      if (this.pollIntervalId) clearInterval(this.pollIntervalId);
+      this.pollIntervalId = setInterval(() => {
         if (this.socket && this.authenticated) {
           this.socket.emit("getMonitorList", (res: any) => {
             if (res?.ok && res.data) {
@@ -234,6 +213,7 @@ class KumaClient {
         console.log("[Kuma] Disconnected");
         this.connected = false;
         this.authenticated = false;
+        if (this.pollIntervalId) { clearInterval(this.pollIntervalId); this.pollIntervalId = null; }
       });
 
       this.socket.on("connect_error", (err: Error) => {

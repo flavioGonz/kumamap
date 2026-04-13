@@ -903,13 +903,24 @@ export default function AlertManagerPanel({ open, onClose, sidebarWidth, onCount
     }
   }, [useCustomDates, dateFrom, dateTo]);
 
+  // Keep fetchHours in a ref so the polling interval doesn't recreate on every change
+  const fetchHoursRef = useRef(fetchHours);
+  fetchHoursRef.current = fetchHours;
+  const fetchEventsRef = useRef(fetchEvents);
+  fetchEventsRef.current = fetchEvents;
+
   // ── Initial load + poll ──
   useEffect(() => {
     if (!open) return;
-    fetchEvents(fetchHours);
-    pollRef.current = setInterval(() => fetchEvents(fetchHours), POLL_INTERVAL);
+    fetchEventsRef.current(fetchHoursRef.current);
+    pollRef.current = setInterval(() => fetchEventsRef.current(fetchHoursRef.current), POLL_INTERVAL);
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
-  }, [open, fetchHours, fetchEvents]);
+  }, [open]);
+
+  // Refetch when filters change (but don't recreate interval)
+  useEffect(() => {
+    if (open) fetchEventsRef.current(fetchHoursRef.current);
+  }, [fetchHours, fetchEvents, open]);
 
   // ── Acknowledge handler ──
   const handleAcknowledge = useCallback((key: string) => {

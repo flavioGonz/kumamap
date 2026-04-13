@@ -108,7 +108,7 @@ interface LeafletMapViewProps {
 // ── Rack Device Picker Modal ─────────────────────────────────────────────────
 // Must be a proper component (not IIFE) so React hooks are valid
 
-const STATUS_COLORS_RACK: Record<number, string> = { 0: "#ef4444", 1: "#22c55e", 2: "#f59e0b", 3: "#8b5cf6" };
+import { STATUS_COLORS as STATUS_COLORS_RACK } from "@/constants/ui";
 
 function RackDevicePickerModal({
   devices,
@@ -418,6 +418,8 @@ export default function LeafletMapView({
   const downSinceFetchedRef = useRef(false); // flag to avoid duplicate fetches
   const downtimeMarkersRef = useRef<Map<string, any>>(new Map()); // edgeId → L.marker with timer
   const downtimeIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Track animation timers to prevent accumulation on rapid events
+  const animTimersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
   const polylinesRef = useRef<Map<string, any>>(new Map());
   const fovLayersRef = useRef<Map<string, any>>(new Map());
   const camHandlesRef = useRef<Map<string, any>>(new Map());
@@ -532,6 +534,18 @@ export default function LeafletMapView({
 
   // Undo history
   const undoStackRef = useRef<Array<{ nodes: SavedNode[]; edges: SavedEdge[] }>>([]);
+  // Tracked setTimeout — auto-removes from set when fired, cleaned up on unmount
+  const safeTimeout = (fn: () => void, delay: number) => {
+    const id = setTimeout(() => { animTimersRef.current.delete(id); fn(); }, delay);
+    animTimersRef.current.add(id);
+    return id;
+  };
+
+  // Cleanup all animation timers on unmount
+  useEffect(() => {
+    return () => { animTimersRef.current.forEach(id => clearTimeout(id)); animTimersRef.current.clear(); };
+  }, []);
+
   const MAX_UNDO = 30;
 
   function pushUndo() {
@@ -694,11 +708,11 @@ export default function LeafletMapView({
       el.style.transition = "filter 0.2s";
       // CSS vibration class
       el.classList.add("node-vibrate");
-      setTimeout(() => {
+      safeTimeout(() => {
         el.style.filter = `drop-shadow(0 0 10px ${flashColor}) brightness(1.2)`;
         el.style.transition = "filter 1.5s";
       }, 1500);
-      setTimeout(() => {
+      safeTimeout(() => {
         el.style.filter = "";
         el.style.transition = "filter 1s";
         el.classList.remove("node-vibrate");
@@ -707,7 +721,7 @@ export default function LeafletMapView({
 
     // Pulse rings around the node (visual only, don't move node)
     for (let i = 0; i < 2; i++) {
-      setTimeout(() => {
+      safeTimeout(() => {
         const ring = L.circleMarker(nodeLatLng, {
           radius: 8, color: flashColor, fillColor: flashColor,
           fillOpacity: 0.3, weight: 2, opacity: 0.7,
@@ -723,7 +737,7 @@ export default function LeafletMapView({
     }
 
     // Open event popup AFTER a short delay (ensures map settled)
-    setTimeout(() => {
+    safeTimeout(() => {
       const mon = kumaMonitors.find(m => m.id === monitorId);
       const existing = failPopupsRef.current.get(node.id);
       if (existing) { try { map.removeLayer(existing); } catch {} }
@@ -777,7 +791,7 @@ export default function LeafletMapView({
         });
       };
 
-      setTimeout(() => { try { map.removeLayer(popup); failPopupsRef.current.delete(node.id); } catch {} }, 8000);
+      safeTimeout(() => { try { map.removeLayer(popup); failPopupsRef.current.delete(node.id); } catch {} }, 8000);
     }, 300);
   }, [kumaMonitors]);
 
@@ -803,15 +817,15 @@ export default function LeafletMapView({
       map.flyTo(nodeLatLng, targetZoom, { animate: true, duration: 1 });
 
       // Flash marker after flyTo completes
-      setTimeout(() => {
+      safeTimeout(() => {
         const marker = markersRef.current.get(node.id);
         if (marker?.getElement()) {
           const el = marker.getElement();
           el.style.filter = `drop-shadow(0 0 20px ${flashColor}) drop-shadow(0 0 40px ${flashColor}) brightness(1.8)`;
           el.style.transition = "filter 0.2s";
           el.classList.add("node-vibrate");
-          setTimeout(() => { el.style.filter = `drop-shadow(0 0 10px ${flashColor}) brightness(1.2)`; el.style.transition = "filter 1.5s"; }, 1500);
-          setTimeout(() => { el.style.filter = ""; el.style.transition = "filter 1s"; el.classList.remove("node-vibrate"); }, 4000);
+          safeTimeout(() => { el.style.filter = `drop-shadow(0 0 10px ${flashColor}) brightness(1.2)`; el.style.transition = "filter 1.5s"; }, 1500);
+          safeTimeout(() => { el.style.filter = ""; el.style.transition = "filter 1s"; el.classList.remove("node-vibrate"); }, 4000);
         }
 
         // Pulse ring
@@ -829,7 +843,7 @@ export default function LeafletMapView({
       }, 600);
 
       // Show event tooltip popup on the node
-      setTimeout(() => {
+      safeTimeout(() => {
         const existing = failPopupsRef.current.get(`alert-${ev.monitorId}`);
         if (existing) { try { map.removeLayer(existing); } catch {} }
 

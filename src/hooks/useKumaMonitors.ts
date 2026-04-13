@@ -12,6 +12,8 @@ export function useKumaMonitors() {
   const prevStatusRef = useRef<Map<number, number>>(new Map());
 
   useEffect(() => {
+    let cleanup: (() => void) | undefined;
+
     import("@/lib/socket").then(({ getSocket }) => {
       const socket = getSocket();
 
@@ -34,13 +36,18 @@ export function useKumaMonitors() {
         setMonitors(newMonitors);
       };
 
-      socket.on("kuma:monitors", handleMonitors);
-      socket.on("disconnect", () => setConnected(false));
+      const handleDisconnect = () => setConnected(false);
 
-      return () => {
+      socket.on("kuma:monitors", handleMonitors);
+      socket.on("disconnect", handleDisconnect);
+
+      cleanup = () => {
         socket.off("kuma:monitors", handleMonitors);
+        socket.off("disconnect", handleDisconnect);
       };
     });
+
+    return () => { cleanup?.(); };
   }, []);
 
   return { monitors, connected };
@@ -52,6 +59,8 @@ export function useKumaMonitorsSimple() {
   const [connected, setConnected] = useState(false);
 
   useEffect(() => {
+    let cleanup: (() => void) | undefined;
+
     import("@/lib/socket").then(({ getSocket }) => {
       const socket = getSocket();
 
@@ -60,13 +69,18 @@ export function useKumaMonitorsSimple() {
         setMonitors(data.monitors || []);
       };
 
-      socket.on("kuma:monitors", handleMonitors);
-      socket.on("disconnect", () => setConnected(false));
+      const handleDisconnect = () => setConnected(false);
 
-      return () => {
+      socket.on("kuma:monitors", handleMonitors);
+      socket.on("disconnect", handleDisconnect);
+
+      cleanup = () => {
         socket.off("kuma:monitors", handleMonitors);
+        socket.off("disconnect", handleDisconnect);
       };
     });
+
+    return () => { cleanup?.(); };
   }, []);
 
   return { monitors, connected };

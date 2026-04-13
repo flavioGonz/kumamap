@@ -955,6 +955,7 @@ function CanvasInner({
         <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleFileChange} />
         <MapErrorBoundary>
         <LeafletMapView
+          key={mapId}
           mapId={mapId}
           mapName={mapData.name}
           kumaMonitors={kumaMonitors}
@@ -1320,6 +1321,7 @@ function CanvasInner({
         ) : bgType === "livemap" ? (
           <MapErrorBoundary>
           <LeafletMapView
+            key={mapId}
             mapId={mapId}
             mapName={mapData?.name}
             kumaMonitors={kumaMonitors}

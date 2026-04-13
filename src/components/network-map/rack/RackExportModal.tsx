@@ -4,7 +4,7 @@ import React, { useState } from "react";
 import { X, FileText, FileSpreadsheet, Printer, FileDown, Download } from "lucide-react";
 import { motion } from "framer-motion";
 import { apiUrl } from "@/lib/api";
-import type { RackDevice } from "../RackDesignerDrawer";
+import type { RackDevice } from "./rack-types";
 import { TYPE_META } from "./rack-constants";
 
 // ── Export Modal ──────────────────────────────────────────────────────────────

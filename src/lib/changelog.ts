@@ -27,7 +27,9 @@ export const CHANGELOG: ChangelogEntry[] = [
       "Middleware de autenticación: todas las rutas API ahora requieren sesión válida",
       "Tokens de sesión criptográficos (HMAC-SHA256) en vez de base64 predecible",
       "Rate limiting en login: 5 intentos / 15 min por IP",
-      "RackDesignerDrawer modularizado: constantes, formularios y ExportModal extraídos a rack/",
+      "RackDesignerDrawer modularizado: 3386→1133 líneas (-67%) con 9 sub-módulos en rack/",
+      "Tipos compartidos de rack extraídos a rack-types.ts (RackDevice, PatchPort, SwitchPort, etc.)",
+      "RackWizard, DeviceEditor, DeviceList, PortEditors extraídos como componentes independientes",
     ],
   },
   {

@@ -64,14 +64,15 @@ export async function GET(req: NextRequest) {
       const vf = vfParts.join(",");
 
       ffmpeg = spawn("ffmpeg", [
-        // ── Input options (low-latency RTSP) ──
+        // ── Input options (ultra low-latency RTSP) ──
         "-rtsp_transport", "tcp",
         "-rtsp_flags", "prefer_tcp",
         "-timeout", "5000000",           // 5s connection timeout (microseconds)
-        "-analyzeduration", "500000",    // 0.5s analyze (faster start)
-        "-probesize", "500000",          // 500KB probe (faster start)
-        "-fflags", "+nobuffer+discardcorrupt",
+        "-analyzeduration", "100000",    // 100ms analyze (minimal)
+        "-probesize", "100000",          // 100KB probe (minimal)
+        "-fflags", "+nobuffer+discardcorrupt+genpts",
         "-flags", "low_delay",
+        "-avioflags", "direct",          // Direct I/O, no buffering
         "-i", rawUrl,
 
         // ── Output options (MJPEG to stdout) ──
@@ -80,6 +81,7 @@ export async function GET(req: NextRequest) {
         "-q:v", String(quality),         // JPEG quality (2=high, 8=medium, 15=low)
         "-f", "mjpeg",                   // MJPEG output
         "-flush_packets", "1",           // Flush after each frame
+        "-max_delay", "0",               // No output delay
         "pipe:1",
       ], {
         stdio: ["ignore", "pipe", "pipe"],

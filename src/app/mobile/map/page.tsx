@@ -74,16 +74,16 @@ function MobileMapViewer() {
   const fetchData = useCallback(async () => {
     if (!mapId) return;
     try {
-      const [mapRes, stateRes, kumaRes] = await Promise.all([
+      // /api/maps/[id] returns map + nodes + edges all in one response
+      const [mapRes, kumaRes] = await Promise.all([
         fetch(apiUrl(`/api/maps/${mapId}`)),
-        fetch(apiUrl(`/api/maps/${mapId}/state`)),
         fetch(apiUrl("/api/kuma")),
       ]);
-      if (mapRes.ok) setMapData(await mapRes.json());
-      if (stateRes.ok) {
-        const state = await stateRes.json();
-        setNodes(state.nodes || []);
-        setEdges(state.edges || []);
+      if (mapRes.ok) {
+        const data = await mapRes.json();
+        setMapData(data);
+        setNodes(data.nodes || []);
+        setEdges(data.edges || []);
       }
       if (kumaRes.ok) {
         const data = await kumaRes.json();

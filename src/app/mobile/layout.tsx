@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import BottomTabBar from "@/components/mobile/BottomTabBar";
 
 export const metadata: Metadata = {
   title: "KumaMap Mobile",
@@ -22,7 +23,6 @@ export const viewport: Viewport = {
 export default function MobileLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen bg-[#0a0a0a] text-[#ededed]">
-      {/* Service Worker registration */}
       <script
         dangerouslySetInnerHTML={{
           __html: `
@@ -33,6 +33,7 @@ export default function MobileLayout({ children }: { children: React.ReactNode }
         }}
       />
       {children}
+      <BottomTabBar />
     </div>
   );
 }

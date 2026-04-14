@@ -3,6 +3,9 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { apiUrl } from "@/lib/api";
 import Link from "next/link";
+import PullToRefresh from "@/components/mobile/PullToRefresh";
+import { SkeletonList } from "@/components/mobile/Skeleton";
+import { useToast } from "@/components/mobile/MobileToast";
 
 interface MapSummary {
   id: string;
@@ -20,18 +23,12 @@ interface KumaMonitor {
   ping: number | null;
 }
 
-const STATUS_COLORS: Record<number, string> = {
-  1: "#22c55e",
-  0: "#ef4444",
-  2: "#f59e0b",
-  3: "#6b7280",
-};
-
 export default function MobileHome() {
   const [maps, setMaps] = useState<MapSummary[]>([]);
   const [monitors, setMonitors] = useState<Map<number, KumaMonitor>>(new Map());
   const [loading, setLoading] = useState(true);
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
+  const { show } = useToast();
 
   const fetchData = useCallback(async () => {
     try {
@@ -47,15 +44,23 @@ export default function MobileHome() {
         setMonitors(monMap);
       }
       setLastUpdate(new Date());
-    } catch {}
-    finally { setLoading(false); }
-  }, []);
+    } catch {
+      show("Sin conexión al servidor", "error");
+    } finally {
+      setLoading(false);
+    }
+  }, [show]);
 
   useEffect(() => {
     fetchData();
     const interval = setInterval(fetchData, 15000);
     return () => clearInterval(interval);
   }, [fetchData]);
+
+  const handleRefresh = useCallback(async () => {
+    await fetchData();
+    show("Actualizado", "success");
+  }, [fetchData, show]);
 
   const getMapStatus = (map: MapSummary) => {
     if (map.monitor_ids.length === 0) return { up: 0, down: 0, pending: 0, total: 0 };
@@ -71,7 +76,7 @@ export default function MobileHome() {
   };
 
   return (
-    <div className="flex flex-col min-h-screen">
+    <PullToRefresh onRefresh={handleRefresh}>
       {/* Header */}
       <header className="sticky top-0 z-50 px-4 py-3 safe-top" style={{ background: "rgba(10,10,10,0.95)", backdropFilter: "blur(12px)", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
         <div className="flex items-center justify-between">
@@ -89,15 +94,10 @@ export default function MobileHome() {
             <div>
               <h1 className="text-sm font-bold text-[#ededed]">KumaMap</h1>
               <p className="text-[9px] text-[#555]">
-                {lastUpdate ? `Actualizado ${lastUpdate.toLocaleTimeString("es")}` : "Cargando..."}
+                {lastUpdate ? `${lastUpdate.toLocaleTimeString("es")}` : "Cargando..."}
               </p>
             </div>
           </div>
-          <button onClick={fetchData} className="h-8 w-8 rounded-xl flex items-center justify-center text-[#888] hover:text-[#ededed] active:scale-95 transition-all" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={loading ? "animate-spin" : ""}>
-              <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" /><path d="M21 3v5h-5" />
-            </svg>
-          </button>
         </div>
       </header>
 
@@ -132,19 +132,12 @@ export default function MobileHome() {
 
       {/* Map list */}
       <div className="flex-1 px-4 py-4 space-y-2.5">
-        {loading && (
-          <div className="flex flex-col items-center py-16">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth="2" className="animate-spin mb-3">
-              <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" /><path d="M21 3v5h-5" />
-            </svg>
-            <p className="text-[11px] text-[#555]">Cargando mapas...</p>
-          </div>
-        )}
+        {loading && <SkeletonList count={4} />}
 
         {!loading && maps.length === 0 && (
           <div className="flex flex-col items-center py-16 text-[#555]">
             <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="mb-3 opacity-30">
-              <rect width="18" height="18" x="3" y="3" rx="2" /><path d="M3 9h18" /><path d="M9 21V9" />
+              <polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6" />
             </svg>
             <p className="text-xs">No hay mapas creados</p>
           </div>
@@ -214,6 +207,6 @@ export default function MobileHome() {
       <style>{`
         .safe-top { padding-top: env(safe-area-inset-top, 0); }
       `}</style>
-    </div>
+    </PullToRefresh>
   );
 }

@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import BottomTabBar from "@/components/mobile/BottomTabBar";
+import { MobileToastProvider } from "@/components/mobile/MobileToast";
 
 export const metadata: Metadata = {
   title: "KumaMap Mobile",
@@ -32,8 +33,10 @@ export default function MobileLayout({ children }: { children: React.ReactNode }
           `,
         }}
       />
-      {children}
-      <BottomTabBar />
+      <MobileToastProvider>
+        {children}
+        <BottomTabBar />
+      </MobileToastProvider>
     </div>
   );
 }

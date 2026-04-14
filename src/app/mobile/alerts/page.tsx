@@ -2,6 +2,9 @@
 
 import React, { useEffect, useState, useCallback } from "react";
 import { apiUrl } from "@/lib/api";
+import PullToRefresh from "@/components/mobile/PullToRefresh";
+import { SkeletonList } from "@/components/mobile/Skeleton";
+import { useToast } from "@/components/mobile/MobileToast";
 
 interface KumaMonitor {
   id: number;
@@ -16,6 +19,7 @@ export default function MobileAlerts() {
   const [monitors, setMonitors] = useState<KumaMonitor[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<"all" | "down" | "up">("down");
+  const { show } = useToast();
 
   const fetchData = useCallback(async () => {
     try {
@@ -24,9 +28,11 @@ export default function MobileAlerts() {
         const data = await res.json();
         setMonitors(data.monitors || []);
       }
-    } catch {}
+    } catch {
+      show("Sin conexión", "error");
+    }
     finally { setLoading(false); }
-  }, []);
+  }, [show]);
 
   useEffect(() => {
     fetchData();
@@ -43,8 +49,13 @@ export default function MobileAlerts() {
   const downCount = monitors.filter((m) => m.status === 0).length;
   const upCount = monitors.filter((m) => m.status === 1).length;
 
+  const handleRefresh = useCallback(async () => {
+    await fetchData();
+    show("Actualizado", "success");
+  }, [fetchData, show]);
+
   return (
-    <div className="flex flex-col min-h-screen">
+    <PullToRefresh onRefresh={handleRefresh}>
       {/* Header */}
       <header
         className="sticky top-0 z-50 px-4 py-3"
@@ -89,13 +100,7 @@ export default function MobileAlerts() {
 
       {/* Monitor list */}
       <div className="flex-1 px-4 space-y-1.5 pb-4">
-        {loading && (
-          <div className="flex items-center justify-center py-12">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth="2" className="animate-spin">
-              <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" /><path d="M21 3v5h-5" />
-            </svg>
-          </div>
-        )}
+        {loading && <SkeletonList count={5} />}
 
         {!loading && filtered.length === 0 && (
           <div className="flex flex-col items-center py-12 text-[#555]">
@@ -147,6 +152,6 @@ export default function MobileAlerts() {
           50% { box-shadow: 0 0 12px rgba(239,68,68,0.8); }
         }
       `}</style>
-    </div>
+    </PullToRefresh>
   );
 }

@@ -18,10 +18,15 @@ const PUBLIC_PATHS = [
 // API routes accessible via GET without auth (needed by public /view/[id] kiosk)
 const PUBLIC_GET_PREFIXES = [
   "/api/maps/",            // GET single map by id
+  "/api/kuma",             // monitor data (needed by mobile PWA + kiosk)
   "/api/kuma/down-since",  // monitor down-since timestamps
   "/api/kuma/history/",    // monitor ping history
   "/api/kuma/stream",      // SSE real-time events
   "/api/camera/snapshot",  // camera snapshot proxy
+  "/api/camera/rtsp-stream", // RTSP → MJPEG transcoding proxy
+  "/api/health",           // health check (monitored by Uptime Kuma)
+  "/api/version",          // version info for OTA updater
+  "/api/push",             // push subscription GET (VAPID public key)
 ];
 
 function isPublicPath(pathname: string): boolean {

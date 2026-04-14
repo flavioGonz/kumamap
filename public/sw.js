@@ -1,4 +1,4 @@
-const CACHE_NAME = "kumamap-mobile-v1";
+const CACHE_NAME = "kumamap-mobile-v2";
 const PRECACHE_URLS = ["/mobile", "/mobile/offline"];
 
 // Install: precache shell
@@ -48,6 +48,53 @@ self.addEventListener("fetch", (event) => {
         return response;
       }).catch(() => cached);
       return cached || fetchPromise;
+    })
+  );
+});
+
+// ── Push Notifications ──────────────────────────────────────────────────────
+
+self.addEventListener("push", (event) => {
+  if (!event.data) return;
+
+  let payload;
+  try {
+    payload = event.data.json();
+  } catch {
+    payload = { title: "KumaMap", body: event.data.text() };
+  }
+
+  const title = payload.title || "KumaMap";
+  const options = {
+    body: payload.body || "",
+    icon: "/icon-192.svg",
+    badge: "/icon-192.svg",
+    vibrate: [200, 100, 200],
+    tag: payload.tag || "kumamap-alert",
+    renotify: true,
+    data: payload.data || {},
+    actions: payload.actions || [],
+  };
+
+  event.waitUntil(self.registration.showNotification(title, options));
+});
+
+// Click on notification → open /mobile or focus existing tab
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+
+  const urlToOpen = event.notification.data?.url || "/mobile";
+
+  event.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clients) => {
+      // Focus existing tab if open
+      for (const client of clients) {
+        if (client.url.includes("/mobile") && "focus" in client) {
+          return client.focus();
+        }
+      }
+      // Open new tab
+      return self.clients.openWindow(urlToOpen);
     })
   );
 });

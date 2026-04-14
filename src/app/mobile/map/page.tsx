@@ -64,6 +64,7 @@ function MobileMapViewer() {
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<SelectedNode | null>(null);
   const [filterStatus, setFilterStatus] = useState<number | null>(null);
+  const [mapReady, setMapReady] = useState(false);
 
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<any>(null);
@@ -141,33 +142,35 @@ function MobileMapViewer() {
       }
 
       mapInstanceRef.current = map;
-
-      // Fit to nodes if any
-      if (nodes.length > 0) {
-        const latlngs = nodes.filter((n) => n.icon !== "_waypoint").map((n) => [n.x, n.y] as [number, number]);
-        if (latlngs.length > 0) {
-          map.fitBounds(L.latLngBounds(latlngs), { padding: [40, 40], maxZoom: isImage ? undefined : 16 });
-        }
-      }
+      setMapReady(true);
     });
 
     return () => {
       if (mapInstanceRef.current) {
         mapInstanceRef.current.remove();
         mapInstanceRef.current = null;
+        setMapReady(false);
       }
     };
   }, [mapData]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Render markers
+  // Render markers — depends on mapReady to ensure Leaflet is initialized
   useEffect(() => {
     const L = LRef.current;
     const map = mapInstanceRef.current;
-    if (!L || !map) return;
+    if (!L || !map || !mapReady) return;
 
-    // Clear existing markers
+    // Clear existing layers
     markersRef.current.forEach((m) => { try { map.removeLayer(m); } catch {} });
     markersRef.current.clear();
+
+    // Fit to nodes on first render
+    const isImage = mapData?.background_type === "image" || mapData?.background_type === "grid";
+    const visibleNodes = nodes.filter((n) => n.icon !== "_waypoint" && n.icon !== "_textLabel");
+    if (visibleNodes.length > 0) {
+      const latlngs = visibleNodes.map((n) => [n.x, n.y] as [number, number]);
+      map.fitBounds(L.latLngBounds(latlngs), { padding: [40, 40], maxZoom: isImage ? undefined : 16 });
+    }
 
     // Draw edges
     edges.forEach((edge) => {
@@ -188,7 +191,7 @@ function MobileMapViewer() {
 
       const cd = safeJsonParse<NodeCustomData>(node.custom_data);
       const mon = node.kuma_monitor_id ? monitors.get(node.kuma_monitor_id) : null;
-      const status = mon?.status ?? (node.icon === "_rack" ? -1 : -1);
+      const status = mon?.status ?? -1;
       const color = status >= 0 ? (statusColors[status] || "#6b7280") : (cd.nodeColor || "#6b7280");
       const scale = cd.nodeSize || 1.0;
       const size = Math.round(24 * scale);
@@ -228,7 +231,7 @@ function MobileMapViewer() {
       });
       markersRef.current.set(node.id, marker);
     });
-  }, [nodes, edges, monitors]);
+  }, [nodes, edges, monitors, mapReady]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Filtered node list for bottom drawer
   const filteredNodes = useMemo(() => {

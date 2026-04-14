@@ -9,9 +9,27 @@ export interface ChangelogEntry {
   items: string[];
 }
 
-export const APP_VERSION = "2.1.0";
+export const APP_VERSION = "2.2.0";
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: "2.2.0",
+    date: "2026-04-14",
+    title: "PWA Mobile, RTSP Liveview y Herramientas de Operaciones",
+    items: [
+      "PWA Mobile: app instalable en celular con lista de mapas, visor de mapa con Leaflet, detalle de nodos y modo offline (/mobile)",
+      "RTSP Liveview: transcoding server-side RTSP → MJPEG via ffmpeg con FPS configurable y templates para Hikvision, Dahua y Axis",
+      "Click en cámara abre popup PiP con stream en vivo (antes requería click derecho)",
+      "Fix proxy de cámaras: IPs privadas ahora permitidas (cámaras están en red local)",
+      "Fix timer de downtime: cada monitor muestra su tiempo individual real desde la DB en vez de 00:00:00",
+      "Health Check: /api/health verifica conexión Kuma, DB, disco, memoria y frescura de heartbeats",
+      "Deploy automático: botón para desplegar a servidores remotos via SSH (git pull → build → pm2 restart)",
+      "Métricas de rendimiento del servidor en tiempo real",
+      "Node Templates: 17 plantillas predefinidas en 6 categorías para crear nodos rápidamente",
+      "Auto-Discovery: escaneo de subred con ping sweep + DNS reverse lookup para descubrir hosts",
+      "Modularización: 3 modals extraídos de LeafletMapView (-310 líneas)",
+    ],
+  },
   {
     version: "2.1.0",
     date: "2026-04-13",

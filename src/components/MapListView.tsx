@@ -384,6 +384,32 @@ export default function MapListView({
           </a>
           </Tooltip>
 
+          {/* ── Metrics ── */}
+          <Tooltip content="Métricas del servidor" placement="bottom">
+          <a
+            href={`${process.env.NEXT_PUBLIC_BASE_PATH || ""}/metrics`}
+            className="flex h-8 w-8 items-center justify-center rounded-lg transition-all"
+            style={{ color: "#555", border: "1px solid transparent" }}
+            onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = "#a78bfa"; (e.currentTarget as HTMLElement).style.borderColor = "rgba(167,139,250,0.25)"; (e.currentTarget as HTMLElement).style.background = "rgba(167,139,250,0.08)"; }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = "#555"; (e.currentTarget as HTMLElement).style.borderColor = "transparent"; (e.currentTarget as HTMLElement).style.background = "transparent"; }}
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 20V10M12 20V4M6 20v-6"/></svg>
+          </a>
+          </Tooltip>
+
+          {/* ── Deploy ── */}
+          <Tooltip content="Deploy a servidores" placement="bottom">
+          <button
+            onClick={() => setDeployOpen(true)}
+            className="flex h-8 w-8 items-center justify-center rounded-lg transition-all"
+            style={{ color: "#555", border: "1px solid transparent" }}
+            onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = "#fb923c"; (e.currentTarget as HTMLElement).style.borderColor = "rgba(251,146,60,0.25)"; (e.currentTarget as HTMLElement).style.background = "rgba(251,146,60,0.08)"; }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = "#555"; (e.currentTarget as HTMLElement).style.borderColor = "transparent"; (e.currentTarget as HTMLElement).style.background = "transparent"; }}
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/></svg>
+          </button>
+          </Tooltip>
+
           {/* ── Changelog ── */}
           <Tooltip content="Novedades" placement="bottom">
             <ChangelogBadge onClick={() => setChangelogOpen(true)} />
@@ -403,19 +429,6 @@ export default function MapListView({
           >
             <Plus className="h-3.5 w-3.5" />
             Nuevo
-          </button>
-          </Tooltip>
-
-          {/* ── Deploy ── */}
-          <Tooltip content="Deploy a servidores" placement="bottom">
-          <button
-            onClick={() => setDeployOpen(true)}
-            className="flex h-8 w-8 items-center justify-center rounded-lg transition-all"
-            style={{ color: "#555", border: "1px solid transparent" }}
-            onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = "#fb923c"; (e.currentTarget as HTMLElement).style.borderColor = "rgba(251,146,60,0.25)"; (e.currentTarget as HTMLElement).style.background = "rgba(251,146,60,0.08)"; }}
-            onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = "#555"; (e.currentTarget as HTMLElement).style.borderColor = "transparent"; (e.currentTarget as HTMLElement).style.background = "transparent"; }}
-          >
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/></svg>
           </button>
           </Tooltip>
 

@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Version-2.1.0-3b82f6?style=flat-square" alt="v2.1.0" />
+  <img src="https://img.shields.io/badge/Version-2.2.0-3b82f6?style=flat-square" alt="v2.2.0" />
   <img src="https://img.shields.io/badge/Next.js-16-black?style=flat-square&logo=next.js" alt="Next.js 16" />
   <img src="https://img.shields.io/badge/React-19-61DAFB?style=flat-square&logo=react" alt="React 19" />
   <img src="https://img.shields.io/badge/TypeScript-5-3178C6?style=flat-square&logo=typescript" alt="TypeScript" />
@@ -67,12 +67,32 @@ Construido para **equipos NOC**, **MSPs**, **ISPs** e **ingenieros de infraestru
 - Reporte exportable a PDF o Excel (.xlsx) con 4 hojas detalladas
 - Soporte de racks de 3U a 48U (incluyendo 9U)
 
+### Cámaras IP y RTSP Liveview
+- Proxy de snapshot con autenticación HTTP Digest (Hikvision, Dahua, Axis)
+- RTSP Liveview: transcoding server-side RTSP → MJPEG via ffmpeg con FPS configurable
+- Templates de URL por fabricante: Hikvision, Dahua, Axis con presets para RTSP, MJPEG y Snapshot
+- Cono de visión configurable con rotación, ángulo y alcance ajustables via drag handles
+- Click en cámara abre popup PiP flotante con stream en vivo
+
+### PWA Mobile (/mobile)
+- App instalable en celular — abrir `http://server:3000/mobile` y "Add to Home Screen"
+- Lista de mapas con estado global UP/DOWN y barra de salud por mapa
+- Visor de mapa con Leaflet, marcadores coloreados por estado, filtros y detalle de nodo
+- Service worker para caché offline y modo sin conexión
+- Auto-refresh cada 15 segundos
+
 ### Herramientas de Mapa
-- Cámaras RTSP con proxy de snapshot (autenticación Digest), cono de visión configurable
+- Node Templates: 17 plantillas predefinidas en 6 categorías para crear nodos rápidamente
+- Auto-Discovery: escaneo de subred con ICMP ping sweep y DNS reverse lookup
 - Time Machine: reproducción histórica del estado de monitores
 - Portapapeles cross-mapa: copiá un nodo de un mapa y pegalo en otro conservando todos sus datos
 - Menú contextual (click derecho) en nodos, racks, cámaras y espacio vacío del mapa
 - Ocultar etiquetas: también oculta los tooltips de nombres de nodos
+
+### Operaciones
+- Health Check (`/api/health`): verifica conexión Kuma, DB, disco, memoria y frescura de heartbeats — monitoreable por Uptime Kuma
+- Deploy automático: botón en la UI para desplegar a múltiples servidores remotos via SSH (git pull → build → pm2 restart)
+- Métricas de rendimiento del servidor en tiempo real
 
 ---
 
@@ -360,7 +380,12 @@ kumamap/
 │   │       │   └── stream/           # SSE estado en tiempo real
 │   │       ├── rack-report/          # Exportar rack a PDF
 │   │       ├── rack-report-xlsx/     # Exportar rack a Excel (ExcelJS)
-│   │       └── camera/snapshot/      # Proxy snapshot RTSP (Digest Auth)
+│   │       ├── camera/
+│   │       │   ├── snapshot/         # Proxy snapshot (Digest Auth)
+│   │       │   └── rtsp-stream/     # RTSP → MJPEG via ffmpeg
+│   │       ├── discovery/            # Subnet auto-discovery (ping sweep)
+│   │       ├── health/               # Health check endpoint
+│   │       └── deploy/               # Remote deploy via SSH
 │   ├── components/
 │   │   └── network-map/
 │   │       ├── LeafletMapView.tsx    # Mapa principal Leaflet
@@ -407,7 +432,22 @@ KumaMap actúa como proxy: el browser nunca se conecta directamente a Kuma. Toda
 
 ## Changelog
 
-### v2.1.0 — Robustez y Refactoring *(actual)*
+### v2.2.0 — PWA Mobile, RTSP Liveview y Operaciones *(actual)*
+
+- **PWA Mobile**: app instalable en celular con lista de mapas, visor interactivo con Leaflet, detalle de nodos y modo offline
+- **RTSP Liveview**: transcoding RTSP → MJPEG via ffmpeg con templates Hikvision/Dahua/Axis y FPS configurable
+- **Node Templates**: 17 plantillas predefinidas en 6 categorías para crear nodos rápidamente
+- **Auto-Discovery**: escaneo de subred con ICMP ping sweep + DNS reverse lookup
+- **Health Check** (`/api/health`): endpoint monitoreable por Uptime Kuma con checks de DB, disco, memoria y heartbeats
+- **Deploy automático**: botón en UI para desplegar a servidores remotos via SSH
+- **Métricas de rendimiento**: monitoreo en tiempo real del servidor
+- **Fix**: timer de downtime mostraba 00:00:00 — ahora cada monitor muestra su tiempo real individual
+- **Fix**: proxy de cámaras bloqueaba IPs privadas (las cámaras están en la red local)
+- **Fix**: mobile PWA necesitaba Suspense boundary para Next.js App Router
+
+---
+
+### v2.1.0 — Robustez y Refactoring
 
 - **safeFetch centralizado**: ~45 llamadas `fetch()` reemplazadas con wrapper unificado de manejo de errores y logging
 - **safeJsonParse tipado**: 55+ `JSON.parse` inseguros reemplazados con parsing tipado (`NodeCustomData`, `EdgeCustomData`, `RackDeviceSummary`)

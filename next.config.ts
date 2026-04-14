@@ -39,8 +39,8 @@ const nextConfig: NextConfig = {
               "default-src 'self'",
               // Scripts: self + inline (React needs it) + eval (Leaflet/html2canvas)
               "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
-              // Styles: self + inline (Tailwind, dynamic styles)
-              "style-src 'self' 'unsafe-inline'",
+              // Styles: self + inline (Tailwind, dynamic styles) + unpkg (Leaflet CSS for mobile)
+              "style-src 'self' 'unsafe-inline' https://unpkg.com",
               // Images: self + tile servers + data URIs (base64 rack photos) + camera snapshots (any IP)
               "img-src 'self' data: blob: https://*.tile.openstreetmap.org https://server.arcgisonline.com https://*.basemaps.cartocdn.com",
               // Fonts

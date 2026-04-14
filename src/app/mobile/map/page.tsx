@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState, useCallback, useRef, useMemo } from "react";
+import React, { Suspense, useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { apiUrl } from "@/lib/api";
@@ -53,7 +53,7 @@ interface SelectedNode {
   customData: NodeCustomData;
 }
 
-export default function MobileMapViewer() {
+function MobileMapViewer() {
   const searchParams = useSearchParams();
   const mapId = searchParams.get("id") || "";
 
@@ -405,6 +405,7 @@ export default function MobileMapViewer() {
       )}
 
       {/* Leaflet CSS + animations */}
+      {/* eslint-disable-next-line @next/next/no-css-tags */}
       <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
       <style>{`
         .mobile-marker { background: none !important; border: none !important; }
@@ -416,5 +417,19 @@ export default function MobileMapViewer() {
         .safe-bottom { padding-bottom: env(safe-area-inset-bottom, 0); }
       `}</style>
     </div>
+  );
+}
+
+export default function MobileMapPage() {
+  return (
+    <Suspense fallback={
+      <div className="flex items-center justify-center min-h-screen bg-[#0a0a0a]">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth="2" className="animate-spin">
+          <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" /><path d="M21 3v5h-5" />
+        </svg>
+      </div>
+    }>
+      <MobileMapViewer />
+    </Suspense>
   );
 }

@@ -23,13 +23,12 @@ export async function GET() {
     // Get app version from changelog
     let appVersion = "unknown";
     try {
-      const changelog = require("@/lib/changelog");
-      appVersion = changelog.APP_VERSION;
+      const { APP_VERSION } = await import("@/lib/changelog");
+      appVersion = APP_VERSION;
     } catch {
-      // Fallback: read from package.json
+      // Fallback: read version from git tag or commit
       try {
-        const pkg = require("../../package.json");
-        appVersion = pkg.version;
+        appVersion = execSync("git describe --tags --always", { cwd, encoding: "utf-8" }).trim();
       } catch {}
     }
 

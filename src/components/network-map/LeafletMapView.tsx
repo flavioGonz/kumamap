@@ -56,6 +56,9 @@ import { formatElapsed, formatSince, buildSparkline } from "./map-utils";
 import NodeEditModal, { type NodeEditConfig } from "./NodeEditModal";
 import AssignMonitorModal from "./AssignMonitorModal";
 import LinkedMapsModal from "./LinkedMapsModal";
+import NodeTemplateModal from "./NodeTemplateModal";
+import SubnetDiscoveryModal from "./SubnetDiscoveryModal";
+import type { NodeTemplate } from "@/lib/node-templates";
 
 
 interface SavedNode {
@@ -525,6 +528,8 @@ export default function LeafletMapView({
   const [importMapSearch, setImportMapSearch] = useState("");
   const [importingMapId, setImportingMapId] = useState<string | null>(null);
   const [nodeMapModalNodeId, setNodeMapModalNodeId] = useState<string | null>(null);
+  const [templateModalOpen, setTemplateModalOpen] = useState(false);
+  const [discoveryModalOpen, setDiscoveryModalOpen] = useState(false);
   const [timeMachineOpen, setTimeMachineOpen] = useState(false);
   const [timeMachineTime, setTimeMachineTime] = useState<Date | null>(null);
   const [tmFocusMonitorId, setTmFocusMonitorId] = useState<number | null>(null);
@@ -3588,6 +3593,20 @@ export default function LeafletMapView({
             <span className="text-[10px] font-semibold hidden xl:inline">Nodo</span>
           </button>
           </Tooltip>
+          <Tooltip content="Agregar desde plantilla" placement="bottom">
+          <button onClick={() => setTemplateModalOpen(true)}
+            className="group flex items-center gap-1 rounded-xl px-2 py-1.5 text-[#888] hover:text-[#ededed] hover:bg-white/[0.06] transition-all">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M12 8v8"/><path d="M8 12h8"/></svg>
+            <span className="text-[10px] font-semibold hidden xl:inline">Plantilla</span>
+          </button>
+          </Tooltip>
+          <Tooltip content="Auto-descubrir dispositivos en subnet" placement="bottom">
+          <button onClick={() => setDiscoveryModalOpen(true)}
+            className="group flex items-center gap-1 rounded-xl px-2 py-1.5 text-[#888] hover:text-[#ededed] hover:bg-white/[0.06] transition-all">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>
+            <span className="text-[10px] font-semibold hidden xl:inline">Descubrir</span>
+          </button>
+          </Tooltip>
           <Tooltip content="Agregar etiqueta" placement="bottom">
           <button onClick={() => {
             if (!mapRef.current) return;
@@ -4112,6 +4131,58 @@ export default function LeafletMapView({
         title={linkModalData.edgeId ? "Editar conexion" : "Nueva conexion"}
         snmpMonitors={kumaMonitors.filter((m) => m.type === "snmp" || m.type === "push" || m.type === "port")}
       />
+
+      {/* ═══ Node Template Modal ═══ */}
+      {templateModalOpen && (
+        <NodeTemplateModal
+          onSelect={(template: NodeTemplate) => {
+            if (!mapRef.current) return;
+            const center = mapRef.current.getCenter();
+            const id = `node-${Date.now()}`;
+            const cd: Record<string, unknown> = { ...template.customData };
+            if (template.color) cd.nodeColor = template.color;
+            if (template.size !== 1.0) cd.nodeSize = template.size;
+            nodesRef.current = [...nodesRef.current, {
+              id, kuma_monitor_id: null, label: template.defaultLabel,
+              x: center.lat, y: center.lng, icon: template.icon,
+              custom_data: Object.keys(cd).length > 0 ? JSON.stringify(cd) : undefined,
+            }];
+            if (LRef.current) { renderNodes(LRef.current, mapRef.current); renderEdges(LRef.current, mapRef.current); }
+            setTemplateModalOpen(false);
+            toast.success(`${template.name} agregado`);
+          }}
+          onClose={() => setTemplateModalOpen(false)}
+        />
+      )}
+
+      {/* ═══ Subnet Discovery Modal ═══ */}
+      {discoveryModalOpen && (
+        <SubnetDiscoveryModal
+          existingIps={new Set(nodesRef.current.map((n) => { const cd = safeJsonParse<NodeCustomData>(n.custom_data); return cd.ip; }).filter(Boolean) as string[])}
+          onAddNodes={(nodes) => {
+            if (!mapRef.current) return;
+            const center = mapRef.current.getCenter();
+            const offset = 0.001; // slight spread so nodes don't stack
+            nodes.forEach((n, i) => {
+              const angle = (2 * Math.PI * i) / nodes.length;
+              const spread = Math.min(nodes.length * 0.0003, 0.005);
+              const id = `disc-${Date.now()}-${i}`;
+              const cd: Record<string, unknown> = { ...n.customData };
+              if (n.color) cd.nodeColor = n.color;
+              if (n.size !== 1.0) cd.nodeSize = n.size;
+              nodesRef.current = [...nodesRef.current, {
+                id, kuma_monitor_id: null, label: n.label,
+                x: center.lat + Math.sin(angle) * spread,
+                y: center.lng + Math.cos(angle) * spread,
+                icon: n.icon,
+                custom_data: Object.keys(cd).length > 0 ? JSON.stringify(cd) : undefined,
+              }];
+            });
+            if (LRef.current) { renderNodes(LRef.current, mapRef.current); renderEdges(LRef.current, mapRef.current); }
+          }}
+          onClose={() => setDiscoveryModalOpen(false)}
+        />
+      )}
 
       {/* ═══ Node Edit Modal ═══ */}
       {inputModalOpen && (

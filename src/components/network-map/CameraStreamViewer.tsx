@@ -265,14 +265,15 @@ export default function CameraStreamViewer({ config, cameraName, onClose }: Came
           </div>
         )}
 
-        {/* RTSP via ffmpeg proxy — renders as MJPEG multipart stream */}
+        {/* RTSP via ffmpeg proxy — snapshot preload + MJPEG stream swap */}
         {config.streamType === "rtsp" && (
-          <img
-            src={rtspProxyUrl}
-            alt={cameraName}
-            style={{ width: "100%", height: "100%", objectFit: "contain", display: error ? "none" : "block" }}
+          <RtspWithPreload
+            rtspUrl={rtspProxyUrl}
+            cameraName={cameraName}
+            originalRtspUrl={config.streamUrl}
             onLoad={() => { setLoading(false); setError(false); }}
             onError={() => { setLoading(false); setError(true); }}
+            hasError={error}
           />
         )}
 
@@ -309,6 +310,71 @@ export default function CameraStreamViewer({ config, cameraName, onClose }: Came
         @keyframes spin { to { transform: rotate(360deg); } }
         @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
       `}</style>
+    </div>
+  );
+}
+
+// ── RTSP with snapshot preload ───────────────────────────────────────────────
+// Shows an instant snapshot from the camera while ffmpeg connects to the RTSP
+// stream. Once the MJPEG stream delivers its first frame, swaps to live video.
+
+function RtspWithPreload({
+  rtspUrl, cameraName, originalRtspUrl, onLoad, onError, hasError,
+}: {
+  rtspUrl: string; cameraName: string; originalRtspUrl: string;
+  onLoad: () => void; onError: () => void; hasError: boolean;
+}) {
+  const [streamReady, setStreamReady] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState<string>("");
+
+  // Build a snapshot URL from the RTSP URL for instant preview
+  useEffect(() => {
+    try {
+      const parsed = new URL(originalRtspUrl);
+      // Convert rtsp://user:pass@host:554/path → http://user:pass@host/ISAPI/Streaming/channels/101/picture
+      const snapshotUrl = `http://${parsed.username}:${parsed.password}@${parsed.hostname}/ISAPI/Streaming/channels/101/picture`;
+      const proxied = apiUrl(`/api/camera/snapshot?url=${encodeURIComponent(snapshotUrl)}&_t=${Date.now()}`);
+      setPreviewUrl(proxied);
+    } catch {
+      // Can't build preview — just show loading
+    }
+  }, [originalRtspUrl]);
+
+  return (
+    <div style={{ position: "relative", width: "100%", height: "100%" }}>
+      {/* Snapshot preview (shows instantly, fades out when stream arrives) */}
+      {previewUrl && !streamReady && (
+        <img
+          src={previewUrl}
+          alt={cameraName}
+          style={{
+            position: "absolute", inset: 0, width: "100%", height: "100%",
+            objectFit: "contain", zIndex: 1,
+            opacity: streamReady ? 0 : 1,
+            transition: "opacity 0.5s ease-out",
+          }}
+          onLoad={onLoad}
+          onError={() => { /* Preview failed, wait for RTSP */ }}
+        />
+      )}
+      {/* RTSP MJPEG stream (starts loading in background) */}
+      <img
+        src={rtspUrl}
+        alt={cameraName}
+        style={{
+          position: streamReady ? "relative" : "absolute",
+          inset: 0, width: "100%", height: "100%",
+          objectFit: "contain", zIndex: 2,
+          display: hasError && !streamReady ? "none" : "block",
+        }}
+        onLoad={() => {
+          if (!streamReady) setStreamReady(true);
+          onLoad();
+        }}
+        onError={() => {
+          if (!streamReady) onError();
+        }}
+      />
     </div>
   );
 }

@@ -108,8 +108,13 @@ export default function CameraStreamViewer({ config, cameraName, onClose }: Came
   }, []);
 
   // ── Stream source ──────────────────────────────────────────────────────────
+  const rtspProxyUrl = config.streamType === "rtsp"
+    ? apiUrl(`/api/camera/rtsp-stream?url=${encodeURIComponent(config.streamUrl)}&fps=${config.rtspFps || 2}`)
+    : "";
   const streamSrc = config.streamType === "snapshot"
     ? proxySnapshotUrl(config.streamUrl, snapshotKey)
+    : config.streamType === "rtsp"
+    ? rtspProxyUrl
     : config.streamUrl;
 
   // ── Styles ──────────────────────────────────────────────────────────────────
@@ -260,6 +265,17 @@ export default function CameraStreamViewer({ config, cameraName, onClose }: Came
           </div>
         )}
 
+        {/* RTSP via ffmpeg proxy — renders as MJPEG multipart stream */}
+        {config.streamType === "rtsp" && (
+          <img
+            src={rtspProxyUrl}
+            alt={cameraName}
+            style={{ width: "100%", height: "100%", objectFit: "contain", display: error ? "none" : "block" }}
+            onLoad={() => { setLoading(false); setError(false); }}
+            onError={() => { setLoading(false); setError(true); }}
+          />
+        )}
+
         {/* Iframe */}
         {config.streamType === "iframe" && (
           <iframe
@@ -279,10 +295,12 @@ export default function CameraStreamViewer({ config, cameraName, onClose }: Came
       </div>
 
       {/* Footer */}
-      {config.streamType === "snapshot" && (
+      {(config.streamType === "snapshot" || config.streamType === "rtsp") && (
         <div style={{ padding: "4px 10px", borderTop: "1px solid rgba(255,255,255,0.05)", background: "rgba(0,0,0,0.3)" }}>
           <span style={{ fontSize: 9, color: "#444" }}>
-            {config.snapshotInterval ? `Refresco cada ${config.snapshotInterval}s` : "~2 fps (vía proxy)"}
+            {config.streamType === "rtsp"
+              ? `RTSP → MJPEG · ${config.rtspFps || 2} fps (ffmpeg)`
+              : config.snapshotInterval ? `Refresco cada ${config.snapshotInterval}s` : "~2 fps (vía proxy)"}
           </span>
         </div>
       )}

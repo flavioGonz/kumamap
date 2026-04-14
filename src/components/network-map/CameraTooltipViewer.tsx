@@ -279,6 +279,22 @@ export default function CameraTooltipViewer({
             </div>
           )}
 
+          {/* RTSP via ffmpeg proxy — renders as MJPEG multipart stream */}
+          {config.streamType === "rtsp" && (
+            <img
+              src={apiUrl(`/api/camera/rtsp-stream?url=${encodeURIComponent(config.streamUrl)}&fps=${config.rtspFps || 2}`)}
+              alt={cameraName}
+              style={{
+                width: "100%",
+                height: "100%",
+                objectFit: "contain",
+                display: error ? "none" : "block",
+              }}
+              onLoad={() => { setLoading(false); setError(false); }}
+              onError={() => { setLoading(false); setError(true); }}
+            />
+          )}
+
           {/* Iframe */}
           {config.streamType === "iframe" && (
             <iframe

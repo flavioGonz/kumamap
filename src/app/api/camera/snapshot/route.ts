@@ -60,66 +60,18 @@ function buildDigestHeader(
 }
 
 // ── SSRF Protection ───────────────────────────────────────────────────────────
-// Block requests to private/reserved IP ranges to prevent internal network probing
+// Camera proxy allows private IPs (cameras live on the local network).
+// Only block loopback and link-local to prevent abuse.
 
-import { isIP } from "net";
-import dns from "dns/promises";
-
-/** CIDR ranges that must NEVER be fetched */
-const BLOCKED_CIDRS = [
-  // IPv4 private & reserved
-  { prefix: "127.",       label: "loopback" },
-  { prefix: "10.",        label: "private-A" },
-  { prefix: "0.",         label: "reserved" },
-  { prefix: "169.254.",   label: "link-local" },
-  // IPv4 172.16.0.0/12
-  // IPv4 192.168.0.0/16
-];
-
-function isPrivateIPv4(ip: string): boolean {
-  if (ip.startsWith("127.") || ip.startsWith("10.") || ip.startsWith("0.") || ip.startsWith("169.254.")) return true;
-  // 172.16.0.0 – 172.31.255.255
-  if (ip.startsWith("172.")) {
-    const second = parseInt(ip.split(".")[1], 10);
-    if (second >= 16 && second <= 31) return true;
-  }
-  // 192.168.0.0/16
-  if (ip.startsWith("192.168.")) return true;
-  return false;
-}
-
-function isPrivateIPv6(ip: string): boolean {
-  const lower = ip.toLowerCase();
-  return lower === "::1" || lower.startsWith("fe80:") || lower.startsWith("fc") || lower.startsWith("fd");
-}
-
-/** Resolve hostname and check ALL addresses against blocked ranges */
-async function validateUrlTarget(hostname: string): Promise<{ ok: boolean; reason?: string }> {
-  // Direct IP literal
-  if (isIP(hostname)) {
-    if (isIP(hostname) === 4 && isPrivateIPv4(hostname)) return { ok: false, reason: "private IPv4" };
-    if (isIP(hostname) === 6 && isPrivateIPv6(hostname)) return { ok: false, reason: "private IPv6" };
-    return { ok: true };
-  }
-  // Block common internal hostnames
+function validateUrlTarget(hostname: string): { ok: boolean; reason?: string } {
   const lower = hostname.toLowerCase();
-  if (lower === "localhost" || lower.endsWith(".local") || lower.endsWith(".internal")) {
-    return { ok: false, reason: `blocked hostname: ${lower}` };
+  if (lower === "localhost" || lower === "127.0.0.1" || lower === "::1") {
+    return { ok: false, reason: "loopback blocked" };
   }
-  // DNS resolution — check ALL resolved IPs (prevents DNS rebinding on multi-A records)
-  try {
-    const addresses = await dns.resolve4(hostname).catch(() => [] as string[]);
-    const addresses6 = await dns.resolve6(hostname).catch(() => [] as string[]);
-    const all = [...addresses, ...addresses6];
-    if (all.length === 0) return { ok: false, reason: "unresolvable hostname" };
-    for (const ip of all) {
-      if (isIP(ip) === 4 && isPrivateIPv4(ip)) return { ok: false, reason: `resolves to private IP ${ip}` };
-      if (isIP(ip) === 6 && isPrivateIPv6(ip)) return { ok: false, reason: `resolves to private IPv6 ${ip}` };
-    }
-    return { ok: true };
-  } catch {
-    return { ok: false, reason: "DNS resolution failed" };
+  if (lower.startsWith("169.254.")) {
+    return { ok: false, reason: "link-local blocked" };
   }
+  return { ok: true };
 }
 
 export async function GET(req: NextRequest) {
@@ -140,8 +92,8 @@ export async function GET(req: NextRequest) {
       return new Response("Only http/https URLs are allowed", { status: 400 });
     }
 
-    // SSRF check: validate the target is not a private/internal address
-    const ssrfCheck = await validateUrlTarget(parsed.hostname);
+    // SSRF check: block loopback/link-local only (private IPs allowed for local cameras)
+    const ssrfCheck = validateUrlTarget(parsed.hostname);
     if (!ssrfCheck.ok) {
       return new Response(`Blocked: ${ssrfCheck.reason}`, { status: 403 });
     }

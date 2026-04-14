@@ -1742,11 +1742,11 @@ export default function LeafletMapView({
           }
           return;
         }
-        // Camera click: open stream tooltip if configured
+        // Camera click: open stream viewer (PiP popup) if configured
         if (isCamera) {
           const camCd = safeJsonParse<NodeCustomData>(node.custom_data);
           if (camCd.streamUrl) {
-            // Compute screen position of the marker for tooltip anchor
+            // Also compute tooltip anchor in case user switches mode later
             const map = mapRef.current;
             if (map) {
               const pt = map.latLngToContainerPoint([node.x, node.y]);
@@ -1756,7 +1756,7 @@ export default function LeafletMapView({
                 y: (rect?.top ?? 0) + pt.y,
               });
             }
-            setStreamViewerMode("tooltip");
+            setStreamViewerMode("pip");
             setStreamViewerNodeId(node.id);
           }
           return;
@@ -4358,6 +4358,7 @@ export default function LeafletMapView({
           streamType: (camCd.streamType || "") as CameraStreamConfig["streamType"],
           streamUrl: camCd.streamUrl || "",
           snapshotInterval: camCd.snapshotInterval,
+          rtspFps: camCd.rtspFps,
         };
         return (
           <CameraStreamConfigModal
@@ -4370,8 +4371,9 @@ export default function LeafletMapView({
                 ncd.streamType = config.streamType || undefined;
                 ncd.streamUrl = config.streamUrl || undefined;
                 ncd.snapshotInterval = config.snapshotInterval || undefined;
+                ncd.rtspFps = config.rtspFps || undefined;
                 // Clean empty fields
-                if (!ncd.streamType) { delete ncd.streamType; delete ncd.streamUrl; delete ncd.snapshotInterval; }
+                if (!ncd.streamType) { delete ncd.streamType; delete ncd.streamUrl; delete ncd.snapshotInterval; delete ncd.rtspFps; }
                 nodesRef.current[idx] = {
                   ...nodesRef.current[idx],
                   custom_data: JSON.stringify(ncd),
@@ -4394,6 +4396,7 @@ export default function LeafletMapView({
           streamType: (camCd.streamType || "mjpeg") as CameraStreamConfig["streamType"],
           streamUrl: camCd.streamUrl,
           snapshotInterval: camCd.snapshotInterval,
+          rtspFps: camCd.rtspFps,
         };
         if (streamViewerMode === "tooltip") {
           return (

@@ -55,6 +55,7 @@ export interface NodeCustomData {
   streamType?: string;
   streamUrl?: string;
   snapshotInterval?: number;
+  rtspFps?: number;
 
   // Text label
   fontSize?: number;

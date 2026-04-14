@@ -1,12 +1,13 @@
 "use client";
 
 import { useState } from "react";
-import { X, Camera, Globe, Image, Video, Info, ChevronDown } from "lucide-react";
+import { X, Camera, Globe, Image, Video, Radio, Info, ChevronDown } from "lucide-react";
 
 export interface CameraStreamConfig {
-  streamType: "mjpeg" | "snapshot" | "iframe" | "";
+  streamType: "mjpeg" | "snapshot" | "iframe" | "rtsp" | "";
   streamUrl: string;
   snapshotInterval?: number; // seconds for auto-refresh in snapshot mode
+  rtspFps?: number;          // FPS for RTSP transcoding (1-15)
 }
 
 interface CameraStreamConfigModalProps {
@@ -39,6 +40,10 @@ const MANUFACTURERS: ManufacturerTemplate[] = [
         url: "http://{user}:{pass}@{ip}/ISAPI/Streaming/channels/102/httpPreview",
         desc: "Preview MJPEG del canal seleccionado",
       },
+      rtsp: {
+        url: "rtsp://{user}:{pass}@{ip}:554/Streaming/Channels/102",
+        desc: "Canal 101 = mainstream, 102 = substream",
+      },
       iframe: {
         url: "http://{ip}/doc/page/preview.asp",
         desc: "Interfaz web nativa de la cámara",
@@ -57,6 +62,10 @@ const MANUFACTURERS: ManufacturerTemplate[] = [
         url: "http://{user}:{pass}@{ip}/cgi-bin/mjpg/video.cgi?channel=1&subtype=1",
         desc: "subtype=0 mainstream, subtype=1 substream",
       },
+      rtsp: {
+        url: "rtsp://{user}:{pass}@{ip}:554/cam/realmonitor?channel=1&subtype=1",
+        desc: "subtype=0 mainstream, subtype=1 substream",
+      },
     },
   },
   {
@@ -71,6 +80,10 @@ const MANUFACTURERS: ManufacturerTemplate[] = [
         url: "http://{user}:{pass}@{ip}/axis-cgi/mjpg/video.cgi?fps=10",
         desc: "FPS configurable en la URL",
       },
+      rtsp: {
+        url: "rtsp://{user}:{pass}@{ip}:554/axis-media/media.amp",
+        desc: "Stream RTSP principal",
+      },
     },
   },
   {
@@ -81,6 +94,14 @@ const MANUFACTURERS: ManufacturerTemplate[] = [
 ];
 
 const streamTypes = [
+  {
+    value: "rtsp" as const,
+    label: "RTSP Live",
+    icon: Radio,
+    desc: "Video en vivo vía RTSP (transcoding server-side)",
+    placeholder: "rtsp://user:pass@192.168.1.100:554/stream",
+    help: "URL RTSP de la cámara. El servidor transcodes a MJPEG vía ffmpeg. Requiere ffmpeg instalado en el servidor.",
+  },
   {
     value: "mjpeg" as const,
     label: "MJPEG Stream",
@@ -116,6 +137,7 @@ export default function CameraStreamConfigModal({
   const [streamType, setStreamType] = useState<CameraStreamConfig["streamType"]>(currentConfig.streamType || "");
   const [streamUrl, setStreamUrl] = useState(currentConfig.streamUrl || "");
   const [snapshotInterval, setSnapshotInterval] = useState(currentConfig.snapshotInterval || 2);
+  const [rtspFps, setRtspFps] = useState(currentConfig.rtspFps || 2);
   const [manufacturer, setManufacturer] = useState<string>("");
   const [showMfgPicker, setShowMfgPicker] = useState(false);
 
@@ -127,6 +149,7 @@ export default function CameraStreamConfigModal({
       streamType,
       streamUrl: streamUrl.trim(),
       snapshotInterval: streamType === "snapshot" ? snapshotInterval : undefined,
+      rtspFps: streamType === "rtsp" ? rtspFps : undefined,
     });
   };
 
@@ -236,7 +259,7 @@ export default function CameraStreamConfigModal({
           {/* Stream type selector */}
           <div className="space-y-2">
             <label className="text-[10px] text-[#555] font-bold uppercase tracking-wider">Tipo de stream</label>
-            <div className="grid grid-cols-3 gap-1.5">
+            <div className="grid grid-cols-4 gap-1.5">
               {streamTypes.map((type) => {
                 const active = streamType === type.value;
                 const Icon = type.icon;
@@ -306,6 +329,27 @@ export default function CameraStreamConfigModal({
                       className="flex-1 h-1 bg-white/10 rounded-lg appearance-none cursor-pointer accent-blue-500"
                     />
                     <span className="text-xs text-[#888] font-mono w-8 text-right">{snapshotInterval}s</span>
+                  </div>
+                </div>
+              )}
+
+              {/* RTSP FPS */}
+              {streamType === "rtsp" && (
+                <div className="space-y-2">
+                  <label className="text-[10px] text-[#555] font-bold uppercase tracking-wider">
+                    FPS del stream (transcoding)
+                  </label>
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="range"
+                      min="1"
+                      max="15"
+                      step="1"
+                      value={rtspFps}
+                      onChange={(e) => setRtspFps(parseInt(e.target.value))}
+                      className="flex-1 h-1 bg-white/10 rounded-lg appearance-none cursor-pointer accent-blue-500"
+                    />
+                    <span className="text-xs text-[#888] font-mono w-12 text-right">{rtspFps} fps</span>
                   </div>
                 </div>
               )}

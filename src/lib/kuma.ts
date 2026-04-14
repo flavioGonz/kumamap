@@ -242,6 +242,36 @@ class KumaClient {
     return this.heartbeatHistory.get(monitorId) || [];
   }
 
+  /** Fetch notification providers configured in Uptime Kuma */
+  getNotifications(): Promise<{ id: number; name: string; type: string }[]> {
+    if (!this.socket || !this.authenticated) return Promise.resolve([]);
+    return new Promise((resolve) => {
+      const timeout = setTimeout(() => resolve([]), 5000);
+      this.socket!.emit("getNotificationList", (res: any) => {
+        clearTimeout(timeout);
+        if (res?.ok && Array.isArray(res.data)) {
+          resolve(res.data.map((n: any) => ({ id: n.id, name: n.name, type: n.type })));
+        } else {
+          resolve([]);
+        }
+      });
+    });
+  }
+
+  /** Add a new monitor via the Uptime Kuma socket API */
+  addMonitor(data: Record<string, unknown>): Promise<{ ok: boolean; msg?: string; monitorID?: number }> {
+    if (!this.socket || !this.authenticated) {
+      return Promise.resolve({ ok: false, msg: "Not connected to Uptime Kuma" });
+    }
+    return new Promise((resolve) => {
+      const timeout = setTimeout(() => resolve({ ok: false, msg: "Timeout adding monitor" }), 10000);
+      this.socket!.emit("add", data, (res: any) => {
+        clearTimeout(timeout);
+        resolve({ ok: !!res?.ok, msg: res?.msg, monitorID: res?.monitorID });
+      });
+    });
+  }
+
   // Fetch historical beats from Kuma DB (cached 5 min per monitor)
   private beatsCache: Map<string, { data: KumaHeartbeat[]; ts: number }> = new Map();
   private CACHE_TTL = 5 * 60 * 1000; // 5 min

@@ -41,6 +41,21 @@ export const importMapSchema = z
   })
   .passthrough();
 
+// POST /api/kuma/monitors — create a new Uptime Kuma monitor
+export const createMonitorSchema = z.object({
+  name: z.string().min(1, "Monitor name is required"),
+  type: z.enum(["http", "port", "ping", "keyword", "dns", "push", "steam", "mqtt", "sqlserver", "postgres", "mysql", "mongodb", "radius", "redis", "docker", "grpc", "gamedig", "group", "snmp", "json-query", "real-browser"]),
+  url: z.string().optional(),
+  hostname: z.string().optional(),
+  port: z.number().int().min(0).max(65535).optional(),
+  interval: z.number().int().min(20).max(86400).default(60),
+  keyword: z.string().optional(),
+  maxretries: z.number().int().min(0).max(100).default(1),
+  parent: z.number().int().nullable().optional(),
+  notificationIDList: z.record(z.string(), z.boolean()).optional(),
+  description: z.string().optional(),
+});
+
 // POST /api/auth
 export const loginSchema = z.object({
   username: z.string().min(1, "Username is required"),

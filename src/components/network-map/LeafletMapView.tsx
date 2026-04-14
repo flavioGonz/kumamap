@@ -410,17 +410,33 @@ export default function LeafletMapView({
     if (downIds.length > 0) {
       safeFetch<Record<string, string>>(apiUrl("/api/kuma/down-since"), undefined, "DownSince")
         .then((data) => {
-          if (!data) return;
-          for (const [idStr, isoTs] of Object.entries(data)) {
-            const id = Number(idStr);
-            const ts = new Date(isoTs).getTime();
-            if (!isNaN(ts) && ts > 0) {
-              // Always update — DB is authoritative for streak start time
-              downSinceRef.current.set(id, ts);
+          if (data) {
+            for (const [idStr, isoTs] of Object.entries(data)) {
+              const id = Number(idStr);
+              const ts = new Date(isoTs).getTime();
+              if (!isNaN(ts) && ts > 0) {
+                // Always update — DB is authoritative for streak start time
+                downSinceRef.current.set(id, ts);
+              }
+            }
+          }
+          // For any DOWN monitor that the DB didn't return a time for
+          // (DB not configured or no heartbeat history), seed with Date.now()
+          // so the badge at least starts counting from this moment.
+          for (const id of downIds) {
+            if (!downSinceRef.current.has(id)) {
+              downSinceRef.current.set(id, Date.now());
             }
           }
         })
-        .catch(() => { /* DB not configured — silent */ });
+        .catch(() => {
+          // DB not configured — seed all DOWN monitors with Date.now()
+          for (const id of downIds) {
+            if (!downSinceRef.current.has(id)) {
+              downSinceRef.current.set(id, Date.now());
+            }
+          }
+        });
     }
   }, [kumaMonitors]);
 
@@ -2212,22 +2228,29 @@ export default function LeafletMapView({
       // ── Resolve downTimestamp ────────────────────────────────────────────────
       let downTimestamp: number;
       if (node.icon === "_rack") {
-        // FIX: iterate devices directly using monitorId (not status value)
+        // Rack: find earliest DOWN device using DB streak-start times
         const cd2 = safeJsonParse<NodeCustomData>(node.custom_data);
         const rackDevices: any[] = cd2.devices || [];
-        let earliest = now;
+        let earliest = Infinity;
+        let hasAnyDbTs = false;
         for (const d of rackDevices) {
           if (!d.monitorId) continue;
           const m = getMonitorData(d.monitorId);
           if (m?.status !== 0) continue;
-          const t = m.downTime ? new Date(m.downTime).getTime() : (downSinceRef.current.get(d.monitorId) ?? now);
-          if (t < earliest) earliest = t;
+          const dbTs = downSinceRef.current.get(d.monitorId);
+          if (dbTs) {
+            hasAnyDbTs = true;
+            if (dbTs < earliest) earliest = dbTs;
+          }
         }
+        if (!hasAnyDbTs) return; // DB fetch pending — wait for real data
         downTimestamp = earliest;
       } else {
-        const mon = getMonitorData(node.kuma_monitor_id);
-        // Prefer real downTime from Kuma heartbeat DB; fall back to first-detected time
-        downTimestamp = mon?.downTime ? new Date(mon.downTime).getTime() : (downSinceRef.current.get(node.kuma_monitor_id!) ?? now);
+        // Prefer DB streak-start (downSinceRef, from /api/kuma/down-since).
+        // If DB hasn't responded yet, skip this node (don't show 00:00:00).
+        const dbTs = downSinceRef.current.get(node.kuma_monitor_id!);
+        if (!dbTs) return; // DB fetch pending — badge will appear once we have real data
+        downTimestamp = dbTs;
       }
       const elapsed = now - downTimestamp;
       const elapsedStr = formatElapsed(elapsed);
@@ -2323,20 +2346,17 @@ export default function LeafletMapView({
     if (!LRef.current || !mapRef.current) return;
     const L = LRef.current;
 
-    // Track DOWN timestamps — prefer real downTime from Uptime Kuma, fallback to now
+    // Track DOWN timestamps — DB query (/api/kuma/down-since) is authoritative.
+    // Only clear entries for recovered monitors; new DOWN entries come from the DB fetch.
     nodesRef.current.forEach((node) => {
       if (!node.kuma_monitor_id) return;
       const m = getMonitorData(node.kuma_monitor_id);
-      if (m?.status === 0) {
-        if (!downSinceRef.current.has(node.kuma_monitor_id)) {
-          // Use the real downTime from Kuma if available, otherwise fall back to now
-          const ts = m.downTime ? new Date(m.downTime).getTime() : Date.now();
-          downSinceRef.current.set(node.kuma_monitor_id, ts);
-        }
-      } else {
+      if (m?.status !== 0) {
         // Recovered — remove tracking
         downSinceRef.current.delete(node.kuma_monitor_id);
       }
+      // Note: we do NOT set downSinceRef here for DOWN monitors.
+      // The DB fetch in the kumaMonitors useEffect provides the real streak start time.
     });
 
     nodesRef.current.forEach((node) => {

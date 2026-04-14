@@ -416,6 +416,19 @@ function MobileMapViewer() {
                   <span className="text-[11px] font-bold text-[#8b5cf6]">Ver Rack</span>
                 </Link>
               )}
+              {/* Camera link */}
+              {selected.node.icon === "_camera" && selected.customData.streamUrl && (
+                <Link
+                  href={`/mobile/camera?mapId=${mapId}&nodeId=${selected.node.id}`}
+                  className="col-span-2 rounded-xl px-3 py-2.5 flex items-center justify-center gap-2 active:scale-[0.98] transition-all"
+                  style={{ background: "rgba(59,130,246,0.1)", border: "1px solid rgba(59,130,246,0.25)" }}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#60a5fa" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="m22 8-6 4 6 4V8Z" /><rect width="14" height="12" x="2" y="6" rx="2" ry="2" />
+                  </svg>
+                  <span className="text-[11px] font-bold text-[#60a5fa]">Ver Cámara</span>
+                </Link>
+              )}
             </div>
           </div>
         </div>

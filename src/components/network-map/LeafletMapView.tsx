@@ -52,6 +52,10 @@ import { useAnimationTimers } from "@/hooks/useAnimationTimers";
 import { useMapVisibility } from "@/hooks/useMapVisibility";
 import { useAlertSound } from "@/hooks/useAlertSound";
 import { useMapKeyboard } from "@/hooks/useMapKeyboard";
+import { formatElapsed, formatSince, buildSparkline } from "./map-utils";
+import NodeEditModal, { type NodeEditConfig } from "./NodeEditModal";
+import AssignMonitorModal from "./AssignMonitorModal";
+import LinkedMapsModal from "./LinkedMapsModal";
 
 
 interface SavedNode {
@@ -479,7 +483,7 @@ export default function LeafletMapView({
   const [linkModalOpen, setLinkModalOpen] = useState(false);
   const [linkModalData, setLinkModalData] = useState<{ sourceId: string; targetId: string; edgeId?: string; initial?: Partial<LinkFormData> }>({ sourceId: "", targetId: "" });
   const [inputModalOpen, setInputModalOpen] = useState(false);
-  const [inputModalConfig, setInputModalConfig] = useState<{ nodeId: string; initial: string; mac?: string; ip?: string; credUser?: string; credPass?: string; labelHidden?: boolean; labelSize?: number; nodeColor?: string }>({ nodeId: "", initial: "" });
+  const [inputModalConfig, setInputModalConfig] = useState<NodeEditConfig>({ nodeId: "", initial: "" });
   const [showPass, setShowPass] = useState(false);
 
   // Camera stream modals
@@ -1156,31 +1160,7 @@ export default function LeafletMapView({
     };
   }
 
-  // Build sparkline SVG from ping history
-  function buildSparkline(pings: number[], width: number = 200, height: number = 40): string {
-    if (pings.length < 2) return "";
-    const max = Math.max(...pings, 1);
-    const min = Math.min(...pings, 0);
-    const range = max - min || 1;
-    const step = width / (pings.length - 1);
-    const points = pings.map((p, i) => `${i * step},${height - ((p - min) / range) * (height - 4) - 2}`).join(" ");
-    const avg = Math.round(pings.reduce((a, b) => a + b, 0) / pings.length);
-    const maxP = Math.round(max);
-    const minP = Math.round(min);
-    return `
-      <div style="margin-top:8px;border-top:1px solid #222;padding-top:6px;">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
-          <span style="font-size:8px;color:#555;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;">Latencia</span>
-          <span style="font-size:8px;color:#888;">min ${minP}ms · avg ${avg}ms · max ${maxP}ms</span>
-        </div>
-        <svg width="${width}" height="${height}" style="display:block;">
-          <defs><linearGradient id="sg" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#3b82f6" stop-opacity="0.3"/><stop offset="100%" stop-color="#3b82f6" stop-opacity="0"/></linearGradient></defs>
-          <polygon points="0,${height} ${points} ${width},${height}" fill="url(#sg)" />
-          <polyline points="${points}" fill="none" stroke="#3b82f6" stroke-width="1.5" stroke-linejoin="round" />
-          <circle cx="${width}" cy="${points.split(" ").pop()?.split(",")[1]}" r="2.5" fill="#60a5fa" />
-        </svg>
-      </div>`;
-  }
+  // buildSparkline imported from ./map-utils
 
   // Ping history cache
   const pingHistoryRef = useRef<Map<number, number[]>>(new Map());
@@ -2187,27 +2167,7 @@ export default function LeafletMapView({
   }
 
   // Format elapsed downtime: "00:34:21" or "1d 02:15:30"
-  function formatElapsed(ms: number): string {
-    if (ms < 0) ms = 0;
-    const totalSec = Math.floor(ms / 1000);
-    const h = Math.floor(totalSec / 3600);
-    const m = Math.floor((totalSec % 3600) / 60);
-    const s = totalSec % 60;
-    if (h >= 24) {
-      const d = Math.floor(h / 24);
-      const rh = h % 24;
-      return `${d}d ${String(rh).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-    }
-    return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-  }
-
-  // Format the "since" label: "desde 08-abr. 10:33"
-  function formatSince(ts: number): string {
-    const dt = new Date(ts);
-    const day = dt.toLocaleDateString("es-UY", { day: "2-digit", month: "short" });
-    const time = dt.toLocaleTimeString("es-UY", { hour: "2-digit", minute: "2-digit", hour12: false });
-    return `${day} ${time}`;
-  }
+  // formatElapsed, formatSince imported from ./map-utils
 
   // Update downtime counter labels on the map (called every second)
   // Counters appear ABOVE the DOWN node, not on the link.
@@ -4153,253 +4113,48 @@ export default function LeafletMapView({
         snmpMonitors={kumaMonitors.filter((m) => m.type === "snmp" || m.type === "push" || m.type === "port")}
       />
 
-      {/* ═══ Node Edit Modal (unified: Name + Label + MAC + IP + Credentials + Color) ═══ */}
-      {inputModalOpen && (() => {
-        const cd = inputModalConfig.nodeId
-          ? safeJsonParse<NodeCustomData>(nodesRef.current.find(n => n.id === inputModalConfig.nodeId)?.custom_data)
-          : {};
-
-        const [editName, setEditName] = [inputModalConfig.initial, (v: string) => setInputModalConfig(c => ({ ...c, initial: v }))];
-        const [editMac, setEditMac] = [inputModalConfig.mac || "", (v: string) => setInputModalConfig(c => ({ ...c, mac: v }))];
-        const [editIp, setEditIp] = [inputModalConfig.ip || "", (v: string) => setInputModalConfig(c => ({ ...c, ip: v }))];
-        const [editUser, setEditUser] = [inputModalConfig.credUser || cd.credUser || "", (v: string) => setInputModalConfig(c => ({ ...c, credUser: v }))];
-        const [editPass, setEditPass] = [inputModalConfig.credPass || cd.credPass || "", (v: string) => setInputModalConfig(c => ({ ...c, credPass: v }))];
-        const [editLabelHidden, setEditLabelHidden] = [inputModalConfig.labelHidden ?? cd.labelHidden ?? false, (v: boolean) => setInputModalConfig(c => ({ ...c, labelHidden: v }))];
-        const [editLabelSize, setEditLabelSize] = [inputModalConfig.labelSize ?? cd.labelSize ?? 12, (v: number) => setInputModalConfig(c => ({ ...c, labelSize: v }))];
-        const [editNodeColor, setEditNodeColor] = [inputModalConfig.nodeColor || cd.nodeColor || "", (v: string) => setInputModalConfig(c => ({ ...c, nodeColor: v }))];
-
-        const nodeColors = [
-          { color: "", name: "Auto" },
-          { color: "#22c55e", name: "Verde" },
-          { color: "#3b82f6", name: "Azul" },
-          { color: "#ef4444", name: "Rojo" },
-          { color: "#f59e0b", name: "Naranja" },
-          { color: "#8b5cf6", name: "Violeta" },
-          { color: "#ec4899", name: "Rosa" },
-          { color: "#06b6d4", name: "Cyan" },
-          { color: "#facc15", name: "Amarillo" },
-          { color: "#ffffff", name: "Blanco" },
-        ];
-
-        const closeInputModal = () => { setInputModalOpen(false); setShowPass(false); };
-
-        const handleSubmit = () => {
-          if (editName.trim()) {
+      {/* ═══ Node Edit Modal ═══ */}
+      {inputModalOpen && (
+        <NodeEditModal
+          config={inputModalConfig}
+          showPass={showPass}
+          onConfigChange={(updater) => setInputModalConfig(updater)}
+          onShowPassToggle={() => setShowPass(!showPass)}
+          onSubmit={(values) => {
             const idx = nodesRef.current.findIndex((n) => n.id === inputModalConfig.nodeId);
             if (idx >= 0) {
               const ncd = safeJsonParse<NodeCustomData>(nodesRef.current[idx].custom_data);
-              ncd.mac = editMac.trim() || undefined;
-              ncd.ip = editIp.trim() || undefined;
-              ncd.credUser = editUser.trim() || undefined;
-              ncd.credPass = editPass.trim() || undefined;
-              ncd.labelHidden = editLabelHidden || undefined;
-              ncd.labelSize = editLabelSize !== 12 ? editLabelSize : undefined;
-              ncd.nodeColor = editNodeColor || undefined;
-              nodesRef.current[idx] = { ...nodesRef.current[idx], label: editName.trim(), custom_data: JSON.stringify(ncd) };
-              if (LRef.current && mapRef.current) {
-                renderNodes(LRef.current, mapRef.current);
-                renderEdges(LRef.current, mapRef.current);
-              }
+              ncd.mac = values.mac; ncd.ip = values.ip;
+              ncd.credUser = values.credUser; ncd.credPass = values.credPass;
+              ncd.labelHidden = values.labelHidden; ncd.labelSize = values.labelSize;
+              ncd.nodeColor = values.nodeColor;
+              nodesRef.current[idx] = { ...nodesRef.current[idx], label: values.name, custom_data: JSON.stringify(ncd) };
+              if (LRef.current && mapRef.current) { renderNodes(LRef.current, mapRef.current); renderEdges(LRef.current, mapRef.current); }
             }
-          }
-          closeInputModal();
-        };
-
-        return (
-          <div className="fixed inset-0 z-[99999] flex items-center justify-center" style={{ background: "rgba(0,0,0,0.65)", backdropFilter: "blur(6px)" }}
-            onClick={closeInputModal}>
-            <div className="w-full max-w-md rounded-2xl shadow-2xl" onClick={(e) => e.stopPropagation()}
-              style={{ background: "linear-gradient(180deg, rgba(18,18,18,0.99), rgba(10,10,10,0.99))", border: "1px solid rgba(255,255,255,0.09)" }}>
-
-              {/* Header */}
-              <div className="flex items-center gap-3 px-5 py-3.5" style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
-                <div className="flex h-8 w-8 items-center justify-center rounded-xl" style={{ background: "rgba(59,130,246,0.12)", border: "1px solid rgba(59,130,246,0.25)" }}>
-                  <Pencil className="h-4 w-4 text-blue-400" />
-                </div>
-                <h3 className="text-sm font-bold text-[#ededed] flex-1">Editar Nodo</h3>
-                <button onClick={closeInputModal} className="text-[#555] hover:text-[#ededed] text-lg">&times;</button>
-              </div>
-
-              <form onSubmit={(e) => { e.preventDefault(); handleSubmit(); }} className="px-5 py-4 space-y-4 max-h-[80vh] overflow-y-auto">
-
-                {/* ── Nombre ── */}
-                <div>
-                  <label className="text-[10px] font-bold uppercase tracking-wider text-[#666] block mb-1">Nombre</label>
-                  <input type="text" value={editName} onChange={(e) => setEditName(e.target.value)} placeholder="Nombre del nodo..." autoFocus
-                    className="w-full rounded-xl px-3.5 py-2 text-sm text-[#ededed] placeholder:text-[#555] focus:outline-none focus:ring-2 focus:ring-blue-500/40"
-                    style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.1)" }} />
-                </div>
-
-                {/* ── Etiqueta ── */}
-                <div className="rounded-xl p-3 space-y-2.5" style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.05)" }}>
-                  <div className="text-[10px] font-bold uppercase tracking-wider text-[#555] mb-1">Etiqueta en mapa</div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-[11px] text-[#aaa]">Mostrar etiqueta</span>
-                    <button type="button" onClick={() => setEditLabelHidden(!editLabelHidden)}
-                      className="relative h-5 w-9 rounded-full transition-colors"
-                      style={{ background: editLabelHidden ? "rgba(255,255,255,0.08)" : "rgba(59,130,246,0.5)" }}>
-                      <span className="absolute top-0.5 h-4 w-4 rounded-full transition-all bg-white shadow-sm"
-                        style={{ left: editLabelHidden ? "2px" : "20px" }} />
-                    </button>
-                  </div>
-                  {!editLabelHidden && (
-                    <div>
-                      <div className="flex items-center justify-between mb-1.5">
-                        <span className="text-[11px] text-[#aaa]">Tamaño de fuente</span>
-                        <span className="text-[11px] font-mono text-[#60a5fa]">{editLabelSize}px</span>
-                      </div>
-                      <input type="range" min="8" max="24" step="1" value={editLabelSize}
-                        onChange={(e) => setEditLabelSize(parseInt(e.target.value))}
-                        className="w-full h-1 rounded-full appearance-none cursor-pointer"
-                        style={{ background: `linear-gradient(to right, #3b82f6 ${((editLabelSize - 8) / 16) * 100}%, #333 0%)` }} />
-                      <div className="flex justify-between text-[9px] text-[#444] mt-0.5">
-                        <span>8px</span><span>16px</span><span>24px</span>
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                {/* ── Color del nodo ── */}
-                <div>
-                  <label className="text-[10px] font-bold uppercase tracking-wider text-[#666] block mb-2">Color del nodo</label>
-                  <div className="flex flex-wrap gap-2">
-                    {nodeColors.map((c) => (
-                      <Tooltip key={c.color} content={c.name}>
-                      <button type="button" onClick={() => setEditNodeColor(c.color)}
-                        className="relative h-7 w-7 rounded-lg transition-all hover:scale-110"
-                        style={{
-                          background: c.color || "rgba(255,255,255,0.08)",
-                          border: editNodeColor === c.color ? "2px solid #fff" : "2px solid rgba(255,255,255,0.1)",
-                          boxShadow: editNodeColor === c.color ? `0 0 10px ${c.color || "#fff"}88` : "none",
-                        }}>
-                        {!c.color && <span className="text-[8px] font-bold text-[#888] flex items-center justify-center h-full">AUTO</span>}
-                      </button>
-                      </Tooltip>
-                    ))}
-                  </div>
-                </div>
-
-                {/* ── Red ── */}
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="text-[10px] font-bold uppercase tracking-wider text-[#666] block mb-1">MAC Address</label>
-                    <input type="text" value={editMac} onChange={(e) => setEditMac(e.target.value)} placeholder="AA:BB:CC:DD:EE:FF"
-                      className="w-full rounded-xl px-3 py-2 text-xs text-[#ededed] font-mono placeholder:text-[#444] focus:outline-none focus:ring-1 focus:ring-blue-500/30"
-                      style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }} />
-                  </div>
-                  <div>
-                    <label className="text-[10px] font-bold uppercase tracking-wider text-[#666] block mb-1">IP Address</label>
-                    <input type="text" value={editIp} onChange={(e) => setEditIp(e.target.value)} placeholder="192.168.1.100"
-                      className="w-full rounded-xl px-3 py-2 text-xs text-[#ededed] font-mono placeholder:text-[#444] focus:outline-none focus:ring-1 focus:ring-blue-500/30"
-                      style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }} />
-                  </div>
-                </div>
-
-                {/* ── Credenciales ── */}
-                <div className="rounded-xl p-3 space-y-2" style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.05)" }}>
-                  <div className="text-[10px] font-bold uppercase tracking-wider text-[#555] mb-1">Credenciales del dispositivo</div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="text-[10px] text-[#666] block mb-1">Usuario</label>
-                      <input type="text" value={editUser} onChange={(e) => setEditUser(e.target.value)} placeholder="admin"
-                        className="w-full rounded-xl px-3 py-2 text-xs text-[#ededed] font-mono placeholder:text-[#444] focus:outline-none focus:ring-1 focus:ring-blue-500/30"
-                        style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }} />
-                    </div>
-                    <div>
-                      <label className="text-[10px] text-[#666] block mb-1">Contraseña</label>
-                      <div className="relative">
-                        <input type={showPass ? "text" : "password"} value={editPass} onChange={(e) => setEditPass(e.target.value)} placeholder="••••••••"
-                          className="w-full rounded-xl px-3 py-2 pr-8 text-xs text-[#ededed] font-mono placeholder:text-[#444] focus:outline-none focus:ring-1 focus:ring-blue-500/30"
-                          style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }} />
-                        <button type="button" onClick={() => setShowPass(!showPass)}
-                          className="absolute right-2 top-1/2 -translate-y-1/2 text-[#555] hover:text-[#aaa]">
-                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            {showPass ? <><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></> : <><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></>}
-                          </svg>
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                  <p className="text-[9px] text-[#444] leading-relaxed">Las credenciales se guardan localmente en el mapa. No se envían a ningún servidor externo.</p>
-                </div>
-
-                {/* ── Botones ── */}
-                <div className="flex gap-2 pt-1">
-                  <button type="button" onClick={closeInputModal}
-                    className="flex-1 rounded-xl py-2 text-xs font-semibold"
-                    style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", color: "#888" }}>Cancelar</button>
-                  <button type="submit"
-                    className="flex-1 rounded-xl py-2 text-xs font-bold"
-                    style={{ background: "rgba(59,130,246,0.15)", border: "1px solid rgba(59,130,246,0.3)", color: "#60a5fa" }}>Guardar</button>
-                </div>
-              </form>
-            </div>
-          </div>
-        );
-      })()}
+          }}
+          onClose={() => { setInputModalOpen(false); setShowPass(false); }}
+        />
+      )}
 
 
       {/* Assign Monitor Modal */}
       {assignModalOpen && (
-        <div className="fixed inset-0 z-[99999] flex items-center justify-center" style={{ background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }}>
-          <div className="rounded-2xl w-[380px] max-h-[500px] flex flex-col overflow-hidden"
-            style={{ background: "rgba(16,16,16,0.98)", border: "1px solid rgba(255,255,255,0.08)", boxShadow: "0 20px 60px rgba(0,0,0,0.7)" }}>
-            <div className="px-4 py-3 flex items-center gap-2" style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
-              <Signal className="h-4 w-4 text-blue-400" />
-              <span className="text-sm font-bold text-[#ededed]">Asignar Monitor Kuma</span>
-              <button onClick={() => setAssignModalOpen(false)} className="ml-auto text-[#555] hover:text-[#ededed] text-lg leading-none">&times;</button>
-            </div>
-            <div className="px-4 py-2" style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
-              <input
-                autoFocus
-                type="text"
-                placeholder="Buscar monitor..."
-                value={assignSearch}
-                onChange={(e) => setAssignSearch(e.target.value)}
-                className="w-full rounded-lg px-3 py-2 text-xs text-[#ededed] placeholder:text-[#555] focus:outline-none focus:ring-1 focus:ring-blue-500/40"
-                style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}
-              />
-            </div>
-            <div className="flex-1 overflow-y-auto px-2 py-2 space-y-0.5">
-              {kumaMonitors
-                .filter((m) => m.type !== "group" && m.active !== false)
-                .filter((m) => !assignSearch || m.name.toLowerCase().includes(assignSearch.toLowerCase()))
-                .map((m) => {
-                  const color = statusColors[m.status ?? 2] || "#f59e0b";
-                  const alreadyUsed = nodesRef.current.some((n) => n.kuma_monitor_id === m.id && n.id !== assignNodeId);
-                  return (
-                    <button
-                      key={m.id}
-                      disabled={alreadyUsed}
-                      onClick={() => {
-                        const idx = nodesRef.current.findIndex((n) => n.id === assignNodeId);
-                        if (idx >= 0) {
-                          nodesRef.current[idx] = { ...nodesRef.current[idx], kuma_monitor_id: m.id, label: m.name };
-                          if (LRef.current && mapRef.current) {
-                            renderNodes(LRef.current, mapRef.current);
-                            renderEdges(LRef.current, mapRef.current);
-                          }
-                          toast.success("Monitor asignado", { description: m.name });
-                        }
-                        setAssignModalOpen(false);
-                      }}
-                      className="w-full flex items-center gap-2.5 rounded-xl px-3 py-2 text-left transition-all disabled:opacity-30"
-                      style={{ background: "transparent" }}
-                      onMouseEnter={(e) => { if (!alreadyUsed) (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.04)"; }}
-                      onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}
-                    >
-                      <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ backgroundColor: color, boxShadow: `0 0 6px ${color}88` }} />
-                      <div className="flex-1 min-w-0">
-                        <div className="text-xs font-semibold text-[#ededed] truncate">{m.name}</div>
-                        <div className="text-[10px] text-[#555]">{m.type.toUpperCase()} {m.ping != null ? `· ${m.ping}ms` : ""}</div>
-                      </div>
-                      {alreadyUsed && <span className="text-[9px] text-[#555]">en uso</span>}
-                    </button>
-                  );
-                })}
-            </div>
-          </div>
-        </div>
+        <AssignMonitorModal
+          monitors={kumaMonitors}
+          usedMonitorIds={new Set(nodesRef.current.filter((n) => n.kuma_monitor_id && n.id !== assignNodeId).map((n) => n.kuma_monitor_id!))}
+          search={assignSearch}
+          onSearchChange={setAssignSearch}
+          onAssign={(monitorId, monitorName) => {
+            const idx = nodesRef.current.findIndex((n) => n.id === assignNodeId);
+            if (idx >= 0) {
+              nodesRef.current[idx] = { ...nodesRef.current[idx], kuma_monitor_id: monitorId, label: monitorName };
+              if (LRef.current && mapRef.current) { renderNodes(LRef.current, mapRef.current); renderEdges(LRef.current, mapRef.current); }
+              toast.success("Monitor asignado", { description: monitorName });
+            }
+            setAssignModalOpen(false);
+          }}
+          onClose={() => setAssignModalOpen(false)}
+        />
       )}
 
       {/* Color Picker Modal */}
@@ -4640,101 +4395,37 @@ export default function LeafletMapView({
         const node = nodesRef.current.find(n => n.id === nodeMapModalNodeId);
         if (!node) { setNodeMapModalNodeId(null); return null; }
         const cd = safeJsonParse<NodeCustomData>(node.custom_data);
-        const linkedMaps: { id: string; name: string }[] = cd.linkedMaps || [];
-        const addLinkedMap = (mapId: string, mapName: string) => {
-          const idx = nodesRef.current.findIndex(n => n.id === nodeMapModalNodeId);
-          if (idx < 0) return;
-          const ncd = safeJsonParse<NodeCustomData>(nodesRef.current[idx].custom_data);
-          const existing: { id: string; name: string }[] = ncd.linkedMaps || [];
-          if (existing.some(m => m.id === mapId)) { toast.info("Este mapa ya está vinculado"); return; }
-          ncd.linkedMaps = [...existing, { id: mapId, name: mapName }];
-          nodesRef.current[idx] = { ...nodesRef.current[idx], custom_data: JSON.stringify(ncd) };
-          if (LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current);
-          toast.success("Mapa vinculado", { description: mapName });
-          setNodeMapModalNodeId(null);
-        };
-        const removeLinkedMap = (mapId: string) => {
-          const idx = nodesRef.current.findIndex(n => n.id === nodeMapModalNodeId);
-          if (idx < 0) return;
-          const ncd = safeJsonParse<NodeCustomData>(nodesRef.current[idx].custom_data);
-          ncd.linkedMaps = (ncd.linkedMaps || []).filter((m: any) => m.id !== mapId);
-          nodesRef.current[idx] = { ...nodesRef.current[idx], custom_data: JSON.stringify(ncd) };
-          if (LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current);
-          toast.success("Mapa desvinculado");
-        };
-        const unlinkedMaps = availableMaps.filter(m => m.id !== mapId && !linkedMaps.some(lm => lm.id === m.id));
+        const linked: { id: string; name: string }[] = cd.linkedMaps || [];
         return (
-          <div className="fixed inset-0 z-[9999] flex items-center justify-center" style={{ background: "rgba(0,0,0,0.7)", backdropFilter: "blur(8px)" }}>
-            <div className="w-full max-w-md rounded-2xl shadow-2xl" style={{ background: "rgba(14,14,14,0.99)", border: "1px solid rgba(99,102,241,0.25)" }}>
-              {/* Header */}
-              <div className="flex items-center gap-3 px-5 py-4" style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
-                <div className="flex h-9 w-9 items-center justify-center rounded-xl" style={{ background: "rgba(99,102,241,0.12)", border: "1px solid rgba(99,102,241,0.25)" }}>
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#818cf8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
-                </div>
-                <div>
-                  <h3 className="text-sm font-bold text-[#ededed]">Mapas del nodo</h3>
-                  <p className="text-[10px] text-[#666]">{node.label}</p>
-                </div>
-                <button onClick={() => setNodeMapModalNodeId(null)} className="ml-auto text-[#555] hover:text-[#ededed] text-xl leading-none">&times;</button>
-              </div>
-
-              {/* Linked maps list */}
-              <div className="px-5 py-3 space-y-1.5" style={{ minHeight: "80px" }}>
-                {linkedMaps.length === 0 ? (
-                  <div className="flex flex-col items-center py-6 text-[#555]">
-                    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="mb-2 opacity-30"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
-                    <p className="text-[11px]">Sin mapas vinculados</p>
-                    <p className="text-[10px] text-[#444] mt-0.5">Seleccioná un mapa abajo para vincular</p>
-                  </div>
-                ) : linkedMaps.map(lm => (
-                  <div key={lm.id} className="flex items-center gap-3 rounded-xl px-3 py-2.5 group"
-                    style={{ background: "rgba(99,102,241,0.06)", border: "1px solid rgba(99,102,241,0.12)" }}>
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#818cf8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
-                    <span className="flex-1 text-xs font-semibold text-[#a5b4fc] truncate">{lm.name}</span>
-                    <Tooltip content="Abrir mapa">
-                    <button
-                      className="rounded-lg px-2 py-1 text-[10px] font-semibold text-[#60a5fa] hover:bg-blue-500/10 transition-all"
-                      onClick={(e) => { e.stopPropagation(); setNodeMapModalNodeId(null); if (onOpenMap) onOpenMap(lm.id); else window.open(apiUrl(`/?map=${lm.id}`), "_blank"); }}>
-                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" x2="21" y1="14" y2="3"/></svg>
-                    </button>
-                    </Tooltip>
-                    <Tooltip content="Desvincular">
-                    <button onClick={() => removeLinkedMap(lm.id)}
-                      className="rounded-lg p-1 text-[#555] hover:text-red-400 transition-all opacity-0 group-hover:opacity-100">
-                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" x2="6" y1="6" y2="18"/><line x1="6" x2="18" y1="6" y2="18"/></svg>
-                    </button>
-                    </Tooltip>
-                  </div>
-                ))}
-              </div>
-
-              {/* Add map section */}
-              {unlinkedMaps.length > 0 && (
-                <div className="px-5 pb-4" style={{ borderTop: "1px solid rgba(255,255,255,0.05)" }}>
-                  <p className="text-[9px] font-bold uppercase tracking-wider text-[#555] pt-3 pb-2">Vincular mapa</p>
-                  <div className="space-y-1 max-h-[180px] overflow-y-auto">
-                    {unlinkedMaps.map(m => (
-                      <button key={m.id} onClick={() => addLinkedMap(m.id, m.name)}
-                        className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-xs text-[#888] transition-all"
-                        onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "rgba(99,102,241,0.08)"; (e.currentTarget as HTMLElement).style.color = "#ededed"; }}
-                        onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; (e.currentTarget as HTMLElement).style.color = "#888"; }}>
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#6366f1" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="16"/><line x1="8" x2="16" y1="12" y2="12"/></svg>
-                        <span className="flex-1 text-left truncate">{m.name}</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Close */}
-              <div className="px-5 py-3" style={{ borderTop: "1px solid rgba(255,255,255,0.06)" }}>
-                <button onClick={() => setNodeMapModalNodeId(null)}
-                  className="w-full rounded-xl py-2 text-xs font-semibold text-[#888] transition-all hover:bg-white/5">
-                  Cerrar
-                </button>
-              </div>
-            </div>
-          </div>
+          <LinkedMapsModal
+            nodeLabel={node.label}
+            linkedMaps={linked}
+            availableMaps={availableMaps}
+            currentMapId={mapId}
+            onAddMap={(targetMapId, mapName) => {
+              const idx = nodesRef.current.findIndex(n => n.id === nodeMapModalNodeId);
+              if (idx < 0) return;
+              const ncd = safeJsonParse<NodeCustomData>(nodesRef.current[idx].custom_data);
+              const existing: { id: string; name: string }[] = ncd.linkedMaps || [];
+              if (existing.some(m => m.id === targetMapId)) { toast.info("Este mapa ya está vinculado"); return; }
+              ncd.linkedMaps = [...existing, { id: targetMapId, name: mapName }];
+              nodesRef.current[idx] = { ...nodesRef.current[idx], custom_data: JSON.stringify(ncd) };
+              if (LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current);
+              toast.success("Mapa vinculado", { description: mapName });
+              setNodeMapModalNodeId(null);
+            }}
+            onRemoveMap={(targetMapId) => {
+              const idx = nodesRef.current.findIndex(n => n.id === nodeMapModalNodeId);
+              if (idx < 0) return;
+              const ncd = safeJsonParse<NodeCustomData>(nodesRef.current[idx].custom_data);
+              ncd.linkedMaps = (ncd.linkedMaps || []).filter((m: any) => m.id !== targetMapId);
+              nodesRef.current[idx] = { ...nodesRef.current[idx], custom_data: JSON.stringify(ncd) };
+              if (LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current);
+              toast.success("Mapa desvinculado");
+            }}
+            onOpenMap={(id) => { if (onOpenMap) onOpenMap(id); else window.open(apiUrl(`/?map=${id}`), "_blank"); }}
+            onClose={() => setNodeMapModalNodeId(null)}
+          />
         );
       })()}
 

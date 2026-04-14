@@ -67,7 +67,7 @@ export async function GET(req: NextRequest) {
         // ── Input options (low-latency RTSP) ──
         "-rtsp_transport", "tcp",
         "-rtsp_flags", "prefer_tcp",
-        "-stimeout", "5000000",          // 5s connection timeout (microseconds)
+        "-timeout", "5000000",           // 5s connection timeout (microseconds)
         "-analyzeduration", "500000",    // 0.5s analyze (faster start)
         "-probesize", "500000",          // 500KB probe (faster start)
         "-fflags", "+nobuffer+discardcorrupt",

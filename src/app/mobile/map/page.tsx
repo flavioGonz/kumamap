@@ -402,6 +402,20 @@ function MobileMapViewer() {
                   <div className="text-[10px] text-[#888] truncate">{selected.monitor.msg}</div>
                 </div>
               )}
+              {/* Rack link */}
+              {selected.node.icon === "_rack" && (
+                <Link
+                  href={`/mobile/rack?mapId=${mapId}&nodeId=${selected.node.id}`}
+                  className="col-span-2 rounded-xl px-3 py-2.5 flex items-center justify-center gap-2 active:scale-[0.98] transition-all"
+                  style={{ background: "rgba(139,92,246,0.1)", border: "1px solid rgba(139,92,246,0.25)" }}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8b5cf6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="2" y="2" width="20" height="8" rx="2" ry="2" /><rect x="2" y="14" width="20" height="8" rx="2" ry="2" />
+                    <line x1="6" y1="6" x2="6.01" y2="6" /><line x1="6" y1="18" x2="6.01" y2="18" />
+                  </svg>
+                  <span className="text-[11px] font-bold text-[#8b5cf6]">Ver Rack</span>
+                </Link>
+              )}
             </div>
           </div>
         </div>

@@ -6,7 +6,7 @@ import PullToRefresh from "@/components/mobile/PullToRefresh";
 import PageTransition from "@/components/mobile/PageTransition";
 import { SkeletonList } from "@/components/mobile/Skeleton";
 import { useToast } from "@/components/mobile/MobileToast";
-import { hapticTap, hapticSuccess } from "@/lib/haptics";
+import { hapticTap, hapticSuccess, hapticMedium } from "@/lib/haptics";
 
 interface KumaMonitor {
   id: number;
@@ -123,30 +123,7 @@ export default function MobileAlerts() {
         )}
 
         {filtered.map((m) => (
-          <div
-            key={m.id}
-            className="rounded-2xl px-4 py-3 flex items-center gap-3"
-            style={{
-              background: m.status === 0 ? "rgba(239,68,68,0.04)" : "rgba(255,255,255,0.02)",
-              border: `1px solid ${m.status === 0 ? "rgba(239,68,68,0.12)" : "rgba(255,255,255,0.06)"}`,
-            }}
-          >
-            <div
-              className="h-3 w-3 rounded-full shrink-0"
-              style={{
-                background: m.status === 1 ? "#22c55e" : m.status === 0 ? "#ef4444" : "#f59e0b",
-                boxShadow: m.status === 0 ? "0 0 8px rgba(239,68,68,0.5)" : "none",
-                animation: m.status === 0 ? "pulse-dot 2s ease-in-out infinite" : "none",
-              }}
-            />
-            <div className="flex-1 min-w-0">
-              <div className="text-xs font-bold text-[#ddd] truncate">{m.name}</div>
-              <div className="text-[10px] text-[#555] truncate">{m.msg || m.type.toUpperCase()}</div>
-            </div>
-            {m.ping != null && m.status === 1 && (
-              <span className="text-[10px] font-mono text-[#555]">{m.ping}ms</span>
-            )}
-          </div>
+          <AlertCard key={m.id} monitor={m} onToast={show} />
         ))}
       </div>
 
@@ -158,5 +135,108 @@ export default function MobileAlerts() {
       `}</style>
     </PullToRefresh>
     </PageTransition>
+  );
+}
+
+/* ── Expandable alert card ── */
+function AlertCard({ monitor: m, onToast }: { monitor: KumaMonitor; onToast: (msg: string, type?: "success" | "error" | "info" | "warning") => void }) {
+  const [expanded, setExpanded] = useState(false);
+  const longPressTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleTouchStart = () => {
+    longPressTimer.current = setTimeout(() => {
+      hapticMedium();
+      navigator.clipboard.writeText(m.name).then(() => {
+        onToast("Nombre copiado", "info");
+      }).catch(() => {});
+    }, 500);
+  };
+
+  const handleTouchEnd = () => {
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+  };
+
+  return (
+    <div
+      className="rounded-2xl overflow-hidden transition-all"
+      style={{
+        background: m.status === 0 ? "rgba(239,68,68,0.04)" : "rgba(255,255,255,0.02)",
+        border: `1px solid ${m.status === 0 ? "rgba(239,68,68,0.12)" : "rgba(255,255,255,0.06)"}`,
+      }}
+    >
+      <button
+        onClick={() => { setExpanded(!expanded); hapticTap(); }}
+        onTouchStart={handleTouchStart}
+        onTouchEnd={handleTouchEnd}
+        onTouchCancel={handleTouchEnd}
+        className="w-full px-4 py-3 flex items-center gap-3 active:bg-white/[0.02] transition-all text-left"
+      >
+        <div
+          className="h-3 w-3 rounded-full shrink-0"
+          style={{
+            background: m.status === 1 ? "#22c55e" : m.status === 0 ? "#ef4444" : "#f59e0b",
+            boxShadow: m.status === 0 ? "0 0 8px rgba(239,68,68,0.5)" : "none",
+            animation: m.status === 0 ? "pulse-dot 2s ease-in-out infinite" : "none",
+          }}
+        />
+        <div className="flex-1 min-w-0">
+          <div className="text-xs font-bold text-[#ddd] truncate">{m.name}</div>
+          <div className="text-[10px] text-[#555] truncate">{m.msg || m.type.toUpperCase()}</div>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          {m.ping != null && m.status === 1 && (
+            <span className="text-[10px] font-mono text-[#555]">{m.ping}ms</span>
+          )}
+          <svg
+            width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#555" strokeWidth="2" strokeLinecap="round"
+            style={{ transform: expanded ? "rotate(180deg)" : "rotate(0)", transition: "transform 0.2s" }}
+          >
+            <polyline points="6 9 12 15 18 9" />
+          </svg>
+        </div>
+      </button>
+
+      {/* Expandable detail */}
+      {expanded && (
+        <div
+          className="px-4 pb-3 pt-0 border-t grid grid-cols-2 gap-2"
+          style={{ borderColor: "rgba(255,255,255,0.04)", animation: "expand-in 0.2s ease-out" }}
+        >
+          <DetailChip label="Tipo" value={m.type.toUpperCase()} />
+          <DetailChip label="ID" value={`#${m.id}`} />
+          {m.ping != null && <DetailChip label="Latencia" value={`${m.ping}ms`} />}
+          <DetailChip
+            label="Estado"
+            value={m.status === 1 ? "UP" : m.status === 0 ? "DOWN" : "PENDING"}
+            color={m.status === 1 ? "#22c55e" : m.status === 0 ? "#ef4444" : "#f59e0b"}
+          />
+          {m.msg && (
+            <div className="col-span-2 rounded-lg px-2.5 py-1.5" style={{ background: "rgba(255,255,255,0.02)" }}>
+              <div className="text-[8px] uppercase tracking-wider text-[#444] mb-0.5">Mensaje</div>
+              <div className="text-[10px] text-[#888] break-all">{m.msg}</div>
+            </div>
+          )}
+        </div>
+      )}
+
+      <style>{`
+        @keyframes expand-in {
+          from { opacity: 0; max-height: 0; }
+          to { opacity: 1; max-height: 200px; }
+        }
+      `}</style>
+    </div>
+  );
+}
+
+function DetailChip({ label, value, color }: { label: string; value: string; color?: string }) {
+  return (
+    <div className="rounded-lg px-2.5 py-1.5" style={{ background: "rgba(255,255,255,0.02)" }}>
+      <div className="text-[8px] uppercase tracking-wider text-[#444]">{label}</div>
+      <div className="text-[10px] font-mono font-bold" style={{ color: color || "#aaa" }}>{value}</div>
+    </div>
   );
 }

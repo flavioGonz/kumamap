@@ -145,6 +145,33 @@ export default function MobileHome() {
         );
       })()}
 
+      {/* Quick stats row */}
+      {!loading && maps.length > 0 && (() => {
+        const allMonitorIds = maps.flatMap((m) => m.monitor_ids);
+        const uniqueIds = [...new Set(allMonitorIds)];
+        const pings = uniqueIds.map((id) => monitors.get(id)?.ping).filter((p): p is number => p != null && p > 0);
+        const avgPing = pings.length > 0 ? Math.round(pings.reduce((a, b) => a + b, 0) / pings.length) : null;
+        const maxPing = pings.length > 0 ? Math.max(...pings) : null;
+
+        return (
+          <div className="px-4 mt-2 flex gap-2">
+            <MiniStat label="Mapas" value={String(maps.length)} icon={
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#60a5fa" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6" />
+              </svg>
+            } color="#60a5fa" />
+            <MiniStat label="Monitores" value={String(uniqueIds.length)} icon={
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" strokeWidth="2.5" strokeLinecap="round"><circle cx="12" cy="12" r="10" /><path d="M12 6v6l4 2" /></svg>
+            } color="#a78bfa" />
+            {avgPing !== null && (
+              <MiniStat label="Avg ping" value={`${avgPing}ms`} icon={
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" strokeWidth="2.5" strokeLinecap="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2" /></svg>
+              } color="#f59e0b" />
+            )}
+          </div>
+        );
+      })()}
+
       {/* Map list */}
       <div className="flex-1 px-4 py-4 space-y-2.5">
         {loading && <SkeletonList count={4} />}
@@ -224,5 +251,20 @@ export default function MobileHome() {
       `}</style>
     </PullToRefresh>
     </PageTransition>
+  );
+}
+
+function MiniStat({ label, value, icon, color }: { label: string; value: string; icon: React.ReactNode; color: string }) {
+  return (
+    <div
+      className="flex-1 rounded-xl px-2.5 py-2 flex items-center gap-2"
+      style={{ background: `${color}08`, border: `1px solid ${color}15` }}
+    >
+      <div className="shrink-0">{icon}</div>
+      <div>
+        <div className="text-[11px] font-bold font-mono" style={{ color }}>{value}</div>
+        <div className="text-[8px] text-[#555] uppercase tracking-wider">{label}</div>
+      </div>
+    </div>
   );
 }

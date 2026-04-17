@@ -1,11 +1,82 @@
 "use client";
 
 import React, { useState } from "react";
-import { X, FileText, FileSpreadsheet, Printer, FileDown, Download } from "lucide-react";
+import { X, FileText, FileSpreadsheet, Printer, FileDown, Download, MessageCircle } from "lucide-react";
 import { motion } from "framer-motion";
 import { apiUrl } from "@/lib/api";
 import type { RackDevice } from "./rack-types";
 import { TYPE_META } from "./rack-constants";
+
+// ── WhatsApp text generator ─────────────────────────────────────────────────
+
+function generateWhatsAppText(rackName: string, totalUnits: number, devices: RackDevice[]): string {
+  const sorted = [...devices].sort((a, b) => b.unit - a.unit);
+  const usedU = devices.reduce((s, d) => s + d.sizeUnits, 0);
+  const date = new Date().toLocaleDateString("es-UY", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+
+  let t = `🗄️ *${rackName}*\n`;
+  t += `📅 ${date}\n`;
+  t += `📊 ${totalUnits}U total · ${usedU}U ocupados · ${totalUnits - usedU}U libres\n`;
+  t += `━━━━━━━━━━━━━━━\n\n`;
+
+  sorted.forEach(d => {
+    const meta = TYPE_META[d.type] || TYPE_META.other;
+    const uRange = d.sizeUnits > 1 ? `U${d.unit}-${d.unit + d.sizeUnits - 1}` : `U${d.unit}`;
+
+    t += `⚪ *${d.label}*\n`;
+    t += `   📍 ${uRange} · ${meta.label} · ${d.sizeUnits}U\n`;
+    if (d.model) t += `   📋 Modelo: ${d.model}\n`;
+    if (d.managementIp) t += `   🌐 IP: \`${d.managementIp}\`\n`;
+    if (d.serial) t += `   🔢 Serie: ${d.serial}\n`;
+
+    // Switch ports summary
+    if (d.type === "switch" && d.switchPorts && d.switchPorts.length > 0) {
+      const connected = d.switchPorts.filter(p => p.connected);
+      const total = d.switchPorts.length;
+      t += `   🔌 Puertos: ${connected.length}/${total} conectados\n`;
+      connected.forEach(p => {
+        const parts = [`P${p.port}`];
+        if (p.speed) parts.push(p.speed);
+        if (p.connectedDevice) parts.push(`→ ${p.connectedDevice}`);
+        if (p.vlan) parts.push(`VLAN ${p.vlan}`);
+        if (p.uplink) parts.push("⬆ UPLINK");
+        if (p.isPoe) parts.push(`⚡PoE${p.poeWatts ? ` ${p.poeWatts}W` : ""}`);
+        t += `      • ${parts.join(" · ")}\n`;
+      });
+    }
+
+    // Patch ports summary
+    if (d.type === "patchpanel" && d.ports && d.ports.length > 0) {
+      const connected = d.ports.filter(p => p.connected);
+      const total = d.ports.length;
+      t += `   🔌 Puertos: ${connected.length}/${total} conectados\n`;
+      connected.forEach(p => {
+        const parts = [`P${p.port}`];
+        if (p.destination) parts.push(`→ ${p.destination}`);
+        if (p.connectedDevice) parts.push(`(${p.connectedDevice})`);
+        if (p.cableLength) parts.push(p.cableLength);
+        if (p.isPoe) parts.push("⚡PoE");
+        t += `      • ${parts.join(" · ")}\n`;
+      });
+    }
+
+    // Router interfaces
+    if (d.type === "router" && d.routerInterfaces && d.routerInterfaces.length > 0) {
+      t += `   🔌 Interfaces:\n`;
+      d.routerInterfaces.forEach(iface => {
+        const status = iface.connected ? "✅" : "❌";
+        t += `      ${status} ${iface.name} (${iface.type})${iface.ipAddress ? ` · ${iface.ipAddress}` : ""}\n`;
+      });
+    }
+
+    if (d.notes) t += `   📝 ${d.notes}\n`;
+    t += "\n";
+  });
+
+  t += `━━━━━━━━━━━━━━━\n`;
+  t += `_Exportado desde KumaMap_`;
+  return t;
+}
 
 // ── Export Modal ──────────────────────────────────────────────────────────────
 
@@ -67,6 +138,15 @@ export default function RackExportModal({ rackName, totalUnits, devices, onClose
           win.document.close();
           win.focus();
           setTimeout(() => win.print(), 800);
+        }
+      } else if (type === "whatsapp") {
+        const text = generateWhatsAppText(rackName, totalUnits, devices);
+        // Try Web Share API first, then copy + open wa.me
+        if (navigator.share) {
+          await navigator.share({ text });
+        } else {
+          await navigator.clipboard.writeText(text);
+          window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank");
         }
       } else if (type === "markdown") {
         const sorted = [...devices].sort((a, b) => b.unit - a.unit);
@@ -171,6 +251,36 @@ export default function RackExportModal({ rackName, totalUnits, devices, onClose
             <ExportCard type="pdf"      icon={Printer}         label="PDF"      ext="print" desc="Abre el reporte listo para imprimir o guardar"  accentColor="#f97316" glowColor="rgba(249,115,22,0.25)"  bgGradient="linear-gradient(135deg,#2e1f10,#201508)" />
             <ExportCard type="markdown" icon={FileDown}         label="Markdown" ext=".md"  desc="Texto plano con tablas Markdown estándar"       accentColor="#a855f7" glowColor="rgba(168,85,247,0.25)"  bgGradient="linear-gradient(135deg,#231430,#180d25)" />
           </div>
+
+          {/* WhatsApp — full width */}
+          <button
+            onClick={() => download("whatsapp")}
+            disabled={loading !== null}
+            className="relative group w-full rounded-xl p-3.5 text-left transition-all cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed overflow-hidden"
+            style={{ background: "linear-gradient(135deg,#1a2e1f,#13201a)", border: "1px solid rgba(37,211,102,0.2)" }}
+            onMouseEnter={e => { if (!loading) (e.currentTarget as HTMLElement).style.boxShadow = "0 0 16px rgba(37,211,102,0.2)"; }}
+            onMouseLeave={e => { (e.currentTarget as HTMLElement).style.boxShadow = loading === "whatsapp" ? "0 0 20px rgba(37,211,102,0.25)" : "none"; }}
+          >
+            <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none"
+              style={{ background: "linear-gradient(135deg,rgba(37,211,102,0.06) 0%, transparent 60%)" }} />
+            <div className="flex items-center gap-3 relative z-10">
+              <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
+                style={{ background: "rgba(37,211,102,0.15)", border: "1px solid rgba(37,211,102,0.3)" }}>
+                {loading === "whatsapp"
+                  ? <div className="w-4 h-4 border-2 border-t-transparent rounded-full animate-spin" style={{ borderColor: "#25d366 transparent transparent transparent" }} />
+                  : done === "whatsapp"
+                  ? <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="#25d366" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
+                  : <MessageCircle className="w-3.5 h-3.5" style={{ color: "#25d366" }} />}
+              </div>
+              <div>
+                <div className="flex items-baseline gap-1.5">
+                  <span className="text-sm font-semibold text-white/80">WhatsApp</span>
+                  <span className="text-[10px] font-mono font-medium px-1 py-0.5 rounded" style={{ background: "rgba(37,211,102,0.15)", color: "#25d366" }}>compartir</span>
+                </div>
+                <div className="text-xs text-white/40">Texto estilizado con emojis listo para enviar por WhatsApp</div>
+              </div>
+            </div>
+          </button>
 
           {/* PNG — full width */}
           <button

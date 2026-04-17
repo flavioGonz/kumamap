@@ -7,6 +7,7 @@ import { apiUrl } from "@/lib/api";
 import { statusColors } from "@/utils/status";
 import { getIconSvg } from "@/utils/map-icons";
 import { safeJsonParse } from "@/lib/error-handler";
+import { hapticTap, hapticMedium } from "@/lib/haptics";
 import type { NodeCustomData } from "@/lib/types";
 
 interface SavedNode {
@@ -223,6 +224,7 @@ function MobileMapViewer() {
 
       const marker = L.marker([node.x, node.y], { icon }).addTo(map);
       marker.on("click", () => {
+        hapticMedium();
         setSelected({
           node,
           monitor: mon || null,
@@ -311,7 +313,7 @@ function MobileMapViewer() {
             ].filter((f) => f.status === null || f.count > 0).map((f) => (
               <button
                 key={f.label}
-                onClick={() => setFilterStatus(f.status)}
+                onClick={() => { setFilterStatus(f.status); hapticTap(); }}
                 className="rounded-lg px-2.5 py-1 text-[10px] font-bold transition-all active:scale-95"
                 style={{
                   background: filterStatus === f.status ? (f.color ? `${f.color}33` : "rgba(59,130,246,0.2)") : "rgba(10,10,10,0.85)",
@@ -325,12 +327,65 @@ function MobileMapViewer() {
             ))}
           </div>
         )}
+
+        {/* Zoom controls — right side */}
+        {!loading && mapInstanceRef.current && (
+          <div className="absolute right-3 bottom-3 z-20 flex flex-col gap-1.5">
+            {/* Fit all nodes */}
+            <button
+              onClick={() => {
+                hapticTap();
+                const L = LRef.current;
+                const map = mapInstanceRef.current;
+                if (!L || !map) return;
+                const visible = nodes.filter((n) => n.icon !== "_waypoint" && n.icon !== "_textLabel");
+                if (visible.length > 0) {
+                  const latlngs = visible.map((n) => [n.x, n.y] as [number, number]);
+                  map.fitBounds(L.latLngBounds(latlngs), { padding: [40, 40], animate: true });
+                }
+              }}
+              className="h-9 w-9 rounded-xl flex items-center justify-center active:scale-90 transition-all"
+              style={{ background: "rgba(10,10,10,0.85)", border: "1px solid rgba(255,255,255,0.1)", backdropFilter: "blur(8px)" }}
+              title="Ver todo"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#888" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
+              </svg>
+            </button>
+            {/* Zoom in */}
+            <button
+              onClick={() => { hapticTap(); mapInstanceRef.current?.zoomIn(); }}
+              className="h-9 w-9 rounded-xl flex items-center justify-center active:scale-90 transition-all"
+              style={{ background: "rgba(10,10,10,0.85)", border: "1px solid rgba(255,255,255,0.1)", backdropFilter: "blur(8px)" }}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#888" strokeWidth="2" strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
+            </button>
+            {/* Zoom out */}
+            <button
+              onClick={() => { hapticTap(); mapInstanceRef.current?.zoomOut(); }}
+              className="h-9 w-9 rounded-xl flex items-center justify-center active:scale-90 transition-all"
+              style={{ background: "rgba(10,10,10,0.85)", border: "1px solid rgba(255,255,255,0.1)", backdropFilter: "blur(8px)" }}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#888" strokeWidth="2" strokeLinecap="round"><line x1="5" y1="12" x2="19" y2="12" /></svg>
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Node detail bottom sheet */}
       {selected && (
-        <div className="z-50" style={{ borderTop: "1px solid rgba(255,255,255,0.08)" }}>
-          <div className="px-4 py-3" style={{ background: "rgba(14,14,14,0.98)", backdropFilter: "blur(16px)" }}>
+        <div
+          className="z-50"
+          style={{
+            borderTop: "1px solid rgba(255,255,255,0.08)",
+            animation: "sheet-slide-up 0.25s ease-out",
+          }}
+        >
+          <div className="px-4 pt-2 pb-3" style={{ background: "rgba(14,14,14,0.98)", backdropFilter: "blur(16px)" }}>
+            {/* Drag handle indicator */}
+            <div className="flex justify-center mb-2">
+              <div className="w-8 h-1 rounded-full" style={{ background: "rgba(255,255,255,0.15)" }} />
+            </div>
             {/* Handle + close */}
             <div className="flex items-center justify-between mb-2.5">
               <div className="flex items-center gap-2.5">
@@ -442,6 +497,10 @@ function MobileMapViewer() {
         @keyframes pulse-red {
           0%, 100% { box-shadow: 0 0 8px #ef444488; }
           50% { box-shadow: 0 0 20px #ef4444cc, 0 0 40px #ef444444; }
+        }
+        @keyframes sheet-slide-up {
+          from { transform: translateY(100%); opacity: 0; }
+          to { transform: translateY(0); opacity: 1; }
         }
         .safe-top { padding-top: env(safe-area-inset-top, 0); }
         .safe-bottom { padding-bottom: env(safe-area-inset-bottom, 0); }

@@ -2,6 +2,8 @@
 
 import React, { useEffect, useState, useCallback } from "react";
 import { apiUrl } from "@/lib/api";
+import PageTransition from "@/components/mobile/PageTransition";
+import { hapticTap, hapticSuccess, hapticError } from "@/lib/haptics";
 
 function urlBase64ToUint8Array(base64String: string): Uint8Array {
   const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
@@ -88,15 +90,18 @@ export default function MobileSettings() {
           body: JSON.stringify(sub.toJSON()),
         });
         setPushEnabled(true);
+        hapticSuccess();
       }
     } catch (err) {
       console.error("[push]", err);
+      hapticError();
     } finally {
       setPushLoading(false);
     }
   }, [pushEnabled, pushSupported]);
 
   return (
+    <PageTransition>
     <div className="flex flex-col min-h-screen">
       {/* Header */}
       <header
@@ -122,7 +127,7 @@ export default function MobileSettings() {
 
           {/* Push toggle */}
           <button
-            onClick={togglePush}
+            onClick={() => { hapticTap(); togglePush(); }}
             disabled={pushLoading || !pushSupported}
             className="w-full flex items-center justify-between px-4 py-3.5 active:bg-white/[0.02] transition-all"
           >
@@ -228,6 +233,7 @@ export default function MobileSettings() {
         </div>
       </div>
     </div>
+    </PageTransition>
   );
 }
 

@@ -2,6 +2,9 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useMonitorCounts } from "@/hooks/useMonitorCounts";
+import { useOnlineStatus } from "@/hooks/useOnlineStatus";
+import { hapticTap } from "@/lib/haptics";
 
 const tabs = [
   {
@@ -18,6 +21,7 @@ const tabs = [
   {
     href: "/mobile/alerts",
     label: "Alertas",
+    badge: true, // will show DOWN count
     icon: (active: boolean) => (
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={active ? "#f87171" : "#555"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" />
@@ -39,13 +43,19 @@ const tabs = [
 
 export default function BottomTabBar() {
   const pathname = usePathname();
+  const { down } = useMonitorCounts();
+  const online = useOnlineStatus();
 
-  // Don't show on map viewer (needs full screen)
-  if (pathname.startsWith("/mobile/map")) return null;
+  // Hide on map viewer, rack viewer, camera viewer (need full screen)
+  if (
+    pathname.startsWith("/mobile/map") ||
+    pathname.startsWith("/mobile/rack") ||
+    pathname.startsWith("/mobile/camera")
+  ) return null;
 
   return (
     <>
-      {/* Spacer to prevent content from hiding behind fixed bar */}
+      {/* Spacer */}
       <div className="h-16 safe-bottom" />
 
       <nav
@@ -56,6 +66,17 @@ export default function BottomTabBar() {
           borderTop: "1px solid rgba(255,255,255,0.06)",
         }}
       >
+        {/* Online/offline indicator strip */}
+        {!online && (
+          <div
+            className="h-5 flex items-center justify-center gap-1.5"
+            style={{ background: "rgba(239,68,68,0.15)" }}
+          >
+            <div className="h-1.5 w-1.5 rounded-full bg-red-400 animate-pulse" />
+            <span className="text-[9px] font-bold text-red-400">Sin conexión</span>
+          </div>
+        )}
+
         <div className="flex items-center justify-around h-14 max-w-md mx-auto">
           {tabs.map((tab) => {
             const isActive = tab.href === "/mobile"
@@ -66,15 +87,38 @@ export default function BottomTabBar() {
               <Link
                 key={tab.href}
                 href={tab.href}
-                className="flex flex-col items-center gap-0.5 px-4 py-1 transition-all active:scale-95"
+                onClick={() => hapticTap()}
+                className="relative flex flex-col items-center gap-0.5 px-4 py-1 transition-all active:scale-95"
               >
-                {tab.icon(isActive)}
+                <div className="relative">
+                  {tab.icon(isActive)}
+                  {/* Badge for down monitors */}
+                  {"badge" in tab && tab.badge && down > 0 && (
+                    <span
+                      className="absolute -top-1.5 -right-2 min-w-[16px] h-4 flex items-center justify-center rounded-full text-[9px] font-bold text-white px-1"
+                      style={{
+                        background: "#ef4444",
+                        boxShadow: "0 0 6px rgba(239,68,68,0.6)",
+                        animation: "badge-pulse 2s ease-in-out infinite",
+                      }}
+                    >
+                      {down > 99 ? "99+" : down}
+                    </span>
+                  )}
+                </div>
                 <span
                   className="text-[9px] font-bold"
                   style={{ color: isActive ? "#ededed" : "#555" }}
                 >
                   {tab.label}
                 </span>
+                {/* Active indicator dot */}
+                {isActive && (
+                  <div
+                    className="absolute -bottom-0.5 h-0.5 w-4 rounded-full"
+                    style={{ background: isActive ? (tab.href === "/mobile/alerts" ? "#f87171" : tab.href === "/mobile/settings" ? "#a78bfa" : "#60a5fa") : "transparent" }}
+                  />
+                )}
               </Link>
             );
           })}
@@ -83,6 +127,10 @@ export default function BottomTabBar() {
 
       <style>{`
         .safe-bottom { padding-bottom: env(safe-area-inset-bottom, 0); }
+        @keyframes badge-pulse {
+          0%, 100% { transform: scale(1); }
+          50% { transform: scale(1.1); }
+        }
       `}</style>
     </>
   );

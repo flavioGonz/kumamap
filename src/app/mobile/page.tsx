@@ -4,8 +4,11 @@ import React, { useEffect, useState, useCallback } from "react";
 import { apiUrl } from "@/lib/api";
 import Link from "next/link";
 import PullToRefresh from "@/components/mobile/PullToRefresh";
+import PageTransition from "@/components/mobile/PageTransition";
 import { SkeletonList } from "@/components/mobile/Skeleton";
 import { useToast } from "@/components/mobile/MobileToast";
+import { useOnlineStatus } from "@/hooks/useOnlineStatus";
+import { hapticTap, hapticSuccess } from "@/lib/haptics";
 
 interface MapSummary {
   id: string;
@@ -29,6 +32,7 @@ export default function MobileHome() {
   const [loading, setLoading] = useState(true);
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
   const { show } = useToast();
+  const online = useOnlineStatus();
 
   const fetchData = useCallback(async () => {
     try {
@@ -59,6 +63,7 @@ export default function MobileHome() {
 
   const handleRefresh = useCallback(async () => {
     await fetchData();
+    hapticSuccess();
     show("Actualizado", "success");
   }, [fetchData, show]);
 
@@ -76,6 +81,7 @@ export default function MobileHome() {
   };
 
   return (
+    <PageTransition>
     <PullToRefresh onRefresh={handleRefresh}>
       {/* Header */}
       <header className="sticky top-0 z-50 px-4 py-3 safe-top" style={{ background: "rgba(10,10,10,0.95)", backdropFilter: "blur(12px)", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
@@ -92,7 +98,16 @@ export default function MobileHome() {
               </svg>
             </div>
             <div>
-              <h1 className="text-sm font-bold text-[#ededed]">KumaMap</h1>
+              <div className="flex items-center gap-1.5">
+                <h1 className="text-sm font-bold text-[#ededed]">KumaMap</h1>
+                <div
+                  className="h-1.5 w-1.5 rounded-full"
+                  style={{
+                    background: online ? "#22c55e" : "#ef4444",
+                    boxShadow: online ? "0 0 4px rgba(34,197,94,0.6)" : "0 0 4px rgba(239,68,68,0.6)",
+                  }}
+                />
+              </div>
               <p className="text-[9px] text-[#555]">
                 {lastUpdate ? `${lastUpdate.toLocaleTimeString("es")}` : "Cargando..."}
               </p>
@@ -149,7 +164,7 @@ export default function MobileHome() {
           const healthPct = status.total > 0 ? (status.up / status.total) * 100 : 100;
 
           return (
-            <Link key={map.id} href={`/mobile/map?id=${map.id}`}>
+            <Link key={map.id} href={`/mobile/map?id=${map.id}`} onClick={() => hapticTap()}>
               <div
                 className="rounded-2xl p-4 transition-all active:scale-[0.98]"
                 style={{
@@ -208,5 +223,6 @@ export default function MobileHome() {
         .safe-top { padding-top: env(safe-area-inset-top, 0); }
       `}</style>
     </PullToRefresh>
+    </PageTransition>
   );
 }

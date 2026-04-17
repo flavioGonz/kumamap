@@ -3,8 +3,10 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { apiUrl } from "@/lib/api";
 import PullToRefresh from "@/components/mobile/PullToRefresh";
+import PageTransition from "@/components/mobile/PageTransition";
 import { SkeletonList } from "@/components/mobile/Skeleton";
 import { useToast } from "@/components/mobile/MobileToast";
+import { hapticTap, hapticSuccess } from "@/lib/haptics";
 
 interface KumaMonitor {
   id: number;
@@ -51,10 +53,12 @@ export default function MobileAlerts() {
 
   const handleRefresh = useCallback(async () => {
     await fetchData();
+    hapticSuccess();
     show("Actualizado", "success");
   }, [fetchData, show]);
 
   return (
+    <PageTransition>
     <PullToRefresh onRefresh={handleRefresh}>
       {/* Header */}
       <header
@@ -85,7 +89,7 @@ export default function MobileAlerts() {
         ]).map((f) => (
           <button
             key={f.key}
-            onClick={() => setFilter(f.key)}
+            onClick={() => { setFilter(f.key); hapticTap(); }}
             className="rounded-xl px-3 py-1.5 text-[10px] font-bold transition-all active:scale-95"
             style={{
               background: filter === f.key ? `${f.color}22` : "rgba(255,255,255,0.02)",
@@ -153,5 +157,6 @@ export default function MobileAlerts() {
         }
       `}</style>
     </PullToRefresh>
+    </PageTransition>
   );
 }

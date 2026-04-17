@@ -61,12 +61,59 @@ function generateWhatsAppText(rackName: string, totalUnits: number, devices: Rac
     }
 
     // Router interfaces
-    if (d.type === "router" && d.routerInterfaces && d.routerInterfaces.length > 0) {
+    if (d.routerInterfaces && d.routerInterfaces.length > 0) {
       t += `   🔌 Interfaces:\n`;
       d.routerInterfaces.forEach(iface => {
         const status = iface.connected ? "✅" : "❌";
         t += `      ${status} ${iface.name} (${iface.type})${iface.ipAddress ? ` · ${iface.ipAddress}` : ""}\n`;
       });
+    }
+
+    // PBX extensions
+    if (d.pbxExtensions && d.pbxExtensions.length > 0) {
+      t += `   📞 Extensiones: ${d.pbxExtensions.length}\n`;
+      d.pbxExtensions.forEach(ext => {
+        const parts = [`Ext ${ext.extension}`, ext.name];
+        if (ext.ipPhone) parts.push(`IP: ${ext.ipPhone}`);
+        if (ext.model) parts.push(ext.model);
+        if (ext.location) parts.push(ext.location);
+        t += `      • ${parts.join(" · ")}\n`;
+      });
+    }
+
+    // PBX trunk lines
+    if (d.pbxTrunkLines && d.pbxTrunkLines.length > 0) {
+      t += `   📡 Troncales: ${d.pbxTrunkLines.length}\n`;
+      d.pbxTrunkLines.forEach(tr => {
+        const statusEmoji = tr.status === "active" ? "✅" : tr.status === "backup" ? "🟡" : "❌";
+        const parts = [tr.provider, tr.number, tr.type];
+        if (tr.channels) parts.push(`${tr.channels}ch`);
+        t += `      ${statusEmoji} ${parts.join(" · ")}\n`;
+      });
+    }
+
+    // Fiber tray
+    if (d.type === "tray-fiber" && (d.fiberCapacity || d.fiberConnectorType)) {
+      t += `   🔮 Fibra:`;
+      if (d.fiberCapacity) t += ` ${d.fiberCapacity} fibras`;
+      if (d.fiberConnectorType) t += ` · ${d.fiberConnectorType}`;
+      if (d.fiberMode) t += ` · ${d.fiberMode}`;
+      if (d.spliceCount) t += ` · ${d.spliceCount} empalmes`;
+      t += "\n";
+    }
+
+    // PDU
+    if (d.type === "pdu") {
+      const pduParts: string[] = [];
+      if (d.pduInputCount) pduParts.push(`${d.pduInputCount} entradas`);
+      if (d.pduHasBreaker) pduParts.push("Con breaker");
+      if (d.portCount) pduParts.push(`${d.portCount} tomas`);
+      if (pduParts.length > 0) t += `   ⚡ PDU: ${pduParts.join(" · ")}\n`;
+    }
+
+    // Cable organizer
+    if (d.type === "cable-organizer" && d.mountedItems) {
+      t += `   🔧 Contenido: ${d.mountedItems}\n`;
     }
 
     if (d.notes) t += `   📝 ${d.notes}\n`;

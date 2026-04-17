@@ -294,27 +294,6 @@ export default function MobileSettings() {
             )}
           </button>
 
-          {/* Health endpoint link */}
-          <a
-            href={apiUrl("/api/health")}
-            target="_blank"
-            rel="noopener"
-            className="flex items-center justify-between px-4 py-3.5 active:bg-white/[0.02] transition-all border-t"
-            style={{ borderColor: "rgba(255,255,255,0.04)" }}
-          >
-            <div className="flex items-center gap-3">
-              <SettingsIcon color="#60a5fa" bg="rgba(59,130,246,0.12)" border="rgba(59,130,246,0.25)">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#60a5fa" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <rect x="2" y="3" width="20" height="14" rx="2" ry="2" /><line x1="8" y1="21" x2="16" y2="21" /><line x1="12" y1="17" x2="12" y2="21" />
-                </svg>
-              </SettingsIcon>
-              <div>
-                <div className="text-xs font-bold text-[#ddd]">Health endpoint</div>
-                <div className="text-[10px] text-[#555]">JSON completo del servidor</div>
-              </div>
-            </div>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#555" strokeWidth="2" strokeLinecap="round"><polyline points="9 18 15 12 9 6" /></svg>
-          </a>
         </SettingsSection>
 
         {/* ── Notifications ── */}

@@ -28,11 +28,34 @@ interface RouterInterface {
   id: string; name: string; type: string; ipAddress?: string; connected: boolean; notes?: string;
 }
 
+interface PbxExtension {
+  extension: string; name: string; ipPhone?: string; macAddress?: string;
+  username?: string; model?: string; location?: string; notes?: string;
+  monitorId?: number | null;
+}
+
+interface PbxTrunkLine {
+  id: string; provider: string; number: string;
+  type: string; channels?: number; sipServer?: string;
+  codec?: string; status?: string; notes?: string;
+}
+
 interface RackDevice {
   id: string; unit: number; sizeUnits: number; label: string; type: string;
   color?: string; monitorId?: number | null; model?: string; serial?: string;
   managementIp?: string; notes?: string; portCount?: number; isPoeCapable?: boolean;
   ports?: PatchPort[]; switchPorts?: SwitchPort[]; routerInterfaces?: RouterInterface[];
+  // PBX
+  pbxExtensions?: PbxExtension[]; pbxTrunkLines?: PbxTrunkLine[];
+  // Fiber tray
+  fiberTrayType?: string; fiberCapacity?: number; fiberConnectorType?: string;
+  fiberMode?: string; spliceCount?: number;
+  // PDU
+  pduHasBreaker?: boolean; pduInputCount?: number;
+  // Cable organizer
+  mountedItems?: string;
+  // Cable length (for patch panels etc)
+  cableLength?: number;
 }
 
 interface KumaMonitor {
@@ -119,12 +142,59 @@ function generateWhatsAppText(rackName: string, totalUnits: number, devices: Rac
     }
 
     // Router interfaces
-    if (d.type === "router" && d.routerInterfaces && d.routerInterfaces.length > 0) {
+    if (d.routerInterfaces && d.routerInterfaces.length > 0) {
       t += `   🔌 Interfaces:\n`;
       d.routerInterfaces.forEach(iface => {
         const status = iface.connected ? "✅" : "❌";
         t += `      ${status} ${iface.name} (${iface.type})${iface.ipAddress ? ` · ${iface.ipAddress}` : ""}\n`;
       });
+    }
+
+    // PBX extensions
+    if (d.pbxExtensions && d.pbxExtensions.length > 0) {
+      t += `   📞 Extensiones: ${d.pbxExtensions.length}\n`;
+      d.pbxExtensions.forEach(ext => {
+        const parts = [`Ext ${ext.extension}`, ext.name];
+        if (ext.ipPhone) parts.push(`IP: ${ext.ipPhone}`);
+        if (ext.model) parts.push(ext.model);
+        if (ext.location) parts.push(ext.location);
+        t += `      • ${parts.join(" · ")}\n`;
+      });
+    }
+
+    // PBX trunk lines
+    if (d.pbxTrunkLines && d.pbxTrunkLines.length > 0) {
+      t += `   📡 Troncales: ${d.pbxTrunkLines.length}\n`;
+      d.pbxTrunkLines.forEach(tr => {
+        const statusEmoji = tr.status === "active" ? "✅" : tr.status === "backup" ? "🟡" : "❌";
+        const parts = [tr.provider, tr.number, tr.type];
+        if (tr.channels) parts.push(`${tr.channels}ch`);
+        t += `      ${statusEmoji} ${parts.join(" · ")}\n`;
+      });
+    }
+
+    // Fiber tray
+    if (d.type === "tray-fiber" && (d.fiberCapacity || d.fiberConnectorType)) {
+      t += `   🔮 Fibra:`;
+      if (d.fiberCapacity) t += ` ${d.fiberCapacity} fibras`;
+      if (d.fiberConnectorType) t += ` · ${d.fiberConnectorType}`;
+      if (d.fiberMode) t += ` · ${d.fiberMode}`;
+      if (d.spliceCount) t += ` · ${d.spliceCount} empalmes`;
+      t += "\n";
+    }
+
+    // PDU
+    if (d.type === "pdu") {
+      const pduParts: string[] = [];
+      if (d.pduInputCount) pduParts.push(`${d.pduInputCount} entradas`);
+      if (d.pduHasBreaker) pduParts.push("Con breaker");
+      if (d.portCount) pduParts.push(`${d.portCount} tomas`);
+      if (pduParts.length > 0) t += `   ⚡ PDU: ${pduParts.join(" · ")}\n`;
+    }
+
+    // Cable organizer
+    if (d.type === "cable-organizer" && d.mountedItems) {
+      t += `   🔧 Contenido: ${d.mountedItems}\n`;
     }
 
     if (d.notes) t += `   📝 ${d.notes}\n`;
@@ -320,6 +390,128 @@ function MobileRouterInterfaces({ interfaces }: { interfaces: RouterInterface[] 
             </div>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+function MobilePbxExtensions({ extensions, monitors }: { extensions: PbxExtension[]; monitors: Map<number, KumaMonitor> }) {
+  const [selected, setSelected] = useState<string | null>(null);
+  const sel = selected !== null ? extensions.find(e => e.extension === selected) : null;
+
+  return (
+    <div>
+      <div className="text-[9px] text-[#555] font-bold uppercase tracking-wider mb-2 flex items-center gap-1.5">
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#06b6d4" strokeWidth="2.5"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z" /></svg>
+        Extensiones ({extensions.length})
+      </div>
+
+      <div className="flex flex-wrap gap-1 mb-2">
+        {extensions.map(ext => {
+          const isSelected = selected === ext.extension;
+          const mon = ext.monitorId ? monitors.get(ext.monitorId) : null;
+          const statusColor = mon ? (mon.status === 1 ? "#22c55e" : mon.status === 0 ? "#ef4444" : "#f59e0b") : undefined;
+          return (
+            <button
+              key={ext.extension}
+              onClick={() => { setSelected(isSelected ? null : ext.extension); hapticTap(); }}
+              className="relative flex items-center justify-center transition-all active:scale-90"
+              style={{
+                minWidth: 36, height: 28, borderRadius: 6, padding: "0 6px",
+                background: isSelected ? "rgba(6,182,212,0.2)" : "rgba(255,255,255,0.02)",
+                border: `1.5px solid ${isSelected ? "#06b6d4" : "rgba(255,255,255,0.06)"}`,
+                fontSize: 9, fontFamily: "monospace", fontWeight: 700,
+                color: isSelected ? "#67e8f9" : "#06b6d4",
+              }}
+            >
+              {ext.extension}
+              {statusColor && (
+                <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full" style={{ background: statusColor }} />
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      {sel && (
+        <div
+          className="rounded-xl p-2.5 space-y-1.5"
+          style={{ background: "rgba(6,182,212,0.06)", border: "1px solid rgba(6,182,212,0.15)", animation: "expand-in 0.2s ease-out" }}
+        >
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-[10px] font-mono font-bold text-[#67e8f9]">Ext {sel.extension}</span>
+            <span className="text-[9px] text-[#aaa]">{sel.name}</span>
+          </div>
+          <div className="grid grid-cols-2 gap-1.5">
+            {sel.ipPhone && <MiniDetail label="IP Teléfono" value={sel.ipPhone} mono />}
+            {sel.model && <MiniDetail label="Modelo" value={sel.model} />}
+            {sel.macAddress && <MiniDetail label="MAC" value={sel.macAddress} mono />}
+            {sel.location && <MiniDetail label="Ubicación" value={sel.location} />}
+            {sel.notes && <MiniDetail label="Notas" value={sel.notes} span2 />}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MobilePbxTrunkLines({ trunks }: { trunks: PbxTrunkLine[] }) {
+  return (
+    <div>
+      <div className="text-[9px] text-[#555] font-bold uppercase tracking-wider mb-2 flex items-center gap-1.5">
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#06b6d4" strokeWidth="2.5"><path d="M12 2L2 7l10 5 10-5-10-5z" /><path d="M2 17l10 5 10-5M2 12l10 5 10-5" /></svg>
+        Troncales ({trunks.length})
+      </div>
+      <div className="space-y-1">
+        {trunks.map(tr => {
+          const statusColors: Record<string, string> = { active: "#22c55e", inactive: "#ef4444", backup: "#f59e0b" };
+          const color = tr.status ? statusColors[tr.status] || "#6b7280" : "#6b7280";
+          return (
+            <div key={tr.id} className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg" style={{ background: "rgba(255,255,255,0.02)" }}>
+              <div className="h-2 w-2 rounded-full" style={{ background: color, boxShadow: `0 0 4px ${color}66` }} />
+              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded font-mono" style={{ background: "rgba(6,182,212,0.1)", color: "#06b6d4", border: "1px solid rgba(6,182,212,0.2)" }}>
+                {tr.type}
+              </span>
+              <span className="text-[10px] font-bold text-[#aaa]">{tr.provider}</span>
+              <span className="text-[9px] font-mono text-[#67e8f9]">{tr.number}</span>
+              {tr.channels && <span className="text-[8px] text-[#555]">{tr.channels}ch</span>}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function MobileFiberTrayInfo({ device }: { device: RackDevice }) {
+  return (
+    <div>
+      <div className="text-[9px] text-[#555] font-bold uppercase tracking-wider mb-2 flex items-center gap-1.5">
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#d946ef" strokeWidth="2.5"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z" /><circle cx="12" cy="12" r="3" /></svg>
+        Fibra Óptica
+      </div>
+      <div className="grid grid-cols-2 gap-1.5">
+        {device.fiberTrayType && <MiniDetail label="Tipo" value={device.fiberTrayType} />}
+        {device.fiberCapacity && <MiniDetail label="Capacidad" value={`${device.fiberCapacity} fibras`} />}
+        {device.fiberConnectorType && <MiniDetail label="Conector" value={device.fiberConnectorType} />}
+        {device.fiberMode && <MiniDetail label="Modo" value={device.fiberMode} />}
+        {device.spliceCount != null && <MiniDetail label="Empalmes" value={`${device.spliceCount}`} />}
+      </div>
+    </div>
+  );
+}
+
+function MobilePduInfo({ device }: { device: RackDevice }) {
+  return (
+    <div>
+      <div className="text-[9px] text-[#555] font-bold uppercase tracking-wider mb-2 flex items-center gap-1.5">
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#f97316" strokeWidth="2.5"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" /></svg>
+        PDU
+      </div>
+      <div className="grid grid-cols-2 gap-1.5">
+        {device.pduInputCount != null && <MiniDetail label="Entradas" value={`${device.pduInputCount}`} />}
+        <MiniDetail label="Breaker" value={device.pduHasBreaker ? "Sí" : "No"} />
+        {device.portCount && <MiniDetail label="Tomas" value={`${device.portCount}`} />}
       </div>
     </div>
   );
@@ -593,19 +785,50 @@ function MobileRackViewer() {
                     {dev.notes && <DetailRow label="Notas" value={dev.notes} />}
                   </div>
 
-                  {/* Switch ports - full interactive grid */}
-                  {dev.type === "switch" && dev.switchPorts && dev.switchPorts.length > 0 && (
+                  {/* Switch ports */}
+                  {dev.switchPorts && dev.switchPorts.length > 0 && (
                     <MobileSwitchPortGrid ports={dev.switchPorts} />
                   )}
 
-                  {/* Patch panel ports - full interactive grid */}
-                  {dev.type === "patchpanel" && dev.ports && dev.ports.length > 0 && (
+                  {/* Patch panel ports */}
+                  {dev.ports && dev.ports.length > 0 && (
                     <MobilePatchPortGrid ports={dev.ports} />
                   )}
 
                   {/* Router interfaces */}
-                  {dev.type === "router" && dev.routerInterfaces && dev.routerInterfaces.length > 0 && (
+                  {dev.routerInterfaces && dev.routerInterfaces.length > 0 && (
                     <MobileRouterInterfaces interfaces={dev.routerInterfaces} />
+                  )}
+
+                  {/* PBX extensions */}
+                  {dev.pbxExtensions && dev.pbxExtensions.length > 0 && (
+                    <MobilePbxExtensions extensions={dev.pbxExtensions} monitors={monitors} />
+                  )}
+
+                  {/* PBX trunk lines */}
+                  {dev.pbxTrunkLines && dev.pbxTrunkLines.length > 0 && (
+                    <MobilePbxTrunkLines trunks={dev.pbxTrunkLines} />
+                  )}
+
+                  {/* Fiber tray */}
+                  {dev.type === "tray-fiber" && (dev.fiberCapacity || dev.fiberConnectorType || dev.fiberMode || dev.fiberTrayType) && (
+                    <MobileFiberTrayInfo device={dev} />
+                  )}
+
+                  {/* PDU */}
+                  {dev.type === "pdu" && (dev.pduInputCount != null || dev.pduHasBreaker != null) && (
+                    <MobilePduInfo device={dev} />
+                  )}
+
+                  {/* Cable organizer */}
+                  {dev.type === "cable-organizer" && dev.mountedItems && (
+                    <div>
+                      <div className="text-[9px] text-[#555] font-bold uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
+                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#78716c" strokeWidth="2.5"><path d="M4 9h16M4 15h16M10 3L8 21M16 3l-2 18" /></svg>
+                        Organizador
+                      </div>
+                      <MiniDetail label="Contenido" value={dev.mountedItems} span2 />
+                    </div>
                   )}
                 </div>
               )}

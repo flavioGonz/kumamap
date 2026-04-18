@@ -7,7 +7,8 @@ import { TYPE_META, fieldStyle, miniFieldStyle } from "./rack-constants";
 import { RackDevice, PatchPort, SwitchPort, RouterInterface } from "./rack-types";
 import { SectionHeader, FieldLabel } from "./RackFormComponents";
 import MonitorSelect from "./MonitorSelect";
-import { PatchPanelEditor, SwitchEditor, RouterEditor, PbxExtensionsEditor, PbxTrunkLinesEditor } from "./RackPortEditors";
+import { PatchPanelEditor, SwitchEditor, RouterEditor, PbxExtensionsEditor, PbxTrunkLinesEditor, NvrChannelsEditor, NvrDisksEditor } from "./RackPortEditors";
+import type { NvrChannel, NvrDisk } from "./rack-types";
 
 function DeviceEditor({
   device, isNew, totalUnits, monitors, isLocked, onChange, onSave, onDelete, onCancel,
@@ -24,7 +25,7 @@ function DeviceEditor({
 }) {
   const [activeTab, setActiveTab] = useState<"ports" | "trunks" | "general">("ports");
   const meta = TYPE_META[device.type] || TYPE_META.other;
-  const hasPorts = ["patchpanel", "switch", "router", "pbx"].includes(device.type);
+  const hasPorts = ["patchpanel", "switch", "router", "pbx", "nvr"].includes(device.type);
 
   const getStatusInfo = useCallback((monitorId?: number | null) => {
     if (!monitorId || !monitors) return { color: "#6b7280", name: "" };
@@ -57,6 +58,19 @@ function DeviceEditor({
         { extension: "100", name: "Recepción" },
         { extension: "101", name: "Oficina 1" },
       ];
+    if (type === "nvr" && !device.nvrChannels) {
+      const chCount = device.nvrTotalChannels || 16;
+      upd.nvrChannels = Array.from({ length: chCount }, (_, i) => ({
+        channel: i + 1, label: `CH${i + 1}`, enabled: false,
+      }));
+      upd.nvrTotalChannels = chCount;
+      if (!device.nvrDisks) {
+        upd.nvrDisks = Array.from({ length: device.nvrDiskBays || 2 }, (_, i) => ({
+          id: `disk-${Date.now()}-${i}`, slot: i + 1, status: "empty" as const,
+        }));
+        upd.nvrDiskBays = device.nvrDiskBays || 2;
+      }
+    }
     onChange({ ...device, ...upd });
   };
 
@@ -73,7 +87,7 @@ function DeviceEditor({
   };
 
   const showPortCount = device.type === "patchpanel" || device.type === "switch";
-  const showManagementIp = device.type === "switch" || device.type === "router" || device.type === "server" || device.type === "pbx";
+  const showManagementIp = device.type === "switch" || device.type === "router" || device.type === "server" || device.type === "pbx" || device.type === "nvr";
 
   // Default to ports tab if device has ports, otherwise general
   useEffect(() => {
@@ -124,8 +138,9 @@ function DeviceEditor({
       {hasPorts && (
         <div className="shrink-0 flex border-b border-white/[0.06]" style={{ background: "rgba(0,0,0,0.2)" }}>
           {[
-            { id: "ports", label: device.type === "router" ? "Interfaces" : device.type === "pbx" ? "Extensiones" : `Puertos${device.type === "patchpanel" ? " del Panel" : ""}` },
+            { id: "ports", label: device.type === "router" ? "Interfaces" : device.type === "pbx" ? "Extensiones" : device.type === "nvr" ? "Canales" : `Puertos${device.type === "patchpanel" ? " del Panel" : ""}` },
             ...(device.type === "pbx" ? [{ id: "trunks", label: "Líneas" }] : []),
+            ...(device.type === "nvr" ? [{ id: "trunks", label: "Discos" }] : []),
             { id: "general", label: "General" },
           ].map((tab) => (
             <button
@@ -173,8 +188,20 @@ function DeviceEditor({
             getStatusInfo={getStatusInfo}
           />
         )}
+        {activeTab === "ports" && device.type === "nvr" && (
+          <NvrChannelsEditor
+            channels={device.nvrChannels || []}
+            onChange={nvrChannels => onChange({ ...device, nvrChannels })}
+          />
+        )}
 
-        {/* Trunk lines tab */}
+        {/* Trunk lines / Disks tab */}
+        {activeTab === "trunks" && device.type === "nvr" && (
+          <NvrDisksEditor
+            disks={device.nvrDisks || []}
+            onChange={nvrDisks => onChange({ ...device, nvrDisks })}
+          />
+        )}
         {activeTab === "trunks" && device.type === "pbx" && (
           <PbxTrunkLinesEditor
             trunkLines={device.pbxTrunkLines || []}
@@ -307,6 +334,37 @@ function DeviceEditor({
                     placeholder="ej. Cables del servidor 3, Patch del switch principal, Lazo fibra óptica..."
                     style={{ ...fieldStyle, resize: "none" }}
                   />
+                </div>
+              </>
+            )}
+
+            {/* ── NVR: canales y bahías ── */}
+            {device.type === "nvr" && (
+              <>
+                <SectionHeader title="Configuración NVR" />
+                <div className="grid grid-cols-2 gap-3 -mt-2">
+                  <div>
+                    <FieldLabel>Total de Canales</FieldLabel>
+                    <select value={device.nvrTotalChannels || 16} onChange={e => {
+                      const cnt = parseInt(e.target.value);
+                      const channels: NvrChannel[] = Array.from({ length: cnt }, (_, i) =>
+                        device.nvrChannels?.[i] || { channel: i + 1, label: `CH${i + 1}`, enabled: false });
+                      onChange({ ...device, nvrTotalChannels: cnt, nvrChannels: channels });
+                    }} style={fieldStyle}>
+                      {[4, 8, 16, 32, 64, 128].map(n => (<option key={n} value={n} style={{ background: "#1a1a1a" }}>{n} canales</option>))}
+                    </select>
+                  </div>
+                  <div>
+                    <FieldLabel>Bahías de Disco</FieldLabel>
+                    <select value={device.nvrDiskBays || 2} onChange={e => {
+                      const cnt = parseInt(e.target.value);
+                      const disks: NvrDisk[] = Array.from({ length: cnt }, (_, i) =>
+                        device.nvrDisks?.[i] || { id: `disk-${Date.now()}-${i}`, slot: i + 1, status: "empty" as const });
+                      onChange({ ...device, nvrDiskBays: cnt, nvrDisks: disks });
+                    }} style={fieldStyle}>
+                      {[1, 2, 4, 8, 16].map(n => (<option key={n} value={n} style={{ background: "#1a1a1a" }}>{n} bahías</option>))}
+                    </select>
+                  </div>
                 </div>
               </>
             )}

@@ -2,7 +2,7 @@
 
 import React from "react";
 import {
-  Server, Network, Zap, Settings, Phone, Inbox, Router, Cable,
+  Server, Network, Zap, Settings, Phone, Inbox, Router, Cable, Video,
 } from "lucide-react";
 
 // ── Device type metadata ──────────────────────────────────────────────────────
@@ -15,6 +15,7 @@ export const TYPE_META: Record<string, { label: string; icon: React.ReactNode; c
   router:            { label: "Router",              icon: React.createElement(Router, { className: "w-4 h-4" }),   color: "#ef4444" },
   pdu:               { label: "PDU",                 icon: React.createElement(Zap, { className: "w-4 h-4" }),      color: "#f97316" },
   pbx:               { label: "PBX / Telefonía",    icon: React.createElement(Phone, { className: "w-4 h-4" }),    color: "#06b6d4" },
+  nvr:               { label: "NVR / Grabador",      icon: React.createElement(Video, { className: "w-4 h-4" }),   color: "#e11d48" },
   "tray-fiber":      { label: "Bandeja de Fibra",    icon: React.createElement(Inbox, { className: "w-4 h-4" }),   color: "#d946ef" },
   "tray-1u":         { label: "Bandeja 1U",          icon: React.createElement(Inbox, { className: "w-4 h-4" }),   color: "#52525b" },
   "tray-2u":         { label: "Bandeja 2U",          icon: React.createElement(Inbox, { className: "w-4 h-4" }),   color: "#52525b" },
@@ -30,11 +31,24 @@ export const CABLE_PRESET_COLORS = ["#ef4444", "#f97316", "#eab308", "#22c55e", 
 export const SWITCH_SPEEDS = ["10", "100", "1G", "10G"] as const;
 export const POE_TYPES = ["802.3af", "802.3at", "802.3bt"] as const;
 export const ROUTER_IF_TYPES = ["WAN", "LAN", "MGMT", "DMZ", "VPN", "other"] as const;
+export const NVR_CODECS = ["H.264", "H.265", "H.265+", "MJPEG", "other"] as const;
+export const NVR_PROTOCOLS = ["ONVIF", "RTSP", "proprietary", "other"] as const;
+export const NVR_RECORDINGS = ["continuous", "motion", "schedule", "alarm", "off"] as const;
+export const NVR_DISK_STATUSES = ["healthy", "degraded", "failed", "empty"] as const;
+export const NVR_RESOLUTIONS = ["4K (3840×2160)", "5MP (2592×1944)", "4MP (2560×1440)", "1080p (1920×1080)", "720p (1280×720)", "D1 (704×480)"] as const;
 
 // ── Color maps ────────────────────────────────────────────────────────────────
 
 export const SPEED_COLOR: Record<string, string> = {
   "10": "#52525b", "100": "#3b82f6", "1G": "#10b981", "10G": "#f59e0b",
+};
+
+export const DISK_STATUS_COLOR: Record<string, string> = {
+  healthy: "#22c55e", degraded: "#f59e0b", failed: "#ef4444", empty: "#52525b",
+};
+
+export const RECORDING_COLOR: Record<string, string> = {
+  continuous: "#22c55e", motion: "#3b82f6", schedule: "#f59e0b", alarm: "#ef4444", off: "#52525b",
 };
 
 export const IF_TYPE_COLOR: Record<string, string> = {

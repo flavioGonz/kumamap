@@ -66,12 +66,37 @@ export interface PbxTrunkLine {
   notes?: string;
 }
 
+export interface NvrChannel {
+  channel: number;
+  label: string;
+  enabled: boolean;
+  resolution?: string;
+  fps?: number;
+  codec?: "H.264" | "H.265" | "H.265+" | "MJPEG" | "other";
+  connectedCamera?: string;
+  cameraIp?: string;
+  protocol?: "ONVIF" | "RTSP" | "proprietary" | "other";
+  recording?: "continuous" | "motion" | "schedule" | "alarm" | "off";
+  notes?: string;
+}
+
+export interface NvrDisk {
+  id: string;
+  slot: number;
+  brand?: string;
+  model?: string;
+  capacityTB?: number;
+  type?: "HDD" | "SSD";
+  status?: "healthy" | "degraded" | "failed" | "empty";
+  notes?: string;
+}
+
 export interface RackDevice {
   id: string;
   unit: number;
   sizeUnits: number;
   label: string;
-  type: "server" | "switch" | "patchpanel" | "ups" | "router" | "pdu" | "pbx" | "tray-fiber" | "tray-1u" | "tray-2u" | "cable-organizer" | "other";
+  type: "server" | "switch" | "patchpanel" | "ups" | "router" | "pdu" | "pbx" | "nvr" | "tray-fiber" | "tray-1u" | "tray-2u" | "cable-organizer" | "other";
   color?: string;
   monitorId?: number | null;
   ports?: PatchPort[];
@@ -98,6 +123,11 @@ export interface RackDevice {
   // PBX
   pbxExtensions?: PbxExtension[];
   pbxTrunkLines?: PbxTrunkLine[];
+  // NVR
+  nvrChannels?: NvrChannel[];
+  nvrDisks?: NvrDisk[];
+  nvrTotalChannels?: number;
+  nvrDiskBays?: number;
 }
 
 /** Status info returned by getDeviceStatusInfo helpers */

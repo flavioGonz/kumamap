@@ -9,9 +9,11 @@ import {
   CABLE_LENGTHS, CABLE_PRESET_COLORS,
   SWITCH_SPEEDS, POE_TYPES, ROUTER_IF_TYPES,
   SPEED_COLOR, IF_TYPE_COLOR,
+  NVR_CODECS, NVR_PROTOCOLS, NVR_RECORDINGS, NVR_RESOLUTIONS, NVR_DISK_STATUSES,
+  DISK_STATUS_COLOR, RECORDING_COLOR,
   miniFieldStyle, toggleTrack, toggleThumb,
 } from "./rack-constants";
-import type { PatchPort, SwitchPort, RouterInterface, PbxExtension, PbxTrunkLine } from "./rack-types";
+import type { PatchPort, SwitchPort, RouterInterface, PbxExtension, PbxTrunkLine, NvrChannel, NvrDisk } from "./rack-types";
 import MonitorSelect from "./MonitorSelect";
 
 // ── Port button (used by PatchPanel + Switch) ──────────────────────────────────
@@ -1036,6 +1038,257 @@ export function PbxTrunkLinesEditor({ trunkLines, onChange }: { trunkLines: PbxT
 
       {trunkLines.length === 0 && (
         <div className="text-center py-6 text-[11px] text-white/20">Sin líneas — agregá una para comenzar</div>
+      )}
+    </div>
+  );
+}
+
+// ── NVR Channels Editor ─────────────────────────────────────────────────────
+
+export function NvrChannelsEditor({
+  channels, onChange,
+}: {
+  channels: NvrChannel[];
+  onChange: (channels: NvrChannel[]) => void;
+}) {
+  const [selected, setSelected] = useState<number | null>(null);
+
+  const updateChannel = (idx: number, partial: Partial<NvrChannel>) => {
+    const upd = channels.map((c, i) => i === idx ? { ...c, ...partial } : c);
+    onChange(upd);
+  };
+
+  const fStyle = { ...miniFieldStyle };
+
+  // Channel grid
+  const PortGrid = () => (
+    <div className="flex flex-wrap gap-0.5">
+      {channels.map((ch, idx) => {
+        const isSelected = selected === idx;
+        const recColor = ch.recording ? RECORDING_COLOR[ch.recording] || "#22c55e" : "#22c55e";
+        return (
+          <button
+            key={ch.channel}
+            onClick={() => setSelected(isSelected ? null : idx)}
+            className="relative flex items-center justify-center transition-all cursor-pointer"
+            style={{
+              width: 26, height: 26, borderRadius: 3,
+              background: isSelected ? "rgba(225,29,72,0.2)" : ch.enabled ? `${recColor}15` : "#1a1a1a",
+              border: `1px solid ${isSelected ? "#e11d48" : ch.enabled ? `${recColor}55` : "#333"}`,
+              fontSize: 7, fontFamily: "monospace", fontWeight: 700,
+              color: isSelected ? "#fda4af" : ch.enabled ? recColor : "#444",
+              boxShadow: ch.enabled ? `0 0 5px ${recColor}33` : "none",
+            }}
+          >
+            {ch.channel}
+            {ch.enabled && ch.recording && ch.recording !== "off" && (
+              <span className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full" style={{ background: "#ef4444" }} />
+            )}
+          </button>
+        );
+      })}
+    </div>
+  );
+
+  const sel = selected !== null ? channels[selected] : null;
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-[11px] text-white/50 font-bold uppercase tracking-wider">
+          Canales ({channels.filter(c => c.enabled).length}/{channels.length} activos)
+        </span>
+      </div>
+
+      <PortGrid />
+
+      {/* Legend */}
+      <div className="flex items-center gap-3 mt-1.5 flex-wrap">
+        {Object.entries(RECORDING_COLOR).map(([mode, color]) => (
+          <span key={mode} className="flex items-center gap-1">
+            <span className="w-2 h-2 rounded-sm" style={{ background: color }} />
+            <span className="text-[8px] text-white/30 capitalize">{mode === "continuous" ? "Continuo" : mode === "motion" ? "Movimiento" : mode === "schedule" ? "Horario" : mode === "alarm" ? "Alarma" : "Off"}</span>
+          </span>
+        ))}
+      </div>
+
+      {/* Selected channel editor */}
+      <AnimatePresence>
+        {sel && selected !== null && (
+          <motion.div
+            key={selected}
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            className="mt-2 rounded-xl overflow-hidden"
+            style={{ background: "rgba(225,29,72,0.05)", border: "1px solid rgba(225,29,72,0.15)" }}
+          >
+            <div className="p-3">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-[11px] font-bold" style={{ color: "#fda4af" }}>Canal {sel.channel}</span>
+                <button style={toggleTrack(sel.enabled, "#e11d48")} onClick={() => updateChannel(selected, { enabled: !sel.enabled })}>
+                  <span style={toggleThumb(sel.enabled)} />
+                </button>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-[9px] text-white/30 font-bold uppercase tracking-wider block mb-0.5">Etiqueta</label>
+                  <input type="text" value={sel.label || ""} onChange={e => updateChannel(selected, { label: e.target.value })} placeholder={`Canal ${sel.channel}`} style={fStyle} />
+                </div>
+                <div>
+                  <label className="text-[9px] text-white/30 font-bold uppercase tracking-wider block mb-0.5">Cámara conectada</label>
+                  <input type="text" value={sel.connectedCamera || ""} onChange={e => updateChannel(selected, { connectedCamera: e.target.value })} placeholder="Nombre cámara..." style={fStyle} />
+                </div>
+                <div>
+                  <label className="text-[9px] text-white/30 font-bold uppercase tracking-wider block mb-0.5">IP Cámara</label>
+                  <input type="text" value={sel.cameraIp || ""} onChange={e => updateChannel(selected, { cameraIp: e.target.value })} placeholder="10.1.10.x" style={{ ...fStyle, fontFamily: "monospace" }} />
+                </div>
+                <div>
+                  <label className="text-[9px] text-white/30 font-bold uppercase tracking-wider block mb-0.5">Protocolo</label>
+                  <select value={sel.protocol || ""} onChange={e => updateChannel(selected, { protocol: e.target.value as NvrChannel["protocol"] })} style={fStyle}>
+                    <option value="" style={{ background: "#1a1a1a" }}>—</option>
+                    {NVR_PROTOCOLS.map(p => <option key={p} value={p} style={{ background: "#1a1a1a" }}>{p}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-[9px] text-white/30 font-bold uppercase tracking-wider block mb-0.5">Resolución</label>
+                  <select value={sel.resolution || ""} onChange={e => updateChannel(selected, { resolution: e.target.value })} style={fStyle}>
+                    <option value="" style={{ background: "#1a1a1a" }}>—</option>
+                    {NVR_RESOLUTIONS.map(r => <option key={r} value={r} style={{ background: "#1a1a1a" }}>{r}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-[9px] text-white/30 font-bold uppercase tracking-wider block mb-0.5">Codec</label>
+                  <select value={sel.codec || ""} onChange={e => updateChannel(selected, { codec: e.target.value as NvrChannel["codec"] })} style={fStyle}>
+                    <option value="" style={{ background: "#1a1a1a" }}>—</option>
+                    {NVR_CODECS.map(c => <option key={c} value={c} style={{ background: "#1a1a1a" }}>{c}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-[9px] text-white/30 font-bold uppercase tracking-wider block mb-0.5">FPS</label>
+                  <input type="number" min={1} max={60} value={sel.fps || ""} onChange={e => updateChannel(selected, { fps: parseInt(e.target.value) || undefined })} placeholder="25" style={{ ...fStyle, fontFamily: "monospace" }} />
+                </div>
+                <div>
+                  <label className="text-[9px] text-white/30 font-bold uppercase tracking-wider block mb-0.5">Grabación</label>
+                  <select value={sel.recording || ""} onChange={e => updateChannel(selected, { recording: e.target.value as NvrChannel["recording"] })} style={fStyle}>
+                    <option value="" style={{ background: "#1a1a1a" }}>—</option>
+                    {NVR_RECORDINGS.map(r => {
+                      const labels: Record<string, string> = { continuous: "Continuo", motion: "Movimiento", schedule: "Horario", alarm: "Alarma", off: "Apagado" };
+                      return <option key={r} value={r} style={{ background: "#1a1a1a" }}>{labels[r] || r}</option>;
+                    })}
+                  </select>
+                </div>
+                <div style={{ gridColumn: "span 2" }}>
+                  <label className="text-[9px] text-white/30 font-bold uppercase tracking-wider block mb-0.5">Notas</label>
+                  <input type="text" value={sel.notes || ""} onChange={e => updateChannel(selected, { notes: e.target.value })} placeholder="Notas..." style={fStyle} />
+                </div>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {channels.length === 0 && (
+        <div className="text-center py-6 text-[11px] text-white/20">Sin canales configurados</div>
+      )}
+    </div>
+  );
+}
+
+// ── NVR Disks Editor ────────────────────────────────────────────────────────
+
+export function NvrDisksEditor({
+  disks, onChange,
+}: {
+  disks: NvrDisk[];
+  onChange: (disks: NvrDisk[]) => void;
+}) {
+  const updateDisk = (idx: number, partial: Partial<NvrDisk>) => {
+    onChange(disks.map((d, i) => i === idx ? { ...d, ...partial } : d));
+  };
+
+  const addDisk = () => {
+    const maxSlot = disks.length > 0 ? Math.max(...disks.map(d => d.slot)) : 0;
+    onChange([...disks, { id: `disk-${Date.now()}`, slot: maxSlot + 1, status: "empty" }]);
+  };
+
+  const removeDisk = (idx: number) => {
+    onChange(disks.filter((_, i) => i !== idx));
+  };
+
+  const fStyle = { ...miniFieldStyle };
+  const totalTB = disks.reduce((s, d) => s + (d.capacityTB || 0), 0);
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-[11px] text-white/50 font-bold uppercase tracking-wider">
+          Discos ({disks.filter(d => d.status !== "empty").length}/{disks.length} instalados · {totalTB}TB total)
+        </span>
+        <button onClick={addDisk} className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold transition-all cursor-pointer" style={{ background: "rgba(225,29,72,0.1)", color: "#fda4af", border: "1px solid rgba(225,29,72,0.2)" }}>
+          <Plus className="w-3 h-3" /> Bahía
+        </button>
+      </div>
+
+      <div className="space-y-2">
+        {disks.map((disk, idx) => {
+          const statusColor = DISK_STATUS_COLOR[disk.status || "empty"];
+          return (
+            <div key={disk.id} className="rounded-xl p-3" style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.05)" }}>
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  <div className="w-2 h-2 rounded-full" style={{ background: statusColor, boxShadow: `0 0 4px ${statusColor}66` }} />
+                  <span className="text-[11px] font-bold text-white/70">Bahía {disk.slot}</span>
+                  <span className="text-[9px] font-bold px-1.5 py-0.5 rounded capitalize" style={{ background: `${statusColor}15`, color: statusColor, border: `1px solid ${statusColor}30` }}>
+                    {disk.status === "healthy" ? "OK" : disk.status === "degraded" ? "Degradado" : disk.status === "failed" ? "Fallado" : "Vacío"}
+                  </span>
+                </div>
+                <button onClick={() => removeDisk(idx)} className="p-1 rounded text-white/20 hover:text-red-400 transition-colors cursor-pointer">
+                  <Trash2 className="w-3 h-3" />
+                </button>
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                <div>
+                  <label className="text-[9px] text-white/30 font-bold uppercase tracking-wider block mb-0.5">Marca</label>
+                  <input type="text" value={disk.brand || ""} onChange={e => updateDisk(idx, { brand: e.target.value })} placeholder="WD, Seagate..." style={fStyle} />
+                </div>
+                <div>
+                  <label className="text-[9px] text-white/30 font-bold uppercase tracking-wider block mb-0.5">Modelo</label>
+                  <input type="text" value={disk.model || ""} onChange={e => updateDisk(idx, { model: e.target.value })} placeholder="Purple, SkyHawk..." style={fStyle} />
+                </div>
+                <div>
+                  <label className="text-[9px] text-white/30 font-bold uppercase tracking-wider block mb-0.5">Capacidad (TB)</label>
+                  <input type="number" min={0} step={0.5} value={disk.capacityTB ?? ""} onChange={e => updateDisk(idx, { capacityTB: parseFloat(e.target.value) || undefined })} placeholder="4" style={{ ...fStyle, fontFamily: "monospace" }} />
+                </div>
+                <div>
+                  <label className="text-[9px] text-white/30 font-bold uppercase tracking-wider block mb-0.5">Tipo</label>
+                  <select value={disk.type || ""} onChange={e => updateDisk(idx, { type: e.target.value as NvrDisk["type"] })} style={fStyle}>
+                    <option value="" style={{ background: "#1a1a1a" }}>—</option>
+                    <option value="HDD" style={{ background: "#1a1a1a" }}>HDD</option>
+                    <option value="SSD" style={{ background: "#1a1a1a" }}>SSD</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-[9px] text-white/30 font-bold uppercase tracking-wider block mb-0.5">Estado</label>
+                  <select value={disk.status || "empty"} onChange={e => updateDisk(idx, { status: e.target.value as NvrDisk["status"] })} style={fStyle}>
+                    {NVR_DISK_STATUSES.map(s => {
+                      const labels: Record<string, string> = { healthy: "OK", degraded: "Degradado", failed: "Fallado", empty: "Vacío" };
+                      return <option key={s} value={s} style={{ background: "#1a1a1a" }}>{labels[s]}</option>;
+                    })}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-[9px] text-white/30 font-bold uppercase tracking-wider block mb-0.5">Notas</label>
+                  <input type="text" value={disk.notes || ""} onChange={e => updateDisk(idx, { notes: e.target.value })} placeholder="..." style={fStyle} />
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {disks.length === 0 && (
+        <div className="text-center py-6 text-[11px] text-white/20">Sin discos — agregá bahías para comenzar</div>
       )}
     </div>
   );

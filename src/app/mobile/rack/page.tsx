@@ -40,6 +40,18 @@ interface PbxTrunkLine {
   codec?: string; status?: string; notes?: string;
 }
 
+interface NvrChannel {
+  channel: number; label: string; enabled: boolean;
+  resolution?: string; fps?: number;
+  codec?: string; connectedCamera?: string; cameraIp?: string;
+  protocol?: string; recording?: string; notes?: string;
+}
+
+interface NvrDisk {
+  id: string; slot: number; brand?: string; model?: string;
+  capacityTB?: number; type?: string; status?: string; notes?: string;
+}
+
 interface RackDevice {
   id: string; unit: number; sizeUnits: number; label: string; type: string;
   color?: string; monitorId?: number | null; model?: string; serial?: string;
@@ -56,6 +68,9 @@ interface RackDevice {
   mountedItems?: string;
   // Cable length (for patch panels etc)
   cableLength?: number;
+  // NVR
+  nvrChannels?: NvrChannel[]; nvrDisks?: NvrDisk[];
+  nvrTotalChannels?: number; nvrDiskBays?: number;
 }
 
 interface KumaMonitor {
@@ -70,6 +85,7 @@ const TYPE_META: Record<string, { label: string; color: string }> = {
   router: { label: "Router", color: "#ef4444" },
   pdu: { label: "PDU", color: "#f97316" },
   pbx: { label: "PBX", color: "#06b6d4" },
+  nvr: { label: "NVR", color: "#e11d48" },
   "tray-fiber": { label: "Fibra", color: "#d946ef" },
   "tray-1u": { label: "Bandeja 1U", color: "#52525b" },
   "tray-2u": { label: "Bandeja 2U", color: "#52525b" },
@@ -195,6 +211,35 @@ function generateWhatsAppText(rackName: string, totalUnits: number, devices: Rac
     // Cable organizer
     if (d.type === "cable-organizer" && d.mountedItems) {
       t += `   🔧 Contenido: ${d.mountedItems}\n`;
+    }
+
+    // NVR channels
+    if (d.nvrChannels && d.nvrChannels.length > 0) {
+      const enabled = d.nvrChannels.filter(c => c.enabled);
+      t += `   📹 Canales: ${enabled.length}/${d.nvrChannels.length} activos\n`;
+      enabled.forEach(ch => {
+        const parts = [`CH${ch.channel}`];
+        if (ch.connectedCamera) parts.push(ch.connectedCamera);
+        if (ch.cameraIp) parts.push(ch.cameraIp);
+        if (ch.resolution) parts.push(ch.resolution);
+        if (ch.codec) parts.push(ch.codec);
+        if (ch.recording) parts.push(`🔴${ch.recording}`);
+        t += `      • ${parts.join(" · ")}\n`;
+      });
+    }
+
+    // NVR disks
+    if (d.nvrDisks && d.nvrDisks.length > 0) {
+      t += `   💾 Discos: ${d.nvrDisks.length}\n`;
+      d.nvrDisks.forEach(disk => {
+        const parts = [`Bay ${disk.slot}`];
+        if (disk.brand) parts.push(disk.brand);
+        if (disk.model) parts.push(disk.model);
+        if (disk.capacityTB) parts.push(`${disk.capacityTB}TB`);
+        if (disk.type) parts.push(disk.type);
+        if (disk.status) parts.push(disk.status === "healthy" ? "✅" : disk.status === "failed" ? "❌" : "⚠️");
+        t += `      • ${parts.join(" · ")}\n`;
+      });
     }
 
     if (d.notes) t += `   📝 ${d.notes}\n`;
@@ -517,6 +562,125 @@ function MobilePduInfo({ device }: { device: RackDevice }) {
   );
 }
 
+const RECORDING_COLORS: Record<string, string> = {
+  continuous: "#22c55e", motion: "#3b82f6", schedule: "#f59e0b", alarm: "#ef4444", off: "#52525b",
+};
+
+const DISK_STATUS_COLORS: Record<string, string> = {
+  healthy: "#22c55e", degraded: "#f59e0b", failed: "#ef4444", empty: "#52525b",
+};
+
+function MobileNvrChannels({ channels }: { channels: NvrChannel[] }) {
+  const [selected, setSelected] = useState<number | null>(null);
+  const sel = selected !== null ? channels.find(c => c.channel === selected) : null;
+  const enabled = channels.filter(c => c.enabled);
+
+  return (
+    <div>
+      <div className="text-[9px] text-[#555] font-bold uppercase tracking-wider mb-2 flex items-center gap-1.5">
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#e11d48" strokeWidth="2.5"><polygon points="23 7 16 12 23 17 23 7" /><rect x="1" y="5" width="15" height="14" rx="2" /></svg>
+        Canales ({enabled.length}/{channels.length} activos)
+      </div>
+
+      <div className="flex flex-wrap gap-1 mb-2">
+        {channels.map(ch => {
+          const isSelected = selected === ch.channel;
+          const recColor = ch.recording ? RECORDING_COLORS[ch.recording] || "#52525b" : "#52525b";
+          return (
+            <button
+              key={ch.channel}
+              onClick={() => { setSelected(isSelected ? null : ch.channel); hapticTap(); }}
+              className="relative flex items-center justify-center transition-all active:scale-90"
+              style={{
+                width: 28, height: 28, borderRadius: 6,
+                background: isSelected ? "rgba(225,29,72,0.2)"
+                  : ch.enabled ? `${recColor}15` : "rgba(255,255,255,0.02)",
+                border: `1.5px solid ${isSelected ? "#e11d48"
+                  : ch.enabled ? `${recColor}40` : "rgba(255,255,255,0.06)"}`,
+                fontSize: 9, fontFamily: "monospace", fontWeight: 700,
+                color: isSelected ? "#fda4af" : ch.enabled ? recColor : "#333",
+              }}
+            >
+              {ch.channel}
+              {!ch.enabled && (
+                <span className="absolute inset-0 flex items-center justify-center text-[8px] text-[#444]">—</span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      {sel && (
+        <div
+          className="rounded-xl p-2.5 space-y-1.5"
+          style={{ background: "rgba(225,29,72,0.06)", border: "1px solid rgba(225,29,72,0.15)", animation: "expand-in 0.2s ease-out" }}
+        >
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-[10px] font-mono font-bold text-[#fda4af]">CH {sel.channel}</span>
+            <div className="h-2 w-2 rounded-full" style={{ background: sel.enabled ? "#22c55e" : "#555" }} />
+            <span className="text-[9px] text-[#555]">{sel.enabled ? "Activo" : "Inactivo"}</span>
+            {sel.recording && (
+              <span className="text-[8px] font-bold px-1.5 py-0.5 rounded" style={{ background: `${RECORDING_COLORS[sel.recording] || "#52525b"}22`, color: RECORDING_COLORS[sel.recording] || "#52525b" }}>
+                {sel.recording}
+              </span>
+            )}
+          </div>
+          <div className="grid grid-cols-2 gap-1.5">
+            {sel.connectedCamera && <MiniDetail label="Cámara" value={sel.connectedCamera} />}
+            {sel.cameraIp && <MiniDetail label="IP Cámara" value={sel.cameraIp} mono />}
+            {sel.resolution && <MiniDetail label="Resolución" value={sel.resolution} />}
+            {sel.codec && <MiniDetail label="Codec" value={sel.codec} />}
+            {sel.fps && <MiniDetail label="FPS" value={`${sel.fps}`} />}
+            {sel.protocol && <MiniDetail label="Protocolo" value={sel.protocol} />}
+            {sel.notes && <MiniDetail label="Notas" value={sel.notes} span2 />}
+          </div>
+        </div>
+      )}
+
+      {/* Recording mode legend */}
+      <div className="flex items-center gap-3 mt-1.5 flex-wrap">
+        {Object.entries(RECORDING_COLORS).map(([mode, color]) => (
+          <span key={mode} className="flex items-center gap-1">
+            <span className="w-2 h-2 rounded-sm" style={{ background: color }} />
+            <span className="text-[8px] text-[#444]">{mode}</span>
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function MobileNvrDisks({ disks }: { disks: NvrDisk[] }) {
+  return (
+    <div>
+      <div className="text-[9px] text-[#555] font-bold uppercase tracking-wider mb-2 flex items-center gap-1.5">
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#e11d48" strokeWidth="2.5"><ellipse cx="12" cy="5" rx="9" ry="3" /><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3" /><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" /></svg>
+        Discos ({disks.length})
+      </div>
+      <div className="space-y-1">
+        {disks.map(disk => {
+          const statusColor = disk.status ? DISK_STATUS_COLORS[disk.status] || "#52525b" : "#52525b";
+          return (
+            <div key={disk.id} className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg" style={{ background: "rgba(255,255,255,0.02)" }}>
+              <div className="h-2 w-2 rounded-full" style={{ background: statusColor, boxShadow: `0 0 4px ${statusColor}66` }} />
+              <span className="text-[9px] font-bold font-mono text-[#aaa]">Bay {disk.slot}</span>
+              {disk.brand && <span className="text-[9px] text-[#888]">{disk.brand}</span>}
+              {disk.model && <span className="text-[9px] text-[#666]">{disk.model}</span>}
+              {disk.capacityTB && <span className="text-[9px] font-mono text-[#fda4af]">{disk.capacityTB}TB</span>}
+              {disk.type && <span className="text-[8px] font-bold px-1 py-0.5 rounded" style={{ background: "rgba(225,29,72,0.1)", color: "#e11d48" }}>{disk.type}</span>}
+              {disk.status && (
+                <span className="text-[8px] font-bold px-1 py-0.5 rounded" style={{ background: `${statusColor}15`, color: statusColor }}>
+                  {disk.status}
+                </span>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function MiniDetail({ label, value, mono, span2 }: { label: string; value: string; mono?: boolean; span2?: boolean }) {
   return (
     <div className={`rounded-lg px-2 py-1.5 ${span2 ? "col-span-2" : ""}`} style={{ background: "rgba(255,255,255,0.03)" }}>
@@ -829,6 +993,16 @@ function MobileRackViewer() {
                       </div>
                       <MiniDetail label="Contenido" value={dev.mountedItems} span2 />
                     </div>
+                  )}
+
+                  {/* NVR channels */}
+                  {dev.nvrChannels && dev.nvrChannels.length > 0 && (
+                    <MobileNvrChannels channels={dev.nvrChannels} />
+                  )}
+
+                  {/* NVR disks */}
+                  {dev.nvrDisks && dev.nvrDisks.length > 0 && (
+                    <MobileNvrDisks disks={dev.nvrDisks} />
                   )}
                 </div>
               )}

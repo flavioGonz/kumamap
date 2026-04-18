@@ -116,6 +116,35 @@ function generateWhatsAppText(rackName: string, totalUnits: number, devices: Rac
       t += `   🔧 Contenido: ${d.mountedItems}\n`;
     }
 
+    // NVR channels
+    if (d.nvrChannels && d.nvrChannels.length > 0) {
+      const enabled = d.nvrChannels.filter(c => c.enabled);
+      t += `   📹 Canales: ${enabled.length}/${d.nvrChannels.length} activos\n`;
+      enabled.forEach(ch => {
+        const parts = [`CH${ch.channel}`];
+        if (ch.connectedCamera) parts.push(ch.connectedCamera);
+        if (ch.cameraIp) parts.push(ch.cameraIp);
+        if (ch.resolution) parts.push(ch.resolution);
+        if (ch.codec) parts.push(ch.codec);
+        if (ch.recording) parts.push(`🔴${ch.recording}`);
+        t += `      • ${parts.join(" · ")}\n`;
+      });
+    }
+
+    // NVR disks
+    if (d.nvrDisks && d.nvrDisks.length > 0) {
+      t += `   💾 Discos: ${d.nvrDisks.length}\n`;
+      d.nvrDisks.forEach(disk => {
+        const parts = [`Bay ${disk.slot}`];
+        if (disk.brand) parts.push(disk.brand);
+        if (disk.model) parts.push(disk.model);
+        if (disk.capacityTB) parts.push(`${disk.capacityTB}TB`);
+        if (disk.type) parts.push(disk.type);
+        if (disk.status) parts.push(disk.status === "healthy" ? "✅" : disk.status === "failed" ? "❌" : "⚠️");
+        t += `      • ${parts.join(" · ")}\n`;
+      });
+    }
+
     if (d.notes) t += `   📝 ${d.notes}\n`;
     t += "\n";
   });

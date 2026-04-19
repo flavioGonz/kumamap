@@ -560,6 +560,196 @@ export default function RackDesignerDrawer({ open, onClose, nodeId, nodes, monit
     finally { document.body.removeChild(container); }
   };
 
+  // ── Export individual device as PNG ──
+  const handleExportDevice = async (device: RackDevice) => {
+    const meta = TYPE_META[device.type] || TYPE_META.other;
+    const now = new Date().toLocaleDateString("es-UY", { day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit" });
+
+    // Build sections based on device type
+    let sectionsHtml = "";
+
+    // Switch ports
+    if (device.switchPorts && device.switchPorts.length > 0) {
+      const rows = device.switchPorts.map((p, i) => `
+        <tr style="border-bottom:1px solid rgba(255,255,255,0.05);background:${i%2===0?"transparent":"rgba(255,255,255,0.02)"}">
+          <td style="padding:5px 8px;font-family:monospace;font-size:10px;color:${p.connected?"#10b981":"rgba(255,255,255,0.3)"};font-weight:700">${p.port}</td>
+          <td style="padding:5px 8px;font-size:10px;color:#fff">${p.connectedDevice||"—"}</td>
+          <td style="padding:5px 8px;font-size:10px;color:rgba(255,255,255,0.4)">${p.speed||"—"}</td>
+          <td style="padding:5px 8px;font-size:10px;color:rgba(255,255,255,0.4);font-family:monospace">${p.vlan||"—"}</td>
+          <td style="padding:5px 8px;font-size:10px;color:rgba(255,255,255,0.4);font-family:monospace">${p.macAddress||"—"}</td>
+          <td style="padding:5px 8px;font-size:10px;color:${p.isPoe?"#f59e0b":"rgba(255,255,255,0.2)"}">${p.isPoe?`⚡${p.poeWatts?` ${p.poeWatts}W`:""}`:""}</td>
+          <td style="padding:5px 8px;font-size:10px;color:${p.uplink?"#3b82f6":"rgba(255,255,255,0.2)"}">${p.uplink?"⬆ UP":""}</td>
+        </tr>`).join("");
+      const connected = device.switchPorts.filter(p => p.connected).length;
+      sectionsHtml += `
+        <div style="margin-top:16px">
+          <div style="font-size:11px;color:#10b981;font-weight:600;margin-bottom:6px">🔌 Puertos — ${connected}/${device.switchPorts.length} conectados</div>
+          <table style="width:100%;border-collapse:collapse"><thead><tr style="border-bottom:1px solid rgba(255,255,255,0.1)">
+            ${["#","Dispositivo","Vel.","VLAN","MAC","PoE","UL"].map(h=>`<th style="text-align:left;padding:5px 8px;color:rgba(255,255,255,0.35);font-size:8px;font-weight:600;text-transform:uppercase">${h}</th>`).join("")}
+          </tr></thead><tbody>${rows}</tbody></table>
+        </div>`;
+    }
+
+    // Patch panel ports
+    if (device.ports && device.ports.length > 0) {
+      const rows = device.ports.map((p, i) => `
+        <tr style="border-bottom:1px solid rgba(255,255,255,0.05);background:${i%2===0?"transparent":"rgba(255,255,255,0.02)"}">
+          <td style="padding:5px 8px;font-family:monospace;font-size:10px;color:${p.connected?"#8b5cf6":"rgba(255,255,255,0.3)"};font-weight:700">${p.port}</td>
+          <td style="padding:5px 8px;font-size:10px;color:#fff">${p.destination||"—"}</td>
+          <td style="padding:5px 8px;font-size:10px;color:rgba(255,255,255,0.4)">${p.connectedDevice||"—"}</td>
+          <td style="padding:5px 8px;font-size:10px;color:rgba(255,255,255,0.4)">${p.cableLength||"—"}</td>
+          <td style="padding:5px 8px;font-size:10px;color:rgba(255,255,255,0.4)">${p.cableColor||"—"}</td>
+          <td style="padding:5px 8px;font-size:10px;color:rgba(255,255,255,0.4);font-family:monospace">${p.macAddress||"—"}</td>
+        </tr>`).join("");
+      const connected = device.ports.filter(p => p.connected).length;
+      sectionsHtml += `
+        <div style="margin-top:16px">
+          <div style="font-size:11px;color:#8b5cf6;font-weight:600;margin-bottom:6px">🔗 Puertos — ${connected}/${device.ports.length} conectados</div>
+          <table style="width:100%;border-collapse:collapse"><thead><tr style="border-bottom:1px solid rgba(255,255,255,0.1)">
+            ${["#","Destino","Dispositivo","Cable","Color","MAC"].map(h=>`<th style="text-align:left;padding:5px 8px;color:rgba(255,255,255,0.35);font-size:8px;font-weight:600;text-transform:uppercase">${h}</th>`).join("")}
+          </tr></thead><tbody>${rows}</tbody></table>
+        </div>`;
+    }
+
+    // PBX extensions
+    if (device.pbxExtensions && device.pbxExtensions.length > 0) {
+      const rows = device.pbxExtensions.map((ext, i) => `
+        <tr style="border-bottom:1px solid rgba(255,255,255,0.05);background:${i%2===0?"transparent":"rgba(255,255,255,0.02)"}">
+          <td style="padding:5px 8px;font-family:monospace;font-size:11px;color:#06b6d4;font-weight:700">${ext.extension}</td>
+          <td style="padding:5px 8px;font-size:10px;color:#fff">${ext.name||"—"}</td>
+          <td style="padding:5px 8px;font-size:10px;color:rgba(255,255,255,0.4);font-family:monospace">${ext.ipPhone||"—"}</td>
+          <td style="padding:5px 8px;font-size:10px;color:rgba(255,255,255,0.4);font-family:monospace">${ext.macAddress||"—"}</td>
+          <td style="padding:5px 8px;font-size:10px;color:rgba(255,255,255,0.4)">${ext.model||"—"}</td>
+          <td style="padding:5px 8px;font-size:10px;color:rgba(255,255,255,0.4)">${ext.location||"—"}</td>
+        </tr>`).join("");
+      sectionsHtml += `
+        <div style="margin-top:16px">
+          <div style="font-size:11px;color:#06b6d4;font-weight:600;margin-bottom:6px">📞 Extensiones — ${device.pbxExtensions.length}</div>
+          <table style="width:100%;border-collapse:collapse"><thead><tr style="border-bottom:1px solid rgba(255,255,255,0.1)">
+            ${["Ext","Nombre","IP Teléfono","MAC","Modelo","Ubicación"].map(h=>`<th style="text-align:left;padding:5px 8px;color:rgba(255,255,255,0.35);font-size:8px;font-weight:600;text-transform:uppercase">${h}</th>`).join("")}
+          </tr></thead><tbody>${rows}</tbody></table>
+        </div>`;
+    }
+
+    // PBX trunks
+    if (device.pbxTrunkLines && device.pbxTrunkLines.length > 0) {
+      const rows = device.pbxTrunkLines.map((tr, i) => `
+        <tr style="border-bottom:1px solid rgba(255,255,255,0.05);background:${i%2===0?"transparent":"rgba(255,255,255,0.02)"}">
+          <td style="padding:5px 8px;font-size:10px;color:#fff">${tr.provider}</td>
+          <td style="padding:5px 8px;font-size:10px;color:rgba(255,255,255,0.4);font-family:monospace">${tr.number}</td>
+          <td style="padding:5px 8px;font-size:10px;color:rgba(255,255,255,0.4)">${tr.type}</td>
+          <td style="padding:5px 8px;font-size:10px;color:rgba(255,255,255,0.4)">${tr.channels||"—"}</td>
+          <td style="padding:5px 8px;font-size:10px;color:${tr.status==="active"?"#22c55e":tr.status==="backup"?"#f59e0b":"#ef4444"}">${tr.status||"—"}</td>
+        </tr>`).join("");
+      sectionsHtml += `
+        <div style="margin-top:16px">
+          <div style="font-size:11px;color:#f97316;font-weight:600;margin-bottom:6px">📡 Troncales — ${device.pbxTrunkLines.length}</div>
+          <table style="width:100%;border-collapse:collapse"><thead><tr style="border-bottom:1px solid rgba(255,255,255,0.1)">
+            ${["Proveedor","Número","Tipo","Canales","Estado"].map(h=>`<th style="text-align:left;padding:5px 8px;color:rgba(255,255,255,0.35);font-size:8px;font-weight:600;text-transform:uppercase">${h}</th>`).join("")}
+          </tr></thead><tbody>${rows}</tbody></table>
+        </div>`;
+    }
+
+    // NVR channels
+    if (device.nvrChannels && device.nvrChannels.length > 0) {
+      const rows = device.nvrChannels.map((ch, i) => `
+        <tr style="border-bottom:1px solid rgba(255,255,255,0.05);background:${i%2===0?"transparent":"rgba(255,255,255,0.02)"}">
+          <td style="padding:5px 8px;font-family:monospace;font-size:10px;color:${ch.enabled?"#ef4444":"rgba(255,255,255,0.3)"};font-weight:700">${ch.channel}</td>
+          <td style="padding:5px 8px;font-size:10px;color:#fff">${ch.label||"—"}</td>
+          <td style="padding:5px 8px;font-size:10px;color:rgba(255,255,255,0.4)">${ch.connectedCamera||"—"}</td>
+          <td style="padding:5px 8px;font-size:10px;color:rgba(255,255,255,0.4);font-family:monospace">${ch.cameraIp||"—"}</td>
+          <td style="padding:5px 8px;font-size:10px;color:rgba(255,255,255,0.4)">${ch.resolution||"—"}</td>
+          <td style="padding:5px 8px;font-size:10px;color:rgba(255,255,255,0.4)">${ch.codec||"—"}</td>
+          <td style="padding:5px 8px;font-size:10px;color:rgba(255,255,255,0.4)">${ch.recording||"—"}</td>
+        </tr>`).join("");
+      const enabled = device.nvrChannels.filter(c => c.enabled).length;
+      sectionsHtml += `
+        <div style="margin-top:16px">
+          <div style="font-size:11px;color:#ef4444;font-weight:600;margin-bottom:6px">📹 Canales — ${enabled}/${device.nvrChannels.length} activos</div>
+          <table style="width:100%;border-collapse:collapse"><thead><tr style="border-bottom:1px solid rgba(255,255,255,0.1)">
+            ${["CH","Nombre","Cámara","IP","Resolución","Codec","Grabación"].map(h=>`<th style="text-align:left;padding:5px 8px;color:rgba(255,255,255,0.35);font-size:8px;font-weight:600;text-transform:uppercase">${h}</th>`).join("")}
+          </tr></thead><tbody>${rows}</tbody></table>
+        </div>`;
+    }
+
+    // NVR disks
+    if (device.nvrDisks && device.nvrDisks.length > 0) {
+      const rows = device.nvrDisks.map((disk, i) => `
+        <tr style="border-bottom:1px solid rgba(255,255,255,0.05);background:${i%2===0?"transparent":"rgba(255,255,255,0.02)"}">
+          <td style="padding:5px 8px;font-size:10px;color:rgba(255,255,255,0.5)">${disk.slot}</td>
+          <td style="padding:5px 8px;font-size:10px;color:#fff">${disk.brand||"—"} ${disk.model||""}</td>
+          <td style="padding:5px 8px;font-size:10px;color:rgba(255,255,255,0.4)">${disk.capacityTB?`${disk.capacityTB} TB`:"—"}</td>
+          <td style="padding:5px 8px;font-size:10px;color:rgba(255,255,255,0.4)">${disk.type||"—"}</td>
+          <td style="padding:5px 8px;font-size:10px;color:${disk.status==="healthy"?"#22c55e":disk.status==="failed"?"#ef4444":"#f59e0b"}">${disk.status||"—"}</td>
+        </tr>`).join("");
+      sectionsHtml += `
+        <div style="margin-top:16px">
+          <div style="font-size:11px;color:#f59e0b;font-weight:600;margin-bottom:6px">💾 Discos — ${device.nvrDisks.length} bahías</div>
+          <table style="width:100%;border-collapse:collapse"><thead><tr style="border-bottom:1px solid rgba(255,255,255,0.1)">
+            ${["Bay","Modelo","Capacidad","Tipo","Estado"].map(h=>`<th style="text-align:left;padding:5px 8px;color:rgba(255,255,255,0.35);font-size:8px;font-weight:600;text-transform:uppercase">${h}</th>`).join("")}
+          </tr></thead><tbody>${rows}</tbody></table>
+        </div>`;
+    }
+
+    // Router interfaces
+    if (device.routerInterfaces && device.routerInterfaces.length > 0) {
+      const rows = device.routerInterfaces.map((iface, i) => `
+        <tr style="border-bottom:1px solid rgba(255,255,255,0.05);background:${i%2===0?"transparent":"rgba(255,255,255,0.02)"}">
+          <td style="padding:5px 8px;font-size:10px;color:#fff">${iface.name}</td>
+          <td style="padding:5px 8px;font-size:10px;color:rgba(255,255,255,0.4)">${iface.type}</td>
+          <td style="padding:5px 8px;font-size:10px;color:rgba(255,255,255,0.4);font-family:monospace">${iface.ipAddress||"—"}</td>
+          <td style="padding:5px 8px;font-size:10px;color:${iface.connected?"#22c55e":"#ef4444"}">${iface.connected?"✅ Conectado":"❌ Desconectado"}</td>
+        </tr>`).join("");
+      sectionsHtml += `
+        <div style="margin-top:16px">
+          <div style="font-size:11px;color:#3b82f6;font-weight:600;margin-bottom:6px">🌐 Interfaces — ${device.routerInterfaces.length}</div>
+          <table style="width:100%;border-collapse:collapse"><thead><tr style="border-bottom:1px solid rgba(255,255,255,0.1)">
+            ${["Nombre","Tipo","IP","Estado"].map(h=>`<th style="text-align:left;padding:5px 8px;color:rgba(255,255,255,0.35);font-size:8px;font-weight:600;text-transform:uppercase">${h}</th>`).join("")}
+          </tr></thead><tbody>${rows}</tbody></table>
+        </div>`;
+    }
+
+    const color = device.color || meta.color;
+    const container = document.createElement("div");
+    container.style.cssText = "position:fixed;left:-9999px;top:0;width:900px;background:#0f0f0f;padding:32px;font-family:'Segoe UI',-apple-system,BlinkMacSystemFont,sans-serif;color:#fff";
+    container.innerHTML = `
+      <div style="display:flex;align-items:center;gap:16px;margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid rgba(255,255,255,0.08)">
+        <div style="width:48px;height:48px;border-radius:12px;background:${color};display:flex;align-items:center;justify-content:center;font-size:22px">${typeof meta.icon === "string" ? meta.icon : "⚙"}</div>
+        <div style="flex:1">
+          <div style="font-size:20px;font-weight:800;color:#fff">${device.label}</div>
+          <div style="font-size:12px;color:rgba(255,255,255,0.4);margin-top:2px">${meta.label} · U${device.unit}${device.sizeUnits>1?`–U${device.unit+device.sizeUnits-1}`:""} · ${device.sizeUnits}U</div>
+        </div>
+        <div style="text-align:right">
+          <div style="font-size:10px;color:rgba(255,255,255,0.25)">${now}</div>
+          <div style="font-size:9px;color:rgba(255,255,255,0.15);margin-top:2px">${rackName}</div>
+        </div>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:12px;margin-bottom:8px">
+        ${device.model?`<div style="padding:6px 12px;border-radius:8px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);font-size:11px"><span style="color:rgba(255,255,255,0.35)">Modelo:</span> <span style="color:#fff;font-weight:600">${device.model}</span></div>`:""}
+        ${device.serial?`<div style="padding:6px 12px;border-radius:8px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);font-size:11px"><span style="color:rgba(255,255,255,0.35)">Serie:</span> <span style="color:#fff;font-family:monospace">${device.serial}</span></div>`:""}
+        ${device.managementIp?`<div style="padding:6px 12px;border-radius:8px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);font-size:11px"><span style="color:rgba(255,255,255,0.35)">IP:</span> <span style="color:#fff;font-family:monospace">${device.managementIp}</span></div>`:""}
+        ${device.isPoeCapable?`<div style="padding:6px 12px;border-radius:8px;background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.2);font-size:11px;color:#f59e0b">⚡ PoE</div>`:""}
+      </div>
+      ${device.notes?`<div style="padding:8px 12px;border-radius:8px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);font-size:11px;color:rgba(255,255,255,0.5);margin-bottom:8px">📝 ${device.notes}</div>`:""}
+      ${sectionsHtml}
+      <div style="margin-top:20px;padding-top:10px;border-top:1px solid rgba(255,255,255,0.06);font-size:9px;color:rgba(255,255,255,0.12);text-align:center">KumaMap · ${rackName} · Exportado ${now}</div>
+    `;
+    document.body.appendChild(container);
+
+    try {
+      const canvas = await html2canvas(container, { backgroundColor: "#0f0f0f", scale: 2, useCORS: true, logging: false, removeContainer: false } as any);
+      const a = document.createElement("a");
+      a.href = canvas.toDataURL("image/png");
+      a.download = `${device.label.replace(/\s+/g, "_")}-U${device.unit}.png`;
+      a.click();
+    } catch (err) {
+      console.error("Device PNG export error:", err);
+      setToastMsg("Error al exportar equipo");
+    } finally {
+      document.body.removeChild(container);
+    }
+  };
+
   if (!open) return null;
 
   const usedUnits = devices.reduce((s, d) => s + d.sizeUnits, 0);
@@ -1095,6 +1285,7 @@ export default function RackDesignerDrawer({ open, onClose, nodeId, nodes, monit
                   onDelete={handleDeleteDevice}
                   getStatusInfo={getDeviceStatusInfo}
                   onWizard={() => setShowWizard(true)}
+                  onExportDevice={handleExportDevice}
                 />
               )}
             </AnimatePresence>
@@ -1214,7 +1405,14 @@ export default function RackDesignerDrawer({ open, onClose, nodeId, nodes, monit
             rackImageBase64={rackImageBase64}
             onClose={() => setShowExportModal(false)}
             onPng={async () => {
+              // Export rack overview
               await handleDownloadImage();
+              // Export individual device images
+              for (const d of devices) {
+                await handleExportDevice(d);
+                // Small delay between downloads so browser doesn't block them
+                await new Promise(r => setTimeout(r, 300));
+              }
               setShowExportModal(false);
             }}
           />

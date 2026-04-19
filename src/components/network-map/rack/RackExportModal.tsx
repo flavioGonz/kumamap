@@ -220,10 +220,25 @@ export default function RackExportModal({ rackName, totalUnits, devices, onClose
       } else if (type === "whatsapp") {
         const text = generateWhatsAppText(rackName, totalUnits, devices);
         // Try Web Share API first, then copy + open wa.me
-        if (navigator.share) {
+        if (typeof navigator !== "undefined" && navigator.share) {
           await navigator.share({ text });
         } else {
-          await navigator.clipboard.writeText(text);
+          // Copy to clipboard with fallback for non-secure contexts
+          try {
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+              await navigator.clipboard.writeText(text);
+            } else {
+              // Fallback: textarea copy
+              const ta = document.createElement("textarea");
+              ta.value = text;
+              ta.style.cssText = "position:fixed;left:-9999px;top:-9999px;opacity:0";
+              document.body.appendChild(ta);
+              ta.focus();
+              ta.select();
+              document.execCommand("copy");
+              document.body.removeChild(ta);
+            }
+          } catch { /* clipboard copy failed, still open wa.me */ }
           window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank");
         }
       } else if (type === "markdown") {
@@ -381,7 +396,7 @@ export default function RackExportModal({ rackName, totalUnits, devices, onClose
                   <span className="text-sm font-semibold text-white/80">Imagen PNG</span>
                   <span className="text-[10px] font-mono font-medium px-1 py-0.5 rounded" style={{ background: "rgba(255,255,255,0.08)", color: "rgba(255,255,255,0.5)" }}>.png</span>
                 </div>
-                <div className="text-xs text-white/40">Captura visual del rack como imagen de alta resolución</div>
+                <div className="text-xs text-white/40">Rack general + una imagen por cada equipo con detalles</div>
               </div>
             </div>
           </button>

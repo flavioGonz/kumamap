@@ -202,18 +202,48 @@ function SnmpSectionHeader({ icon, title, badge }: { icon: React.ReactNode; titl
   );
 }
 
+// ── Enhanced device status types ────────────────────────────────────────────
+
+interface NvrDiskStatus {
+  id: string; name: string; capacityGB: number; freeGB: number;
+  usedPercent: number; status: string; property: string;
+}
+interface NvrChannelStatus {
+  id: number; name: string; online: boolean; recording: boolean;
+  resolution?: string; bitrate?: number;
+}
+interface NvrStatusData {
+  type: "nvr"; reachable: boolean; cached?: boolean; error?: string;
+  deviceInfo?: { model: string; firmware: string; serial: string; name: string };
+  resources?: { cpuUsage: number; memUsage: number };
+  disks: NvrDiskStatus[];
+  channels: NvrChannelStatus[];
+}
+
+interface PbxStatusData {
+  type: "pbx"; reachable: boolean; cached?: boolean; error?: string;
+  activeCalls: number; totalExtensions: number; registeredExtensions: number;
+  trunks: Array<{ name: string; status: string; type: string }>;
+  calls: Array<{ caller: string; callee: string; duration: string; status: string }>;
+}
+
 // ── Main component ──────────────────────────────────────────────────────────
 
 export default function SnmpStatusPanel({
   ip,
   community,
   deviceType,
+  mgmtUser,
+  mgmtPassword,
 }: {
   ip: string;
   community?: string;
   deviceType?: string;
+  mgmtUser?: string;
+  mgmtPassword?: string;
 }) {
   const [data, setData] = useState<SnmpResult | null>(null);
+  const [enhanced, setEnhanced] = useState<NvrStatusData | PbxStatusData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showAllInterfaces, setShowAllInterfaces] = useState(false);
@@ -222,6 +252,8 @@ export default function SnmpStatusPanel({
   const mountedRef = useRef(true);
 
   const config = (deviceType && DEVICE_CONFIGS[deviceType]) || DEFAULT_CONFIG;
+  const hasCredentials = !!(mgmtUser && mgmtPassword);
+  const useEnhanced = hasCredentials && (deviceType === "nvr" || deviceType === "pbx");
 
   const poll = useCallback(async () => {
     if (!ip) return;
@@ -233,35 +265,48 @@ export default function SnmpStatusPanel({
     setError(null);
 
     try {
-      const res = await fetch(apiUrl("/api/snmp/poll"), {
+      // Always fetch SNMP first
+      const snmpPromise = fetch(apiUrl("/api/snmp/poll"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ip, community: community || "public", deviceType }),
         signal: controller.signal,
-      });
+      }).then(r => r.json()).catch(() => null);
+
+      // If credentials available, also fetch enhanced data
+      const enhancedPromise = useEnhanced
+        ? fetch(apiUrl("/api/device-status"), {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ip, user: mgmtUser, password: mgmtPassword, deviceType }),
+            signal: controller.signal,
+          }).then(r => r.json()).catch(() => null)
+        : Promise.resolve(null);
+
+      const [snmpData, enhancedData] = await Promise.all([snmpPromise, enhancedPromise]);
 
       if (!mountedRef.current) return;
 
-      const json = await res.json();
-      if (!mountedRef.current) return;
-
-      if (!res.ok) {
-        setError(json.error || "Error polling SNMP");
-        setData(null);
+      if (snmpData) {
+        setData(snmpData);
+      }
+      if (enhancedData) {
+        setEnhanced(enhancedData);
+      }
+      if (!snmpData?.reachable && !enhancedData?.reachable) {
+        setError("No se pudo alcanzar el equipo");
       } else {
-        setData(json);
         setError(null);
       }
     } catch (err: any) {
       if (err.name === "AbortError") return;
       if (mountedRef.current) {
         setError(err.message || "Network error");
-        setData(null);
       }
     } finally {
       if (mountedRef.current) setLoading(false);
     }
-  }, [ip, community, deviceType]);
+  }, [ip, community, deviceType, mgmtUser, mgmtPassword, useEnhanced]);
 
   // Auto-poll on mount and when IP/community changes
   useEffect(() => {
@@ -311,14 +356,16 @@ export default function SnmpStatusPanel({
     );
   }
 
-  if (!data) return null;
+  if (!data && !enhanced) return null;
 
-  if (!data.reachable) {
+  const isReachable = data?.reachable || enhanced?.reachable;
+
+  if (!isReachable) {
     return (
       <div style={{ ...cardStyle, display: "flex", alignItems: "center", gap: 8, padding: "12px" }}>
         <WifiOff className="w-3.5 h-3.5 shrink-0" style={{ color: "#ef4444" }} />
-        <span style={{ fontSize: 11, color: "#ef4444" }}>No se pudo alcanzar {ip} por SNMP</span>
-        {data.error && <span style={{ fontSize: 10, color: "rgba(239,68,68,0.6)" }}>— {data.error}</span>}
+        <span style={{ fontSize: 11, color: "#ef4444" }}>No se pudo alcanzar {ip}</span>
+        {(data?.error || enhanced?.error) && <span style={{ fontSize: 10, color: "rgba(239,68,68,0.6)" }}>— {data?.error || enhanced?.error}</span>}
         <button
           onClick={poll}
           className="ml-auto shrink-0 px-2 py-1 rounded-md text-[10px] font-semibold transition-all cursor-pointer"
@@ -331,10 +378,10 @@ export default function SnmpStatusPanel({
   }
 
   // ── Successful data ──
-  const sys = data.system;
-  const ifaces = data.interfaces || [];
-  const storage = data.storage || [];
-  const cpu = data.cpu;
+  const sys = data?.system;
+  const ifaces = data?.interfaces || [];
+  const storage = data?.storage || [];
+  const cpu = data?.cpu;
   const upIfaces = ifaces.filter(i => i.operStatus === "up").length;
   const totalErrors = ifaces.reduce((sum, i) => sum + i.inErrors + i.outErrors, 0);
 
@@ -358,7 +405,7 @@ export default function SnmpStatusPanel({
             <span style={{ color: config.accentColor }}>{config.icon}</span>
             <span style={{ fontSize: 10, color: config.accentColor, fontWeight: 600 }}>{config.label}</span>
           </div>
-          {data.cached && (
+          {data?.cached && (
             <span style={{ fontSize: 9, color: "rgba(255,255,255,0.25)", fontStyle: "italic" }}>cache</span>
           )}
         </div>
@@ -625,8 +672,219 @@ export default function SnmpStatusPanel({
         </div>
       )}
 
+      {/* ── NVR Enhanced: ISAPI data ── */}
+      {enhanced?.type === "nvr" && enhanced.reachable && (() => {
+        const nvr = enhanced as NvrStatusData;
+        return (
+          <>
+            {/* Device info */}
+            {nvr.deviceInfo && (
+              <div style={cardStyle} className="flex flex-col gap-1.5">
+                <SnmpSectionHeader
+                  icon={<Video className="w-3 h-3" style={{ color: "#f59e0b" }} />}
+                  title="Hikvision ISAPI"
+                />
+                <div className="flex items-center gap-1.5 -mt-1">
+                  <span style={{ fontSize: 12, fontWeight: 700, color: "rgba(255,255,255,0.75)" }}>
+                    {nvr.deviceInfo.name || nvr.deviceInfo.model}
+                  </span>
+                </div>
+                <div className="flex items-center gap-3 flex-wrap" style={{ fontSize: 10, color: "rgba(255,255,255,0.3)" }}>
+                  {nvr.deviceInfo.model && <span>Modelo: {nvr.deviceInfo.model}</span>}
+                  {nvr.deviceInfo.firmware && <span>FW: {nvr.deviceInfo.firmware}</span>}
+                  {nvr.deviceInfo.serial && <span>S/N: {nvr.deviceInfo.serial}</span>}
+                </div>
+              </div>
+            )}
+
+            {/* CPU + Memory from ISAPI */}
+            {nvr.resources && (
+              <div className="grid grid-cols-2 gap-2">
+                <div style={cardStyle}>
+                  <SnmpSectionHeader
+                    icon={<Cpu className="w-3 h-3" style={{ color: cpuColor(nvr.resources.cpuUsage) }} />}
+                    title="CPU"
+                    badge={<span style={{ fontSize: 14, fontWeight: 800, fontFamily: "monospace", color: cpuColor(nvr.resources.cpuUsage) }}>{nvr.resources.cpuUsage}%</span>}
+                  />
+                  <ProgressBar pct={nvr.resources.cpuUsage} color={cpuColor(nvr.resources.cpuUsage)} />
+                </div>
+                <div style={cardStyle}>
+                  <SnmpSectionHeader
+                    icon={<Activity className="w-3 h-3" style={{ color: cpuColor(nvr.resources.memUsage) }} />}
+                    title="RAM"
+                    badge={<span style={{ fontSize: 14, fontWeight: 800, fontFamily: "monospace", color: cpuColor(nvr.resources.memUsage) }}>{nvr.resources.memUsage}%</span>}
+                  />
+                  <ProgressBar pct={nvr.resources.memUsage} color={cpuColor(nvr.resources.memUsage)} />
+                </div>
+              </div>
+            )}
+
+            {/* NVR Disks */}
+            {nvr.disks.length > 0 && (
+              <div style={{ ...cardStyle, padding: 0, overflow: "hidden" }}>
+                <div className="flex items-center justify-between px-3 py-2" style={{ borderBottom: `1px solid ${borderColor}` }}>
+                  <div className="flex items-center gap-1.5">
+                    <Database className="w-3 h-3" style={{ color: "#f59e0b" }} />
+                    <span style={{ fontSize: 10, color: "rgba(255,255,255,0.35)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em" }}>Discos</span>
+                    <span style={{ fontSize: 10, color: "rgba(255,255,255,0.25)", fontFamily: "monospace" }}>{nvr.disks.length} HDD</span>
+                  </div>
+                  {(() => {
+                    const totalGB = nvr.disks.reduce((s, d) => s + d.capacityGB, 0);
+                    const freeGB = nvr.disks.reduce((s, d) => s + d.freeGB, 0);
+                    const pct = totalGB > 0 ? Math.round(((totalGB - freeGB) / totalGB) * 100) : 0;
+                    return (
+                      <span style={{ fontSize: 10, fontWeight: 700, fontFamily: "monospace", color: storageColor(pct) }}>
+                        {totalGB - freeGB} GB / {totalGB} GB ({pct}%)
+                      </span>
+                    );
+                  })()}
+                </div>
+                <div className="p-3 flex flex-col gap-2.5">
+                  {nvr.disks.map(d => {
+                    const statusColor = d.status === "ok" || d.status === "normal" ? "#22c55e" : d.status === "error" || d.status === "abnormal" ? "#ef4444" : "#f59e0b";
+                    return (
+                      <div key={d.id}>
+                        <div className="flex items-center justify-between mb-1">
+                          <div className="flex items-center gap-1.5">
+                            <HardDrive className="w-3 h-3 shrink-0" style={{ color: storageColor(d.usedPercent) }} />
+                            <span style={{ fontSize: 11, color: "rgba(255,255,255,0.6)", fontWeight: 600 }}>{d.name}</span>
+                            <span style={{ fontSize: 9, padding: "1px 5px", borderRadius: 3, background: `${statusColor}15`, color: statusColor, fontWeight: 700 }}>
+                              {d.status}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span style={{ fontSize: 10, color: "rgba(255,255,255,0.3)", fontFamily: "monospace" }}>
+                              {d.capacityGB - d.freeGB} GB / {d.capacityGB} GB
+                            </span>
+                            <span style={{ fontSize: 11, fontWeight: 700, fontFamily: "monospace", color: storageColor(d.usedPercent), minWidth: 36, textAlign: "right" }}>
+                              {d.usedPercent}%
+                            </span>
+                          </div>
+                        </div>
+                        <ProgressBar pct={d.usedPercent} color={storageColor(d.usedPercent)} height={5} />
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* NVR Channels */}
+            {nvr.channels.length > 0 && (
+              <div style={{ ...cardStyle, padding: 0, overflow: "hidden" }}>
+                <div className="flex items-center justify-between px-3 py-2" style={{ borderBottom: `1px solid ${borderColor}` }}>
+                  <div className="flex items-center gap-1.5">
+                    <Video className="w-3 h-3" style={{ color: "#f59e0b" }} />
+                    <span style={{ fontSize: 10, color: "rgba(255,255,255,0.35)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em" }}>Canales</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <span className="w-2 h-2 rounded-full" style={{ background: "#22c55e" }} />
+                    <span style={{ fontSize: 9, color: "rgba(255,255,255,0.25)" }}>{nvr.channels.filter(c => c.online).length}</span>
+                    <span className="w-2 h-2 rounded-full ml-1.5" style={{ background: "#ef4444" }} />
+                    <span style={{ fontSize: 9, color: "rgba(255,255,255,0.25)" }}>{nvr.channels.filter(c => !c.online).length}</span>
+                  </div>
+                </div>
+                <div className="grid gap-1 p-2" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(110px, 1fr))" }}>
+                  {nvr.channels.map(ch => (
+                    <div
+                      key={ch.id}
+                      className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg"
+                      style={{
+                        background: ch.online ? "rgba(34,197,94,0.06)" : "rgba(239,68,68,0.06)",
+                        border: `1px solid ${ch.online ? "rgba(34,197,94,0.15)" : "rgba(239,68,68,0.15)"}`,
+                      }}
+                    >
+                      <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: ch.online ? "#22c55e" : "#ef4444" }} />
+                      <span style={{ fontSize: 10, color: ch.online ? "rgba(255,255,255,0.6)" : "rgba(255,255,255,0.3)", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {ch.name}
+                      </span>
+                      {ch.recording && (
+                        <span style={{ fontSize: 8, color: "#ef4444", fontWeight: 800, marginLeft: "auto" }}>REC</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </>
+        );
+      })()}
+
+      {/* ── PBX Enhanced data ── */}
+      {enhanced?.type === "pbx" && enhanced.reachable && (() => {
+        const pbx = enhanced as PbxStatusData;
+        return (
+          <>
+            {/* Call summary */}
+            <div className="grid grid-cols-3 gap-2">
+              <div style={cardStyle} className="text-center">
+                <div style={{ fontSize: 9, color: "rgba(255,255,255,0.35)", fontWeight: 700, textTransform: "uppercase", marginBottom: 4 }}>Llamadas</div>
+                <div style={{ fontSize: 22, fontWeight: 800, fontFamily: "monospace", color: pbx.activeCalls > 0 ? "#22c55e" : "rgba(255,255,255,0.3)" }}>
+                  {pbx.activeCalls}
+                </div>
+              </div>
+              <div style={cardStyle} className="text-center">
+                <div style={{ fontSize: 9, color: "rgba(255,255,255,0.35)", fontWeight: 700, textTransform: "uppercase", marginBottom: 4 }}>Extensiones</div>
+                <div style={{ fontSize: 22, fontWeight: 800, fontFamily: "monospace", color: "#10b981" }}>
+                  {pbx.registeredExtensions}<span style={{ fontSize: 11, color: "rgba(255,255,255,0.2)" }}>/{pbx.totalExtensions}</span>
+                </div>
+              </div>
+              <div style={cardStyle} className="text-center">
+                <div style={{ fontSize: 9, color: "rgba(255,255,255,0.35)", fontWeight: 700, textTransform: "uppercase", marginBottom: 4 }}>Troncales</div>
+                <div style={{ fontSize: 22, fontWeight: 800, fontFamily: "monospace", color: "#8b5cf6" }}>
+                  {pbx.trunks.filter(t => t.status === "registered").length}<span style={{ fontSize: 11, color: "rgba(255,255,255,0.2)" }}>/{pbx.trunks.length}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Trunk list */}
+            {pbx.trunks.length > 0 && (
+              <div style={{ ...cardStyle, padding: 0, overflow: "hidden" }}>
+                <div className="flex items-center justify-between px-3 py-2" style={{ borderBottom: `1px solid ${borderColor}` }}>
+                  <div className="flex items-center gap-1.5">
+                    <Phone className="w-3 h-3" style={{ color: "#10b981" }} />
+                    <span style={{ fontSize: 10, color: "rgba(255,255,255,0.35)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em" }}>Troncales SIP</span>
+                  </div>
+                </div>
+                <div className="p-2 flex flex-col gap-1">
+                  {pbx.trunks.map((t, i) => {
+                    const isUp = t.status === "registered";
+                    return (
+                      <div key={i} className="flex items-center gap-2 px-2 py-1.5 rounded-lg" style={{ background: "rgba(255,255,255,0.02)" }}>
+                        <span className="w-2 h-2 rounded-full" style={{ background: isUp ? "#22c55e" : "#ef4444" }} />
+                        <span style={{ fontSize: 11, color: "rgba(255,255,255,0.6)", fontWeight: 600, flex: 1 }}>{t.name}</span>
+                        <span style={{ fontSize: 9, padding: "1px 5px", borderRadius: 3, fontWeight: 700, color: isUp ? "#22c55e" : "#ef4444", background: isUp ? "rgba(34,197,94,0.1)" : "rgba(239,68,68,0.1)" }}>
+                          {t.status}
+                        </span>
+                        <span style={{ fontSize: 9, color: "rgba(255,255,255,0.2)" }}>{t.type}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Hint if no credentials */}
+            {pbx.error && (
+              <div style={{ ...cardStyle, textAlign: "center", padding: "12px" }}>
+                <span style={{ fontSize: 10, color: "rgba(255,255,255,0.3)" }}>{pbx.error}</span>
+              </div>
+            )}
+          </>
+        );
+      })()}
+
+      {/* ── Hint to add credentials for NVR/PBX ── */}
+      {(deviceType === "nvr" || deviceType === "pbx") && !hasCredentials && data?.reachable && (
+        <div style={{ ...cardStyle, textAlign: "center", padding: "10px 12px" }}>
+          <span style={{ fontSize: 10, color: "rgba(255,255,255,0.3)" }}>
+            Agregá usuario y contraseña en General para obtener {deviceType === "nvr" ? "discos, canales y estado de grabación vía ISAPI" : "llamadas activas, extensiones y troncales"}.
+          </span>
+        </div>
+      )}
+
       {/* ── No data sections warning ── */}
-      {!sys && !cpu && storage.length === 0 && ifaces.length === 0 && (
+      {!enhanced?.reachable && !sys && !cpu && storage.length === 0 && ifaces.length === 0 && (
         <div style={{ ...cardStyle, textAlign: "center", padding: "16px 12px" }}>
           <span style={{ fontSize: 11, color: "rgba(255,255,255,0.35)" }}>
             Equipo alcanzable pero no devolvió datos SNMP estándar.

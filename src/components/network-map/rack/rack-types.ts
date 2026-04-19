@@ -105,6 +105,9 @@ export interface RackDevice {
   portCount?: number;
   managementIp?: string;
   snmpCommunity?: string;
+  // Credenciales para APIs HTTP (ISAPI Hikvision, PBX admin, etc.)
+  mgmtUser?: string;
+  mgmtPassword?: string;
   model?: string;
   serial?: string;
   cableLength?: number;

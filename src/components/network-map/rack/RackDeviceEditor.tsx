@@ -287,6 +287,8 @@ function DeviceEditor({
               ip={device.managementIp}
               community={device.snmpCommunity}
               deviceType={device.type}
+              mgmtUser={device.mgmtUser}
+              mgmtPassword={device.mgmtPassword}
             />
             {/* SNMP auto-sync button for switches */}
             {canSnmpSync && (
@@ -357,6 +359,18 @@ function DeviceEditor({
                     <FieldLabel>Comunidad SNMP</FieldLabel>
                     <input type="text" value={device.snmpCommunity || ""} onChange={e => onChange({ ...device, snmpCommunity: e.target.value })} placeholder="public" disabled={isLocked} style={{ ...fieldStyle, fontFamily: "monospace", opacity: isLocked ? 0.5 : 1 }} />
                   </div>
+                  {(device.type === "nvr" || device.type === "pbx") && (
+                    <>
+                      <div>
+                        <FieldLabel>Usuario Admin</FieldLabel>
+                        <input type="text" value={device.mgmtUser || ""} onChange={e => onChange({ ...device, mgmtUser: e.target.value })} placeholder={device.type === "nvr" ? "admin" : "admin"} disabled={isLocked} style={{ ...fieldStyle, fontFamily: "monospace", opacity: isLocked ? 0.5 : 1 }} />
+                      </div>
+                      <div>
+                        <FieldLabel>Contraseña Admin</FieldLabel>
+                        <input type="password" value={device.mgmtPassword || ""} onChange={e => onChange({ ...device, mgmtPassword: e.target.value })} placeholder="••••••" disabled={isLocked} style={{ ...fieldStyle, fontFamily: "monospace", opacity: isLocked ? 0.5 : 1 }} />
+                      </div>
+                    </>
+                  )}
                 </>
               )}
             </div>

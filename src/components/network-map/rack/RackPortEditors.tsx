@@ -1105,8 +1105,8 @@ export function NvrChannelsEditor({
             </button>
           </div>
         </div>
-        {/* Fields grid */}
-        <div className="p-3 grid gap-2.5" style={{ gridTemplateColumns: "1fr 1fr 1fr 1fr" }}>
+        {/* Fields grid — 2 columns to fit within table cell */}
+        <div className="p-3 grid gap-2.5" style={{ gridTemplateColumns: "1fr 1fr" }}>
           <div>
             <span className="block text-[10px] mb-1" style={{ color: "rgba(255,255,255,0.35)" }}>Etiqueta</span>
             <input type="text" value={ch.label || ""} onChange={e => updateChannel(idx, { label: e.target.value })} onClick={e => e.stopPropagation()} placeholder={`Canal ${ch.channel}`} style={fStyle} />
@@ -1153,7 +1153,7 @@ export function NvrChannelsEditor({
               ))}
             </select>
           </div>
-          <div style={{ gridColumn: "span 4" }}>
+          <div style={{ gridColumn: "span 2" }}>
             <span className="block text-[10px] mb-1" style={{ color: "rgba(255,255,255,0.35)" }}>Notas</span>
             <textarea value={ch.notes || ""} onChange={e => updateChannel(idx, { notes: e.target.value })} onClick={e => e.stopPropagation()}
               rows={2} style={{ ...fStyle, resize: "none", width: "100%" }} />

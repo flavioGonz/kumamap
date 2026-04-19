@@ -162,9 +162,10 @@ interface RackExportModalProps {
   devices: RackDevice[];
   onClose: () => void;
   onPng: () => void;
+  rackImageBase64?: string | null;
 }
 
-export default function RackExportModal({ rackName, totalUnits, devices, onClose, onPng }: RackExportModalProps) {
+export default function RackExportModal({ rackName, totalUnits, devices, onClose, onPng, rackImageBase64 }: RackExportModalProps) {
   const [loading, setLoading] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -184,11 +185,12 @@ export default function RackExportModal({ rackName, totalUnits, devices, onClose
     setLoading(type);
     setError(null);
     try {
+      const payload = { rackName, totalUnits, devices, rackImage: rackImageBase64 || null };
       if (type === "word") {
         const res = await fetch(apiUrl("/api/rack-report"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ rackName, totalUnits, devices }),
+          body: JSON.stringify(payload),
         });
         if (!res.ok) throw new Error(await res.text());
         triggerDownload(await res.blob(), `rack-${safeName}-report.docx`);
@@ -196,7 +198,7 @@ export default function RackExportModal({ rackName, totalUnits, devices, onClose
         const res = await fetch(apiUrl("/api/rack-report-xlsx"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ rackName, totalUnits, devices }),
+          body: JSON.stringify(payload),
         });
         if (!res.ok) throw new Error(await res.text());
         triggerDownload(await res.blob(), `rack-${safeName}-report.xlsx`);
@@ -204,7 +206,7 @@ export default function RackExportModal({ rackName, totalUnits, devices, onClose
         const res = await fetch(apiUrl("/api/rack-report-pdf"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ rackName, totalUnits, devices }),
+          body: JSON.stringify(payload),
         });
         if (!res.ok) throw new Error(await res.text());
         const html = await res.text();

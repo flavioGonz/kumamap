@@ -58,6 +58,7 @@ export default function RackDesignerDrawer({ open, onClose, nodeId, nodes, monit
   const [dragDeviceId, setDragDeviceId] = useState<string | null>(null);
   const [dragOverUnit, setDragOverUnit] = useState<number | null>(null);
   const [showExportModal, setShowExportModal] = useState(false);
+  const [rackImageBase64, setRackImageBase64] = useState<string | null>(null);
   const [isImporting, setIsImporting] = useState(false);
   const [showGallery, setShowGallery] = useState(false);
   const [rackPhotos, setRackPhotos] = useState<string[]>([]);
@@ -678,7 +679,16 @@ export default function RackDesignerDrawer({ open, onClose, nodeId, nodes, monit
             <button
               data-tooltip-id="rack-tip"
               data-tooltip-content="Exportar datos del rack"
-              onClick={() => setShowExportModal(true)}
+              onClick={async () => {
+                // Capture rack image for export embedding
+                if (rackRef.current) {
+                  try {
+                    const canvas = await html2canvas(rackRef.current, { backgroundColor: "#0f0f0f", scale: 2, useCORS: true, logging: false } as any);
+                    setRackImageBase64(canvas.toDataURL("image/png"));
+                  } catch { setRackImageBase64(null); }
+                }
+                setShowExportModal(true);
+              }}
               className="w-8 h-8 flex items-center justify-center rounded-lg border border-white/10 text-white/60 hover:text-white/90 hover:border-white/20 transition-all cursor-pointer"
               style={{ background: "rgba(255,255,255,0.03)" }}
             >
@@ -1201,6 +1211,7 @@ export default function RackDesignerDrawer({ open, onClose, nodeId, nodes, monit
             rackName={rackName}
             totalUnits={totalUnits}
             devices={devices}
+            rackImageBase64={rackImageBase64}
             onClose={() => setShowExportModal(false)}
             onPng={async () => {
               await handleDownloadImage();

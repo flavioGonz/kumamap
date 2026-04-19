@@ -1045,6 +1045,10 @@ export function PbxTrunkLinesEditor({ trunkLines, onChange }: { trunkLines: PbxT
 
 // ── NVR Channels Editor ─────────────────────────────────────────────────────
 
+const RECORDING_LABELS: Record<string, string> = {
+  continuous: "Continuo", motion: "Movimiento", schedule: "Horario", alarm: "Alarma", off: "Apagado",
+};
+
 export function NvrChannelsEditor({
   channels, onChange,
 }: {
@@ -1059,134 +1063,194 @@ export function NvrChannelsEditor({
   };
 
   const fStyle = { ...miniFieldStyle };
+  const enabled = channels.filter(c => c.enabled);
 
-  // Channel grid
-  const PortGrid = () => (
-    <div className="flex flex-wrap gap-0.5">
-      {channels.map((ch, idx) => {
-        const isSelected = selected === idx;
-        const recColor = ch.recording ? RECORDING_COLOR[ch.recording] || "#22c55e" : "#22c55e";
-        return (
-          <button
-            key={ch.channel}
-            onClick={() => setSelected(isSelected ? null : idx)}
-            className="relative flex items-center justify-center transition-all cursor-pointer"
-            style={{
-              width: 26, height: 26, borderRadius: 3,
-              background: isSelected ? "rgba(225,29,72,0.2)" : ch.enabled ? `${recColor}15` : "#1a1a1a",
-              border: `1px solid ${isSelected ? "#e11d48" : ch.enabled ? `${recColor}55` : "#333"}`,
-              fontSize: 7, fontFamily: "monospace", fontWeight: 700,
-              color: isSelected ? "#fda4af" : ch.enabled ? recColor : "#444",
-              boxShadow: ch.enabled ? `0 0 5px ${recColor}33` : "none",
-            }}
-          >
-            {ch.channel}
-            {ch.enabled && ch.recording && ch.recording !== "off" && (
-              <span className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full" style={{ background: "#ef4444" }} />
-            )}
-          </button>
-        );
-      })}
-    </div>
+  const handleSelect = (chNum: number) => {
+    const idx = channels.findIndex(c => c.channel === chNum);
+    setSelected(idx === selected ? null : idx);
+  };
+
+  const renderChannelExpansion = (ch: NvrChannel, idx: number) => (
+    <motion.div
+      initial={{ height: 0, opacity: 0 }}
+      animate={{ height: "auto", opacity: 1 }}
+      exit={{ height: 0, opacity: 0 }}
+      transition={{ duration: 0.18, ease: "easeInOut" }}
+      style={{ overflow: "hidden" }}
+    >
+      <div
+        className="rounded-b-xl overflow-hidden"
+        style={{ background: "rgba(225,29,72,0.06)", border: "1px solid rgba(225,29,72,0.2)", borderTop: "none", margin: "0 1px 2px 1px" }}
+      >
+        {/* Header */}
+        <div
+          className="flex items-center gap-3 px-4 py-2"
+          style={{ background: "rgba(225,29,72,0.1)", borderBottom: "1px solid rgba(225,29,72,0.15)" }}
+        >
+          <span className="font-mono font-bold" style={{ fontSize: 12, color: "#fda4af" }}>
+            Canal {ch.channel}
+          </span>
+          {ch.connectedCamera && (
+            <span className="px-2 py-0.5 rounded font-mono" style={{ fontSize: 10, background: "rgba(225,29,72,0.2)", color: "#fb7185" }}>
+              {ch.connectedCamera}
+            </span>
+          )}
+          <div className="flex items-center gap-2 ml-auto">
+            <span style={{ fontSize: 11, color: "rgba(255,255,255,0.4)" }}>Activo</span>
+            <button onClick={e => { e.stopPropagation(); updateChannel(idx, { enabled: !ch.enabled }); }} style={toggleTrack(ch.enabled, "#e11d48")}>
+              <div style={toggleThumb(ch.enabled)} />
+            </button>
+            <button onClick={e => { e.stopPropagation(); setSelected(null); }} className="ml-2 cursor-pointer" style={{ color: "rgba(255,255,255,0.3)" }}>
+              <X style={{ width: 14, height: 14 }} />
+            </button>
+          </div>
+        </div>
+        {/* Fields grid */}
+        <div className="p-3 grid gap-2.5" style={{ gridTemplateColumns: "1fr 1fr 1fr 1fr" }}>
+          <div>
+            <span className="block text-[10px] mb-1" style={{ color: "rgba(255,255,255,0.35)" }}>Etiqueta</span>
+            <input type="text" value={ch.label || ""} onChange={e => updateChannel(idx, { label: e.target.value })} onClick={e => e.stopPropagation()} placeholder={`Canal ${ch.channel}`} style={fStyle} />
+          </div>
+          <div>
+            <span className="block text-[10px] mb-1" style={{ color: "rgba(255,255,255,0.35)" }}>Cámara conectada</span>
+            <input type="text" value={ch.connectedCamera || ""} onChange={e => updateChannel(idx, { connectedCamera: e.target.value })} onClick={e => e.stopPropagation()} placeholder="Nombre cámara..." style={fStyle} />
+          </div>
+          <div>
+            <span className="block text-[10px] mb-1" style={{ color: "rgba(255,255,255,0.35)" }}>IP Cámara</span>
+            <input type="text" value={ch.cameraIp || ""} onChange={e => updateChannel(idx, { cameraIp: e.target.value })} onClick={e => e.stopPropagation()} placeholder="10.1.10.x" style={{ ...fStyle, fontFamily: "monospace" }} />
+          </div>
+          <div>
+            <span className="block text-[10px] mb-1" style={{ color: "rgba(255,255,255,0.35)" }}>Protocolo</span>
+            <select value={ch.protocol || ""} onChange={e => updateChannel(idx, { protocol: e.target.value as NvrChannel["protocol"] })} onClick={e => e.stopPropagation()} style={fStyle}>
+              <option value="" style={{ background: "#1a1a1a" }}>—</option>
+              {NVR_PROTOCOLS.map(p => <option key={p} value={p} style={{ background: "#1a1a1a" }}>{p}</option>)}
+            </select>
+          </div>
+          <div>
+            <span className="block text-[10px] mb-1" style={{ color: "rgba(255,255,255,0.35)" }}>Resolución</span>
+            <select value={ch.resolution || ""} onChange={e => updateChannel(idx, { resolution: e.target.value })} onClick={e => e.stopPropagation()} style={fStyle}>
+              <option value="" style={{ background: "#1a1a1a" }}>—</option>
+              {NVR_RESOLUTIONS.map(r => <option key={r} value={r} style={{ background: "#1a1a1a" }}>{r}</option>)}
+            </select>
+          </div>
+          <div>
+            <span className="block text-[10px] mb-1" style={{ color: "rgba(255,255,255,0.35)" }}>Codec</span>
+            <select value={ch.codec || ""} onChange={e => updateChannel(idx, { codec: e.target.value as NvrChannel["codec"] })} onClick={e => e.stopPropagation()} style={fStyle}>
+              <option value="" style={{ background: "#1a1a1a" }}>—</option>
+              {NVR_CODECS.map(c => <option key={c} value={c} style={{ background: "#1a1a1a" }}>{c}</option>)}
+            </select>
+          </div>
+          <div>
+            <span className="block text-[10px] mb-1" style={{ color: "rgba(255,255,255,0.35)" }}>FPS</span>
+            <input type="number" min={1} max={60} value={ch.fps || ""} onChange={e => updateChannel(idx, { fps: parseInt(e.target.value) || undefined })} onClick={e => e.stopPropagation()} placeholder="25" style={{ ...fStyle, fontFamily: "monospace" }} />
+          </div>
+          <div>
+            <span className="block text-[10px] mb-1" style={{ color: "rgba(255,255,255,0.35)" }}>Grabación</span>
+            <select value={ch.recording || ""} onChange={e => updateChannel(idx, { recording: e.target.value as NvrChannel["recording"] })} onClick={e => e.stopPropagation()} style={fStyle}>
+              <option value="" style={{ background: "#1a1a1a" }}>—</option>
+              {NVR_RECORDINGS.map(r => (
+                <option key={r} value={r} style={{ background: "#1a1a1a" }}>{RECORDING_LABELS[r] || r}</option>
+              ))}
+            </select>
+          </div>
+          <div style={{ gridColumn: "span 4" }}>
+            <span className="block text-[10px] mb-1" style={{ color: "rgba(255,255,255,0.35)" }}>Notas</span>
+            <textarea value={ch.notes || ""} onChange={e => updateChannel(idx, { notes: e.target.value })} onClick={e => e.stopPropagation()}
+              rows={2} style={{ ...fStyle, resize: "none", width: "100%" }} />
+          </div>
+        </div>
+      </div>
+    </motion.div>
   );
 
-  const sel = selected !== null ? channels[selected] : null;
-
   return (
-    <div>
-      <div className="flex items-center justify-between mb-2">
+    <div className="flex flex-col gap-3">
+      {/* Header */}
+      <div className="flex items-center justify-between">
         <span className="text-[11px] text-white/50 font-bold uppercase tracking-wider">
-          Canales ({channels.filter(c => c.enabled).length}/{channels.length} activos)
+          Canales ({enabled.length}/{channels.length} activos)
         </span>
       </div>
 
-      <PortGrid />
+      {/* Channel table */}
+      {channels.length > 0 && (
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11, minWidth: 640 }}>
+            <thead>
+              <tr style={{ borderBottom: "1px solid rgba(255,255,255,0.1)" }}>
+                {["#", "Estado", "Cámara", "IP", "Protocolo", "Resolución", "Codec", "FPS", "Grabación", "Notas"].map(h => (
+                  <th key={h} style={{ padding: "6px 10px", textAlign: "left", fontSize: 9, fontWeight: 700, color: "rgba(255,255,255,0.3)", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {channels.map((ch, idx) => {
+                const isSel = selected === idx;
+                const recColor = ch.recording ? RECORDING_COLOR[ch.recording] || "#22c55e" : "#52525b";
+                return (
+                  <React.Fragment key={ch.channel}>
+                    <tr
+                      onClick={() => handleSelect(ch.channel)}
+                      style={{
+                        cursor: "pointer",
+                        background: isSel ? "rgba(225,29,72,0.1)" : idx % 2 === 0 ? "transparent" : "rgba(255,255,255,0.02)",
+                        borderBottom: isSel ? "none" : "1px solid rgba(255,255,255,0.04)",
+                        outline: isSel ? "1px solid rgba(225,29,72,0.35)" : "none",
+                        transition: "background 0.1s",
+                      }}
+                      onMouseEnter={e => { if (!isSel) (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.04)"; }}
+                      onMouseLeave={e => { if (!isSel) (e.currentTarget as HTMLElement).style.background = idx % 2 === 0 ? "transparent" : "rgba(255,255,255,0.02)"; }}
+                    >
+                      <td style={{ padding: "5px 10px", fontFamily: "monospace", color: isSel ? "#fda4af" : "rgba(255,255,255,0.5)", fontWeight: 700 }}>{ch.channel}</td>
+                      <td style={{ padding: "5px 10px" }}>
+                        <div style={{ width: 8, height: 8, borderRadius: "50%", background: ch.enabled ? "#22c55e" : "#333", boxShadow: ch.enabled ? "0 0 6px #22c55e88" : "none" }} />
+                      </td>
+                      <td style={{ padding: "5px 10px", color: "rgba(255,255,255,0.75)" }}>{ch.connectedCamera || "—"}</td>
+                      <td style={{ padding: "5px 10px", fontFamily: "monospace", color: "rgba(255,255,255,0.4)" }}>{ch.cameraIp || "—"}</td>
+                      <td style={{ padding: "5px 10px", color: "rgba(255,255,255,0.4)" }}>{ch.protocol || "—"}</td>
+                      <td style={{ padding: "5px 10px", color: "rgba(255,255,255,0.4)" }}>{ch.resolution || "—"}</td>
+                      <td style={{ padding: "5px 10px", color: "rgba(255,255,255,0.35)" }}>{ch.codec || "—"}</td>
+                      <td style={{ padding: "5px 10px", fontFamily: "monospace", color: "rgba(255,255,255,0.35)" }}>{ch.fps || "—"}</td>
+                      <td style={{ padding: "5px 10px" }}>
+                        {ch.recording && ch.recording !== "off" ? (
+                          <span style={{ background: `${recColor}33`, color: recColor, padding: "2px 6px", borderRadius: 4, fontWeight: 700, fontSize: 10 }}>
+                            {RECORDING_LABELS[ch.recording] || ch.recording}
+                          </span>
+                        ) : <span style={{ color: "rgba(255,255,255,0.2)" }}>—</span>}
+                      </td>
+                      <td style={{ padding: "5px 10px", color: "rgba(255,255,255,0.3)", maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{ch.notes || ""}</td>
+                    </tr>
+                    <AnimatePresence>
+                      {isSel && (
+                        <tr key={`exp-${ch.channel}`} style={{ borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+                          <td colSpan={10} style={{ padding: 0 }}>
+                            {renderChannelExpansion(ch, idx)}
+                          </td>
+                        </tr>
+                      )}
+                    </AnimatePresence>
+                  </React.Fragment>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {/* Legend */}
-      <div className="flex items-center gap-3 mt-1.5 flex-wrap">
+      <div className="flex items-center gap-4 flex-wrap" style={{ fontSize: 10, color: "rgba(255,255,255,0.3)" }}>
         {Object.entries(RECORDING_COLOR).map(([mode, color]) => (
-          <span key={mode} className="flex items-center gap-1">
-            <span className="w-2 h-2 rounded-sm" style={{ background: color }} />
-            <span className="text-[8px] text-white/30 capitalize">{mode === "continuous" ? "Continuo" : mode === "motion" ? "Movimiento" : mode === "schedule" ? "Horario" : mode === "alarm" ? "Alarma" : "Off"}</span>
+          <span key={mode} className="flex items-center gap-1.5">
+            <span className="w-3 h-3 rounded-sm inline-block" style={{ background: `${color}33`, border: `1px solid ${color}66` }} />
+            {RECORDING_LABELS[mode] || mode}
           </span>
         ))}
+        <span className="ml-auto" style={{ color: "rgba(255,255,255,0.2)" }}>
+          Clic en canal para editar
+        </span>
       </div>
-
-      {/* Selected channel editor */}
-      <AnimatePresence>
-        {sel && selected !== null && (
-          <motion.div
-            key={selected}
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: "auto" }}
-            exit={{ opacity: 0, height: 0 }}
-            className="mt-2 rounded-xl overflow-hidden"
-            style={{ background: "rgba(225,29,72,0.05)", border: "1px solid rgba(225,29,72,0.15)" }}
-          >
-            <div className="p-3">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-[11px] font-bold" style={{ color: "#fda4af" }}>Canal {sel.channel}</span>
-                <button style={toggleTrack(sel.enabled, "#e11d48")} onClick={() => updateChannel(selected, { enabled: !sel.enabled })}>
-                  <span style={toggleThumb(sel.enabled)} />
-                </button>
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="text-[9px] text-white/30 font-bold uppercase tracking-wider block mb-0.5">Etiqueta</label>
-                  <input type="text" value={sel.label || ""} onChange={e => updateChannel(selected, { label: e.target.value })} placeholder={`Canal ${sel.channel}`} style={fStyle} />
-                </div>
-                <div>
-                  <label className="text-[9px] text-white/30 font-bold uppercase tracking-wider block mb-0.5">Cámara conectada</label>
-                  <input type="text" value={sel.connectedCamera || ""} onChange={e => updateChannel(selected, { connectedCamera: e.target.value })} placeholder="Nombre cámara..." style={fStyle} />
-                </div>
-                <div>
-                  <label className="text-[9px] text-white/30 font-bold uppercase tracking-wider block mb-0.5">IP Cámara</label>
-                  <input type="text" value={sel.cameraIp || ""} onChange={e => updateChannel(selected, { cameraIp: e.target.value })} placeholder="10.1.10.x" style={{ ...fStyle, fontFamily: "monospace" }} />
-                </div>
-                <div>
-                  <label className="text-[9px] text-white/30 font-bold uppercase tracking-wider block mb-0.5">Protocolo</label>
-                  <select value={sel.protocol || ""} onChange={e => updateChannel(selected, { protocol: e.target.value as NvrChannel["protocol"] })} style={fStyle}>
-                    <option value="" style={{ background: "#1a1a1a" }}>—</option>
-                    {NVR_PROTOCOLS.map(p => <option key={p} value={p} style={{ background: "#1a1a1a" }}>{p}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="text-[9px] text-white/30 font-bold uppercase tracking-wider block mb-0.5">Resolución</label>
-                  <select value={sel.resolution || ""} onChange={e => updateChannel(selected, { resolution: e.target.value })} style={fStyle}>
-                    <option value="" style={{ background: "#1a1a1a" }}>—</option>
-                    {NVR_RESOLUTIONS.map(r => <option key={r} value={r} style={{ background: "#1a1a1a" }}>{r}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="text-[9px] text-white/30 font-bold uppercase tracking-wider block mb-0.5">Codec</label>
-                  <select value={sel.codec || ""} onChange={e => updateChannel(selected, { codec: e.target.value as NvrChannel["codec"] })} style={fStyle}>
-                    <option value="" style={{ background: "#1a1a1a" }}>—</option>
-                    {NVR_CODECS.map(c => <option key={c} value={c} style={{ background: "#1a1a1a" }}>{c}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="text-[9px] text-white/30 font-bold uppercase tracking-wider block mb-0.5">FPS</label>
-                  <input type="number" min={1} max={60} value={sel.fps || ""} onChange={e => updateChannel(selected, { fps: parseInt(e.target.value) || undefined })} placeholder="25" style={{ ...fStyle, fontFamily: "monospace" }} />
-                </div>
-                <div>
-                  <label className="text-[9px] text-white/30 font-bold uppercase tracking-wider block mb-0.5">Grabación</label>
-                  <select value={sel.recording || ""} onChange={e => updateChannel(selected, { recording: e.target.value as NvrChannel["recording"] })} style={fStyle}>
-                    <option value="" style={{ background: "#1a1a1a" }}>—</option>
-                    {NVR_RECORDINGS.map(r => {
-                      const labels: Record<string, string> = { continuous: "Continuo", motion: "Movimiento", schedule: "Horario", alarm: "Alarma", off: "Apagado" };
-                      return <option key={r} value={r} style={{ background: "#1a1a1a" }}>{labels[r] || r}</option>;
-                    })}
-                  </select>
-                </div>
-                <div style={{ gridColumn: "span 2" }}>
-                  <label className="text-[9px] text-white/30 font-bold uppercase tracking-wider block mb-0.5">Notas</label>
-                  <input type="text" value={sel.notes || ""} onChange={e => updateChannel(selected, { notes: e.target.value })} placeholder="Notas..." style={fStyle} />
-                </div>
-              </div>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
 
       {channels.length === 0 && (
         <div className="text-center py-6 text-[11px] text-white/20">Sin canales configurados</div>

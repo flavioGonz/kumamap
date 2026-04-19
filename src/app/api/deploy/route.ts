@@ -1,161 +1,84 @@
 import { NextRequest, NextResponse } from "next/server";
-import { spawn } from "child_process";
-import { getDeployTargets, type DeployTarget } from "@/lib/deploy-targets";
+import { exec } from "child_process";
 
 export const dynamic = "force-dynamic";
 
-// Prevent concurrent deploys
-let deploying = false;
-
-interface DeployResult {
-  target: string;
-  host: string;
-  status: "success" | "error";
-  output: string;
-  durationMs: number;
-}
+let updating = false;
 
 /**
  * POST /api/deploy
- * Body: { targets?: string[] }  — array of target IDs. If omitted, deploys to ALL targets.
  *
- * Runs git pull → npm run build → pm2 restart on each target via SSH.
- * Returns results per target.
+ * Self-update: git pull → npm install → npm run build → pm2 restart
+ * Runs locally — each KumaMap instance updates itself.
  */
-export async function POST(req: NextRequest) {
-  if (deploying) {
+export async function POST() {
+  if (updating) {
     return NextResponse.json(
-      { error: "Deploy already in progress" },
+      { error: "Actualización en progreso" },
       { status: 409 }
     );
   }
 
-  let body: { targets?: string[] } = {};
-  try {
-    body = await req.json();
-  } catch {
-    // empty body = deploy all
-  }
-
-  const allTargets = getDeployTargets();
-  const selectedTargets = body.targets
-    ? allTargets.filter((t) => body.targets!.includes(t.id))
-    : allTargets;
-
-  if (selectedTargets.length === 0) {
-    return NextResponse.json(
-      { error: "No matching targets found", available: allTargets.map((t) => t.id) },
-      { status: 400 }
-    );
-  }
-
-  deploying = true;
+  updating = true;
+  const start = Date.now();
+  const cwd = process.cwd();
 
   try {
-    // Deploy to all targets in parallel
-    const results = await Promise.all(
-      selectedTargets.map((target) => deployToTarget(target))
-    );
+    const steps = [
+      { label: "git pull", cmd: "git pull origin master" },
+      { label: "npm install", cmd: "npm install --omit=dev --ignore-scripts 2>&1 || true" },
+      { label: "build", cmd: "npm run build" },
+      { label: "restart", cmd: "pm2 restart kumamap || pm2 restart all" },
+    ];
 
-    const allSuccess = results.every((r) => r.status === "success");
+    const logs: { step: string; output: string; ok: boolean; ms: number }[] = [];
+    let failed = false;
+
+    for (const step of steps) {
+      if (failed) break;
+      const stepStart = Date.now();
+      try {
+        const output = await run(step.cmd, cwd, 180_000);
+        logs.push({ step: step.label, output: truncate(output, 1500), ok: true, ms: Date.now() - stepStart });
+      } catch (err: any) {
+        logs.push({ step: step.label, output: truncate(err.message || String(err), 1500), ok: false, ms: Date.now() - stepStart });
+        failed = true;
+      }
+    }
 
     return NextResponse.json({
-      status: allSuccess ? "success" : "partial_failure",
-      results,
+      status: failed ? "error" : "success",
+      durationMs: Date.now() - start,
+      steps: logs,
     });
+  } catch (err: any) {
+    return NextResponse.json(
+      { status: "error", error: err.message, durationMs: Date.now() - start },
+      { status: 500 }
+    );
   } finally {
-    deploying = false;
+    updating = false;
   }
 }
 
 /**
  * GET /api/deploy
- * Returns the list of configured deploy targets.
+ * Returns current deploy status.
  */
 export async function GET() {
-  const targets = getDeployTargets();
-  return NextResponse.json({
-    targets: targets.map((t) => ({
-      id: t.id,
-      name: t.name,
-      host: t.host,
-    })),
-    deploying,
-  });
+  return NextResponse.json({ updating });
 }
 
-async function deployToTarget(target: DeployTarget): Promise<DeployResult> {
-  const start = Date.now();
-  const path = target.path || "/opt/kumamap";
-  const pm2Name = target.pm2Name || "kumamap";
-
-  const command = [
-    `cd ${path}`,
-    "git pull origin master",
-    "npm run build",
-    `pm2 restart ${pm2Name}`,
-  ].join(" && ");
-
-  try {
-    const output = await sshExec(target, command, 180_000); // 3min timeout
-    return {
-      target: target.name,
-      host: target.host,
-      status: "success",
-      output: truncate(output, 2000),
-      durationMs: Date.now() - start,
-    };
-  } catch (err) {
-    return {
-      target: target.name,
-      host: target.host,
-      status: "error",
-      output: truncate(err instanceof Error ? err.message : String(err), 2000),
-      durationMs: Date.now() - start,
-    };
-  }
-}
-
-function sshExec(target: DeployTarget, command: string, timeoutMs: number): Promise<string> {
+function run(cmd: string, cwd: string, timeout: number): Promise<string> {
   return new Promise((resolve, reject) => {
-    const args = [
-      "-o", "StrictHostKeyChecking=no",
-      "-o", "ConnectTimeout=10",
-      "-o", "BatchMode=yes",
-      "-p", String(target.port || 22),
-      `${target.user}@${target.host}`,
-      command,
-    ];
-
-    const proc = spawn("ssh", args, { stdio: ["ignore", "pipe", "pipe"] });
-    let stdout = "";
-    let stderr = "";
-
-    proc.stdout.on("data", (d: Buffer) => { stdout += d.toString(); });
-    proc.stderr.on("data", (d: Buffer) => { stderr += d.toString(); });
-
-    const timer = setTimeout(() => {
-      proc.kill("SIGTERM");
-      reject(new Error(`SSH timeout after ${timeoutMs / 1000}s`));
-    }, timeoutMs);
-
-    proc.on("close", (code) => {
-      clearTimeout(timer);
-      if (code === 0) {
-        resolve(stdout + stderr);
-      } else {
-        reject(new Error(`Exit code ${code}: ${stderr || stdout}`));
-      }
-    });
-
-    proc.on("error", (err) => {
-      clearTimeout(timer);
-      reject(err);
+    exec(cmd, { cwd, timeout, maxBuffer: 1024 * 1024 * 5 }, (err, stdout, stderr) => {
+      if (err) return reject(new Error(`${stderr || stdout || err.message}`));
+      resolve(stdout + stderr);
     });
   });
 }
 
 function truncate(s: string, max: number): string {
   if (s.length <= max) return s;
-  return s.slice(0, max) + "\n... (truncated)";
+  return s.slice(0, max) + "\n... (truncado)";
 }

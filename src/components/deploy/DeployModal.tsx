@@ -1,22 +1,11 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { X, Rocket, Server, CheckCircle, XCircle, Loader2, Clock, ArrowDown, GitCommit, RefreshCw } from "lucide-react";
+import {
+  X, Rocket, CheckCircle, XCircle, Loader2, Clock,
+  ArrowDown, GitCommit, RefreshCw, Terminal, ChevronDown, ChevronRight,
+} from "lucide-react";
 import { apiUrl } from "@/lib/api";
-
-interface DeployTarget {
-  id: string;
-  name: string;
-  host: string;
-}
-
-interface DeployResult {
-  target: string;
-  host: string;
-  status: "success" | "error";
-  output: string;
-  durationMs: number;
-}
 
 interface VersionInfo {
   appVersion: string;
@@ -28,82 +17,78 @@ interface VersionInfo {
   fetchError?: string;
 }
 
-interface DeployModalProps {
-  onClose: () => void;
+interface StepResult {
+  step: string;
+  output: string;
+  ok: boolean;
+  ms: number;
 }
 
-export default function DeployModal({ onClose }: DeployModalProps) {
-  const [targets, setTargets] = useState<DeployTarget[]>([]);
-  const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [deploying, setDeploying] = useState(false);
-  const [results, setResults] = useState<DeployResult[] | null>(null);
-  const [expandedOutput, setExpandedOutput] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+interface DeployResponse {
+  status: "success" | "error";
+  durationMs: number;
+  steps: StepResult[];
+  error?: string;
+}
+
+export default function DeployModal({ onClose }: { onClose: () => void }) {
   const [version, setVersion] = useState<VersionInfo | null>(null);
-  const [checkingVersion, setCheckingVersion] = useState(true);
+  const [checking, setChecking] = useState(true);
+  const [updating, setUpdating] = useState(false);
+  const [currentStep, setCurrentStep] = useState<string>("");
+  const [result, setResult] = useState<DeployResponse | null>(null);
+  const [expandedStep, setExpandedStep] = useState<string | null>(null);
 
-  // Fetch version + targets in parallel
-  useEffect(() => {
-    Promise.all([
-      fetch(apiUrl("/api/deploy")).then((r) => r.json()).catch(() => ({ targets: [] })),
-      fetch(apiUrl("/api/version")).then((r) => r.json()).catch(() => null),
-    ]).then(([deployData, versionData]) => {
-      setTargets(deployData.targets || []);
-      setSelected(new Set((deployData.targets || []).map((t: DeployTarget) => t.id)));
-      setVersion(versionData);
-    }).finally(() => {
-      setLoading(false);
-      setCheckingVersion(false);
-    });
-  }, []);
-
-  const checkForUpdates = useCallback(async () => {
-    setCheckingVersion(true);
+  const checkVersion = useCallback(async () => {
+    setChecking(true);
     try {
       const res = await fetch(apiUrl("/api/version"));
       if (res.ok) setVersion(await res.json());
-    } catch {}
-    finally { setCheckingVersion(false); }
+    } catch {} finally {
+      setChecking(false);
+    }
   }, []);
 
-  const toggleTarget = (id: string) => {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
+  useEffect(() => { checkVersion(); }, [checkVersion]);
 
-  const handleDeploy = useCallback(async () => {
-    if (selected.size === 0) return;
-    setDeploying(true);
-    setResults(null);
+  const handleUpdate = useCallback(async () => {
+    setUpdating(true);
+    setResult(null);
+    setCurrentStep("git pull");
+
     try {
-      const res = await fetch(apiUrl("/api/deploy"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ targets: Array.from(selected) }),
-      });
-      const data = await res.json();
-      setResults(data.results || []);
-      // Re-check version after deploy
-      checkForUpdates();
-    } catch (err) {
-      setResults([{
-        target: "Error", host: "", status: "error",
-        output: err instanceof Error ? err.message : "Network error",
+      const res = await fetch(apiUrl("/api/deploy"), { method: "POST" });
+      const data: DeployResponse = await res.json();
+      setResult(data);
+      // Re-check version after update
+      if (data.status === "success") {
+        setTimeout(checkVersion, 2000);
+      }
+    } catch (err: any) {
+      setResult({
+        status: "error",
         durationMs: 0,
-      }]);
-    } finally { setDeploying(false); }
-  }, [selected, checkForUpdates]);
+        steps: [{ step: "conexión", output: err.message || "Error de red", ok: false, ms: 0 }],
+      });
+    } finally {
+      setUpdating(false);
+      setCurrentStep("");
+    }
+  }, [checkVersion]);
+
+  const stepLabels: Record<string, string> = {
+    "git pull": "Descargando cambios",
+    "npm install": "Instalando dependencias",
+    "build": "Compilando aplicación",
+    "restart": "Reiniciando servidor",
+  };
 
   return (
     <div className="fixed inset-0 z-[9999] flex items-center justify-center" onClick={onClose}>
       <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
 
       <div
-        className="relative w-[540px] max-h-[85vh] rounded-2xl overflow-hidden flex flex-col"
+        className="relative w-[480px] max-h-[85vh] rounded-2xl overflow-hidden flex flex-col"
         style={{
           background: "linear-gradient(180deg, rgba(20,20,20,0.98), rgba(12,12,12,0.99))",
           border: "1px solid rgba(255,255,255,0.08)",
@@ -117,36 +102,36 @@ export default function DeployModal({ onClose }: DeployModalProps) {
             <Rocket className="h-4 w-4 text-orange-400" />
             <h3 className="text-sm font-bold text-[#eee]">Actualizador OTA</h3>
           </div>
-          <button onClick={onClose} className="text-[#666] hover:text-white transition-colors">
+          <button onClick={onClose} className="text-[#666] hover:text-white transition-colors cursor-pointer">
             <X className="h-4 w-4" />
           </button>
         </div>
 
         <div className="p-4 space-y-4 overflow-y-auto flex-1">
-          {loading && (
+          {/* Loading */}
+          {checking && !version && (
             <div className="flex items-center justify-center py-8">
               <Loader2 className="h-5 w-5 text-blue-400 animate-spin" />
             </div>
           )}
 
-          {/* Version info */}
-          {!loading && version && (
+          {version && (
             <>
-              {/* Current version card */}
+              {/* Current version */}
               <div className="rounded-2xl p-3.5" style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)" }}>
                 <div className="flex items-center justify-between mb-2">
-                  <div className="text-[10px] text-[#555] font-bold uppercase tracking-wider">Versión actual</div>
+                  <span className="text-[10px] text-[#555] font-bold uppercase tracking-wider">Versión instalada</span>
                   <button
-                    onClick={checkForUpdates}
-                    disabled={checkingVersion}
-                    className="flex items-center gap-1 text-[10px] text-[#555] hover:text-[#888] transition-all"
+                    onClick={checkVersion}
+                    disabled={checking}
+                    className="flex items-center gap-1 text-[10px] text-[#555] hover:text-[#888] transition-all cursor-pointer"
                   >
-                    <RefreshCw className={`h-3 w-3 ${checkingVersion ? "animate-spin" : ""}`} />
-                    Buscar
+                    <RefreshCw className={`h-3 w-3 ${checking ? "animate-spin" : ""}`} />
+                    Verificar
                   </button>
                 </div>
                 <div className="flex items-center gap-3">
-                  <div className="h-10 w-10 rounded-xl flex items-center justify-center" style={{ background: "rgba(59,130,246,0.12)", border: "1px solid rgba(59,130,246,0.25)" }}>
+                  <div className="h-10 w-10 rounded-xl flex items-center justify-center shrink-0" style={{ background: "rgba(59,130,246,0.12)", border: "1px solid rgba(59,130,246,0.25)" }}>
                     <span className="text-xs font-bold text-blue-400">v{version.appVersion}</span>
                   </div>
                   <div className="flex-1 min-w-0">
@@ -160,17 +145,16 @@ export default function DeployModal({ onClose }: DeployModalProps) {
                 </div>
               </div>
 
-              {/* Update available */}
-              {version.updateAvailable && version.remote && (
+              {/* Updates available */}
+              {version.updateAvailable && version.remote && !result && (
                 <div className="rounded-2xl p-3.5" style={{ background: "rgba(34,197,94,0.04)", border: "1px solid rgba(34,197,94,0.15)" }}>
                   <div className="flex items-center gap-2 mb-2.5">
                     <ArrowDown className="h-3.5 w-3.5 text-green-400" />
                     <span className="text-[10px] text-green-400 font-bold uppercase tracking-wider">
-                      {version.commitsBehind} commit{version.commitsBehind > 1 ? "s" : ""} disponible{version.commitsBehind > 1 ? "s" : ""}
+                      {version.commitsBehind} actualización{version.commitsBehind > 1 ? "es" : ""} disponible{version.commitsBehind > 1 ? "s" : ""}
                     </span>
                   </div>
-                  {/* New commits list */}
-                  <div className="space-y-1 max-h-32 overflow-y-auto">
+                  <div className="space-y-1 max-h-40 overflow-y-auto">
                     {version.newCommits.map((c) => (
                       <div key={c.hash} className="flex items-start gap-2 text-[10px]">
                         <GitCommit className="h-3 w-3 text-green-400/50 mt-0.5 shrink-0" />
@@ -184,8 +168,8 @@ export default function DeployModal({ onClose }: DeployModalProps) {
                 </div>
               )}
 
-              {/* No updates */}
-              {!version.updateAvailable && !version.fetchError && (
+              {/* Up to date */}
+              {!version.updateAvailable && !version.fetchError && !result && (
                 <div className="rounded-2xl p-3.5 flex items-center gap-3" style={{ background: "rgba(59,130,246,0.04)", border: "1px solid rgba(59,130,246,0.1)" }}>
                   <CheckCircle className="h-4 w-4 text-blue-400 shrink-0" />
                   <div>
@@ -195,7 +179,8 @@ export default function DeployModal({ onClose }: DeployModalProps) {
                 </div>
               )}
 
-              {version.fetchError && (
+              {/* Fetch error */}
+              {version.fetchError && !result && (
                 <div className="rounded-2xl p-3.5 flex items-center gap-3" style={{ background: "rgba(239,68,68,0.04)", border: "1px solid rgba(239,68,68,0.1)" }}>
                   <XCircle className="h-4 w-4 text-red-400 shrink-0" />
                   <div className="text-[10px] text-[#888]">{version.fetchError}</div>
@@ -204,112 +189,134 @@ export default function DeployModal({ onClose }: DeployModalProps) {
             </>
           )}
 
-          {/* Target selection */}
-          {!loading && targets.length > 0 && !results && (version?.updateAvailable || targets.length > 0) && (
-            <div className="space-y-1.5">
-              <label className="text-[10px] text-[#555] font-bold uppercase tracking-wider">Servidores destino</label>
-              {targets.map((target) => (
-                <button
-                  key={target.id}
-                  onClick={() => toggleTarget(target.id)}
-                  disabled={deploying}
-                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all text-left"
-                  style={{
-                    background: selected.has(target.id) ? "rgba(59,130,246,0.1)" : "rgba(255,255,255,0.02)",
-                    border: `1px solid ${selected.has(target.id) ? "rgba(59,130,246,0.3)" : "rgba(255,255,255,0.06)"}`,
-                  }}
-                >
-                  <div
-                    className="h-4 w-4 rounded flex items-center justify-center shrink-0"
-                    style={{
-                      background: selected.has(target.id) ? "rgba(59,130,246,0.3)" : "rgba(255,255,255,0.04)",
-                      border: `1px solid ${selected.has(target.id) ? "rgba(59,130,246,0.5)" : "rgba(255,255,255,0.1)"}`,
-                    }}
-                  >
-                    {selected.has(target.id) && (
-                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#60a5fa" strokeWidth="3" strokeLinecap="round"><polyline points="20 6 9 17 4 12" /></svg>
-                    )}
+          {/* Updating progress */}
+          {updating && (
+            <div className="rounded-2xl p-4" style={{ background: "rgba(249,115,22,0.04)", border: "1px solid rgba(249,115,22,0.15)" }}>
+              <div className="flex flex-col items-center py-4 gap-3">
+                <div className="relative">
+                  <Loader2 className="h-10 w-10 text-orange-400 animate-spin" />
+                  <Rocket className="h-4 w-4 text-orange-400 absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2" />
+                </div>
+                <p className="text-sm font-bold text-[#ccc]">Actualizando...</p>
+                <p className="text-[10px] text-[#555]">
+                  {stepLabels[currentStep] || currentStep}
+                </p>
+              </div>
+              {/* Step progress */}
+              <div className="flex items-center justify-center gap-1.5 mt-2">
+                {["git pull", "npm install", "build", "restart"].map((s, i) => (
+                  <div key={s} className="flex items-center gap-1.5">
+                    <div
+                      className="h-1.5 w-8 rounded-full transition-all duration-500"
+                      style={{
+                        background: currentStep === s ? "#f97316" :
+                          ["git pull", "npm install", "build", "restart"].indexOf(currentStep) > i ? "#22c55e" : "rgba(255,255,255,0.06)",
+                      }}
+                    />
                   </div>
-                  <Server className="h-3.5 w-3.5 text-[#555]" />
-                  <div className="flex-1 min-w-0">
-                    <div className="text-xs font-bold text-[#ddd]">{target.name}</div>
-                    <div className="text-[10px] font-mono text-[#555]">{target.host}</div>
-                  </div>
-                </button>
-              ))}
-            </div>
-          )}
-
-          {!loading && targets.length === 0 && (
-            <div className="text-center py-4 text-[#555]">
-              <Server className="h-6 w-6 mx-auto mb-1.5 opacity-30" />
-              <p className="text-[10px]">Configurá servidores en <code className="bg-white/5 px-1 rounded">deploy-targets.ts</code></p>
-            </div>
-          )}
-
-          {/* Deploying state */}
-          {deploying && (
-            <div className="flex flex-col items-center py-6 gap-3">
-              <Loader2 className="h-8 w-8 text-orange-400 animate-spin" />
-              <p className="text-sm font-bold text-[#ccc]">Actualizando...</p>
-              <p className="text-[10px] text-[#555]">git pull → build → restart · {selected.size} servidor{selected.size > 1 ? "es" : ""}</p>
+                ))}
+              </div>
             </div>
           )}
 
           {/* Results */}
-          {results && (
+          {result && (
             <div className="space-y-2">
-              <label className="text-[10px] text-[#555] font-bold uppercase tracking-wider">Resultados</label>
-              {results.map((result, i) => (
-                <div key={i}>
-                  <button
-                    onClick={() => setExpandedOutput(expandedOutput === result.target ? null : result.target)}
-                    className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all text-left"
-                    style={{
-                      background: result.status === "success" ? "rgba(34,197,94,0.06)" : "rgba(239,68,68,0.06)",
-                      border: `1px solid ${result.status === "success" ? "rgba(34,197,94,0.15)" : "rgba(239,68,68,0.15)"}`,
-                    }}
-                  >
-                    {result.status === "success" ? <CheckCircle className="h-4 w-4 text-green-400 shrink-0" /> : <XCircle className="h-4 w-4 text-red-400 shrink-0" />}
-                    <div className="flex-1 min-w-0">
-                      <div className="text-xs font-bold" style={{ color: result.status === "success" ? "#86efac" : "#fca5a5" }}>{result.target}</div>
-                      <div className="text-[10px] font-mono text-[#555]">{result.host}</div>
-                    </div>
-                    <div className="flex items-center gap-1 text-[10px] text-[#555]">
-                      <Clock className="h-3 w-3" />
-                      {(result.durationMs / 1000).toFixed(1)}s
-                    </div>
-                  </button>
-                  {expandedOutput === result.target && (
-                    <div className="mt-1 mx-2 p-2.5 rounded-lg overflow-x-auto" style={{ background: "rgba(0,0,0,0.4)", border: "1px solid rgba(255,255,255,0.05)", maxHeight: 200, overflowY: "auto" }}>
-                      <pre className="text-[9px] font-mono text-[#888] whitespace-pre-wrap">{result.output}</pre>
-                    </div>
-                  )}
+              {/* Overall status */}
+              <div
+                className="rounded-2xl p-3.5 flex items-center gap-3"
+                style={{
+                  background: result.status === "success" ? "rgba(34,197,94,0.06)" : "rgba(239,68,68,0.06)",
+                  border: `1px solid ${result.status === "success" ? "rgba(34,197,94,0.2)" : "rgba(239,68,68,0.2)"}`,
+                }}
+              >
+                {result.status === "success"
+                  ? <CheckCircle className="h-5 w-5 text-green-400 shrink-0" />
+                  : <XCircle className="h-5 w-5 text-red-400 shrink-0" />
+                }
+                <div className="flex-1">
+                  <div className="text-xs font-bold" style={{ color: result.status === "success" ? "#86efac" : "#fca5a5" }}>
+                    {result.status === "success" ? "Actualización completada" : "Error en la actualización"}
+                  </div>
+                  <div className="text-[10px] text-[#555]">
+                    Tiempo total: {(result.durationMs / 1000).toFixed(1)}s
+                  </div>
                 </div>
-              ))}
+              </div>
+
+              {/* Step details */}
+              <div className="space-y-1">
+                <span className="text-[10px] text-[#555] font-bold uppercase tracking-wider">Detalle</span>
+                {result.steps.map((step) => (
+                  <div key={step.step}>
+                    <button
+                      onClick={() => setExpandedStep(expandedStep === step.step ? null : step.step)}
+                      className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl transition-all text-left cursor-pointer"
+                      style={{
+                        background: "rgba(255,255,255,0.02)",
+                        border: `1px solid ${step.ok ? "rgba(255,255,255,0.06)" : "rgba(239,68,68,0.15)"}`,
+                      }}
+                    >
+                      {step.ok
+                        ? <CheckCircle className="h-3.5 w-3.5 text-green-400 shrink-0" />
+                        : <XCircle className="h-3.5 w-3.5 text-red-400 shrink-0" />
+                      }
+                      <span className="flex-1 text-[11px] font-semibold text-[#bbb]">{step.step}</span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[9px] text-[#555] font-mono flex items-center gap-1">
+                          <Clock className="h-2.5 w-2.5" />
+                          {(step.ms / 1000).toFixed(1)}s
+                        </span>
+                        {expandedStep === step.step
+                          ? <ChevronDown className="h-3 w-3 text-[#555]" />
+                          : <ChevronRight className="h-3 w-3 text-[#555]" />
+                        }
+                      </div>
+                    </button>
+                    {expandedStep === step.step && (
+                      <div className="mx-2 mt-1 p-2.5 rounded-lg" style={{ background: "rgba(0,0,0,0.4)", border: "1px solid rgba(255,255,255,0.05)", maxHeight: 180, overflowY: "auto" }}>
+                        <pre className="text-[9px] font-mono text-[#888] whitespace-pre-wrap break-words">{step.output || "(sin salida)"}</pre>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
             </div>
           )}
         </div>
 
         {/* Footer */}
-        <div className="p-4 border-t border-white/5 flex items-center gap-2">
-          <div className="flex-1" />
-          {results ? (
-            <button onClick={() => { setResults(null); setExpandedOutput(null); }} className="px-4 py-2 rounded-xl text-[11px] font-bold text-[#888] hover:text-[#ccc] transition-all">
-              Nuevo
-            </button>
-          ) : null}
-          <button onClick={onClose} className="px-4 py-2 rounded-xl text-[11px] font-bold text-[#666] hover:text-[#aaa] transition-all">
-            {results ? "Cerrar" : "Cancelar"}
-          </button>
-          {!results && !deploying && (
+        <div className="p-4 border-t border-white/5 flex items-center justify-end gap-2">
+          {result && (
             <button
-              onClick={handleDeploy}
-              disabled={selected.size === 0}
-              className="px-4 py-2 rounded-xl text-[11px] font-bold bg-orange-500/20 text-orange-400 border border-orange-500/30 hover:bg-orange-500/30 transition-all disabled:opacity-30 disabled:cursor-not-allowed flex items-center gap-1.5"
+              onClick={() => { setResult(null); checkVersion(); }}
+              className="px-4 py-2 rounded-xl text-[11px] font-bold text-[#888] hover:text-[#ccc] transition-all cursor-pointer"
+            >
+              Volver
+            </button>
+          )}
+          <button
+            onClick={onClose}
+            className="px-4 py-2 rounded-xl text-[11px] font-bold text-[#666] hover:text-[#aaa] transition-all cursor-pointer"
+          >
+            {result ? "Cerrar" : "Cancelar"}
+          </button>
+          {!result && !updating && version?.updateAvailable && (
+            <button
+              onClick={handleUpdate}
+              className="px-4 py-2 rounded-xl text-[11px] font-bold bg-orange-500/20 text-orange-400 border border-orange-500/30 hover:bg-orange-500/30 transition-all flex items-center gap-1.5 cursor-pointer"
             >
               <Rocket className="h-3.5 w-3.5" />
-              {version?.updateAvailable ? `Actualizar (${version.commitsBehind})` : "Desplegar"} ({selected.size})
+              Actualizar ({version.commitsBehind})
+            </button>
+          )}
+          {!result && !updating && !version?.updateAvailable && version && !version.fetchError && (
+            <button
+              onClick={handleUpdate}
+              className="px-4 py-2 rounded-xl text-[11px] font-bold bg-white/5 text-[#666] border border-white/10 hover:bg-white/10 hover:text-[#999] transition-all flex items-center gap-1.5 cursor-pointer"
+            >
+              <RefreshCw className="h-3.5 w-3.5" />
+              Forzar rebuild
             </button>
           )}
         </div>

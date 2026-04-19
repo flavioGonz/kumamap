@@ -1,13 +1,14 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Lock, Trash2 } from "lucide-react";
+import { Lock, Trash2, RefreshCw, ArrowDownToLine } from "lucide-react";
 import { motion } from "framer-motion";
 import { TYPE_META, fieldStyle, miniFieldStyle } from "./rack-constants";
 import { RackDevice, PatchPort, SwitchPort, RouterInterface } from "./rack-types";
 import { SectionHeader, FieldLabel } from "./RackFormComponents";
 import MonitorSelect from "./MonitorSelect";
 import { PatchPanelEditor, SwitchEditor, RouterEditor, PbxExtensionsEditor, PbxTrunkLinesEditor, NvrChannelsEditor, NvrDisksEditor } from "./RackPortEditors";
+import SnmpStatusPanel from "./SnmpStatusPanel";
 import type { NvrChannel, NvrDisk } from "./rack-types";
 
 function DeviceEditor({
@@ -24,8 +25,75 @@ function DeviceEditor({
   onCancel: () => void;
 }) {
   const [activeTab, setActiveTab] = useState<"ports" | "trunks" | "general">("ports");
+  const [snmpSyncing, setSnmpSyncing] = useState(false);
+  const [snmpSyncMsg, setSnmpSyncMsg] = useState<string | null>(null);
   const meta = TYPE_META[device.type] || TYPE_META.other;
   const hasPorts = ["patchpanel", "switch", "router", "pbx", "nvr"].includes(device.type);
+
+  // ── SNMP auto-sync for switch ports ──
+  const canSnmpSync = device.type === "switch" && !!device.managementIp && !isLocked;
+
+  const handleSnmpSync = useCallback(async () => {
+    if (!device.managementIp) return;
+    setSnmpSyncing(true);
+    setSnmpSyncMsg(null);
+    try {
+      const res = await fetch("/api/snmp/poll", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ip: device.managementIp, community: device.snmpCommunity || "public", deviceType: "switch" }),
+      });
+      const data = await res.json();
+      if (!data.reachable || !data.interfaces?.length) {
+        setSnmpSyncMsg("No se pudo obtener información de puertos vía SNMP");
+        return;
+      }
+      // Map SNMP interfaces to switch ports
+      const snmpIfaces: Array<{
+        index: number; name: string; alias?: string; speed: number;
+        operStatus: string; inOctets: number; outOctets: number;
+      }> = data.interfaces;
+
+      const updatedPorts = (device.switchPorts || []).map((port) => {
+        // Try to match by index (SNMP index often maps to physical port)
+        const match = snmpIfaces.find(iface => {
+          // Match by port number to interface index, or by name containing port number
+          const portStr = String(port.port);
+          return iface.index === port.port
+            || iface.name.endsWith(`/${portStr}`)
+            || iface.name.endsWith(` ${portStr}`)
+            || iface.name === `GigabitEthernet${portStr}`
+            || iface.name === `FastEthernet${portStr}`
+            || iface.name === `Port ${portStr}`
+            || iface.name === `port${portStr}`;
+        });
+        if (!match) return port;
+
+        // Determine speed label from SNMP Mbps
+        let speed: SwitchPort["speed"] = port.speed;
+        if (match.speed >= 10000) speed = "10G";
+        else if (match.speed >= 1000) speed = "1G";
+        else if (match.speed >= 100) speed = "100";
+        else if (match.speed > 0) speed = "10";
+
+        return {
+          ...port,
+          connected: match.operStatus === "up",
+          speed,
+          label: port.label || match.alias || match.name,
+          connectedDevice: port.connectedDevice || match.alias || undefined,
+        };
+      });
+
+      const synced = updatedPorts.filter((p, i) => p.connected !== (device.switchPorts || [])[i]?.connected).length;
+      onChange({ ...device, switchPorts: updatedPorts });
+      setSnmpSyncMsg(`Sincronizado: ${synced} puertos actualizados desde SNMP`);
+    } catch (err: any) {
+      setSnmpSyncMsg(`Error: ${err.message || "SNMP sync failed"}`);
+    } finally {
+      setSnmpSyncing(false);
+    }
+  }, [device, onChange]);
 
   const getStatusInfo = useCallback((monitorId?: number | null) => {
     if (!monitorId || !monitors) return { color: "#6b7280", name: "" };
@@ -240,12 +308,58 @@ function DeviceEditor({
                 <input type="text" value={device.serial || ""} onChange={e => onChange({ ...device, serial: e.target.value })} placeholder="S/N..." disabled={isLocked} style={{ ...fieldStyle, opacity: isLocked ? 0.5 : 1 }} />
               </div>
               {showManagementIp && (
-                <div style={{ gridColumn: "span 2" }}>
-                  <FieldLabel>IP de Gestión</FieldLabel>
-                  <input type="text" value={device.managementIp || ""} onChange={e => onChange({ ...device, managementIp: e.target.value })} placeholder="192.168.1.1" disabled={isLocked} style={{ ...fieldStyle, fontFamily: "monospace", opacity: isLocked ? 0.5 : 1 }} />
-                </div>
+                <>
+                  <div>
+                    <FieldLabel>IP de Gestión</FieldLabel>
+                    <input type="text" value={device.managementIp || ""} onChange={e => onChange({ ...device, managementIp: e.target.value })} placeholder="192.168.1.1" disabled={isLocked} style={{ ...fieldStyle, fontFamily: "monospace", opacity: isLocked ? 0.5 : 1 }} />
+                  </div>
+                  <div>
+                    <FieldLabel>Comunidad SNMP</FieldLabel>
+                    <input type="text" value={device.snmpCommunity || ""} onChange={e => onChange({ ...device, snmpCommunity: e.target.value })} placeholder="public" disabled={isLocked} style={{ ...fieldStyle, fontFamily: "monospace", opacity: isLocked ? 0.5 : 1 }} />
+                  </div>
+                </>
               )}
             </div>
+
+            {/* ── SNMP Live Status ── */}
+            {showManagementIp && device.managementIp && (
+              <>
+                <SectionHeader title="Estado SNMP en Vivo" />
+                <div className="-mt-1">
+                  <SnmpStatusPanel
+                    ip={device.managementIp}
+                    community={device.snmpCommunity}
+                    deviceType={device.type}
+                  />
+                </div>
+                {/* SNMP auto-sync button for switches */}
+                {canSnmpSync && (
+                  <div className="flex items-center gap-3 mt-1">
+                    <button
+                      onClick={handleSnmpSync}
+                      disabled={snmpSyncing}
+                      className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-all cursor-pointer"
+                      style={{
+                        background: "linear-gradient(135deg, rgba(16,185,129,0.15), rgba(16,185,129,0.08))",
+                        color: "#6ee7b7",
+                        border: "1px solid rgba(16,185,129,0.25)",
+                        opacity: snmpSyncing ? 0.6 : 1,
+                      }}
+                    >
+                      {snmpSyncing
+                        ? <RefreshCw className="w-3 h-3 animate-spin" />
+                        : <ArrowDownToLine className="w-3 h-3" />}
+                      {snmpSyncing ? "Sincronizando..." : "Sincronizar puertos desde SNMP"}
+                    </button>
+                    {snmpSyncMsg && (
+                      <span style={{ fontSize: 10, color: snmpSyncMsg.startsWith("Error") ? "#ef4444" : "rgba(255,255,255,0.45)" }}>
+                        {snmpSyncMsg}
+                      </span>
+                    )}
+                  </div>
+                )}
+              </>
+            )}
 
             <SectionHeader title="Posición en el Rack" />
             <div className="grid gap-3 -mt-2" style={{ gridTemplateColumns: showPortCount ? "1fr 1fr 1fr" : "1fr 1fr" }}>

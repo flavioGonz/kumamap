@@ -104,6 +104,7 @@ export interface RackDevice {
   routerInterfaces?: RouterInterface[];
   portCount?: number;
   managementIp?: string;
+  snmpCommunity?: string;
   model?: string;
   serial?: string;
   cableLength?: number;

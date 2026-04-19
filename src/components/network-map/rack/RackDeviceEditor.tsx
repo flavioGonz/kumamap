@@ -9,6 +9,7 @@ import { SectionHeader, FieldLabel } from "./RackFormComponents";
 import MonitorSelect from "./MonitorSelect";
 import { PatchPanelEditor, SwitchEditor, RouterEditor, PbxExtensionsEditor, PbxTrunkLinesEditor, NvrChannelsEditor, NvrDisksEditor } from "./RackPortEditors";
 import SnmpStatusPanel from "./SnmpStatusPanel";
+import { apiUrl } from "@/lib/api";
 import type { NvrChannel, NvrDisk } from "./rack-types";
 
 function DeviceEditor({
@@ -38,7 +39,7 @@ function DeviceEditor({
     setSnmpSyncing(true);
     setSnmpSyncMsg(null);
     try {
-      const res = await fetch("/api/snmp/poll", {
+      const res = await fetch(apiUrl("/api/snmp/poll"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ip: device.managementIp, community: device.snmpCommunity || "public", deviceType: "switch" }),

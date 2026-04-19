@@ -5,6 +5,7 @@ import {
   Activity, Cpu, HardDrive, Network, RefreshCw, Wifi, WifiOff,
   Clock, Server, Phone, Video, Router, MonitorSmartphone, Database,
 } from "lucide-react";
+import { apiUrl } from "@/lib/api";
 
 // ── Types matching the API response ─────────────────────────────────────────
 
@@ -232,7 +233,7 @@ export default function SnmpStatusPanel({
     setError(null);
 
     try {
-      const res = await fetch("/api/snmp/poll", {
+      const res = await fetch(apiUrl("/api/snmp/poll"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ip, community: community || "public", deviceType }),

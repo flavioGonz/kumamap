@@ -473,25 +473,67 @@ function DeviceEditor({
                 <div className="grid grid-cols-2 gap-3 -mt-2">
                   <div>
                     <FieldLabel>Total de Canales</FieldLabel>
-                    <select value={device.nvrTotalChannels || 16} onChange={e => {
-                      const cnt = parseInt(e.target.value);
-                      const channels: NvrChannel[] = Array.from({ length: cnt }, (_, i) =>
-                        device.nvrChannels?.[i] || { channel: i + 1, label: `CH${i + 1}`, enabled: false });
-                      onChange({ ...device, nvrTotalChannels: cnt, nvrChannels: channels });
-                    }} style={fieldStyle}>
-                      {[4, 8, 16, 32, 64, 128].map(n => (<option key={n} value={n} style={{ background: "#1a1a1a" }}>{n} canales</option>))}
-                    </select>
+                    <div className="flex gap-1.5 items-center">
+                      <input
+                        type="number"
+                        min={1}
+                        max={256}
+                        value={device.nvrTotalChannels || 16}
+                        onChange={e => {
+                          const cnt = Math.max(1, Math.min(256, parseInt(e.target.value) || 1));
+                          const channels: NvrChannel[] = Array.from({ length: cnt }, (_, i) =>
+                            device.nvrChannels?.[i] || { channel: i + 1, label: `CH${i + 1}`, enabled: false });
+                          onChange({ ...device, nvrTotalChannels: cnt, nvrChannels: channels });
+                        }}
+                        disabled={isLocked}
+                        style={{ ...fieldStyle, width: "70px", textAlign: "center", opacity: isLocked ? 0.5 : 1 }}
+                      />
+                      <div className="flex gap-1 flex-wrap">
+                        {[4, 8, 16, 32, 64].map(n => (
+                          <button key={n} type="button" onClick={() => {
+                            const channels: NvrChannel[] = Array.from({ length: n }, (_, i) =>
+                              device.nvrChannels?.[i] || { channel: i + 1, label: `CH${i + 1}`, enabled: false });
+                            onChange({ ...device, nvrTotalChannels: n, nvrChannels: channels });
+                          }}
+                            disabled={isLocked}
+                            className="cursor-pointer"
+                            style={{ fontSize: 9, padding: "2px 6px", borderRadius: 4, background: (device.nvrTotalChannels || 16) === n ? "rgba(59,130,246,0.3)" : "rgba(255,255,255,0.06)", color: (device.nvrTotalChannels || 16) === n ? "#60a5fa" : "rgba(255,255,255,0.4)", border: `1px solid ${(device.nvrTotalChannels || 16) === n ? "rgba(59,130,246,0.4)" : "rgba(255,255,255,0.08)"}` }}
+                          >{n}</button>
+                        ))}
+                      </div>
+                    </div>
                   </div>
                   <div>
                     <FieldLabel>Bahías de Disco</FieldLabel>
-                    <select value={device.nvrDiskBays || 2} onChange={e => {
-                      const cnt = parseInt(e.target.value);
-                      const disks: NvrDisk[] = Array.from({ length: cnt }, (_, i) =>
-                        device.nvrDisks?.[i] || { id: `disk-${Date.now()}-${i}`, slot: i + 1, status: "empty" as const });
-                      onChange({ ...device, nvrDiskBays: cnt, nvrDisks: disks });
-                    }} style={fieldStyle}>
-                      {[1, 2, 4, 8, 16].map(n => (<option key={n} value={n} style={{ background: "#1a1a1a" }}>{n} bahías</option>))}
-                    </select>
+                    <div className="flex gap-1.5 items-center">
+                      <input
+                        type="number"
+                        min={1}
+                        max={48}
+                        value={device.nvrDiskBays || 2}
+                        onChange={e => {
+                          const cnt = Math.max(1, Math.min(48, parseInt(e.target.value) || 1));
+                          const disks: NvrDisk[] = Array.from({ length: cnt }, (_, i) =>
+                            device.nvrDisks?.[i] || { id: `disk-${Date.now()}-${i}`, slot: i + 1, status: "empty" as const });
+                          onChange({ ...device, nvrDiskBays: cnt, nvrDisks: disks });
+                        }}
+                        disabled={isLocked}
+                        style={{ ...fieldStyle, width: "70px", textAlign: "center", opacity: isLocked ? 0.5 : 1 }}
+                      />
+                      <div className="flex gap-1 flex-wrap">
+                        {[1, 2, 4, 8, 16].map(n => (
+                          <button key={n} type="button" onClick={() => {
+                            const disks: NvrDisk[] = Array.from({ length: n }, (_, i) =>
+                              device.nvrDisks?.[i] || { id: `disk-${Date.now()}-${i}`, slot: i + 1, status: "empty" as const });
+                            onChange({ ...device, nvrDiskBays: n, nvrDisks: disks });
+                          }}
+                            disabled={isLocked}
+                            className="cursor-pointer"
+                            style={{ fontSize: 9, padding: "2px 6px", borderRadius: 4, background: (device.nvrDiskBays || 2) === n ? "rgba(59,130,246,0.3)" : "rgba(255,255,255,0.06)", color: (device.nvrDiskBays || 2) === n ? "#60a5fa" : "rgba(255,255,255,0.4)", border: `1px solid ${(device.nvrDiskBays || 2) === n ? "rgba(59,130,246,0.4)" : "rgba(255,255,255,0.08)"}` }}
+                          >{n}</button>
+                        ))}
+                      </div>
+                    </div>
                   </div>
                 </div>
               </>

@@ -41,33 +41,80 @@ function digestAuth(user: string, pass: string, method: string, uri: string, www
   return `Digest username="${user}", realm="${realm}", nonce="${nonce}", uri="${uri}", qop=${qop}, nc=${nc}, cnonce="${cnonce}", response="${response}"`;
 }
 
-async function isapiGet(ip: string, path: string, user: string, pass: string, timeout = 5000): Promise<string | null> {
-  const url = `http://${ip}${path}`;
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeout);
+async function isapiGet(ip: string, path: string, user: string, pass: string, timeout = 8000): Promise<string | null> {
+  // Try both HTTP and HTTPS
+  const schemes = ["http", "https"];
+  for (const scheme of schemes) {
+    const url = `${scheme}://${ip}${path}`;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeout);
 
-  try {
-    // First request to get Digest challenge
-    const r1 = await fetch(url, { signal: controller.signal, headers: { Accept: "application/xml" } });
-    if (r1.status !== 401) {
+    try {
+      // First request — may return 401 with Digest challenge, or 200 if no auth needed
+      const r1 = await fetch(url, {
+        signal: controller.signal,
+        headers: { Accept: "application/xml" },
+        // @ts-ignore — Node fetch option to skip TLS verification for self-signed certs
+        ...(scheme === "https" ? { dispatcher: undefined } : {}),
+      });
+
+      if (r1.ok) {
+        clearTimeout(timer);
+        const text = await r1.text();
+        if (text.includes("<") && !text.includes("<!DOCTYPE html")) return text;
+        // Got HTML login page, not XML — try with auth
+      }
+
+      if (r1.status === 401) {
+        const wwwAuth = r1.headers.get("www-authenticate") || "";
+
+        if (wwwAuth.toLowerCase().startsWith("digest")) {
+          // Digest auth
+          const auth = digestAuth(user, pass, "GET", path, wwwAuth);
+          const r2 = await fetch(url, {
+            signal: controller.signal,
+            headers: { Authorization: auth, Accept: "application/xml" },
+          });
+          clearTimeout(timer);
+          if (r2.ok) return await r2.text();
+          console.log(`[ISAPI] Digest auth failed for ${url}: ${r2.status}`);
+        } else if (wwwAuth.toLowerCase().startsWith("basic")) {
+          // Basic auth fallback
+          const basic = Buffer.from(`${user}:${pass}`).toString("base64");
+          const r2 = await fetch(url, {
+            signal: controller.signal,
+            headers: { Authorization: `Basic ${basic}`, Accept: "application/xml" },
+          });
+          clearTimeout(timer);
+          if (r2.ok) return await r2.text();
+          console.log(`[ISAPI] Basic auth failed for ${url}: ${r2.status}`);
+        } else {
+          // Unknown auth scheme — try Basic anyway
+          const basic = Buffer.from(`${user}:${pass}`).toString("base64");
+          const r2 = await fetch(url, {
+            signal: controller.signal,
+            headers: { Authorization: `Basic ${basic}`, Accept: "application/xml" },
+          });
+          clearTimeout(timer);
+          if (r2.ok) return await r2.text();
+        }
+      } else if (r1.status >= 300 && r1.status < 400) {
+        // Redirect — check Location for HTTPS
+        const loc = r1.headers.get("location") || "";
+        console.log(`[ISAPI] Redirect ${r1.status} to ${loc}`);
+        clearTimeout(timer);
+        if (loc.startsWith("https") && scheme === "http") continue; // will try HTTPS next
+      } else if (!r1.ok) {
+        clearTimeout(timer);
+        console.log(`[ISAPI] ${url} returned ${r1.status}`);
+      }
+    } catch (err: any) {
       clearTimeout(timer);
-      return r1.ok ? await r1.text() : null;
+      if (scheme === "http") continue; // try HTTPS
+      // Both failed
     }
-
-    const wwwAuth = r1.headers.get("www-authenticate") || "";
-    if (!wwwAuth.toLowerCase().startsWith("digest")) { clearTimeout(timer); return null; }
-
-    const auth = digestAuth(user, pass, "GET", path, wwwAuth);
-    const r2 = await fetch(url, {
-      signal: controller.signal,
-      headers: { Authorization: auth, Accept: "application/xml" },
-    });
-    clearTimeout(timer);
-    return r2.ok ? await r2.text() : null;
-  } catch {
-    clearTimeout(timer);
-    return null;
   }
+  return null;
 }
 
 function xmlVal(xml: string, tag: string): string {
@@ -127,10 +174,44 @@ interface NvrStatus {
 async function pollNvr(ip: string, user: string, pass: string): Promise<NvrStatus> {
   const result: NvrStatus = { type: "nvr", reachable: false, disks: [], channels: [] };
 
-  // ── Device Info ──
-  const devXml = await isapiGet(ip, "/ISAPI/System/deviceInfo", user, pass);
+  console.log(`[NVR] Polling ${ip} with user=${user}`);
+
+  // ── Device Info — try multiple paths ──
+  let devXml = await isapiGet(ip, "/ISAPI/System/deviceInfo", user, pass);
   if (!devXml) {
-    result.error = "No se pudo conectar a ISAPI (verificar IP/credenciales)";
+    // Some NVRs use a different base path or port
+    devXml = await isapiGet(ip, "/ISAPI/System/deviceinfo", user, pass);
+  }
+  if (!devXml) {
+    // Try port 443 explicitly for HTTPS-only devices
+    devXml = await isapiGet(`${ip}:443`, "/ISAPI/System/deviceInfo", user, pass);
+  }
+  if (!devXml) {
+    // Try port 80 explicitly
+    devXml = await isapiGet(`${ip}:80`, "/ISAPI/System/deviceInfo", user, pass);
+  }
+  if (!devXml) {
+    // Last resort: check if device is even reachable via HTTP
+    try {
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 5000);
+      const r = await fetch(`http://${ip}`, { signal: ctrl.signal, redirect: "manual" });
+      clearTimeout(t);
+      result.reachable = true;
+      result.error = `NVR alcanzable (HTTP ${r.status}) pero ISAPI no responde — verificar credenciales (user: ${user}) y que el NVR tenga ISAPI habilitado`;
+      console.log(`[NVR] ${ip} HTTP reachable (${r.status}) but ISAPI failed`);
+    } catch {
+      try {
+        const ctrl2 = new AbortController();
+        const t2 = setTimeout(() => ctrl2.abort(), 5000);
+        await fetch(`https://${ip}`, { signal: ctrl2.signal, redirect: "manual" });
+        clearTimeout(t2);
+        result.reachable = true;
+        result.error = `NVR alcanzable (HTTPS) pero ISAPI no responde — verificar credenciales (user: ${user})`;
+      } catch {
+        result.error = `NVR no alcanzable en ${ip} — verificar IP y que esté en la misma red`;
+      }
+    }
     return result;
   }
 
@@ -270,100 +351,147 @@ async function pollPbx(ip: string, user: string, pass: string): Promise<PbxStatu
     trunks: [], calls: [],
   };
 
-  // Try Grandstream UCM API first
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 5000);
+  console.log(`[PBX] Polling ${ip} with user=${user}`);
 
-  try {
-    // Grandstream UCM: login to get cookie/token
-    const loginRes = await fetch(`http://${ip}:8089/api`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ request: { action: "login", user, token: createHash("md5").update(pass).digest("hex") } }),
-      signal: controller.signal,
-    });
+  // Try Grandstream UCM API on multiple ports
+  const ports = [8089, 443, 8088, 80];
+  let cookie: string | null = null;
+  let apiBase = "";
 
-    if (loginRes.ok) {
-      const loginData = await loginRes.json();
-      const cookie = loginData?.response?.cookie;
-
-      if (cookie) {
-        result.reachable = true;
-
-        // Get PBX status
-        const statusRes = await fetch(`http://${ip}:8089/api`, {
+  for (const port of ports) {
+    if (cookie) break;
+    const schemes = port === 443 ? ["https"] : ["http"];
+    for (const scheme of schemes) {
+      const base = `${scheme}://${ip}:${port}/api`;
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 4000);
+      try {
+        // Grandstream uses MD5 hash of password as token
+        const md5Token = createHash("md5").update(pass).digest("hex");
+        const loginRes = await fetch(base, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ request: { action: "getSystemStatus", cookie } }),
+          body: JSON.stringify({ request: { action: "login", user, token: md5Token } }),
           signal: controller.signal,
         });
-        if (statusRes.ok) {
-          const sd = await statusRes.json();
-          const status = sd?.response;
-          if (status) {
-            result.activeCalls = parseInt(status.ActiveCalls) || 0;
+        if (loginRes.ok) {
+          const loginData = await loginRes.json();
+          const c = loginData?.response?.cookie;
+          if (c) {
+            cookie = c;
+            apiBase = base;
+            console.log(`[PBX] Grandstream login OK on ${base}`);
+          } else {
+            // Maybe uses challenge-response: try with password directly
+            const loginRes2 = await fetch(base, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ request: { action: "login", user, token: pass } }),
+              signal: controller.signal,
+            });
+            if (loginRes2.ok) {
+              const ld2 = await loginRes2.json();
+              if (ld2?.response?.cookie) {
+                cookie = ld2.response.cookie;
+                apiBase = base;
+                console.log(`[PBX] Grandstream login OK (plain pass) on ${base}`);
+              }
+            }
           }
         }
-
-        // Get SIP extensions
-        const extRes = await fetch(`http://${ip}:8089/api`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ request: { action: "listAccount", cookie, page: 1, item_num: 500 } }),
-          signal: controller.signal,
-        });
-        if (extRes.ok) {
-          const ed = await extRes.json();
-          const accts = ed?.response?.account || [];
-          result.totalExtensions = accts.length;
-          result.registeredExtensions = accts.filter((a: any) => a.status === "Registered" || a.status === "2").length;
-        }
-
-        // Get trunks
-        const trunkRes = await fetch(`http://${ip}:8089/api`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ request: { action: "listVoIPTrunk", cookie, page: 1, item_num: 50 } }),
-          signal: controller.signal,
-        });
-        if (trunkRes.ok) {
-          const td = await trunkRes.json();
-          const trunks = td?.response?.trunk || [];
-          result.trunks = trunks.map((t: any) => ({
-            name: t.trunk_name || t.trunkname || `Troncal ${t.trunk_index}`,
-            status: t.reg_status === "Registered" || t.reg_status === "2" ? "registered" : t.reg_status || "unknown",
-            type: t.trunk_type || "SIP",
-          }));
-        }
-
-        // Logout
-        await fetch(`http://${ip}:8089/api`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ request: { action: "logout", cookie } }),
-        }).catch(() => {});
+        clearTimeout(timer);
+      } catch {
+        clearTimeout(timer);
       }
     }
-  } catch {
-    // Not a Grandstream — try generic approach
-  } finally {
-    clearTimeout(timer);
   }
 
-  // If Grandstream didn't work, try ISAPI-style or mark as SNMP-only
-  if (!result.reachable) {
-    // Try basic HTTP check
+  // Grandstream UCM: use the cookie to query status
+  if (cookie && apiBase) {
+    result.reachable = true;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 8000);
+
     try {
-      const controller2 = new AbortController();
-      const t2 = setTimeout(() => controller2.abort(), 3000);
-      const r = await fetch(`http://${ip}`, { signal: controller2.signal, redirect: "manual" });
-      clearTimeout(t2);
-      if (r.status > 0) {
-        result.reachable = true;
-        result.error = "PBX alcanzable pero API no soportada — mostrando datos SNMP";
+      // Get PBX status
+      const statusRes = await fetch(apiBase, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ request: { action: "getSystemStatus", cookie } }),
+        signal: controller.signal,
+      });
+      if (statusRes.ok) {
+        const sd = await statusRes.json();
+        const status = sd?.response;
+        if (status) {
+          result.activeCalls = parseInt(status.ActiveCalls) || 0;
+        }
       }
-    } catch {
-      result.error = "PBX no alcanzable por HTTP — mostrando datos SNMP";
+
+      // Get SIP extensions
+      const extRes = await fetch(apiBase, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ request: { action: "listAccount", cookie, page: 1, item_num: 500 } }),
+        signal: controller.signal,
+      });
+      if (extRes.ok) {
+        const ed = await extRes.json();
+        const accts = ed?.response?.account || [];
+        result.totalExtensions = accts.length;
+        result.registeredExtensions = accts.filter((a: any) => a.status === "Registered" || a.status === "2").length;
+      }
+
+      // Get trunks
+      const trunkRes = await fetch(apiBase, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ request: { action: "listVoIPTrunk", cookie, page: 1, item_num: 50 } }),
+        signal: controller.signal,
+      });
+      if (trunkRes.ok) {
+        const td = await trunkRes.json();
+        const trunks = td?.response?.trunk || [];
+        result.trunks = trunks.map((t: any) => ({
+          name: t.trunk_name || t.trunkname || `Troncal ${t.trunk_index}`,
+          status: t.reg_status === "Registered" || t.reg_status === "2" ? "registered" : t.reg_status || "unknown",
+          type: t.trunk_type || "SIP",
+        }));
+      }
+
+      // Logout
+      await fetch(apiBase, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ request: { action: "logout", cookie } }),
+      }).catch(() => {});
+    } catch (err: any) {
+      console.log(`[PBX] Error querying Grandstream API: ${err.message}`);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  // If Grandstream didn't work, try basic HTTP reachability
+  if (!result.reachable) {
+    const httpPorts = [80, 443, 8080, 8443];
+    for (const port of httpPorts) {
+      const scheme = port === 443 || port === 8443 ? "https" : "http";
+      try {
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), 3000);
+        const r = await fetch(`${scheme}://${ip}:${port}`, { signal: ctrl.signal, redirect: "manual" });
+        clearTimeout(t);
+        if (r.status > 0) {
+          result.reachable = true;
+          result.error = `PBX alcanzable (${scheme}:${port}, HTTP ${r.status}) pero login Grandstream falló — verificar user/password o que sea Grandstream UCM`;
+          console.log(`[PBX] ${ip} reachable on ${scheme}:${port} (${r.status}) but Grandstream API failed`);
+          break;
+        }
+      } catch { /* next port */ }
+    }
+    if (!result.reachable) {
+      result.error = `PBX no alcanzable en ${ip} — verificar IP y conectividad`;
     }
   }
 

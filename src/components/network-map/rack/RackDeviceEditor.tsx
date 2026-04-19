@@ -24,7 +24,7 @@ function DeviceEditor({
   onDelete?: () => void;
   onCancel: () => void;
 }) {
-  const [activeTab, setActiveTab] = useState<"ports" | "trunks" | "general">("ports");
+  const [activeTab, setActiveTab] = useState<"ports" | "trunks" | "snmp" | "general">("ports");
   const [snmpSyncing, setSnmpSyncing] = useState(false);
   const [snmpSyncMsg, setSnmpSyncMsg] = useState<string | null>(null);
   const meta = TYPE_META[device.type] || TYPE_META.other;
@@ -157,10 +157,11 @@ function DeviceEditor({
   const showPortCount = device.type === "patchpanel" || device.type === "switch";
   const showManagementIp = device.type === "switch" || device.type === "router" || device.type === "server" || device.type === "pbx" || device.type === "nvr";
 
-  // Default to ports tab if device has ports, otherwise general
+  // Default tab based on device capabilities
   useEffect(() => {
-    if (!hasPorts) setActiveTab("general");
-  }, [device.type, hasPorts]);
+    if (!hasPorts && showManagementIp && device.managementIp) setActiveTab("snmp");
+    else if (!hasPorts) setActiveTab("general");
+  }, [device.type, hasPorts, showManagementIp, device.managementIp]);
 
   return (
     <motion.div
@@ -203,17 +204,18 @@ function DeviceEditor({
       )}
 
       {/* Tab bar */}
-      {hasPorts && (
+      {(hasPorts || (showManagementIp && device.managementIp)) && (
         <div className="shrink-0 flex border-b border-white/[0.06]" style={{ background: "rgba(0,0,0,0.2)" }}>
           {[
-            { id: "ports", label: device.type === "router" ? "Interfaces" : device.type === "pbx" ? "Extensiones" : device.type === "nvr" ? "Canales" : `Puertos${device.type === "patchpanel" ? " del Panel" : ""}` },
+            ...(hasPorts ? [{ id: "ports", label: device.type === "router" ? "Interfaces" : device.type === "pbx" ? "Extensiones" : device.type === "nvr" ? "Canales" : `Puertos${device.type === "patchpanel" ? " del Panel" : ""}` }] : []),
             ...(device.type === "pbx" ? [{ id: "trunks", label: "Líneas" }] : []),
             ...(device.type === "nvr" ? [{ id: "trunks", label: "Discos" }] : []),
+            ...(showManagementIp && device.managementIp ? [{ id: "snmp", label: "SNMP" }] : []),
             { id: "general", label: "General" },
           ].map((tab) => (
             <button
               key={tab.id}
-              onClick={() => setActiveTab(tab.id as "ports" | "trunks" | "general")}
+              onClick={() => setActiveTab(tab.id as "ports" | "trunks" | "snmp" | "general")}
               className="px-5 py-2.5 text-xs font-semibold transition-all cursor-pointer relative"
               style={{
                 color: activeTab === tab.id ? "#fff" : "rgba(255,255,255,0.35)",
@@ -277,6 +279,43 @@ function DeviceEditor({
           />
         )}
 
+        {/* SNMP tab */}
+        {activeTab === "snmp" && showManagementIp && device.managementIp && (
+          <>
+            <SnmpStatusPanel
+              ip={device.managementIp}
+              community={device.snmpCommunity}
+              deviceType={device.type}
+            />
+            {/* SNMP auto-sync button for switches */}
+            {canSnmpSync && (
+              <div className="flex items-center gap-3 mt-1">
+                <button
+                  onClick={handleSnmpSync}
+                  disabled={snmpSyncing}
+                  className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-all cursor-pointer"
+                  style={{
+                    background: "linear-gradient(135deg, rgba(16,185,129,0.15), rgba(16,185,129,0.08))",
+                    color: "#6ee7b7",
+                    border: "1px solid rgba(16,185,129,0.25)",
+                    opacity: snmpSyncing ? 0.6 : 1,
+                  }}
+                >
+                  {snmpSyncing
+                    ? <RefreshCw className="w-3 h-3 animate-spin" />
+                    : <ArrowDownToLine className="w-3 h-3" />}
+                  {snmpSyncing ? "Sincronizando..." : "Sincronizar puertos desde SNMP"}
+                </button>
+                {snmpSyncMsg && (
+                  <span style={{ fontSize: 10, color: snmpSyncMsg.startsWith("Error") ? "#ef4444" : "rgba(255,255,255,0.45)" }}>
+                    {snmpSyncMsg}
+                  </span>
+                )}
+              </div>
+            )}
+          </>
+        )}
+
         {/* General tab */}
         {activeTab === "general" && (
           <>
@@ -320,46 +359,6 @@ function DeviceEditor({
                 </>
               )}
             </div>
-
-            {/* ── SNMP Live Status ── */}
-            {showManagementIp && device.managementIp && (
-              <>
-                <SectionHeader title="Estado SNMP en Vivo" />
-                <div className="-mt-1">
-                  <SnmpStatusPanel
-                    ip={device.managementIp}
-                    community={device.snmpCommunity}
-                    deviceType={device.type}
-                  />
-                </div>
-                {/* SNMP auto-sync button for switches */}
-                {canSnmpSync && (
-                  <div className="flex items-center gap-3 mt-1">
-                    <button
-                      onClick={handleSnmpSync}
-                      disabled={snmpSyncing}
-                      className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-all cursor-pointer"
-                      style={{
-                        background: "linear-gradient(135deg, rgba(16,185,129,0.15), rgba(16,185,129,0.08))",
-                        color: "#6ee7b7",
-                        border: "1px solid rgba(16,185,129,0.25)",
-                        opacity: snmpSyncing ? 0.6 : 1,
-                      }}
-                    >
-                      {snmpSyncing
-                        ? <RefreshCw className="w-3 h-3 animate-spin" />
-                        : <ArrowDownToLine className="w-3 h-3" />}
-                      {snmpSyncing ? "Sincronizando..." : "Sincronizar puertos desde SNMP"}
-                    </button>
-                    {snmpSyncMsg && (
-                      <span style={{ fontSize: 10, color: snmpSyncMsg.startsWith("Error") ? "#ef4444" : "rgba(255,255,255,0.45)" }}>
-                        {snmpSyncMsg}
-                      </span>
-                    )}
-                  </div>
-                )}
-              </>
-            )}
 
             <SectionHeader title="Posición en el Rack" />
             <div className="grid gap-3 -mt-2" style={{ gridTemplateColumns: showPortCount ? "1fr 1fr 1fr" : "1fr 1fr" }}>

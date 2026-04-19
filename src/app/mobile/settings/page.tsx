@@ -6,6 +6,7 @@ import PageTransition from "@/components/mobile/PageTransition";
 import { useToast } from "@/components/mobile/MobileToast";
 import { hapticTap, hapticSuccess, hapticError, hapticMedium } from "@/lib/haptics";
 import { useOnlineStatus } from "@/hooks/useOnlineStatus";
+import { useTheme } from "@/components/mobile/ThemeProvider";
 
 function urlBase64ToUint8Array(base64String: string): Uint8Array {
   const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
@@ -43,6 +44,7 @@ export default function MobileSettings() {
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   const { show } = useToast();
   const online = useOnlineStatus();
+  const { theme, setTheme, resolvedTheme } = useTheme();
 
   useEffect(() => {
     // Check push support
@@ -224,13 +226,13 @@ export default function MobileSettings() {
       <header
         className="sticky top-0 z-50 px-4 py-3"
         style={{
-          background: "rgba(10,10,10,0.95)",
+          background: "var(--status-bar-bg)",
           backdropFilter: "blur(12px)",
-          borderBottom: "1px solid rgba(255,255,255,0.06)",
+          borderBottom: "1px solid var(--glass-border)",
         }}
       >
         <div className="flex items-center justify-between">
-          <h1 className="text-sm font-bold text-[#ededed]">Configuración</h1>
+          <h1 className="text-sm font-bold" style={{ color: "var(--text-primary)" }}>Configuración</h1>
           <div className="flex items-center gap-1.5">
             <div
               className="h-1.5 w-1.5 rounded-full"
@@ -239,7 +241,7 @@ export default function MobileSettings() {
                 boxShadow: online ? "0 0 4px rgba(34,197,94,0.6)" : "0 0 4px rgba(239,68,68,0.6)",
               }}
             />
-            <span className="text-[9px] text-[#555]">{online ? "Online" : "Offline"}</span>
+            <span className="text-[9px] text-[var(--text-tertiary)]">{online ? "Online" : "Offline"}</span>
           </div>
         </div>
       </header>
@@ -264,7 +266,7 @@ export default function MobileSettings() {
             onClick={runPing}
             disabled={pinging}
             className="w-full flex items-center justify-between px-4 py-3.5 active:bg-white/[0.02] transition-all border-t"
-            style={{ borderColor: "rgba(255,255,255,0.04)" }}
+            style={{ borderColor: "var(--surface-hover)" }}
           >
             <div className="flex items-center gap-3">
               <SettingsIcon color="#f59e0b" bg="rgba(245,158,11,0.12)" border="rgba(245,158,11,0.25)">
@@ -273,8 +275,8 @@ export default function MobileSettings() {
                 </svg>
               </SettingsIcon>
               <div className="text-left">
-                <div className="text-xs font-bold text-[#ddd]">Ping al servidor</div>
-                <div className="text-[10px] text-[#555]">
+                <div className="text-xs font-bold text-[var(--text-primary)]">Ping al servidor</div>
+                <div className="text-[10px] text-[var(--text-tertiary)]">
                   {pinging
                     ? "Probando conexión..."
                     : pingResult !== null
@@ -296,6 +298,82 @@ export default function MobileSettings() {
 
         </SettingsSection>
 
+        {/* ── Appearance / Theme ── */}
+        <SettingsSection title="Apariencia">
+          <div className="px-4 py-3">
+            <div className="flex items-center gap-3 mb-3">
+              <SettingsIcon color="#f59e0b" bg="rgba(245,158,11,0.12)" border="rgba(245,158,11,0.25)">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="5" />
+                  <line x1="12" y1="1" x2="12" y2="3" />
+                  <line x1="12" y1="21" x2="12" y2="23" />
+                  <line x1="4.22" y1="4.22" x2="5.64" y2="5.64" />
+                  <line x1="18.36" y1="18.36" x2="19.78" y2="19.78" />
+                  <line x1="1" y1="12" x2="3" y2="12" />
+                  <line x1="21" y1="12" x2="23" y2="12" />
+                  <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" />
+                  <line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
+                </svg>
+              </SettingsIcon>
+              <div>
+                <div className="text-xs font-bold" style={{ color: "var(--text-primary)" }}>Tema</div>
+                <div className="text-[10px]" style={{ color: "var(--text-tertiary)" }}>
+                  {resolvedTheme === "dark" ? "Modo oscuro activo" : "Modo claro activo"}
+                </div>
+              </div>
+            </div>
+
+            {/* 3-segment control */}
+            <div
+              className="relative flex rounded-xl overflow-hidden"
+              style={{
+                background: "var(--surface-hover)",
+                border: "1px solid var(--glass-border)",
+                height: 36,
+              }}
+            >
+              {(["auto", "light", "dark"] as const).map((opt) => {
+                const isActive = theme === opt;
+                const labels = { auto: "Auto", light: "Claro", dark: "Oscuro" };
+                return (
+                  <button
+                    key={opt}
+                    onClick={() => {
+                      hapticTap();
+                      setTheme(opt);
+                    }}
+                    className="relative flex-1 flex items-center justify-center gap-1.5 text-[11px] font-bold transition-all z-10"
+                    style={{
+                      color: isActive ? "var(--text-primary)" : "var(--text-tertiary)",
+                      background: isActive ? "var(--surface-elevated)" : "transparent",
+                      borderRadius: 10,
+                      margin: 2,
+                      boxShadow: isActive ? "0 1px 4px rgba(0,0,0,0.15)" : "none",
+                    }}
+                  >
+                    {opt === "auto" && (
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                        <circle cx="12" cy="12" r="10" /><path d="M12 2a10 10 0 0 0 0 20V2z" fill="currentColor" />
+                      </svg>
+                    )}
+                    {opt === "light" && (
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                        <circle cx="12" cy="12" r="5" /><line x1="12" y1="1" x2="12" y2="3" /><line x1="12" y1="21" x2="12" y2="23" /><line x1="4.22" y1="4.22" x2="5.64" y2="5.64" /><line x1="18.36" y1="18.36" x2="19.78" y2="19.78" /><line x1="1" y1="12" x2="3" y2="12" /><line x1="21" y1="12" x2="23" y2="12" />
+                      </svg>
+                    )}
+                    {opt === "dark" && (
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+                      </svg>
+                    )}
+                    {labels[opt]}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </SettingsSection>
+
         {/* ── Notifications ── */}
         <SettingsSection title="Notificaciones">
           <button
@@ -314,8 +392,8 @@ export default function MobileSettings() {
                 </svg>
               </SettingsIcon>
               <div className="text-left">
-                <div className="text-xs font-bold text-[#ddd]">Notificaciones Push</div>
-                <div className="text-[10px] text-[#555]">
+                <div className="text-xs font-bold text-[var(--text-primary)]">Notificaciones Push</div>
+                <div className="text-[10px] text-[var(--text-tertiary)]">
                   {!pushSupported
                     ? "No soportado en este navegador"
                     : pushPermission === "denied"
@@ -329,14 +407,14 @@ export default function MobileSettings() {
             <IOSSwitch on={pushEnabled} loading={pushLoading} />
           </button>
 
-          <div className="px-4 py-2 border-t flex items-center gap-2" style={{ borderColor: "rgba(255,255,255,0.04)" }}>
+          <div className="px-4 py-2 border-t flex items-center gap-2" style={{ borderColor: "var(--surface-hover)" }}>
             <div
               className="h-2 w-2 rounded-full"
               style={{
                 background: pushPermission === "granted" ? "#22c55e" : pushPermission === "denied" ? "#ef4444" : "#f59e0b",
               }}
             />
-            <span className="text-[10px] text-[#555]">
+            <span className="text-[10px] text-[var(--text-tertiary)]">
               Permiso: {pushPermission === "granted" ? "Concedido" : pushPermission === "denied" ? "Denegado" : "No solicitado"}
             </span>
           </div>
@@ -355,8 +433,8 @@ export default function MobileSettings() {
                 </svg>
               </SettingsIcon>
               <div className="text-left">
-                <div className="text-xs font-bold text-[#ddd]">Limpiar caché</div>
-                <div className="text-[10px] text-[#555]">
+                <div className="text-xs font-bold text-[var(--text-primary)]">Limpiar caché</div>
+                <div className="text-[10px] text-[var(--text-tertiary)]">
                   {cacheSize ? `Usando ${cacheSize}` : "Liberar espacio y recargar datos"}
                 </div>
               </div>
@@ -381,7 +459,7 @@ export default function MobileSettings() {
                 </SettingsIcon>
                 <div className="text-left">
                   <div className="text-xs font-bold text-[#22c55e]">Instalar App</div>
-                  <div className="text-[10px] text-[#555]">Agregar a pantalla de inicio</div>
+                  <div className="text-[10px] text-[var(--text-tertiary)]">Agregar a pantalla de inicio</div>
                 </div>
               </div>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="2" strokeLinecap="round"><polyline points="9 18 15 12 9 6" /></svg>
@@ -392,7 +470,7 @@ export default function MobileSettings() {
           <button
             onClick={shareApp}
             className={`w-full flex items-center justify-between px-4 py-3.5 active:bg-white/[0.02] transition-all ${deferredPrompt ? "border-t" : ""}`}
-            style={deferredPrompt ? { borderColor: "rgba(255,255,255,0.04)" } : {}}
+            style={deferredPrompt ? { borderColor: "var(--surface-hover)" } : {}}
           >
             <div className="flex items-center gap-3">
               <SettingsIcon color="#ec4899" bg="rgba(236,72,153,0.12)" border="rgba(236,72,153,0.25)">
@@ -402,8 +480,8 @@ export default function MobileSettings() {
                 </svg>
               </SettingsIcon>
               <div className="text-left">
-                <div className="text-xs font-bold text-[#ddd]">Compartir</div>
-                <div className="text-[10px] text-[#555]">Enviar link de KumaMap</div>
+                <div className="text-xs font-bold text-[var(--text-primary)]">Compartir</div>
+                <div className="text-[10px] text-[var(--text-tertiary)]">Enviar link de KumaMap</div>
               </div>
             </div>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#555" strokeWidth="2" strokeLinecap="round"><polyline points="9 18 15 12 9 6" /></svg>
@@ -422,7 +500,7 @@ export default function MobileSettings() {
               }
             }}
             className="w-full flex items-center justify-between px-4 py-3.5 active:bg-white/[0.02] transition-all border-t"
-            style={{ borderColor: "rgba(255,255,255,0.04)" }}
+            style={{ borderColor: "var(--surface-hover)" }}
           >
             <div className="flex items-center gap-3">
               <SettingsIcon color="#14b8a6" bg="rgba(20,184,166,0.12)" border="rgba(20,184,166,0.25)">
@@ -431,8 +509,8 @@ export default function MobileSettings() {
                 </svg>
               </SettingsIcon>
               <div className="text-left">
-                <div className="text-xs font-bold text-[#ddd]">Pantalla completa</div>
-                <div className="text-[10px] text-[#555]">Modo inmersivo sin barras</div>
+                <div className="text-xs font-bold text-[var(--text-primary)]">Pantalla completa</div>
+                <div className="text-[10px] text-[var(--text-tertiary)]">Modo inmersivo sin barras</div>
               </div>
             </div>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#555" strokeWidth="2" strokeLinecap="round"><polyline points="9 18 15 12 9 6" /></svg>
@@ -441,7 +519,7 @@ export default function MobileSettings() {
 
         {/* ── About ── */}
         <SettingsSection title="Acerca de">
-          <div className="divide-y" style={{ borderColor: "rgba(255,255,255,0.04)" }}>
+          <div className="divide-y" style={{ borderColor: "var(--surface-hover)" }}>
             <InfoRow label="Versión" value={version?.appVersion || "..."} />
             <InfoRow label="Commit" value={version?.local.commit || "..."} mono />
             <InfoRow label="Branch" value={version?.local.branch || "..."} />
@@ -467,10 +545,10 @@ function SettingsSection({ title, children }: { title: string; children: React.R
   return (
     <div
       className="rounded-2xl overflow-hidden"
-      style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)" }}
+      style={{ background: "var(--surface-card)", border: "1px solid var(--glass-border)" }}
     >
-      <div className="px-4 py-2.5 border-b" style={{ borderColor: "rgba(255,255,255,0.04)" }}>
-        <div className="text-[10px] text-[#555] font-bold uppercase tracking-wider">{title}</div>
+      <div className="px-4 py-2.5 border-b" style={{ borderColor: "var(--surface-hover)" }}>
+        <div className="text-[10px] font-bold uppercase tracking-wider" style={{ color: "var(--text-tertiary)" }}>{title}</div>
       </div>
       {children}
     </div>
@@ -490,7 +568,7 @@ function IOSSwitch({ on, loading }: { on: boolean; loading: boolean }) {
     <div
       className="w-11 h-6 rounded-full relative transition-all"
       style={{
-        background: on ? "#22c55e" : "rgba(255,255,255,0.1)",
+        background: on ? "#22c55e" : "var(--muted)",
         opacity: loading ? 0.5 : 1,
       }}
     >
@@ -512,7 +590,7 @@ function MiniGauge({ label, value }: { label: string; value?: number }) {
           <path
             d="M18 2.0845a15.9155 15.9155 0 0 1 0 31.831 15.9155 15.9155 0 0 1 0-31.831"
             fill="none"
-            stroke="rgba(255,255,255,0.05)"
+            stroke="var(--surface-hover)"
             strokeWidth="3"
           />
           <path
@@ -529,7 +607,7 @@ function MiniGauge({ label, value }: { label: string; value?: number }) {
           {pct.toFixed(0)}%
         </span>
       </div>
-      <span className="text-[8px] text-[#555] mt-0.5 block">{label}</span>
+      <span className="text-[8px] text-[var(--text-tertiary)] mt-0.5 block">{label}</span>
     </div>
   );
 }
@@ -537,8 +615,8 @@ function MiniGauge({ label, value }: { label: string; value?: number }) {
 function InfoRow({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
   return (
     <div className="flex items-center justify-between px-4 py-2.5">
-      <span className="text-[11px] text-[#888]">{label}</span>
-      <span className={`text-[11px] text-[#ddd] ${mono ? "font-mono" : ""}`}>{value}</span>
+      <span className="text-[11px] text-[var(--text-secondary)]">{label}</span>
+      <span className={`text-[11px] text-[var(--text-primary)] ${mono ? "font-mono" : ""}`}>{value}</span>
     </div>
   );
 }

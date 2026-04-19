@@ -63,10 +63,18 @@ export default function RackDesignerDrawer({ open, onClose, nodeId, nodes, monit
   const [rackPhotos, setRackPhotos] = useState<string[]>([]);
   const [galleryIndex, setGalleryIndex] = useState(0);
   const [showWizard, setShowWizard] = useState(false);
+  const [toastMsg, setToastMsg] = useState<string | null>(null);
   const photoInputRef = useRef<HTMLInputElement>(null);
   const rackRef = useRef<HTMLDivElement>(null);
   const exportRef = useRef<HTMLDivElement>(null);
   const importFileRef = useRef<HTMLInputElement>(null);
+
+  // Auto-dismiss toast
+  useEffect(() => {
+    if (!toastMsg) return;
+    const t = setTimeout(() => setToastMsg(null), 3000);
+    return () => clearTimeout(t);
+  }, [toastMsg]);
 
   const getDeviceStatusInfo = useCallback((monitorId?: number | null) => {
     if (!monitorId || !monitors) return { color: "#6b7280", name: "" };
@@ -208,7 +216,7 @@ export default function RackDesignerDrawer({ open, onClose, nodeId, nodes, monit
       a.click();
       URL.revokeObjectURL(url);
     } catch (err) {
-      alert("Error al generar el reporte: " + err);
+      setToastMsg("Error al generar el reporte");
     }
   };
 
@@ -233,7 +241,7 @@ export default function RackDesignerDrawer({ open, onClose, nodeId, nodes, monit
       a.click();
       URL.revokeObjectURL(url);
     } catch (err) {
-      alert("Error al exportar plantilla: " + err);
+      setToastMsg("Error al exportar plantilla");
     }
   };
 
@@ -256,7 +264,7 @@ export default function RackDesignerDrawer({ open, onClose, nodeId, nodes, monit
       setEditingDevice(null);
       setSelectedDeviceId(null);
     } catch (err) {
-      alert("Error al importar: " + err);
+      setToastMsg("Error al importar");
     } finally {
       setIsImporting(false);
       if (importFileRef.current) importFileRef.current.value = "";
@@ -306,7 +314,7 @@ export default function RackDesignerDrawer({ open, onClose, nodeId, nodes, monit
       const dEnd = d.unit + d.sizeUnits - 1;
       return Math.max(startU, d.unit) <= Math.min(endU, dEnd);
     });
-    if (hasOverlap) { alert("Error: El equipo se sobrepone con otro en el Rack."); return; }
+    if (hasOverlap) { setToastMsg("El equipo se sobrepone con otro en el Rack"); return; }
     setDevices(prev => {
       const idx = prev.findIndex(p => p.id === editingDevice.id);
       if (idx >= 0) { const nc = [...prev]; nc[idx] = editingDevice; return nc; }
@@ -317,10 +325,17 @@ export default function RackDesignerDrawer({ open, onClose, nodeId, nodes, monit
   };
 
   const handleDeleteDevice = (id: string) => {
-    if (!confirm("¿Eliminar este componente del Rack?")) return;
-    setDevices(prev => prev.filter(d => d.id !== id));
+    setDeleteConfirm(id);
+  };
+
+  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+
+  const confirmDeleteDevice = () => {
+    if (!deleteConfirm) return;
+    setDevices(prev => prev.filter(d => d.id !== deleteConfirm));
     setSelectedDeviceId(null);
     setEditingDevice(null);
+    setDeleteConfirm(null);
   };
 
   const handleDownloadImage = async () => {
@@ -539,7 +554,7 @@ export default function RackDesignerDrawer({ open, onClose, nodeId, nodes, monit
       a.click();
     } catch (err) {
       console.error("Rack PNG export error:", err);
-      alert("Error al exportar: " + (err instanceof Error ? err.message : String(err)));
+      setToastMsg("Error al exportar imagen");
     }
     finally { document.body.removeChild(container); }
   };
@@ -782,16 +797,17 @@ export default function RackDesignerDrawer({ open, onClose, nodeId, nodes, monit
                           e.dataTransfer.setData("text/plain", occ.device.id);
                         }}
                         onDragEnd={() => { setDragDeviceId(null); setDragOverUnit(null); }}
-                        className="relative w-full flex-shrink-0 cursor-pointer transition-all duration-100"
+                        className="relative w-full flex-shrink-0 cursor-pointer transition-all duration-200 hover:brightness-110"
                         style={{
                           height: `${h}px`,
                           backgroundColor: occ.device.color || meta.color,
                           boxShadow: isSelected
-                            ? `inset 0 0 0 2px #fff, 0 0 12px ${occ.device.color || meta.color}88`
-                            : "inset 0 1px 0 rgba(255,255,255,0.18), inset 0 -1px 0 rgba(0,0,0,0.5)",
+                            ? `inset 0 0 0 2px rgba(255,255,255,0.9), 0 0 16px ${occ.device.color || meta.color}66, 0 4px 12px rgba(0,0,0,0.3)`
+                            : "inset 0 1px 0 rgba(255,255,255,0.18), inset 0 -1px 0 rgba(0,0,0,0.5), 0 1px 3px rgba(0,0,0,0.2)",
                           filter: isSelected ? "brightness(1.15)" : "brightness(1)",
-                          opacity: dragDeviceId === occ.device.id ? 0.4 : 1,
+                          opacity: dragDeviceId === occ.device.id ? 0.35 : 1,
                           cursor: !isLocked ? "grab" : "pointer",
+                          transform: isSelected ? "scale(1.01)" : dragDeviceId === occ.device.id ? "scale(0.97)" : "scale(1)",
                         }}
                       >
                         <div className="absolute left-0 top-0 bottom-0 w-[8px]" style={{ background: "#1a1a1a", borderRight: "1px solid #0a0a0a" }} />
@@ -1092,6 +1108,82 @@ export default function RackDesignerDrawer({ open, onClose, nodeId, nodes, monit
           zIndex: 99999,
         }}
       />
+
+      {/* Toast notification */}
+      <AnimatePresence>
+        {toastMsg && (
+          <motion.div
+            initial={{ opacity: 0, y: -20, x: "-50%" }}
+            animate={{ opacity: 1, y: 0, x: "-50%" }}
+            exit={{ opacity: 0, y: -20, x: "-50%" }}
+            className="fixed top-6 left-1/2 z-[99999] px-4 py-2.5 rounded-xl text-xs font-medium"
+            style={{
+              background: "rgba(239,68,68,0.9)",
+              color: "#fff",
+              backdropFilter: "blur(12px)",
+              boxShadow: "0 8px 32px rgba(239,68,68,0.3), 0 0 0 1px rgba(255,255,255,0.1)",
+            }}
+          >
+            {toastMsg}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Delete confirmation modal */}
+      <AnimatePresence>
+        {deleteConfirm && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[99999] flex items-center justify-center"
+            style={{ background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }}
+            onClick={() => setDeleteConfirm(null)}
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              transition={{ type: "spring", damping: 25, stiffness: 300 }}
+              onClick={e => e.stopPropagation()}
+              className="rounded-2xl p-6 max-w-sm w-full mx-4"
+              style={{
+                background: "linear-gradient(160deg, #1e1e1e 0%, #141414 100%)",
+                border: "1px solid rgba(255,255,255,0.1)",
+                boxShadow: "0 32px 80px rgba(0,0,0,0.8)",
+              }}
+            >
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" style={{ background: "rgba(239,68,68,0.15)" }}>
+                  <Trash2 className="w-5 h-5 text-red-400" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-semibold text-white/90">Eliminar componente</h3>
+                  <p className="text-xs text-white/40 mt-0.5">
+                    {devices.find(d => d.id === deleteConfirm)?.label || "Este equipo"} será eliminado del rack
+                  </p>
+                </div>
+              </div>
+              <div className="flex gap-2 justify-end">
+                <button
+                  onClick={() => setDeleteConfirm(null)}
+                  className="px-4 py-2 text-xs rounded-lg font-medium text-white/60 hover:text-white/80 transition-colors cursor-pointer"
+                  style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.08)" }}
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={confirmDeleteDevice}
+                  className="px-4 py-2 text-xs rounded-lg font-medium text-white cursor-pointer transition-all hover:brightness-110"
+                  style={{ background: "linear-gradient(135deg, #dc2626, #b91c1c)", boxShadow: "0 4px 12px rgba(220,38,38,0.3)" }}
+                >
+                  Eliminar
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Scrollbar styling */}
       <style>{`

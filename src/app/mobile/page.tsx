@@ -84,7 +84,7 @@ export default function MobileHome() {
     <PageTransition>
     <PullToRefresh onRefresh={handleRefresh}>
       {/* Header */}
-      <header className="sticky top-0 z-50 px-4 py-3 safe-top" style={{ background: "rgba(10,10,10,0.95)", backdropFilter: "blur(12px)", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+      <header className="sticky top-0 z-50 px-4 py-3 safe-top" style={{ background: "var(--status-bar-bg)", backdropFilter: "blur(12px)", borderBottom: "1px solid var(--glass-border)" }}>
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2.5">
             <div className="h-8 w-8 rounded-xl flex items-center justify-center" style={{ background: "rgba(59,130,246,0.15)", border: "1px solid rgba(59,130,246,0.3)" }}>
@@ -99,7 +99,7 @@ export default function MobileHome() {
             </div>
             <div>
               <div className="flex items-center gap-1.5">
-                <h1 className="text-sm font-bold text-[#ededed]">KumaMap</h1>
+                <h1 className="text-sm font-bold" style={{ color: "var(--text-primary)" }}>KumaMap</h1>
                 <div
                   className="h-1.5 w-1.5 rounded-full"
                   style={{
@@ -108,7 +108,7 @@ export default function MobileHome() {
                   }}
                 />
               </div>
-              <p className="text-[9px] text-[#555]">
+              <p className="text-[9px]" style={{ color: "var(--text-tertiary)" }}>
                 {lastUpdate ? `${lastUpdate.toLocaleTimeString("es")}` : "Cargando..."}
               </p>
             </div>
@@ -139,7 +139,7 @@ export default function MobileHome() {
               <div className="text-xs font-bold" style={{ color: totalDown > 0 ? "#fca5a5" : "#86efac" }}>
                 {totalDown > 0 ? `${totalDown} monitor${totalDown > 1 ? "es" : ""} caído${totalDown > 1 ? "s" : ""}` : "Todo operativo"}
               </div>
-              <div className="text-[10px] text-[#666]">{totalUp} UP · {totalDown} DOWN · {uniqueIds.length} total</div>
+              <div className="text-[10px]" style={{ color: "var(--text-secondary)" }}>{totalUp} UP · {totalDown} DOWN · {uniqueIds.length} total</div>
             </div>
           </div>
         );
@@ -177,7 +177,7 @@ export default function MobileHome() {
         {loading && <SkeletonList count={4} />}
 
         {!loading && maps.length === 0 && (
-          <div className="flex flex-col items-center py-16 text-[#555]">
+          <div className="flex flex-col items-center py-16" style={{ color: "var(--text-tertiary)" }}>
             <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="mb-3 opacity-30">
               <polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6" />
             </svg>
@@ -195,8 +195,8 @@ export default function MobileHome() {
               <div
                 className="rounded-2xl p-4 transition-all active:scale-[0.98]"
                 style={{
-                  background: hasDown ? "rgba(239,68,68,0.04)" : "rgba(255,255,255,0.02)",
-                  border: `1px solid ${hasDown ? "rgba(239,68,68,0.12)" : "rgba(255,255,255,0.06)"}`,
+                  background: hasDown ? "rgba(239,68,68,0.04)" : "var(--surface-card)",
+                  border: `1px solid ${hasDown ? "rgba(239,68,68,0.12)" : "var(--glass-border)"}`,
                 }}
               >
                 <div className="flex items-center gap-3">
@@ -214,11 +214,11 @@ export default function MobileHome() {
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between gap-2">
-                      <h3 className="text-sm font-bold text-[#ededed] truncate">{map.name}</h3>
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#555" strokeWidth="2" strokeLinecap="round" className="shrink-0"><polyline points="9 18 15 12 9 6" /></svg>
+                      <h3 className="text-sm font-bold truncate" style={{ color: "var(--text-primary)" }}>{map.name}</h3>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-tertiary)" strokeWidth="2" strokeLinecap="round" className="shrink-0"><polyline points="9 18 15 12 9 6" /></svg>
                     </div>
                     <div className="flex items-center gap-3 mt-1">
-                      <span className="text-[10px] text-[#666]">{map.node_count} nodos · {map.edge_count} links</span>
+                      <span className="text-[10px]" style={{ color: "var(--text-secondary)" }}>{map.node_count} nodos · {map.edge_count} links</span>
                       {status.total > 0 && (
                         <div className="flex items-center gap-1.5">
                           <span className="text-[10px] font-mono font-bold text-[#22c55e]">{status.up}↑</span>
@@ -230,7 +230,7 @@ export default function MobileHome() {
                   </div>
                 </div>
                 {status.total > 0 && (
-                  <div className="mt-2.5 h-1 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.04)" }}>
+                  <div className="mt-2.5 h-1 rounded-full overflow-hidden" style={{ background: "var(--surface-hover)" }}>
                     <div
                       className="h-full rounded-full transition-all duration-500"
                       style={{
@@ -263,7 +263,7 @@ function MiniStat({ label, value, icon, color }: { label: string; value: string;
       <div className="shrink-0">{icon}</div>
       <div>
         <div className="text-[11px] font-bold font-mono" style={{ color }}>{value}</div>
-        <div className="text-[8px] text-[#555] uppercase tracking-wider">{label}</div>
+        <div className="text-[8px] uppercase tracking-wider" style={{ color: "var(--text-tertiary)" }}>{label}</div>
       </div>
     </div>
   );

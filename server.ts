@@ -22,6 +22,16 @@ const handle = app.getRequestHandler();
 app.prepare().then(() => {
   const server = createServer((req, res) => {
     const parsedUrl = parse(req.url!, true);
+    const pathname = parsedUrl.pathname || "";
+
+    // Prevent upstream proxies/routers from caching HTML pages
+    // (static assets under /_next/ are fine to cache — they have hashed filenames)
+    if (!pathname.includes("/_next/") && !pathname.includes("/api/")) {
+      res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+      res.setHeader("Pragma", "no-cache");
+      res.setHeader("Expires", "0");
+    }
+
     handle(req, res, parsedUrl);
   });
 

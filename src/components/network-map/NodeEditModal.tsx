@@ -1,8 +1,9 @@
 "use client";
 
-import React from "react";
+import React, { useState as useReactState } from "react";
 import { Pencil } from "lucide-react";
 import Tooltip from "./Tooltip";
+import MikrotikStatusPanel from "./rack/MikrotikStatusPanel";
 
 const NODE_COLORS = [
   { color: "", name: "Auto" },
@@ -310,6 +311,23 @@ export default function NodeEditModal({
               Las credenciales se guardan localmente en el mapa. No se envían a ningún servidor externo.
             </p>
           </div>
+
+          {/* MikroTik live panel — only shows when IP + credentials are present */}
+          {editIp && editUser && (
+            <div
+              className="rounded-xl overflow-hidden"
+              style={{ background: "rgba(139,92,246,0.04)", border: "1px solid rgba(139,92,246,0.12)" }}
+            >
+              <div className="px-3 py-2 flex items-center gap-2" style={{ borderBottom: "1px solid rgba(139,92,246,0.08)" }}>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#8b5cf6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="3" />
+                  <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9" />
+                </svg>
+                <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: "#8b5cf6" }}>MikroTik REST API</span>
+              </div>
+              <MikrotikStatusPanel ip={editIp} user={editUser} password={editPass} compact />
+            </div>
+          )}
 
           {/* Botones */}
           <div className="flex gap-2 pt-1">

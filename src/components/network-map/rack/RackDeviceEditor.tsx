@@ -9,6 +9,7 @@ import { SectionHeader, FieldLabel } from "./RackFormComponents";
 import MonitorSelect from "./MonitorSelect";
 import { PatchPanelEditor, SwitchEditor, RouterEditor, PbxExtensionsEditor, PbxTrunkLinesEditor, NvrChannelsEditor, NvrDisksEditor } from "./RackPortEditors";
 import SnmpStatusPanel from "./SnmpStatusPanel";
+import MikrotikStatusPanel from "./MikrotikStatusPanel";
 import { apiUrl } from "@/lib/api";
 import type { NvrChannel, NvrDisk } from "./rack-types";
 
@@ -25,7 +26,7 @@ function DeviceEditor({
   onDelete?: () => void;
   onCancel: () => void;
 }) {
-  const [activeTab, setActiveTab] = useState<"ports" | "trunks" | "snmp" | "general">("ports");
+  const [activeTab, setActiveTab] = useState<"ports" | "trunks" | "snmp" | "mikrotik" | "general">("ports");
   const [snmpSyncing, setSnmpSyncing] = useState(false);
   const [snmpSyncMsg, setSnmpSyncMsg] = useState<string | null>(null);
   const meta = TYPE_META[device.type] || TYPE_META.other;
@@ -212,11 +213,12 @@ function DeviceEditor({
             ...(device.type === "pbx" ? [{ id: "trunks", label: "Líneas" }] : []),
             ...(device.type === "nvr" ? [{ id: "trunks", label: "Discos" }] : []),
             ...(showManagementIp && device.managementIp ? [{ id: "snmp", label: "SNMP" }] : []),
+            ...(device.type === "router" && showManagementIp && device.managementIp ? [{ id: "mikrotik", label: "MikroTik" }] : []),
             { id: "general", label: "General" },
           ].map((tab) => (
             <button
               key={tab.id}
-              onClick={() => setActiveTab(tab.id as "ports" | "trunks" | "snmp" | "general")}
+              onClick={() => setActiveTab(tab.id as "ports" | "trunks" | "snmp" | "mikrotik" | "general")}
               className="px-5 py-2.5 text-xs font-semibold transition-all cursor-pointer relative"
               style={{
                 color: activeTab === tab.id ? "#fff" : "rgba(255,255,255,0.35)",
@@ -317,6 +319,15 @@ function DeviceEditor({
               </div>
             )}
           </>
+        )}
+
+        {/* MikroTik tab */}
+        {activeTab === "mikrotik" && device.managementIp && (
+          <MikrotikStatusPanel
+            ip={device.managementIp}
+            user={device.mgmtUser}
+            password={device.mgmtPassword}
+          />
         )}
 
         {/* General tab */}

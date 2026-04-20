@@ -83,12 +83,12 @@ export default function MobileHome() {
   return (
     <PageTransition>
     <PullToRefresh onRefresh={handleRefresh}>
-      {/* Header */}
-      <header className="sticky top-0 z-50 px-4 py-3 safe-top" style={{ background: "var(--status-bar-bg)", backdropFilter: "blur(12px)", borderBottom: "1px solid var(--glass-border)" }}>
+      {/* Header — immersive, no sticky bar */}
+      <div className="px-5 pt-3 pb-1 safe-top">
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <div className="h-8 w-8 rounded-xl flex items-center justify-center" style={{ background: "rgba(59,130,246,0.15)", border: "1px solid rgba(59,130,246,0.3)" }}>
-              <svg width="16" height="16" viewBox="0 0 32 32" fill="none">
+          <div className="flex items-center gap-3">
+            <div className="h-10 w-10 rounded-2xl flex items-center justify-center" style={{ background: "linear-gradient(135deg, rgba(59,130,246,0.2), rgba(99,102,241,0.15))", border: "1px solid rgba(59,130,246,0.25)", boxShadow: "0 4px 16px rgba(59,130,246,0.15)" }}>
+              <svg width="18" height="18" viewBox="0 0 32 32" fill="none">
                 <circle cx="16" cy="16" r="6" fill="none" stroke="#60a5fa" strokeWidth="2" />
                 <circle cx="16" cy="16" r="2.5" fill="#60a5fa" />
                 <circle cx="9" cy="9" r="1.5" fill="#22c55e" />
@@ -98,23 +98,23 @@ export default function MobileHome() {
               </svg>
             </div>
             <div>
-              <div className="flex items-center gap-1.5">
-                <h1 className="text-sm font-bold" style={{ color: "var(--text-primary)" }}>KumaMap</h1>
+              <div className="flex items-center gap-2">
+                <h1 className="text-base font-extrabold" style={{ color: "var(--text-primary)" }}>KumaMap</h1>
                 <div
-                  className="h-1.5 w-1.5 rounded-full"
+                  className="h-2 w-2 rounded-full"
                   style={{
                     background: online ? "#22c55e" : "#ef4444",
-                    boxShadow: online ? "0 0 4px rgba(34,197,94,0.6)" : "0 0 4px rgba(239,68,68,0.6)",
+                    boxShadow: online ? "0 0 8px rgba(34,197,94,0.6)" : "0 0 8px rgba(239,68,68,0.6)",
                   }}
                 />
               </div>
-              <p className="text-[9px]" style={{ color: "var(--text-tertiary)" }}>
-                {lastUpdate ? `${lastUpdate.toLocaleTimeString("es")}` : "Cargando..."}
+              <p className="text-[10px]" style={{ color: "var(--text-tertiary)" }}>
+                {lastUpdate ? `Actualizado ${lastUpdate.toLocaleTimeString("es")}` : "Cargando..."}
               </p>
             </div>
           </div>
         </div>
-      </header>
+      </div>
 
       {/* Global status bar */}
       {!loading && maps.length > 0 && (() => {

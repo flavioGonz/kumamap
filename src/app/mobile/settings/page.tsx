@@ -214,37 +214,52 @@ export default function MobileSettings() {
         });
       } catch {}
     } else {
-      await navigator.clipboard.writeText(window.location.origin + "/mobile");
-      show("URL copiada al portapapeles", "info");
+      const url = window.location.origin + "/mobile";
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          await navigator.clipboard.writeText(url);
+        } else {
+          const ta = document.createElement("textarea");
+          ta.value = url; ta.style.position = "fixed"; ta.style.opacity = "0";
+          document.body.appendChild(ta); ta.select();
+          document.execCommand("copy"); document.body.removeChild(ta);
+        }
+        show("URL copiada al portapapeles", "info");
+      } catch { show("Error al copiar", "error"); }
     }
   }, [show]);
 
   return (
     <PageTransition>
     <div className="flex flex-col min-h-screen">
-      {/* Header */}
-      <header
-        className="sticky top-0 z-50 px-4 py-3"
-        style={{
-          background: "var(--status-bar-bg)",
-          backdropFilter: "blur(12px)",
-          borderBottom: "1px solid var(--glass-border)",
-        }}
-      >
-        <div className="flex items-center justify-between">
-          <h1 className="text-sm font-bold" style={{ color: "var(--text-primary)" }}>Configuración</h1>
-          <div className="flex items-center gap-1.5">
-            <div
-              className="h-1.5 w-1.5 rounded-full"
-              style={{
-                background: online ? "#22c55e" : "#ef4444",
-                boxShadow: online ? "0 0 4px rgba(34,197,94,0.6)" : "0 0 4px rgba(239,68,68,0.6)",
-              }}
-            />
-            <span className="text-[9px] text-[var(--text-tertiary)]">{online ? "Online" : "Offline"}</span>
+      {/* Immersive Header */}
+      <div className="px-5 pt-3 pb-2 safe-top">
+        <div className="flex items-center gap-3">
+          <div className="h-10 w-10 rounded-2xl flex items-center justify-center" style={{
+            background: "linear-gradient(135deg, rgba(167,139,250,0.2), rgba(167,139,250,0.08))",
+            border: "1px solid rgba(167,139,250,0.25)",
+            boxShadow: "0 4px 16px rgba(167,139,250,0.15)",
+          }}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="3" />
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+            </svg>
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <h1 className="text-base font-extrabold" style={{ color: "var(--text-primary)" }}>Configuración</h1>
+              <div
+                className="h-2 w-2 rounded-full"
+                style={{
+                  background: online ? "#22c55e" : "#ef4444",
+                  boxShadow: online ? "0 0 8px rgba(34,197,94,0.6)" : "0 0 8px rgba(239,68,68,0.6)",
+                }}
+              />
+            </div>
+            <p className="text-[10px]" style={{ color: "var(--text-tertiary)" }}>{online ? "Conectado" : "Sin conexión"}</p>
           </div>
         </div>
-      </header>
+      </div>
 
       <div className="flex-1 px-4 py-4 space-y-3">
 
@@ -534,6 +549,10 @@ export default function MobileSettings() {
         {/* Bottom breathing room */}
         <div className="h-4" />
       </div>
+
+      <style>{`
+        .safe-top { padding-top: env(safe-area-inset-top, 0); }
+      `}</style>
     </div>
     </PageTransition>
   );
@@ -557,7 +576,7 @@ function SettingsSection({ title, children }: { title: string; children: React.R
 
 function SettingsIcon({ children, color, bg, border }: { children: React.ReactNode; color: string; bg: string; border: string }) {
   return (
-    <div className="h-8 w-8 rounded-xl flex items-center justify-center shrink-0" style={{ background: bg, border: `1px solid ${border}` }}>
+    <div className="h-10 w-10 rounded-xl flex items-center justify-center shrink-0" style={{ background: bg, border: `1px solid ${border}`, boxShadow: `0 2px 8px ${color}15` }}>
       {children}
     </div>
   );

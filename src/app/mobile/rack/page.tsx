@@ -275,12 +275,12 @@ function MobileSwitchPortGrid({ ports }: { ports: SwitchPort[] }) {
               onClick={() => { setSelected(isSelected ? null : p.port); hapticTap(); }}
               className="relative flex items-center justify-center transition-all active:scale-90"
               style={{
-                width: 28, height: 28, borderRadius: 6,
+                width: 34, height: 34, borderRadius: 8,
                 background: isSelected ? "rgba(59,130,246,0.2)"
                   : p.connected ? `${speedColor}15` : "rgba(255,255,255,0.02)",
                 border: `1.5px solid ${isSelected ? "#3b82f6"
                   : p.connected ? `${speedColor}40` : "rgba(255,255,255,0.06)"}`,
-                fontSize: 9, fontFamily: "monospace", fontWeight: 700,
+                fontSize: 10, fontFamily: "monospace", fontWeight: 700,
                 color: isSelected ? "#93c5fd" : p.connected ? speedColor : "#333",
               }}
             >
@@ -367,12 +367,12 @@ function MobilePatchPortGrid({ ports }: { ports: PatchPort[] }) {
               onClick={() => { setSelected(isSelected ? null : p.port); hapticTap(); }}
               className="relative flex items-center justify-center transition-all active:scale-90"
               style={{
-                width: 28, height: 28, borderRadius: 6,
+                width: 34, height: 34, borderRadius: 8,
                 background: isSelected ? "rgba(59,130,246,0.2)"
                   : p.connected ? `${portColor}15` : "rgba(255,255,255,0.02)",
                 border: `1.5px solid ${isSelected ? "#3b82f6"
                   : p.connected ? `${portColor}40` : "rgba(255,255,255,0.06)"}`,
-                fontSize: 9, fontFamily: "monospace", fontWeight: 700,
+                fontSize: 10, fontFamily: "monospace", fontWeight: 700,
                 color: isSelected ? "#93c5fd" : p.connected ? portColor : "#333",
               }}
             >
@@ -462,7 +462,7 @@ function MobilePbxExtensions({ extensions, monitors }: { extensions: PbxExtensio
               onClick={() => { setSelected(isSelected ? null : ext.extension); hapticTap(); }}
               className="relative flex items-center justify-center transition-all active:scale-90"
               style={{
-                minWidth: 36, height: 28, borderRadius: 6, padding: "0 6px",
+                minWidth: 42, height: 34, borderRadius: 8, padding: "0 8px",
                 background: isSelected ? "rgba(6,182,212,0.2)" : "rgba(255,255,255,0.02)",
                 border: `1.5px solid ${isSelected ? "#06b6d4" : "rgba(255,255,255,0.06)"}`,
                 fontSize: 9, fontFamily: "monospace", fontWeight: 700,
@@ -592,12 +592,12 @@ function MobileNvrChannels({ channels }: { channels: NvrChannel[] }) {
               onClick={() => { setSelected(isSelected ? null : ch.channel); hapticTap(); }}
               className="relative flex items-center justify-center transition-all active:scale-90"
               style={{
-                width: 28, height: 28, borderRadius: 6,
+                width: 34, height: 34, borderRadius: 8,
                 background: isSelected ? "rgba(225,29,72,0.2)"
                   : ch.enabled ? `${recColor}15` : "rgba(255,255,255,0.02)",
                 border: `1.5px solid ${isSelected ? "#e11d48"
                   : ch.enabled ? `${recColor}40` : "rgba(255,255,255,0.06)"}`,
-                fontSize: 9, fontFamily: "monospace", fontWeight: 700,
+                fontSize: 10, fontFamily: "monospace", fontWeight: 700,
                 color: isSelected ? "#fda4af" : ch.enabled ? recColor : "#333",
               }}
             >
@@ -683,9 +683,9 @@ function MobileNvrDisks({ disks }: { disks: NvrDisk[] }) {
 
 function MiniDetail({ label, value, mono, span2 }: { label: string; value: string; mono?: boolean; span2?: boolean }) {
   return (
-    <div className={`rounded-lg px-2 py-1.5 ${span2 ? "col-span-2" : ""}`} style={{ background: "rgba(255,255,255,0.03)" }}>
-      <div className="text-[7px] uppercase tracking-wider text-[#444]">{label}</div>
-      <div className={`text-[10px] text-[#aaa] ${mono ? "font-mono" : ""} break-all`}>{value}</div>
+    <div className={`rounded-xl px-2.5 py-2 ${span2 ? "col-span-2" : ""}`} style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.04)" }}>
+      <div className="text-[8px] uppercase tracking-wider" style={{ color: "var(--text-tertiary)" }}>{label}</div>
+      <div className={`text-[11px] ${mono ? "font-mono" : ""} break-all`} style={{ color: "var(--text-secondary)" }}>{value}</div>
     </div>
   );
 }
@@ -774,10 +774,27 @@ function MobileRackViewer() {
   const copyToClipboard = useCallback(() => {
     hapticTap();
     const text = generateWhatsAppText(rackName, totalUnits, devices, monitors);
-    navigator.clipboard.writeText(text).then(() => {
-      show("Copiado al portapapeles", "success");
-      hapticSuccess();
-    }).catch(() => show("Error al copiar", "error"));
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(() => {
+          show("Copiado al portapapeles", "success");
+          hapticSuccess();
+        }).catch(() => {
+          // Fallback
+          const ta = document.createElement("textarea");
+          ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+          document.body.appendChild(ta); ta.select();
+          document.execCommand("copy"); document.body.removeChild(ta);
+          show("Copiado al portapapeles", "success"); hapticSuccess();
+        });
+      } else {
+        const ta = document.createElement("textarea");
+        ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+        document.body.appendChild(ta); ta.select();
+        document.execCommand("copy"); document.body.removeChild(ta);
+        show("Copiado al portapapeles", "success"); hapticSuccess();
+      }
+    } catch { show("Error al copiar", "error"); }
   }, [rackName, totalUnits, devices, monitors, show]);
 
   if (loading) {
@@ -793,53 +810,98 @@ function MobileRackViewer() {
   return (
     <PageTransition>
     <div className="flex flex-col min-h-screen">
-      {/* Header */}
-      <header className="sticky top-0 z-50 px-3 py-2.5 flex items-center gap-2" style={{ background: "rgba(10,10,10,0.95)", backdropFilter: "blur(12px)", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
-        <Link
-          href={mapId ? `/mobile/map?id=${mapId}` : "/mobile"}
-          className="h-8 w-8 rounded-xl flex items-center justify-center text-[#888] active:scale-95"
-          style={{ background: "rgba(255,255,255,0.04)" }}
-        >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polyline points="15 18 9 12 15 6" /></svg>
-        </Link>
-        <div className="flex-1 min-w-0">
-          <h1 className="text-xs font-bold text-[#ededed] truncate">{rackName}</h1>
-          <div className="flex items-center gap-2 mt-0.5">
-            <span className="text-[9px] text-[#555]">{totalUnits}U · {devices.length} equipos</span>
-            {stats.down > 0 && <span className="text-[9px] font-bold text-red-400">{stats.down} DOWN</span>}
+      {/* ── Immersive Header ── */}
+      <div className="px-5 pt-3 pb-2 safe-top">
+        <div className="flex items-center gap-3">
+          <Link
+            href={mapId ? `/mobile/map?id=${mapId}` : "/mobile"}
+            className="h-10 w-10 rounded-2xl flex items-center justify-center active:scale-95 transition-all"
+            style={{
+              background: "linear-gradient(135deg, rgba(255,255,255,0.08), rgba(255,255,255,0.03))",
+              border: "1px solid rgba(255,255,255,0.12)",
+              boxShadow: "0 4px 16px rgba(0,0,0,0.2)",
+            }}
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--text-secondary)" strokeWidth="2" strokeLinecap="round"><polyline points="15 18 9 12 15 6" /></svg>
+          </Link>
+          <div className="flex-1 min-w-0">
+            <h1 className="text-base font-extrabold truncate" style={{ color: "var(--text-primary)" }}>{rackName}</h1>
+            <div className="flex items-center gap-2 mt-0.5">
+              <span className="text-[10px]" style={{ color: "var(--text-tertiary)" }}>{totalUnits}U · {devices.length} equipos</span>
+              {stats.down > 0 && <span className="text-[10px] font-bold text-red-400">{stats.down} DOWN</span>}
+            </div>
+          </div>
+          {/* Share WhatsApp */}
+          <button onClick={shareWhatsApp} className="h-10 w-10 rounded-2xl flex items-center justify-center active:scale-90 transition-all" style={{
+            background: "linear-gradient(135deg, rgba(37,211,102,0.15), rgba(37,211,102,0.06))",
+            border: "1px solid rgba(37,211,102,0.25)",
+            boxShadow: "0 4px 16px rgba(37,211,102,0.15)",
+          }}>
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="#25d366">
+              <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/>
+            </svg>
+          </button>
+          {/* Copy */}
+          <button onClick={copyToClipboard} className="h-10 w-10 rounded-2xl flex items-center justify-center active:scale-90 transition-all" style={{
+            background: "linear-gradient(135deg, rgba(255,255,255,0.08), rgba(255,255,255,0.03))",
+            border: "1px solid rgba(255,255,255,0.12)",
+            boxShadow: "0 4px 16px rgba(0,0,0,0.2)",
+          }}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--text-secondary)" strokeWidth="2" strokeLinecap="round"><rect x="9" y="9" width="13" height="13" rx="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>
+          </button>
+        </div>
+      </div>
+
+      {/* ── Status summary card ── */}
+      <div className="mx-4 mt-1 rounded-2xl p-3.5 flex items-center gap-3" style={{
+        background: stats.down > 0 ? "rgba(239,68,68,0.08)" : "rgba(34,197,94,0.08)",
+        border: `1px solid ${stats.down > 0 ? "rgba(239,68,68,0.15)" : "rgba(34,197,94,0.15)"}`,
+      }}>
+        <div className="h-10 w-10 rounded-xl flex items-center justify-center" style={{
+          background: stats.down > 0 ? "rgba(239,68,68,0.15)" : "rgba(34,197,94,0.15)",
+        }}>
+          {stats.down > 0 ? (
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          ) : (
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="2" strokeLinecap="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+          )}
+        </div>
+        <div className="flex-1">
+          <div className="text-xs font-bold" style={{ color: stats.down > 0 ? "#fca5a5" : "#86efac" }}>
+            {stats.down > 0 ? `${stats.down} equipo${stats.down > 1 ? "s" : ""} caído${stats.down > 1 ? "s" : ""}` : "Todo operativo"}
+          </div>
+          <div className="text-[10px]" style={{ color: "var(--text-secondary)" }}>
+            {stats.up} UP · {stats.down} DOWN · {stats.freeUnits}U libres · {Math.round((stats.occupiedUnits / totalUnits) * 100)}% ocupado
           </div>
         </div>
-        {/* Share WhatsApp */}
-        <button onClick={shareWhatsApp} className="h-8 w-8 rounded-xl flex items-center justify-center active:scale-90 transition-all" style={{ background: "rgba(37,211,102,0.12)", border: "1px solid rgba(37,211,102,0.25)" }}>
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="#25d366">
-            <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/>
-          </svg>
-        </button>
-        {/* Copy */}
-        <button onClick={copyToClipboard} className="h-8 w-8 rounded-xl flex items-center justify-center text-[#888] active:scale-90 transition-all" style={{ background: "rgba(255,255,255,0.04)" }}>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><rect x="9" y="9" width="13" height="13" rx="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>
-        </button>
-      </header>
+      </div>
 
-      {/* Stats bar */}
-      <div className="px-3 py-2.5 flex gap-2">
+      {/* ── Quick stats row ── */}
+      <div className="px-4 mt-2 flex gap-2">
         <StatPill label="UP" value={stats.up} color="#22c55e" />
         <StatPill label="DOWN" value={stats.down} color="#ef4444" />
-        <StatPill label="Libre" value={`${stats.freeUnits}U`} color="#555" />
-        <div className="flex-1" />
-        <span className="text-[9px] text-[#444] self-center">
-          {Math.round((stats.occupiedUnits / totalUnits) * 100)}% ocupado
-        </span>
+        <StatPill label="Libre" value={`${stats.freeUnits}U`} color="#a78bfa" />
+        <StatPill label="Total" value={`${totalUnits}U`} color="#60a5fa" />
       </div>
 
-      {/* Occupancy bar */}
-      <div className="mx-3 h-1.5 rounded-full overflow-hidden mb-3" style={{ background: "rgba(255,255,255,0.04)" }}>
-        <div className="h-full rounded-full transition-all" style={{ width: `${(stats.occupiedUnits / totalUnits) * 100}%`, background: stats.down > 0 ? "linear-gradient(90deg, #22c55e, #ef4444)" : "#22c55e" }} />
+      {/* ── Occupancy bar ── */}
+      <div className="mx-4 mt-2.5 h-2 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.04)" }}>
+        <div className="h-full rounded-full transition-all duration-500" style={{
+          width: `${(stats.occupiedUnits / totalUnits) * 100}%`,
+          background: stats.down > 0
+            ? `linear-gradient(90deg, #22c55e ${(stats.up / devices.length) * 100}%, #ef4444 0%)`
+            : "linear-gradient(90deg, #22c55e, #10b981)",
+        }} />
       </div>
 
-      {/* Rack visual */}
-      <div className="px-3 mb-3">
-        <div className="rounded-2xl overflow-hidden" style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)" }}>
+      {/* ── Rack visual ── */}
+      <div className="px-4 mt-4 mb-3">
+        <div className="text-[10px] font-bold uppercase tracking-wider mb-2 px-1" style={{ color: "var(--text-tertiary)" }}>Vista del Rack</div>
+        <div className="rounded-2xl overflow-hidden" style={{
+          background: "linear-gradient(180deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0.01) 100%)",
+          border: "1px solid rgba(255,255,255,0.08)",
+          boxShadow: "0 4px 24px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.06)",
+        }}>
           {Array.from({ length: totalUnits }, (_, i) => totalUnits - i).map((u) => {
             const dev = occMap.get(u);
             const isTop = dev && dev.unit + dev.sizeUnits - 1 === u;
@@ -847,9 +909,9 @@ function MobileRackViewer() {
 
             if (!dev) {
               return (
-                <div key={u} className="flex items-center h-6" style={{ borderBottom: "1px solid rgba(255,255,255,0.03)" }}>
-                  <span className="w-7 text-center text-[8px] font-mono text-[#333]">{u}</span>
-                  <div className="flex-1 h-full" style={{ background: "rgba(255,255,255,0.01)" }} />
+                <div key={u} className="flex items-center h-7" style={{ borderBottom: "1px solid rgba(255,255,255,0.03)" }}>
+                  <span className="w-8 text-center text-[9px] font-mono" style={{ color: "var(--text-tertiary)", opacity: 0.4 }}>{u}</span>
+                  <div className="flex-1 h-full" style={{ background: "rgba(255,255,255,0.005)" }} />
                 </div>
               );
             }
@@ -858,29 +920,37 @@ function MobileRackViewer() {
             const color = dev.color || meta.color;
             const mon = dev.monitorId ? monitors.get(dev.monitorId) : null;
             const statusColor = mon ? (STATUS_COLORS[mon.status] || "#6b7280") : undefined;
-            const h = dev.sizeUnits * 24;
+            const h = dev.sizeUnits * 28;
+            const isActive = expandedDevice === dev.id;
 
             return (
               <button
                 key={u}
-                onClick={() => { setExpandedDevice(expandedDevice === dev.id ? null : dev.id); hapticTap(); }}
+                onClick={() => { setExpandedDevice(isActive ? null : dev.id); hapticTap(); }}
                 className="w-full flex items-stretch text-left active:opacity-80 transition-all"
-                style={{ height: h, borderBottom: "1px solid rgba(255,255,255,0.04)" }}
+                style={{
+                  height: h,
+                  borderBottom: "1px solid rgba(255,255,255,0.04)",
+                  background: isActive ? `${color}18` : "transparent",
+                }}
               >
-                <div className="w-7 flex items-center justify-center shrink-0" style={{ background: "rgba(0,0,0,0.3)" }}>
-                  <span className="text-[8px] font-mono text-[#444]">{dev.unit}</span>
+                <div className="w-8 flex items-center justify-center shrink-0" style={{ background: "rgba(0,0,0,0.25)" }}>
+                  <span className="text-[9px] font-mono" style={{ color: "var(--text-tertiary)", opacity: 0.6 }}>{dev.unit}</span>
                 </div>
-                <div className="flex-1 flex items-center gap-2 px-2.5 min-w-0" style={{ background: `${color}12`, borderLeft: `3px solid ${color}` }}>
+                <div className="flex-1 flex items-center gap-2.5 px-3 min-w-0" style={{ borderLeft: `3px solid ${color}` }}>
                   {statusColor && (
-                    <div className="h-2 w-2 rounded-full shrink-0" style={{ background: statusColor, boxShadow: mon?.status === 0 ? `0 0 6px ${statusColor}` : "none" }} />
+                    <div className="h-2.5 w-2.5 rounded-full shrink-0" style={{
+                      background: statusColor,
+                      boxShadow: mon?.status === 0 ? `0 0 8px ${statusColor}` : mon?.status === 1 ? `0 0 4px ${statusColor}60` : "none",
+                    }} />
                   )}
                   <div className="flex-1 min-w-0">
-                    <div className="text-[10px] font-bold text-[#ddd] truncate">{dev.label}</div>
+                    <div className="text-[11px] font-bold truncate" style={{ color: "var(--text-primary)" }}>{dev.label}</div>
                     {dev.sizeUnits >= 2 && (
-                      <div className="text-[8px] text-[#555] truncate">{meta.label}{dev.model ? ` · ${dev.model}` : ""}</div>
+                      <div className="text-[9px] truncate" style={{ color: "var(--text-tertiary)" }}>{meta.label}{dev.model ? ` · ${dev.model}` : ""}</div>
                     )}
                   </div>
-                  <span className="text-[8px] font-mono text-[#444] shrink-0">{dev.sizeUnits}U</span>
+                  <span className="text-[9px] font-mono shrink-0" style={{ color }}>{dev.sizeUnits}U</span>
                 </div>
               </button>
             );
@@ -888,9 +958,9 @@ function MobileRackViewer() {
         </div>
       </div>
 
-      {/* Device detail cards */}
-      <div className="px-3 pb-20 space-y-2">
-        <div className="text-[10px] text-[#555] font-bold uppercase tracking-wider px-1">Equipos</div>
+      {/* ── Device detail cards ── */}
+      <div className="px-4 pb-28 space-y-2.5">
+        <div className="text-[10px] font-bold uppercase tracking-wider px-1" style={{ color: "var(--text-tertiary)" }}>Equipos</div>
 
         {[...devices].sort((a, b) => b.unit - a.unit).map((dev) => {
           const meta = TYPE_META[dev.type] || TYPE_META.other;
@@ -903,31 +973,40 @@ function MobileRackViewer() {
             <div key={dev.id}>
               <button
                 onClick={() => { setExpandedDevice(isExpanded ? null : dev.id); hapticTap(); }}
-                className="w-full rounded-2xl px-3.5 py-3 text-left active:scale-[0.98] transition-all"
+                className="w-full rounded-2xl px-4 py-3.5 text-left active:scale-[0.98] transition-all"
                 style={{
-                  background: mon?.status === 0 ? "rgba(239,68,68,0.04)" : "rgba(255,255,255,0.02)",
-                  border: `1px solid ${mon?.status === 0 ? "rgba(239,68,68,0.12)" : "rgba(255,255,255,0.06)"}`,
+                  background: mon?.status === 0 ? "rgba(239,68,68,0.06)" : "var(--surface-card)",
+                  border: `1px solid ${mon?.status === 0 ? "rgba(239,68,68,0.15)" : "var(--glass-border)"}`,
+                  boxShadow: isExpanded ? `0 4px 20px ${color}15` : "none",
                 }}
               >
-                <div className="flex items-center gap-3">
-                  <div className="h-9 w-9 rounded-xl flex items-center justify-center shrink-0" style={{ background: `${color}22`, border: `1px solid ${color}44` }}>
-                    <span className="text-[10px] font-bold" style={{ color }}>{dev.unit}</span>
+                <div className="flex items-center gap-3.5">
+                  <div className="h-11 w-11 rounded-xl flex items-center justify-center shrink-0" style={{
+                    background: `linear-gradient(135deg, ${color}25, ${color}10)`,
+                    border: `1px solid ${color}40`,
+                    boxShadow: `0 2px 8px ${color}15`,
+                  }}>
+                    <span className="text-[11px] font-extrabold" style={{ color }}>{dev.unit}</span>
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
-                      <span className="text-xs font-bold text-[#ddd] truncate">{dev.label}</span>
+                      <span className="text-[13px] font-bold truncate" style={{ color: "var(--text-primary)" }}>{dev.label}</span>
                       {statusColor && (
-                        <span className="text-[8px] font-bold px-1.5 py-0.5 rounded" style={{ background: `${statusColor}22`, color: statusColor }}>
+                        <span className="text-[9px] font-bold px-2 py-0.5 rounded-lg" style={{
+                          background: `${statusColor}20`,
+                          color: statusColor,
+                          border: `1px solid ${statusColor}30`,
+                        }}>
                           {mon!.status === 1 ? "UP" : mon!.status === 0 ? "DOWN" : "PEND"}
                         </span>
                       )}
                     </div>
-                    <div className="text-[10px] text-[#555] truncate">
+                    <div className="text-[10px] mt-0.5 truncate" style={{ color: "var(--text-tertiary)" }}>
                       {meta.label} · U{dev.unit}-{dev.unit + dev.sizeUnits - 1} · {dev.sizeUnits}U
                       {dev.model ? ` · ${dev.model}` : ""}
                     </div>
                   </div>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#555" strokeWidth="2" strokeLinecap="round"
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--text-tertiary)" strokeWidth="2" strokeLinecap="round"
                     className="shrink-0 transition-transform" style={{ transform: isExpanded ? "rotate(90deg)" : "none" }}>
                     <polyline points="9 18 15 12 9 6" />
                   </svg>
@@ -936,9 +1015,14 @@ function MobileRackViewer() {
 
               {/* Expanded detail */}
               {isExpanded && (
-                <div className="mx-2 mt-1 rounded-xl p-3 space-y-3" style={{ background: "rgba(0,0,0,0.3)", border: "1px solid rgba(255,255,255,0.04)", animation: "expand-in 0.2s ease-out" }}>
+                <div className="mx-2 mt-1.5 rounded-2xl p-4 space-y-3.5" style={{
+                  background: "linear-gradient(180deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0.01) 100%)",
+                  border: "1px solid rgba(255,255,255,0.06)",
+                  boxShadow: "0 8px 32px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.06)",
+                  animation: "expand-in 0.25s ease-out",
+                }}>
                   {/* Basic details */}
-                  <div className="space-y-1.5">
+                  <div className="space-y-2">
                     {dev.managementIp && <DetailRow label="IP Gestión" value={dev.managementIp} mono />}
                     {dev.model && <DetailRow label="Modelo" value={dev.model} />}
                     {dev.serial && <DetailRow label="Serie" value={dev.serial} mono />}
@@ -987,7 +1071,7 @@ function MobileRackViewer() {
                   {/* Cable organizer */}
                   {dev.type === "cable-organizer" && dev.mountedItems && (
                     <div>
-                      <div className="text-[9px] text-[#555] font-bold uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
+                      <div className="text-[9px] font-bold uppercase tracking-wider mb-1.5 flex items-center gap-1.5" style={{ color: "var(--text-tertiary)" }}>
                         <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#78716c" strokeWidth="2.5"><path d="M4 9h16M4 15h16M10 3L8 21M16 3l-2 18" /></svg>
                         Organizador
                       </div>
@@ -1012,6 +1096,7 @@ function MobileRackViewer() {
       </div>
 
       <style>{`
+        .safe-top { padding-top: env(safe-area-inset-top, 0); }
         @keyframes expand-in {
           from { opacity: 0; transform: translateY(-4px); }
           to { opacity: 1; transform: translateY(0); }
@@ -1024,19 +1109,24 @@ function MobileRackViewer() {
 
 function DetailRow({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
   return (
-    <div className="flex items-center justify-between">
-      <span className="text-[9px] text-[#555]">{label}</span>
-      <span className={`text-[10px] text-[#aaa] ${mono ? "font-mono" : ""}`}>{value}</span>
+    <div className="flex items-center justify-between py-1 px-2 rounded-lg" style={{ background: "rgba(255,255,255,0.02)" }}>
+      <span className="text-[10px] font-medium" style={{ color: "var(--text-tertiary)" }}>{label}</span>
+      <span className={`text-[11px] ${mono ? "font-mono" : ""}`} style={{ color: "var(--text-secondary)" }}>{value}</span>
     </div>
   );
 }
 
 function StatPill({ label, value, color }: { label: string; value: number | string; color: string }) {
   return (
-    <div className="px-2.5 py-1 rounded-lg flex items-center gap-1.5" style={{ background: `${color}11`, border: `1px solid ${color}22` }}>
-      <div className="h-1.5 w-1.5 rounded-full" style={{ background: color }} />
-      <span className="text-[9px] font-bold" style={{ color }}>{value}</span>
-      <span className="text-[8px] text-[#555]">{label}</span>
+    <div className="flex-1 rounded-xl px-2.5 py-2 flex items-center gap-2" style={{
+      background: `${color}08`,
+      border: `1px solid ${color}15`,
+    }}>
+      <div className="h-2 w-2 rounded-full" style={{ background: color, boxShadow: `0 0 6px ${color}40` }} />
+      <div>
+        <div className="text-[11px] font-bold font-mono" style={{ color }}>{value}</div>
+        <div className="text-[8px] uppercase tracking-wider" style={{ color: "var(--text-tertiary)" }}>{label}</div>
+      </div>
     </div>
   );
 }

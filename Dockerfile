@@ -42,8 +42,8 @@ RUN npm run build
 FROM node:20-alpine AS runner
 WORKDIR /app
 
-# Runtime deps for better-sqlite3
-RUN apk add --no-cache libstdc++
+# Runtime deps: better-sqlite3 + ffmpeg for RTSP camera streaming
+RUN apk add --no-cache libstdc++ ffmpeg
 
 ENV NODE_ENV=production
 ENV PORT=3000

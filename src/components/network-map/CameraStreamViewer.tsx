@@ -328,13 +328,33 @@ function RtspWithPreload({
   const [previewUrl, setPreviewUrl] = useState<string>("");
 
   // Build a snapshot URL from the RTSP URL for instant preview
+  // Detects manufacturer by RTSP path pattern to generate the correct HTTP snapshot URL
   useEffect(() => {
     try {
       const parsed = new URL(originalRtspUrl);
-      // Convert rtsp://user:pass@host:554/path → http://user:pass@host/ISAPI/Streaming/channels/101/picture
-      const snapshotUrl = `http://${parsed.username}:${parsed.password}@${parsed.hostname}/ISAPI/Streaming/channels/101/picture`;
-      const proxied = apiUrl(`/api/camera/snapshot?url=${encodeURIComponent(snapshotUrl)}&_t=${Date.now()}`);
-      setPreviewUrl(proxied);
+      const creds = `${parsed.username}:${parsed.password}`;
+      const host = parsed.hostname;
+      const path = parsed.pathname;
+      let snapshotUrl = "";
+
+      if (path.match(/^\/\d+\/\d+$/)) {
+        // Tiandy format: rtsp://user:pass@ip:554/<channel>/<stream>
+        // Tiandy doesn't reliably support HTTP snapshots, skip preview
+      } else if (path.includes("/Streaming/Channels/") || path.includes("/ISAPI/")) {
+        // Hikvision format
+        snapshotUrl = `http://${creds}@${host}/ISAPI/Streaming/channels/101/picture`;
+      } else if (path.includes("/cam/realmonitor")) {
+        // Dahua format
+        snapshotUrl = `http://${creds}@${host}/cgi-bin/snapshot.cgi?channel=1`;
+      } else if (path.includes("/axis-media/")) {
+        // Axis format
+        snapshotUrl = `http://${creds}@${host}/axis-cgi/jpg/image.cgi`;
+      }
+
+      if (snapshotUrl) {
+        const proxied = apiUrl(`/api/camera/snapshot?url=${encodeURIComponent(snapshotUrl)}&_t=${Date.now()}`);
+        setPreviewUrl(proxied);
+      }
     } catch {
       // Can't build preview — just show loading
     }

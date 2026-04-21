@@ -1,12 +1,20 @@
 import { NextRequest } from "next/server";
 import { createHash } from "crypto";
+import { execFile } from "child_process";
+import { tmpdir } from "os";
+import { join } from "path";
+import { readFile, unlink } from "fs/promises";
+import { randomBytes } from "crypto";
 
 /**
  * Server-side proxy for camera snapshots.
- * Supports Basic Auth AND Digest Auth (required by Hikvision cameras).
+ * Supports:
+ *  - HTTP/HTTPS with Basic Auth and Digest Auth (Hikvision, Tiandy, etc.)
+ *  - RTSP URLs via ffmpeg (captures a single frame from the stream)
  *
  * Usage: GET /api/camera/snapshot?url=<encoded-camera-url>
  * Credentials embedded in URL: http://user:pass@host/path
+ *                             rtsp://user:pass@host:554/path
  */
 
 function md5(s: string) {
@@ -60,8 +68,6 @@ function buildDigestHeader(
 }
 
 // ── SSRF Protection ───────────────────────────────────────────────────────────
-// Camera proxy allows private IPs (cameras live on the local network).
-// Only block loopback and link-local to prevent abuse.
 
 function validateUrlTarget(hostname: string): { ok: boolean; reason?: string } {
   const lower = hostname.toLowerCase();
@@ -74,89 +80,144 @@ function validateUrlTarget(hostname: string): { ok: boolean; reason?: string } {
   return { ok: true };
 }
 
+// ── RTSP snapshot via ffmpeg ──────────────────────────────────────────────────
+
+async function captureRtspSnapshot(rtspUrl: string): Promise<Buffer> {
+  const tmpFile = join(tmpdir(), `kumamap-snap-${randomBytes(8).toString("hex")}.jpg`);
+
+  return new Promise<Buffer>((resolve, reject) => {
+    // ffmpeg: connect to RTSP, grab 1 frame, output as JPEG
+    const args = [
+      "-y",                         // overwrite output
+      "-rtsp_transport", "tcp",     // use TCP for RTSP (more reliable)
+      "-i", rtspUrl,                // input RTSP URL (with credentials)
+      "-frames:v", "1",            // capture only 1 frame
+      "-q:v", "3",                 // JPEG quality (2-5, lower = better)
+      "-f", "image2",              // output format
+      tmpFile,                      // output file
+    ];
+
+    const proc = execFile("ffmpeg", args, { timeout: 15000, maxBuffer: 10 * 1024 * 1024 }, async (err) => {
+      try {
+        if (err) {
+          // Cleanup temp file on error
+          await unlink(tmpFile).catch(() => {});
+          return reject(new Error(`ffmpeg error: ${err.message}`));
+        }
+
+        const data = await readFile(tmpFile);
+        await unlink(tmpFile).catch(() => {});
+
+        if (data.length === 0) {
+          return reject(new Error("ffmpeg produced empty output"));
+        }
+
+        resolve(data);
+      } catch (e: any) {
+        await unlink(tmpFile).catch(() => {});
+        reject(new Error(`Snapshot read error: ${e.message}`));
+      }
+    });
+
+    // Kill ffmpeg if it hangs
+    setTimeout(() => {
+      try { proc.kill("SIGKILL"); } catch {}
+    }, 14000);
+  });
+}
+
+// ── Main handler ──────────────────────────────────────────────────────────────
+
 export async function GET(req: NextRequest) {
   const rawUrl = req.nextUrl.searchParams.get("url");
   if (!rawUrl) {
     return new Response("Missing 'url' parameter", { status: 400 });
   }
 
-  let fetchUrl: string;
-  let username = "";
-  let password = "";
-
   try {
     const parsed = new URL(rawUrl);
 
-    // Only allow http/https protocols
-    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-      return new Response("Only http/https URLs are allowed", { status: 400 });
-    }
-
-    // SSRF check: block loopback/link-local only (private IPs allowed for local cameras)
+    // SSRF check
     const ssrfCheck = validateUrlTarget(parsed.hostname);
     if (!ssrfCheck.ok) {
       return new Response(`Blocked: ${ssrfCheck.reason}`, { status: 403 });
     }
 
-    username = decodeURIComponent(parsed.username);
-    password = decodeURIComponent(parsed.password);
+    // ── RTSP: use ffmpeg to capture a frame ─────────────────────────────────
+    if (parsed.protocol === "rtsp:") {
+      try {
+        const jpegBuffer = await captureRtspSnapshot(rawUrl);
+        return new Response(new Uint8Array(jpegBuffer), {
+          status: 200,
+          headers: {
+            "Content-Type": "image/jpeg",
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0",
+          },
+        });
+      } catch (err: any) {
+        return new Response(`RTSP snapshot failed: ${err.message}`, { status: 502 });
+      }
+    }
+
+    // ── HTTP/HTTPS: proxy with auth ─────────────────────────────────────────
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      return new Response("Only http, https, and rtsp URLs are allowed", { status: 400 });
+    }
+
+    let username = decodeURIComponent(parsed.username);
+    let password = decodeURIComponent(parsed.password);
     parsed.username = "";
     parsed.password = "";
-    fetchUrl = parsed.toString();
-  } catch {
-    return new Response("Invalid URL", { status: 400 });
-  }
+    const fetchUrl = parsed.toString();
 
-  const baseHeaders: Record<string, string> = {
-    "User-Agent": "KumaMap-CameraProxy/1.5",
-  };
+    const baseHeaders: Record<string, string> = {
+      "User-Agent": "KumaMap-CameraProxy/1.5",
+    };
 
-  // ── Attempt 1: no auth (or Basic if we got credentials) ──────────────────
-  if (username) {
-    baseHeaders["Authorization"] = `Basic ${Buffer.from(`${username}:${password}`).toString("base64")}`;
-  }
-
-  let response = await fetch(fetchUrl, {
-    headers: baseHeaders,
-    signal: AbortSignal.timeout(6000),
-  });
-
-  // ── If 401 with Digest challenge, retry with Digest Auth ──────────────────
-  if (response.status === 401 && username) {
-    const wwwAuth = response.headers.get("www-authenticate") ?? "";
-    if (wwwAuth.toLowerCase().startsWith("digest")) {
-      const challenge = parseDigestChallenge(wwwAuth);
-
-      // URI is just the path+query part
-      const parsedFetch = new URL(fetchUrl);
-      const uri = parsedFetch.pathname + parsedFetch.search;
-
-      const digestHeader = buildDigestHeader("GET", uri, username, password, challenge);
-
-      response = await fetch(fetchUrl, {
-        headers: {
-          ...baseHeaders,
-          Authorization: digestHeader,
-        },
-        signal: AbortSignal.timeout(6000),
-      });
+    if (username) {
+      baseHeaders["Authorization"] = `Basic ${Buffer.from(`${username}:${password}`).toString("base64")}`;
     }
+
+    let response = await fetch(fetchUrl, {
+      headers: baseHeaders,
+      signal: AbortSignal.timeout(8000),
+    });
+
+    // Digest auth retry if needed
+    if (response.status === 401 && username) {
+      const wwwAuth = response.headers.get("www-authenticate") ?? "";
+      if (wwwAuth.toLowerCase().startsWith("digest")) {
+        const challenge = parseDigestChallenge(wwwAuth);
+        const parsedFetch = new URL(fetchUrl);
+        const uri = parsedFetch.pathname + parsedFetch.search;
+        const digestHeader = buildDigestHeader("GET", uri, username, password, challenge);
+
+        response = await fetch(fetchUrl, {
+          headers: { ...baseHeaders, Authorization: digestHeader },
+          signal: AbortSignal.timeout(8000),
+        });
+      }
+    }
+
+    if (!response.ok) {
+      return new Response(`Camera returned HTTP ${response.status}`, { status: 502 });
+    }
+
+    const buffer = await response.arrayBuffer();
+    const contentType = response.headers.get("content-type") || "image/jpeg";
+
+    return new Response(buffer, {
+      status: 200,
+      headers: {
+        "Content-Type": contentType,
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+      },
+    });
+  } catch (err: any) {
+    return new Response(`Snapshot error: ${err.message}`, { status: 500 });
   }
-
-  if (!response.ok) {
-    return new Response(`Camera returned HTTP ${response.status}`, { status: 502 });
-  }
-
-  const buffer = await response.arrayBuffer();
-  const contentType = response.headers.get("content-type") || "image/jpeg";
-
-  return new Response(buffer, {
-    status: 200,
-    headers: {
-      "Content-Type": contentType,
-      "Cache-Control": "no-cache, no-store, must-revalidate",
-      "Pragma": "no-cache",
-      "Expires": "0",
-    },
-  });
 }

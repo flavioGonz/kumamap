@@ -87,6 +87,24 @@ const MANUFACTURERS: ManufacturerTemplate[] = [
     },
   },
   {
+    id: "tiandy",
+    label: "Tiandy",
+    templates: {
+      rtsp: {
+        url: "rtsp://{user}:{pass}@{ip}:554/1/1",
+        desc: "/<canal>/<stream> — stream 1 = main, 2 = sub, 3 = tercero",
+      },
+      snapshot: {
+        url: "http://{user}:{pass}@{ip}/ISAPI/Streaming/channels/1/picture",
+        desc: "Snapshot ISAPI (puede no estar soportado en todos los modelos)",
+      },
+      mjpeg: {
+        url: "http://{user}:{pass}@{ip}/ISAPI/Streaming/channels/1/httpPreview",
+        desc: "Preview MJPEG vía ISAPI",
+      },
+    },
+  },
+  {
     id: "custom",
     label: "Otro / manual",
     templates: {},

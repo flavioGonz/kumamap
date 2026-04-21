@@ -354,14 +354,24 @@ async function pollPbx(ip: string, user: string, pass: string): Promise<PbxStatu
   console.log(`[PBX] Polling ${ip} with user=${user}`);
 
   // Try Grandstream UCM API on multiple ports
-  const ports = [8089, 443, 8088, 80];
+  // UCM6xxx typically uses HTTPS on 8089 with self-signed cert
+  const portSchemes: { port: number; schemes: string[] }[] = [
+    { port: 8089, schemes: ["https", "http"] },
+    { port: 443, schemes: ["https"] },
+    { port: 8088, schemes: ["https", "http"] },
+    { port: 80, schemes: ["http"] },
+  ];
   let cookie: string | null = null;
   let apiBase = "";
 
-  for (const port of ports) {
+  // Allow self-signed certs for Grandstream UCM
+  const prevTls = process.env.NODE_TLS_REJECT_UNAUTHORIZED;
+  process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+
+  for (const { port, schemes } of portSchemes) {
     if (cookie) break;
-    const schemes = port === 443 ? ["https"] : ["http"];
     for (const scheme of schemes) {
+      if (cookie) break;
       const base = `${scheme}://${ip}:${port}/api`;
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 4000);
@@ -494,6 +504,10 @@ async function pollPbx(ip: string, user: string, pass: string): Promise<PbxStatu
       result.error = `PBX no alcanzable en ${ip} — verificar IP y conectividad`;
     }
   }
+
+  // Restore TLS setting
+  if (prevTls !== undefined) process.env.NODE_TLS_REJECT_UNAUTHORIZED = prevTls;
+  else delete process.env.NODE_TLS_REJECT_UNAUTHORIZED;
 
   return result;
 }

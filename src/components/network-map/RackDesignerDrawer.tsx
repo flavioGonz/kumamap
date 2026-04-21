@@ -767,7 +767,7 @@ export default function RackDesignerDrawer({ open, onClose, nodeId, nodes, monit
         className="relative flex flex-col rounded-2xl overflow-hidden border border-white/10"
         style={{
           width: "min(96vw, 910px)",
-          maxHeight: "76vh",
+          height: "80vh",
           background: "linear-gradient(160deg, #161616 0%, #0e0e0e 100%)",
           boxShadow: "0 32px 100px rgba(0,0,0,0.9), 0 0 0 1px rgba(255,255,255,0.04)",
         }}

@@ -9,14 +9,19 @@ interface CameraStreamViewerProps {
   config: CameraStreamConfig;
   cameraName: string;
   onClose: () => void;
+  /** Initial position offset for multi-view stacking */
+  initialOffset?: number;
 }
+
+const MIN_W = 320;
+const MIN_H = 240;
 
 /** Build proxy URL for snapshot mode — avoids CORS / Basic-Auth browser restrictions */
 function proxySnapshotUrl(cameraUrl: string, cacheBust: number): string {
   return apiUrl(`/api/camera/snapshot?url=${encodeURIComponent(cameraUrl)}&_t=${cacheBust}`);
 }
 
-export default function CameraStreamViewer({ config, cameraName, onClose }: CameraStreamViewerProps) {
+export default function CameraStreamViewer({ config, cameraName, onClose, initialOffset = 0 }: CameraStreamViewerProps) {
   const [fullscreen, setFullscreen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
@@ -27,32 +32,36 @@ export default function CameraStreamViewer({ config, cameraName, onClose }: Came
   const [activeBuffer, setActiveBuffer] = useState<"a" | "b">("a");
   const loadingNextRef = useRef(false);
 
-  // Draggable PiP position — start at bottom-right
+  // Draggable PiP position
   const [pos, setPos] = useState({ x: 0, y: 0 });
+  const [size, setSize] = useState({ w: 0, h: 0 });
   const dragging = useRef(false);
   const dragStart = useRef({ mx: 0, my: 0, px: 0, py: 0 });
+  const resizing = useRef<string | null>(null);
+  const resizeStart = useRef({ mx: 0, my: 0, w: 0, h: 0, x: 0, y: 0 });
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Initialise position to bottom-right corner on mount
+  // Initialise position — stack offset for multi-view
   useEffect(() => {
     const vw = window.innerWidth;
     const vh = window.innerHeight;
-    const w = Math.min(640, vw * 0.9);
-    const h = 380;
-    setPos({ x: vw - w - 20, y: vh - h - 20 });
-  }, []);
+    const w = Math.min(520, vw * 0.45);
+    const h = Math.round(w * 0.625); // ~16:10 aspect
+    const offset = initialOffset * 30;
+    setSize({ w, h });
+    setPos({ x: vw - w - 20 - offset, y: vh - h - 60 - offset });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Snapshot double-buffer: preload next frame off-screen, swap when ready
+  // Snapshot double-buffer
   useEffect(() => {
     if (config.streamType !== "snapshot") return;
     const ms = config.snapshotInterval ? config.snapshotInterval * 1000 : 1000;
-    // Load first frame
     const firstUrl = proxySnapshotUrl(config.streamUrl, Date.now());
     setBufferA(firstUrl);
     setActiveBuffer("a");
 
     const id = setInterval(() => {
-      if (loadingNextRef.current) return; // skip if previous still loading
+      if (loadingNextRef.current) return;
       loadingNextRef.current = true;
       const nextUrl = proxySnapshotUrl(config.streamUrl, Date.now());
       const img = new Image();
@@ -91,14 +100,41 @@ export default function CameraStreamViewer({ config, cameraName, onClose }: Came
     e.preventDefault();
   }, [fullscreen, pos]);
 
+  // ── Resize handlers ────────────────────────────────────────────────────────
+  const onResizeStart = useCallback((edge: string, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    resizing.current = edge;
+    resizeStart.current = { mx: e.clientX, my: e.clientY, w: size.w, h: size.h, x: pos.x, y: pos.y };
+  }, [size, pos]);
+
   useEffect(() => {
     const onMove = (e: MouseEvent) => {
-      if (!dragging.current) return;
-      const dx = e.clientX - dragStart.current.mx;
-      const dy = e.clientY - dragStart.current.my;
-      setPos({ x: dragStart.current.px + dx, y: dragStart.current.py + dy });
+      if (dragging.current) {
+        const dx = e.clientX - dragStart.current.mx;
+        const dy = e.clientY - dragStart.current.my;
+        setPos({ x: dragStart.current.px + dx, y: dragStart.current.py + dy });
+        return;
+      }
+      if (resizing.current) {
+        const dx = e.clientX - resizeStart.current.mx;
+        const dy = e.clientY - resizeStart.current.my;
+        const edge = resizing.current;
+        let newW = resizeStart.current.w;
+        let newH = resizeStart.current.h;
+        let newX = resizeStart.current.x;
+        let newY = resizeStart.current.y;
+
+        if (edge.includes("r")) newW = Math.max(MIN_W, resizeStart.current.w + dx);
+        if (edge.includes("l")) { newW = Math.max(MIN_W, resizeStart.current.w - dx); newX = resizeStart.current.x + (resizeStart.current.w - newW); }
+        if (edge.includes("b")) newH = Math.max(MIN_H, resizeStart.current.h + dy);
+        if (edge.includes("t")) { newH = Math.max(MIN_H, resizeStart.current.h - dy); newY = resizeStart.current.y + (resizeStart.current.h - newH); }
+
+        setSize({ w: newW, h: newH });
+        setPos({ x: newX, y: newY });
+      }
     };
-    const onUp = () => { dragging.current = false; };
+    const onUp = () => { dragging.current = false; resizing.current = null; };
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
     return () => {
@@ -111,32 +147,45 @@ export default function CameraStreamViewer({ config, cameraName, onClose }: Came
   const rtspProxyUrl = config.streamType === "rtsp"
     ? apiUrl(`/api/camera/rtsp-stream?url=${encodeURIComponent(config.streamUrl)}&fps=${config.rtspFps || 2}`)
     : "";
-  const streamSrc = config.streamType === "snapshot"
-    ? proxySnapshotUrl(config.streamUrl, snapshotKey)
-    : config.streamType === "rtsp"
-    ? rtspProxyUrl
-    : config.streamUrl;
 
   // ── Styles ──────────────────────────────────────────────────────────────────
-  const width = typeof window !== "undefined" ? Math.min(640, window.innerWidth * 0.9) : 600;
-
   const wrapStyle: React.CSSProperties = fullscreen
     ? { position: "fixed", inset: 0, zIndex: 99999 }
     : {
         position: "fixed",
         left: pos.x,
         top: pos.y,
-        width,
+        width: size.w,
+        height: size.h,
         zIndex: 9999,
-        borderRadius: 16,
+        borderRadius: 12,
         overflow: "hidden",
         boxShadow: "0 30px 100px rgba(0,0,0,0.9), 0 0 0 1px rgba(255,255,255,0.06)",
         background: "linear-gradient(180deg, rgba(12,12,12,0.99), rgba(8,8,8,0.99))",
         userSelect: "none",
+        display: "flex",
+        flexDirection: "column",
       };
+
+  const EDGE = 6;
+  const resizeEdges: { edge: string; style: React.CSSProperties }[] = [
+    { edge: "r", style: { position: "absolute", top: EDGE, right: 0, bottom: EDGE, width: EDGE, cursor: "ew-resize", zIndex: 20 } },
+    { edge: "l", style: { position: "absolute", top: EDGE, left: 0, bottom: EDGE, width: EDGE, cursor: "ew-resize", zIndex: 20 } },
+    { edge: "b", style: { position: "absolute", bottom: 0, left: EDGE, right: EDGE, height: EDGE, cursor: "ns-resize", zIndex: 20 } },
+    { edge: "t", style: { position: "absolute", top: 0, left: EDGE, right: EDGE, height: EDGE, cursor: "ns-resize", zIndex: 20 } },
+    { edge: "br", style: { position: "absolute", bottom: 0, right: 0, width: EDGE * 2, height: EDGE * 2, cursor: "nwse-resize", zIndex: 21 } },
+    { edge: "bl", style: { position: "absolute", bottom: 0, left: 0, width: EDGE * 2, height: EDGE * 2, cursor: "nesw-resize", zIndex: 21 } },
+    { edge: "tr", style: { position: "absolute", top: 0, right: 0, width: EDGE * 2, height: EDGE * 2, cursor: "nesw-resize", zIndex: 21 } },
+    { edge: "tl", style: { position: "absolute", top: 0, left: 0, width: EDGE * 2, height: EDGE * 2, cursor: "nwse-resize", zIndex: 21 } },
+  ];
 
   return (
     <div ref={containerRef} style={wrapStyle}>
+      {/* ── Resize handles ── */}
+      {!fullscreen && resizeEdges.map(({ edge, style }) => (
+        <div key={edge} style={style} onMouseDown={(e) => onResizeStart(edge, e)} />
+      ))}
+
       {/* ── Header / drag handle ── */}
       <div
         onMouseDown={onMouseDown}
@@ -144,46 +193,32 @@ export default function CameraStreamViewer({ config, cameraName, onClose }: Came
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
-          padding: "6px 10px",
+          padding: "5px 8px",
           borderBottom: "1px solid rgba(255,255,255,0.06)",
           background: "rgba(0,0,0,0.4)",
           cursor: fullscreen ? "default" : "grab",
+          flexShrink: 0,
         }}
       >
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#ef4444", animation: "pulse 2s infinite" }} />
-          <Camera style={{ width: 14, height: 14, color: "#666" }} />
-          <span style={{ fontSize: 12, fontWeight: 700, color: "#ccc" }}>{cameraName}</span>
-          <span style={{ fontSize: 9, color: "#555", textTransform: "uppercase", letterSpacing: 1 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, overflow: "hidden" }}>
+          <div style={{ width: 7, height: 7, borderRadius: "50%", background: "#ef4444", animation: "pulse 2s infinite", flexShrink: 0 }} />
+          <Camera style={{ width: 12, height: 12, color: "#666", flexShrink: 0 }} />
+          <span style={{ fontSize: 11, fontWeight: 700, color: "#ccc", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{cameraName}</span>
+          <span style={{ fontSize: 8, color: "#555", textTransform: "uppercase", letterSpacing: 1, flexShrink: 0 }}>
             {config.streamType}
           </span>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 1, flexShrink: 0 }}>
           {config.streamType === "snapshot" && (
-            <button
-              onMouseDown={(e) => e.stopPropagation()}
-              onClick={handleRefresh}
-              title="Refrescar"
-              style={btnStyle}
-            >
-              <RefreshCw style={{ width: 14, height: 14 }} />
+            <button onMouseDown={(e) => e.stopPropagation()} onClick={handleRefresh} title="Refrescar" style={btnStyle}>
+              <RefreshCw style={{ width: 13, height: 13 }} />
             </button>
           )}
-          <button
-            onMouseDown={(e) => e.stopPropagation()}
-            onClick={() => { setFullscreen(!fullscreen); }}
-            title="Pantalla completa"
-            style={btnStyle}
-          >
-            {fullscreen ? <Minimize2 style={{ width: 14, height: 14 }} /> : <Maximize2 style={{ width: 14, height: 14 }} />}
+          <button onMouseDown={(e) => e.stopPropagation()} onClick={() => setFullscreen(!fullscreen)} title="Pantalla completa" style={btnStyle}>
+            {fullscreen ? <Minimize2 style={{ width: 13, height: 13 }} /> : <Maximize2 style={{ width: 13, height: 13 }} />}
           </button>
-          <button
-            onMouseDown={(e) => e.stopPropagation()}
-            onClick={onClose}
-            title="Cerrar"
-            style={{ ...btnStyle, color: "#888" }}
-          >
-            <X style={{ width: 14, height: 14 }} />
+          <button onMouseDown={(e) => e.stopPropagation()} onClick={onClose} title="Cerrar" style={{ ...btnStyle, color: "#888" }}>
+            <X style={{ width: 13, height: 13 }} />
           </button>
         </div>
       </div>
@@ -195,34 +230,35 @@ export default function CameraStreamViewer({ config, cameraName, onClose }: Came
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        minHeight: fullscreen ? "calc(100vh - 36px)" : 340,
+        flex: 1,
+        overflow: "hidden",
       }}>
         {/* Loading */}
         {loading && !error && (
           <div style={centerOverlay}>
             <div style={{
-              width: 32, height: 32, borderRadius: "50%",
+              width: 28, height: 28, borderRadius: "50%",
               border: "2px solid rgba(96,165,250,0.3)",
               borderTopColor: "#60a5fa",
               animation: "spin 0.8s linear infinite",
             }} />
-            <span style={{ fontSize: 10, color: "#555", marginTop: 8 }}>Conectando...</span>
+            <span style={{ fontSize: 9, color: "#555", marginTop: 6 }}>Conectando...</span>
           </div>
         )}
 
         {/* Error */}
         {error && (
-          <div style={{ ...centerOverlay, gap: 12, textAlign: "center", padding: "0 32px" }}>
-            <Camera style={{ width: 40, height: 40, color: "rgba(239,68,68,0.4)" }} />
-            <div style={{ fontSize: 13, fontWeight: 700, color: "#888" }}>No se pudo cargar el stream</div>
-            <div style={{ fontSize: 10, color: "#555", maxWidth: 280, wordBreak: "break-all" }}>
+          <div style={{ ...centerOverlay, gap: 8, textAlign: "center", padding: "0 24px" }}>
+            <Camera style={{ width: 32, height: 32, color: "rgba(239,68,68,0.4)" }} />
+            <div style={{ fontSize: 11, fontWeight: 700, color: "#888" }}>No se pudo cargar el stream</div>
+            <div style={{ fontSize: 9, color: "#555", maxWidth: 240, wordBreak: "break-all" }}>
               {config.streamUrl}
             </div>
             <button onClick={handleRefresh} style={retryBtn}>Reintentar</button>
           </div>
         )}
 
-        {/* MJPEG — single img */}
+        {/* MJPEG */}
         {config.streamType === "mjpeg" && (
           <img
             src={config.streamUrl}
@@ -233,7 +269,7 @@ export default function CameraStreamViewer({ config, cameraName, onClose }: Came
           />
         )}
 
-        {/* Snapshot — double-buffered for flicker-free transitions */}
+        {/* Snapshot — double-buffered */}
         {config.streamType === "snapshot" && (
           <div style={{ position: "relative", width: "100%", height: "100%" }}>
             {bufferA && (
@@ -265,7 +301,7 @@ export default function CameraStreamViewer({ config, cameraName, onClose }: Came
           </div>
         )}
 
-        {/* RTSP via ffmpeg proxy — snapshot preload + MJPEG stream swap */}
+        {/* RTSP via ffmpeg proxy */}
         {config.streamType === "rtsp" && (
           <RtspWithPreload
             rtspUrl={rtspProxyUrl}
@@ -283,7 +319,7 @@ export default function CameraStreamViewer({ config, cameraName, onClose }: Came
             src={config.streamUrl}
             style={{
               width: "100%",
-              minHeight: fullscreen ? "100%" : 400,
+              height: "100%",
               border: "none",
               display: error ? "none" : "block",
             }}
@@ -297,8 +333,8 @@ export default function CameraStreamViewer({ config, cameraName, onClose }: Came
 
       {/* Footer */}
       {(config.streamType === "snapshot" || config.streamType === "rtsp") && (
-        <div style={{ padding: "4px 10px", borderTop: "1px solid rgba(255,255,255,0.05)", background: "rgba(0,0,0,0.3)" }}>
-          <span style={{ fontSize: 9, color: "#444" }}>
+        <div style={{ padding: "3px 8px", borderTop: "1px solid rgba(255,255,255,0.05)", background: "rgba(0,0,0,0.3)", flexShrink: 0 }}>
+          <span style={{ fontSize: 8, color: "#444" }}>
             {config.streamType === "rtsp"
               ? `RTSP → MJPEG · ${config.rtspFps || 2} fps (ffmpeg)`
               : config.snapshotInterval ? `Refresco cada ${config.snapshotInterval}s` : "~2 fps (vía proxy)"}
@@ -315,8 +351,6 @@ export default function CameraStreamViewer({ config, cameraName, onClose }: Came
 }
 
 // ── RTSP with snapshot preload ───────────────────────────────────────────────
-// Shows an instant snapshot from the camera while ffmpeg connects to the RTSP
-// stream. Once the MJPEG stream delivers its first frame, swaps to live video.
 
 function RtspWithPreload({
   rtspUrl, cameraName, originalRtspUrl, onLoad, onError, hasError,
@@ -362,7 +396,6 @@ function RtspWithPreload({
 
   return (
     <div style={{ position: "relative", width: "100%", height: "100%" }}>
-      {/* Snapshot preview (shows instantly, fades out when stream arrives) */}
       {previewUrl && !streamReady && (
         <img
           src={previewUrl}
@@ -377,7 +410,6 @@ function RtspWithPreload({
           onError={() => { /* Preview failed, wait for RTSP */ }}
         />
       )}
-      {/* RTSP MJPEG stream (starts loading in background) */}
       <img
         src={rtspUrl}
         alt={cameraName}
@@ -401,8 +433,8 @@ function RtspWithPreload({
 
 // ── Shared micro-styles ──────────────────────────────────────────────────────
 const btnStyle: React.CSSProperties = {
-  padding: "4px 6px",
-  borderRadius: 8,
+  padding: "3px 5px",
+  borderRadius: 6,
   background: "transparent",
   border: "none",
   color: "#555",
@@ -422,12 +454,12 @@ const centerOverlay: React.CSSProperties = {
 };
 
 const retryBtn: React.CSSProperties = {
-  marginTop: 8,
-  padding: "6px 16px",
-  borderRadius: 12,
+  marginTop: 6,
+  padding: "5px 14px",
+  borderRadius: 10,
   background: "rgba(255,255,255,0.05)",
   color: "#888",
-  fontSize: 10,
+  fontSize: 9,
   fontWeight: 700,
   border: "none",
   cursor: "pointer",

@@ -507,9 +507,9 @@ export default function LeafletMapView({
 
   // Camera stream modals
   const [streamConfigNodeId, setStreamConfigNodeId] = useState<string | null>(null);
-  const [streamViewerNodeId, setStreamViewerNodeId] = useState<string | null>(null);
-  const [streamViewerMode, setStreamViewerMode] = useState<"tooltip" | "pip">("tooltip");
+  const [streamViewers, setStreamViewers] = useState<{ nodeId: string; mode: "tooltip" | "pip" }[]>([]);
   const [tooltipAnchor, setTooltipAnchor] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const MAX_STREAMS = 4;
 
   // Icon picker & Node size modals (Leaflet)
   const [iconPickerNodeId, setIconPickerNodeId] = useState<string | null>(null);
@@ -1772,8 +1772,11 @@ export default function LeafletMapView({
                 y: (rect?.top ?? 0) + pt.y,
               });
             }
-            setStreamViewerMode("pip");
-            setStreamViewerNodeId(node.id);
+            setStreamViewers(prev => {
+              if (prev.some(v => v.nodeId === node.id)) return prev; // already open
+              if (prev.length >= MAX_STREAMS) return prev; // max reached
+              return [...prev, { nodeId: node.id, mode: "pip" }];
+            });
           }
           return;
         }
@@ -3055,7 +3058,11 @@ export default function LeafletMapView({
           ...(ncd.streamUrl ? [{
             label: "Ver stream",
             icon: menuIcons.Signal,
-            onClick: () => setStreamViewerNodeId(nodeId),
+            onClick: () => setStreamViewers(prev => {
+              if (prev.some(v => v.nodeId === nodeId)) return prev;
+              if (prev.length >= MAX_STREAMS) return prev;
+              return [...prev, { nodeId, mode: "pip" }];
+            }),
           }] : []),
           {
             label: "Lente / FOV",
@@ -3334,11 +3341,12 @@ export default function LeafletMapView({
   }, [handleSave, autoSaveEnabled]);
 
   // ── Update camera tooltip anchor on map move/zoom ──
+  const tooltipViewer = streamViewers.find(v => v.mode === "tooltip");
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !streamViewerNodeId || streamViewerMode !== "tooltip") return;
+    if (!map || !tooltipViewer) return;
     const updateAnchor = () => {
-      const node = nodesRef.current.find((n) => n.id === streamViewerNodeId);
+      const node = nodesRef.current.find((n) => n.id === tooltipViewer.nodeId);
       if (!node) return;
       const pt = map.latLngToContainerPoint([node.x, node.y]);
       const rect = containerRef.current?.getBoundingClientRect();
@@ -3353,7 +3361,7 @@ export default function LeafletMapView({
       map.off("move", updateAnchor);
       map.off("zoom", updateAnchor);
     };
-  }, [streamViewerNodeId, streamViewerMode]);
+  }, [tooltipViewer]);
 
   // Node search — used by both image mode and livemap (nodes take priority over geocoding)
   const handleNodeSearch = useCallback((): boolean => {
@@ -4407,9 +4415,9 @@ export default function LeafletMapView({
         );
       })()}
 
-      {/* ── Camera Stream Viewer (Tooltip or PiP) ── */}
-      {streamViewerNodeId && (() => {
-        const camNode = nodesRef.current.find((n) => n.id === streamViewerNodeId);
+      {/* ── Camera Stream Viewers (multi-view, up to 4) ── */}
+      {streamViewers.map((viewer, idx) => {
+        const camNode = nodesRef.current.find((n) => n.id === viewer.nodeId);
         const camCd = safeJsonParse<NodeCustomData>(camNode?.custom_data);
         if (!camCd.streamUrl) return null;
         const viewCfg: CameraStreamConfig = {
@@ -4418,26 +4426,30 @@ export default function LeafletMapView({
           snapshotInterval: camCd.snapshotInterval,
           rtspFps: camCd.rtspFps,
         };
-        if (streamViewerMode === "tooltip") {
+        const closeViewer = () => setStreamViewers(prev => prev.filter(v => v.nodeId !== viewer.nodeId));
+        if (viewer.mode === "tooltip") {
           return (
             <CameraTooltipViewer
+              key={viewer.nodeId}
               config={viewCfg}
               cameraName={camNode?.label || "Cámara"}
               anchorX={tooltipAnchor.x}
               anchorY={tooltipAnchor.y}
-              onClose={() => setStreamViewerNodeId(null)}
-              onExpand={() => setStreamViewerMode("pip")}
+              onClose={closeViewer}
+              onExpand={() => setStreamViewers(prev => prev.map(v => v.nodeId === viewer.nodeId ? { ...v, mode: "pip" } : v))}
             />
           );
         }
         return (
           <CameraStreamViewer
+            key={viewer.nodeId}
             config={viewCfg}
             cameraName={camNode?.label || "Cámara"}
-            onClose={() => setStreamViewerNodeId(null)}
+            onClose={closeViewer}
+            initialOffset={idx}
           />
         );
-      })()}
+      })}
 
       {/* ── Icon Picker Modal (Leaflet) ── */}
       {iconPickerNodeId && (() => {

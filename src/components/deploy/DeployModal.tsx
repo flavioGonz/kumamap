@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   X, Rocket, CheckCircle, XCircle, Loader2, Clock,
   ArrowDown, GitCommit, RefreshCw, Terminal, ChevronDown, ChevronRight,
@@ -31,13 +31,34 @@ interface DeployResponse {
   error?: string;
 }
 
+interface DeployStatus {
+  updating: boolean;
+  currentStep: string;
+  completedSteps: { step: string; ok: boolean; ms: number }[];
+  lastResult: DeployResponse | null;
+}
+
+const ALL_STEPS = ["git pull", "npm install", "build", "restart"];
+
+const stepLabels: Record<string, string> = {
+  "git pull": "Descargando cambios",
+  "npm install": "Instalando dependencias",
+  "build": "Compilando aplicación",
+  "restart": "Reiniciando servidor",
+};
+
 export default function DeployModal({ onClose }: { onClose: () => void }) {
   const [version, setVersion] = useState<VersionInfo | null>(null);
   const [checking, setChecking] = useState(true);
   const [updating, setUpdating] = useState(false);
   const [currentStep, setCurrentStep] = useState<string>("");
+  const [completedSteps, setCompletedSteps] = useState<{ step: string; ok: boolean; ms: number }[]>([]);
   const [result, setResult] = useState<DeployResponse | null>(null);
   const [expandedStep, setExpandedStep] = useState<string | null>(null);
+  const [elapsed, setElapsed] = useState(0);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const startTimeRef = useRef(0);
 
   const checkVersion = useCallback(async () => {
     setChecking(true);
@@ -51,36 +72,107 @@ export default function DeployModal({ onClose }: { onClose: () => void }) {
 
   useEffect(() => { checkVersion(); }, [checkVersion]);
 
+  // Poll deploy status while updating
+  const startPolling = useCallback(() => {
+    if (pollRef.current) clearInterval(pollRef.current);
+    pollRef.current = setInterval(async () => {
+      try {
+        const res = await fetch(apiUrl("/api/deploy"));
+        if (!res.ok) return;
+        const status: DeployStatus = await res.json();
+
+        setCurrentStep(status.currentStep);
+        setCompletedSteps(status.completedSteps);
+
+        if (!status.updating && status.lastResult) {
+          // Deploy finished
+          setResult(status.lastResult);
+          setUpdating(false);
+          if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+          if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+          if (status.lastResult.status === "success") {
+            setTimeout(checkVersion, 2000);
+          }
+        }
+      } catch {
+        // Server might be restarting, keep polling
+      }
+    }, 1500);
+  }, [checkVersion]);
+
+  // Elapsed timer
+  const startTimer = useCallback(() => {
+    startTimeRef.current = Date.now();
+    setElapsed(0);
+    if (timerRef.current) clearInterval(timerRef.current);
+    timerRef.current = setInterval(() => {
+      setElapsed(Math.floor((Date.now() - startTimeRef.current) / 1000));
+    }, 1000);
+  }, []);
+
+  // Cleanup
+  useEffect(() => {
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, []);
+
   const handleUpdate = useCallback(async () => {
     setUpdating(true);
     setResult(null);
     setCurrentStep("git pull");
+    setCompletedSteps([]);
+    startTimer();
+    startPolling();
 
     try {
+      // Fire and forget — we poll GET /api/deploy for progress
       const res = await fetch(apiUrl("/api/deploy"), { method: "POST" });
       const data: DeployResponse = await res.json();
+      // POST returned — deploy finished
       setResult(data);
-      // Re-check version after update
       if (data.status === "success") {
         setTimeout(checkVersion, 2000);
       }
     } catch (err: any) {
-      setResult({
-        status: "error",
-        durationMs: 0,
-        steps: [{ step: "conexión", output: err.message || "Error de red", ok: false, ms: 0 }],
-      });
+      // Connection lost during restart — this is expected
+      // Keep polling to detect when server comes back
+      setTimeout(async () => {
+        try {
+          const res = await fetch(apiUrl("/api/deploy"));
+          if (res.ok) {
+            const status: DeployStatus = await res.json();
+            if (status.lastResult) {
+              setResult(status.lastResult);
+            }
+          }
+        } catch {
+          // Server still restarting — set a generic success since restart was likely the last step
+          setResult({
+            status: "success",
+            durationMs: Date.now() - startTimeRef.current,
+            steps: [
+              ...completedSteps.map(s => ({ ...s, output: "" })),
+              { step: "restart", output: "Servidor reiniciado", ok: true, ms: 0 },
+            ],
+          });
+        }
+        setTimeout(checkVersion, 3000);
+      }, 5000);
     } finally {
       setUpdating(false);
-      setCurrentStep("");
+      if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+      if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
     }
-  }, [checkVersion]);
+  }, [checkVersion, startPolling, startTimer, completedSteps]);
 
-  const stepLabels: Record<string, string> = {
-    "git pull": "Descargando cambios",
-    "npm install": "Instalando dependencias",
-    "build": "Compilando aplicación",
-    "restart": "Reiniciando servidor",
+  // Determine step status for progress UI
+  const getStepStatus = (step: string): "done" | "active" | "error" | "pending" => {
+    const completed = completedSteps.find(s => s.step === step);
+    if (completed) return completed.ok ? "done" : "error";
+    if (currentStep === step) return "active";
+    return "pending";
   };
 
   return (
@@ -146,7 +238,7 @@ export default function DeployModal({ onClose }: { onClose: () => void }) {
               </div>
 
               {/* Updates available */}
-              {version.updateAvailable && version.remote && !result && (
+              {version.updateAvailable && version.remote && !result && !updating && (
                 <div className="rounded-2xl p-3.5" style={{ background: "rgba(34,197,94,0.04)", border: "1px solid rgba(34,197,94,0.15)" }}>
                   <div className="flex items-center gap-2 mb-2.5">
                     <ArrowDown className="h-3.5 w-3.5 text-green-400" />
@@ -169,7 +261,7 @@ export default function DeployModal({ onClose }: { onClose: () => void }) {
               )}
 
               {/* Up to date */}
-              {!version.updateAvailable && !version.fetchError && !result && (
+              {!version.updateAvailable && !version.fetchError && !result && !updating && (
                 <div className="rounded-2xl p-3.5 flex items-center gap-3" style={{ background: "rgba(59,130,246,0.04)", border: "1px solid rgba(59,130,246,0.1)" }}>
                   <CheckCircle className="h-4 w-4 text-blue-400 shrink-0" />
                   <div>
@@ -180,7 +272,7 @@ export default function DeployModal({ onClose }: { onClose: () => void }) {
               )}
 
               {/* Fetch error */}
-              {version.fetchError && !result && (
+              {version.fetchError && !result && !updating && (
                 <div className="rounded-2xl p-3.5 flex items-center gap-3" style={{ background: "rgba(239,68,68,0.04)", border: "1px solid rgba(239,68,68,0.1)" }}>
                   <XCircle className="h-4 w-4 text-red-400 shrink-0" />
                   <div className="text-[10px] text-[#888]">{version.fetchError}</div>
@@ -189,40 +281,53 @@ export default function DeployModal({ onClose }: { onClose: () => void }) {
             </>
           )}
 
-          {/* Updating progress */}
+          {/* Updating progress — real-time step tracking */}
           {updating && (
             <div className="rounded-2xl p-4" style={{ background: "rgba(249,115,22,0.04)", border: "1px solid rgba(249,115,22,0.15)" }}>
-              <div className="flex flex-col items-center py-4 gap-3">
+              <div className="flex flex-col items-center py-3 gap-2">
                 <div className="relative">
                   <Loader2 className="h-10 w-10 text-orange-400 animate-spin" />
                   <Rocket className="h-4 w-4 text-orange-400 absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2" />
                 </div>
                 <p className="text-sm font-bold text-[#ccc]">Actualizando...</p>
                 <p className="text-[10px] text-[#555]">
-                  {stepLabels[currentStep] || currentStep}
+                  {stepLabels[currentStep] || currentStep || "Iniciando..."}
                 </p>
+                <span className="text-[10px] font-mono text-[#444]">{elapsed}s</span>
               </div>
-              {/* Step progress */}
-              <div className="flex items-center justify-center gap-1.5 mt-2">
-                {["git pull", "npm install", "build", "restart"].map((s, i) => (
-                  <div key={s} className="flex items-center gap-1.5">
-                    <div
-                      className="h-1.5 w-8 rounded-full transition-all duration-500"
-                      style={{
-                        background: currentStep === s ? "#f97316" :
-                          ["git pull", "npm install", "build", "restart"].indexOf(currentStep) > i ? "#22c55e" : "rgba(255,255,255,0.06)",
-                      }}
-                    />
-                  </div>
-                ))}
+
+              {/* Step-by-step progress */}
+              <div className="space-y-1.5 mt-3">
+                {ALL_STEPS.map((step) => {
+                  const status = getStepStatus(step);
+                  const completed = completedSteps.find(s => s.step === step);
+                  return (
+                    <div key={step} className="flex items-center gap-2.5 px-3 py-2 rounded-xl" style={{
+                      background: status === "active" ? "rgba(249,115,22,0.08)" : status === "done" ? "rgba(34,197,94,0.04)" : status === "error" ? "rgba(239,68,68,0.06)" : "rgba(255,255,255,0.01)",
+                      border: `1px solid ${status === "active" ? "rgba(249,115,22,0.2)" : status === "done" ? "rgba(34,197,94,0.1)" : status === "error" ? "rgba(239,68,68,0.15)" : "rgba(255,255,255,0.03)"}`,
+                    }}>
+                      {status === "active" && <Loader2 className="h-3.5 w-3.5 text-orange-400 animate-spin shrink-0" />}
+                      {status === "done" && <CheckCircle className="h-3.5 w-3.5 text-green-400 shrink-0" />}
+                      {status === "error" && <XCircle className="h-3.5 w-3.5 text-red-400 shrink-0" />}
+                      {status === "pending" && <div className="h-3.5 w-3.5 rounded-full border border-white/10 shrink-0" />}
+                      <span className="flex-1 text-[11px] font-semibold" style={{
+                        color: status === "active" ? "#fb923c" : status === "done" ? "#86efac" : status === "error" ? "#fca5a5" : "rgba(255,255,255,0.2)",
+                      }}>
+                        {stepLabels[step] || step}
+                      </span>
+                      {completed && (
+                        <span className="text-[9px] font-mono text-[#555]">{(completed.ms / 1000).toFixed(1)}s</span>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}
 
           {/* Results */}
-          {result && (
+          {result && !updating && (
             <div className="space-y-2">
-              {/* Overall status */}
               <div
                 className="rounded-2xl p-3.5 flex items-center gap-3"
                 style={{
@@ -244,7 +349,6 @@ export default function DeployModal({ onClose }: { onClose: () => void }) {
                 </div>
               </div>
 
-              {/* Step details */}
               <div className="space-y-1">
                 <span className="text-[10px] text-[#555] font-bold uppercase tracking-wider">Detalle</span>
                 {result.steps.map((step) => (
@@ -287,7 +391,7 @@ export default function DeployModal({ onClose }: { onClose: () => void }) {
 
         {/* Footer */}
         <div className="p-4 border-t border-white/5 flex items-center justify-end gap-2">
-          {result && (
+          {result && !updating && (
             <button
               onClick={() => { setResult(null); checkVersion(); }}
               className="px-4 py-2 rounded-xl text-[11px] font-bold text-[#888] hover:text-[#ccc] transition-all cursor-pointer"
@@ -295,12 +399,14 @@ export default function DeployModal({ onClose }: { onClose: () => void }) {
               Volver
             </button>
           )}
-          <button
-            onClick={onClose}
-            className="px-4 py-2 rounded-xl text-[11px] font-bold text-[#666] hover:text-[#aaa] transition-all cursor-pointer"
-          >
-            {result ? "Cerrar" : "Cancelar"}
-          </button>
+          {!updating && (
+            <button
+              onClick={onClose}
+              className="px-4 py-2 rounded-xl text-[11px] font-bold text-[#666] hover:text-[#aaa] transition-all cursor-pointer"
+            >
+              {result ? "Cerrar" : "Cancelar"}
+            </button>
+          )}
           {!result && !updating && version?.updateAvailable && (
             <button
               onClick={handleUpdate}

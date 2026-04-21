@@ -1973,63 +1973,56 @@ export default function LeafletMapView({
         className: isDown && !isBothDown ? "link-pulse" : isVPN ? "link-vpn" : undefined,
       });
 
-      // Tooltip for cable label on hover — include endpoint status
+      // ── Link click popup — shows full link details ──
       const statusLabel = (s: number | undefined) => s === 0 ? "🔴 DOWN" : s === 1 ? "🟢 UP" : s === 2 ? "🟡 PENDING" : s === 3 ? "🟣 MAINT" : "⚪ N/A";
-      const tooltipParts: string[] = [];
-      if (edge.label) tooltipParts.push(`<b>${edge.label}</b>`);
-      if (isDown || isMaint || isPending) {
-        // Find real endpoint names
-        const findRealName = (nodeId: string, fromEdge: string, visited: Set<string>): string => {
-          const node = nodesRef.current.find((n) => n.id === nodeId);
-          if (!node) return "?";
-          if (node.kuma_monitor_id) return node.label || "?";
-          visited.add(fromEdge);
-          const next = edgesRef.current.find((e) => !visited.has(e.id) && (e.source_node_id === nodeId || e.target_node_id === nodeId));
-          if (!next) return node.label || "?";
-          const nextNodeId = next.source_node_id === nodeId ? next.target_node_id : next.source_node_id;
-          return findRealName(nextNodeId, next.id, visited);
-        };
-        const srcName = findRealName(edge.source_node_id, edge.id, new Set([edge.id]));
-        const tgtName = findRealName(edge.target_node_id, edge.id, new Set([edge.id]));
-        tooltipParts.push(`<span style="font-size:10px">${srcName}: ${statusLabel(srcStatus)}<br/>${tgtName}: ${statusLabel(tgtStatus)}</span>`);
-      }
-      if (tooltipParts.length > 0) {
-        line.bindTooltip(tooltipParts.join("<br/>"), { sticky: true, className: "leaflet-label-dark" });
-      }
+      const statusDot = (s: number | undefined) => s === 0 ? "#ef4444" : s === 1 ? "#22c55e" : s === 2 ? "#f59e0b" : s === 3 ? "#8b5cf6" : "#666";
+      const linkTypeLabel = isFiber ? "Fibra óptica" : isWireless ? "Wireless" : isVPN ? "VPN" : "Cobre/UTP";
+      const linkTypeIcon = isFiber ? "🔵" : isWireless ? "📡" : isVPN ? "🔒" : "🟠";
 
-      // Source interface label — plain text near source
-      if (cd.sourceInterface) {
-        const lat = srcNode.x + (tgtNode.x - srcNode.x) * 0.12;
-        const lng = srcNode.y + (tgtNode.y - srcNode.y) * 0.12;
-        const srcLabel = L.marker([lat, lng], {
-          icon: L.divIcon({
-            className: "interface-label",
-            html: `<span style="color:#93c5fd;font-size:8px;font-weight:600;font-family:ui-monospace,monospace;white-space:nowrap;text-shadow:0 1px 3px rgba(0,0,0,0.9);pointer-events:none;">${cd.sourceInterface}</span>`,
-            iconSize: [0, 0],
-            iconAnchor: [0, 6],
-          }),
-          interactive: false,
-        });
-        srcLabel.addTo(map);
-        labelMarkersRef.current.set(`${edge.id}-src`, srcLabel);
-      }
+      const buildPopupHtml = () => {
+        const srcName = srcNode.label || "?";
+        const tgtName = tgtNode.label || "?";
+        const rows: string[] = [];
 
-      // Target interface label — plain text near target
-      if (cd.targetInterface) {
-        const lat = srcNode.x + (tgtNode.x - srcNode.x) * 0.88;
-        const lng = srcNode.y + (tgtNode.y - srcNode.y) * 0.88;
-        const tgtLabel = L.marker([lat, lng], {
-          icon: L.divIcon({
-            className: "interface-label",
-            html: `<span style="color:#c4b5fd;font-size:8px;font-weight:600;font-family:ui-monospace,monospace;white-space:nowrap;text-shadow:0 1px 3px rgba(0,0,0,0.9);pointer-events:none;">${cd.targetInterface}</span>`,
-            iconSize: [0, 0],
-            iconAnchor: [0, 6],
-          }),
-          interactive: false,
-        });
-        tgtLabel.addTo(map);
-        labelMarkersRef.current.set(`${edge.id}-tgt`, tgtLabel);
-      }
+        // Header
+        rows.push(`<div style="font-size:12px;font-weight:800;color:#eee;margin-bottom:6px;display:flex;align-items:center;gap:6px;">
+          ${linkTypeIcon} <span>${linkTypeLabel}</span>
+          ${edge.label ? `<span style="font-size:9px;color:#888;font-weight:500;">— ${edge.label}</span>` : ""}
+        </div>`);
+
+        // Origin
+        rows.push(`<div style="display:flex;align-items:center;gap:6px;padding:4px 0;border-bottom:1px solid rgba(255,255,255,0.06);">
+          <div style="width:7px;height:7px;border-radius:50%;background:${statusDot(srcStatus)};flex-shrink:0;"></div>
+          <div style="flex:1;min-width:0;">
+            <div style="font-size:10px;color:#999;font-weight:600;">ORIGEN</div>
+            <div style="font-size:11px;color:#ddd;font-weight:700;">${srcName}</div>
+            ${cd.sourceInterface ? `<div style="font-size:9px;color:#93c5fd;font-family:ui-monospace,monospace;">${cd.sourceInterface}</div>` : ""}
+          </div>
+          <span style="font-size:9px;color:#666;">${statusLabel(srcStatus)}</span>
+        </div>`);
+
+        // Destination
+        rows.push(`<div style="display:flex;align-items:center;gap:6px;padding:4px 0;">
+          <div style="width:7px;height:7px;border-radius:50%;background:${statusDot(tgtStatus)};flex-shrink:0;"></div>
+          <div style="flex:1;min-width:0;">
+            <div style="font-size:10px;color:#999;font-weight:600;">DESTINO</div>
+            <div style="font-size:11px;color:#ddd;font-weight:700;">${tgtName}</div>
+            ${cd.targetInterface ? `<div style="font-size:9px;color:#c4b5fd;font-family:ui-monospace,monospace;">${cd.targetInterface}</div>` : ""}
+          </div>
+          <span style="font-size:9px;color:#666;">${statusLabel(tgtStatus)}</span>
+        </div>`);
+
+        return `<div style="min-width:180px;max-width:260px;">${rows.join("")}</div>`;
+      };
+
+      // Click on visible line → open popup
+      const openLinkPopup = (e: any) => {
+        const popup = L.popup({ className: "leaflet-popup-dark", maxWidth: 280 })
+          .setLatLng(e.latlng)
+          .setContent(buildPopupHtml());
+        popup.openOn(map);
+      };
+      line.on("click", openLinkPopup);
 
       // SNMP traffic widget — draggable with mini sparkline
       if (cd.snmpMonitorId && !cd.hideTraffic) {
@@ -2165,6 +2158,7 @@ export default function LeafletMapView({
       const hitLine = L.polyline(linePoints, {
         color: "transparent", weight: 16, opacity: 0, interactive: true,
       });
+      hitLine.on("click", openLinkPopup);
       hitLine.on("contextmenu", (e: any) => {
         e.originalEvent.preventDefault();
         e.originalEvent.stopPropagation();

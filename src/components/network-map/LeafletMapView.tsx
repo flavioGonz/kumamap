@@ -1696,7 +1696,7 @@ export default function LeafletMapView({
               setStreamConfigNodeId(node.id);
             } else {
               // Normal edit modal
-              setInputModalConfig({ nodeId: node.id, initial: node.label, mac: cd.mac || "", ip: cd.ip || "", credUser: cd.credUser || "", credPass: cd.credPass || "", labelHidden: cd.labelHidden ?? false, labelSize: cd.labelSize ?? 12, nodeColor: cd.nodeColor || "" });
+              setInputModalConfig({ nodeId: node.id, initial: node.label, mac: cd.mac || "", ip: cd.ip || "", credUser: cd.credUser || "", credPass: cd.credPass || "", credPort: cd.credPort as number | undefined, labelHidden: cd.labelHidden ?? false, labelSize: cd.labelSize ?? 12, nodeColor: cd.nodeColor || "" });
               setInputModalOpen(true);
             }
           }
@@ -2881,7 +2881,7 @@ export default function LeafletMapView({
           icon: menuIcons.Pencil,
           onClick: () => {
             const cd = safeJsonParse<NodeCustomData>(node?.custom_data);
-            setInputModalConfig({ nodeId, initial: node?.label || "", mac: cd.mac || "", ip: cd.ip || "", credUser: cd.credUser || "", credPass: cd.credPass || "", labelHidden: cd.labelHidden ?? false, labelSize: cd.labelSize ?? 12, nodeColor: cd.nodeColor || "" });
+            setInputModalConfig({ nodeId, initial: node?.label || "", mac: cd.mac || "", ip: cd.ip || "", credUser: cd.credUser || "", credPass: cd.credPass || "", credPort: cd.credPort as number | undefined, labelHidden: cd.labelHidden ?? false, labelSize: cd.labelSize ?? 12, nodeColor: cd.nodeColor || "" });
             setInputModalOpen(true);
           },
         },
@@ -2985,7 +2985,7 @@ export default function LeafletMapView({
         icon: menuIcons.Pencil,
         onClick: () => {
           const cd = safeJsonParse<NodeCustomData>(node?.custom_data);
-          setInputModalConfig({ nodeId, initial: node?.label || "", mac: cd.mac || "", ip: cd.ip || "", credUser: cd.credUser || "", credPass: cd.credPass || "", labelHidden: cd.labelHidden ?? false, labelSize: cd.labelSize ?? 12, nodeColor: cd.nodeColor || "" });
+          setInputModalConfig({ nodeId, initial: node?.label || "", mac: cd.mac || "", ip: cd.ip || "", credUser: cd.credUser || "", credPass: cd.credPass || "", credPort: cd.credPort as number | undefined, labelHidden: cd.labelHidden ?? false, labelSize: cd.labelSize ?? 12, nodeColor: cd.nodeColor || "" });
           setInputModalOpen(true);
         },
       },
@@ -4216,7 +4216,7 @@ export default function LeafletMapView({
             if (idx >= 0) {
               const ncd = safeJsonParse<NodeCustomData>(nodesRef.current[idx].custom_data);
               ncd.mac = values.mac; ncd.ip = values.ip;
-              ncd.credUser = values.credUser; ncd.credPass = values.credPass;
+              ncd.credUser = values.credUser; ncd.credPass = values.credPass; ncd.credPort = values.credPort;
               ncd.labelHidden = values.labelHidden; ncd.labelSize = values.labelSize;
               ncd.nodeColor = values.nodeColor;
               nodesRef.current[idx] = { ...nodesRef.current[idx], label: values.name, custom_data: JSON.stringify(ncd) };

@@ -325,6 +325,7 @@ function DeviceEditor({
         {activeTab === "mikrotik" && device.managementIp && (
           <MikrotikStatusPanel
             ip={device.managementIp}
+            port={device.mgmtPort}
             user={device.mgmtUser}
             password={device.mgmtPassword}
           />
@@ -370,16 +371,22 @@ function DeviceEditor({
                     <FieldLabel>Comunidad SNMP</FieldLabel>
                     <input type="text" value={device.snmpCommunity || ""} onChange={e => onChange({ ...device, snmpCommunity: e.target.value })} placeholder="public" disabled={isLocked} style={{ ...fieldStyle, fontFamily: "monospace", opacity: isLocked ? 0.5 : 1 }} />
                   </div>
-                  {(device.type === "nvr" || device.type === "pbx") && (
+                  {(device.type === "nvr" || device.type === "pbx" || device.type === "router") && (
                     <>
                       <div>
                         <FieldLabel>Usuario Admin</FieldLabel>
-                        <input type="text" value={device.mgmtUser || ""} onChange={e => onChange({ ...device, mgmtUser: e.target.value })} placeholder={device.type === "nvr" ? "admin" : "admin"} disabled={isLocked} style={{ ...fieldStyle, fontFamily: "monospace", opacity: isLocked ? 0.5 : 1 }} />
+                        <input type="text" value={device.mgmtUser || ""} onChange={e => onChange({ ...device, mgmtUser: e.target.value })} placeholder="admin" disabled={isLocked} style={{ ...fieldStyle, fontFamily: "monospace", opacity: isLocked ? 0.5 : 1 }} />
                       </div>
                       <div>
                         <FieldLabel>Contraseña Admin</FieldLabel>
                         <input type="password" value={device.mgmtPassword || ""} onChange={e => onChange({ ...device, mgmtPassword: e.target.value })} placeholder="••••••" disabled={isLocked} style={{ ...fieldStyle, fontFamily: "monospace", opacity: isLocked ? 0.5 : 1 }} />
                       </div>
+                      {device.type === "router" && (
+                        <div>
+                          <FieldLabel>Puerto API</FieldLabel>
+                          <input type="number" min={1} max={65535} value={device.mgmtPort || ""} onChange={e => onChange({ ...device, mgmtPort: e.target.value ? parseInt(e.target.value) : undefined })} placeholder="443" disabled={isLocked} style={{ ...fieldStyle, fontFamily: "monospace", opacity: isLocked ? 0.5 : 1 }} />
+                        </div>
+                      )}
                     </>
                   )}
                 </>

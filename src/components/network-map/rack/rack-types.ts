@@ -105,9 +105,10 @@ export interface RackDevice {
   portCount?: number;
   managementIp?: string;
   snmpCommunity?: string;
-  // Credenciales para APIs HTTP (ISAPI Hikvision, PBX admin, etc.)
+  // Credenciales para APIs HTTP (ISAPI Hikvision, PBX admin, MikroTik REST, etc.)
   mgmtUser?: string;
   mgmtPassword?: string;
+  mgmtPort?: number; // Puerto de la API (ej: 443 para MikroTik REST)
   model?: string;
   serial?: string;
   cableLength?: number;

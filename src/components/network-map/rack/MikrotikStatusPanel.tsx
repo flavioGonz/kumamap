@@ -104,12 +104,13 @@ const ACCENT = "#8b5cf6"; // Purple for MikroTik
 
 interface Props {
   ip: string;
+  port?: number;  // Puerto de la REST API (default: auto HTTPS 443 / HTTP 80)
   user?: string;
   password?: string;
   compact?: boolean; // For map sidebar (smaller layout)
 }
 
-export default function MikrotikStatusPanel({ ip, user, password, compact }: Props) {
+export default function MikrotikStatusPanel({ ip, port, user, password, compact }: Props) {
   const [data, setData] = useState<MikrotikResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -121,6 +122,7 @@ export default function MikrotikStatusPanel({ ip, user, password, compact }: Pro
   const fetchData = useCallback(async () => {
     try {
       const params = new URLSearchParams({ ip });
+      if (port) params.set("port", String(port));
       if (user) params.set("user", user);
       if (password) params.set("pass", password);
       const res = await fetch(apiUrl(`/api/mikrotik/poll?${params}`));

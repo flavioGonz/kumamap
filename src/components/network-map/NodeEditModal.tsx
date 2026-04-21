@@ -25,6 +25,7 @@ export interface NodeEditConfig {
   ip?: string;
   credUser?: string;
   credPass?: string;
+  credPort?: number;
   labelHidden?: boolean;
   labelSize?: number;
   nodeColor?: string;
@@ -43,6 +44,7 @@ export interface NodeEditModalProps {
     ip?: string;
     credUser?: string;
     credPass?: string;
+    credPort?: number;
     labelHidden?: boolean;
     labelSize?: number;
     nodeColor?: string;
@@ -68,6 +70,8 @@ export default function NodeEditModal({
   const setEditUser = (v: string) => onConfigChange((c) => ({ ...c, credUser: v }));
   const editPass = config.credPass || "";
   const setEditPass = (v: string) => onConfigChange((c) => ({ ...c, credPass: v }));
+  const editPort = config.credPort;
+  const setEditPort = (v: number | undefined) => onConfigChange((c) => ({ ...c, credPort: v }));
   const editLabelHidden = config.labelHidden ?? false;
   const setEditLabelHidden = (v: boolean) => onConfigChange((c) => ({ ...c, labelHidden: v }));
   const editLabelSize = config.labelSize ?? 12;
@@ -83,6 +87,7 @@ export default function NodeEditModal({
         ip: editIp.trim() || undefined,
         credUser: editUser.trim() || undefined,
         credPass: editPass.trim() || undefined,
+        credPort: editPort || undefined,
         labelHidden: editLabelHidden || undefined,
         labelSize: editLabelSize !== 12 ? editLabelSize : undefined,
         nodeColor: editNodeColor || undefined,
@@ -261,7 +266,7 @@ export default function NodeEditModal({
             <div className="text-[10px] font-bold uppercase tracking-wider text-[#555] mb-1">
               Credenciales del dispositivo
             </div>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-3 gap-2">
               <div>
                 <label className="text-[10px] text-[#666] block mb-1">Usuario</label>
                 <input
@@ -306,6 +311,19 @@ export default function NodeEditModal({
                   </button>
                 </div>
               </div>
+              <div>
+                <label className="text-[10px] text-[#666] block mb-1">Puerto API</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={65535}
+                  value={editPort || ""}
+                  onChange={(e) => setEditPort(e.target.value ? parseInt(e.target.value) : undefined)}
+                  placeholder="443"
+                  className="w-full rounded-xl px-3 py-2 text-xs text-[#ededed] font-mono placeholder:text-[#444] focus:outline-none focus:ring-1 focus:ring-blue-500/30"
+                  style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}
+                />
+              </div>
             </div>
             <p className="text-[9px] text-[#444] leading-relaxed">
               Las credenciales se guardan localmente en el mapa. No se envían a ningún servidor externo.
@@ -325,7 +343,7 @@ export default function NodeEditModal({
                 </svg>
                 <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: "#8b5cf6" }}>MikroTik REST API</span>
               </div>
-              <MikrotikStatusPanel ip={editIp} user={editUser} password={editPass} compact />
+              <MikrotikStatusPanel ip={editIp} port={editPort} user={editUser} password={editPass} compact />
             </div>
           )}
 

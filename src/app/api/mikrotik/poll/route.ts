@@ -163,14 +163,17 @@ async function mikrotikFetch(
   path: string,
   user: string,
   pass: string,
-  timeoutMs = 8000
+  timeoutMs = 8000,
+  port?: number
 ): Promise<any> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   for (const scheme of ["https", "http"]) {
     try {
-      const url = `${scheme}://${ip}/rest${path}`;
+      const effectivePort = port || (scheme === "https" ? 443 : 80);
+      const portSuffix = (scheme === "https" && effectivePort === 443) || (scheme === "http" && effectivePort === 80) ? "" : `:${effectivePort}`;
+      const url = `${scheme}://${ip}${portSuffix}/rest${path}`;
 
       // For HTTPS, we need to set NODE_TLS_REJECT_UNAUTHORIZED temporarily
       // or use a custom agent. Using env var approach for simplicity.
@@ -290,6 +293,7 @@ function parseDhcpLeases(raw: any[]): MikrotikDhcpLease[] {
 export async function GET(req: NextRequest) {
   const { searchParams } = req.nextUrl;
   const ip = searchParams.get("ip");
+  const port = searchParams.get("port") ? parseInt(searchParams.get("port")!) : undefined;
   const user = searchParams.get("user") || "admin";
   const pass = searchParams.get("pass") || "";
 
@@ -314,12 +318,12 @@ export async function GET(req: NextRequest) {
     // Fetch all endpoints in parallel
     const [identityRaw, resourceRaw, routerboardRaw, interfacesRaw, ipRaw, dhcpRaw] =
       await Promise.allSettled([
-        mikrotikFetch(ip, "/system/identity", user, pass),
-        mikrotikFetch(ip, "/system/resource", user, pass),
-        mikrotikFetch(ip, "/system/routerboard", user, pass),
-        mikrotikFetch(ip, "/interface", user, pass),
-        mikrotikFetch(ip, "/ip/address", user, pass),
-        mikrotikFetch(ip, "/ip/dhcp-server/lease", user, pass, 5000),
+        mikrotikFetch(ip, "/system/identity", user, pass, 8000, port),
+        mikrotikFetch(ip, "/system/resource", user, pass, 8000, port),
+        mikrotikFetch(ip, "/system/routerboard", user, pass, 8000, port),
+        mikrotikFetch(ip, "/interface", user, pass, 8000, port),
+        mikrotikFetch(ip, "/ip/address", user, pass, 8000, port),
+        mikrotikFetch(ip, "/ip/dhcp-server/lease", user, pass, 5000, port),
       ]);
 
     result.reachable = true;

@@ -31,6 +31,7 @@ export async function POST() {
 
   try {
     const steps = [
+      { label: "dependencias", cmd: "which ffmpeg > /dev/null 2>&1 || (apt-get update -qq && apt-get install -y -qq ffmpeg) 2>&1 || (apk add --no-cache ffmpeg) 2>&1 || echo 'ffmpeg ya instalado o no se pudo instalar'" },
       { label: "git pull", cmd: "git pull origin master" },
       { label: "npm install", cmd: "npm install --omit=dev --ignore-scripts 2>&1 || true" },
       { label: "build", cmd: "npm run build" },

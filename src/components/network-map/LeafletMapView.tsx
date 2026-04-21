@@ -508,6 +508,7 @@ export default function LeafletMapView({
   // Camera stream modals
   const [streamConfigNodeId, setStreamConfigNodeId] = useState<string | null>(null);
   const [streamViewers, setStreamViewers] = useState<{ nodeId: string; mode: "tooltip" | "pip" }[]>([]);
+  const [focusedViewer, setFocusedViewer] = useState<string | null>(null);
   const [tooltipAnchor, setTooltipAnchor] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const MAX_STREAMS = 4;
 
@@ -4447,6 +4448,8 @@ export default function LeafletMapView({
             cameraName={camNode?.label || "Cámara"}
             onClose={closeViewer}
             initialOffset={idx}
+            zLayer={focusedViewer === viewer.nodeId ? 10 : idx}
+            onFocus={() => setFocusedViewer(viewer.nodeId)}
           />
         );
       })}

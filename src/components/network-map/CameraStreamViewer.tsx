@@ -11,6 +11,10 @@ interface CameraStreamViewerProps {
   onClose: () => void;
   /** Initial position offset for multi-view stacking */
   initialOffset?: number;
+  /** Z-index layer for stacking order */
+  zLayer?: number;
+  /** Called when user interacts (brings to front) */
+  onFocus?: () => void;
 }
 
 const MIN_W = 320;
@@ -21,7 +25,7 @@ function proxySnapshotUrl(cameraUrl: string, cacheBust: number): string {
   return apiUrl(`/api/camera/snapshot?url=${encodeURIComponent(cameraUrl)}&_t=${cacheBust}`);
 }
 
-export default function CameraStreamViewer({ config, cameraName, onClose, initialOffset = 0 }: CameraStreamViewerProps) {
+export default function CameraStreamViewer({ config, cameraName, onClose, initialOffset = 0, zLayer = 0, onFocus }: CameraStreamViewerProps) {
   const [fullscreen, setFullscreen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
@@ -41,15 +45,23 @@ export default function CameraStreamViewer({ config, cameraName, onClose, initia
   const resizeStart = useRef({ mx: 0, my: 0, w: 0, h: 0, x: 0, y: 0 });
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Initialise position — stack offset for multi-view
+  // Initialise position — place in quadrants for multi-view
   useEffect(() => {
     const vw = window.innerWidth;
     const vh = window.innerHeight;
-    const w = Math.min(520, vw * 0.45);
+    const w = Math.min(480, vw * 0.42);
     const h = Math.round(w * 0.625); // ~16:10 aspect
-    const offset = initialOffset * 30;
+    const gap = 10;
+    // 4 quadrant positions: top-left, top-right, bottom-left, bottom-right
+    const positions = [
+      { x: vw - w - gap, y: vh - h - gap - 40 },        // bottom-right (default)
+      { x: gap, y: vh - h - gap - 40 },                  // bottom-left
+      { x: vw - w - gap, y: gap },                       // top-right
+      { x: gap, y: gap },                                // top-left
+    ];
+    const p = positions[initialOffset % 4];
     setSize({ w, h });
-    setPos({ x: vw - w - 20 - offset, y: vh - h - 60 - offset });
+    setPos(p);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Snapshot double-buffer
@@ -157,7 +169,7 @@ export default function CameraStreamViewer({ config, cameraName, onClose, initia
         top: pos.y,
         width: size.w,
         height: size.h,
-        zIndex: 9999,
+        zIndex: 9990 + zLayer,
         borderRadius: 12,
         overflow: "hidden",
         boxShadow: "0 30px 100px rgba(0,0,0,0.9), 0 0 0 1px rgba(255,255,255,0.06)",
@@ -180,7 +192,7 @@ export default function CameraStreamViewer({ config, cameraName, onClose, initia
   ];
 
   return (
-    <div ref={containerRef} style={wrapStyle}>
+    <div ref={containerRef} style={wrapStyle} onMouseDown={() => onFocus?.()}>
       {/* ── Resize handles ── */}
       {!fullscreen && resizeEdges.map(({ edge, style }) => (
         <div key={edge} style={style} onMouseDown={(e) => onResizeStart(edge, e)} />

@@ -16,6 +16,7 @@ import {
   ChevronLeft,
   Pencil,
   Type,
+  Radar,
 } from "lucide-react";
 import { useState } from "react";
 
@@ -44,6 +45,7 @@ interface MapToolbarProps {
   bgScale?: number;
   onScaleBg?: (delta: number) => void;
   onEditName?: () => void;
+  onOnvifScan?: () => void;
 }
 
 function ToolButton({
@@ -125,6 +127,7 @@ export default function MapToolbar({
   bgScale,
   onScaleBg,
   onEditName,
+  onOnvifScan,
 }: MapToolbarProps) {
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -239,6 +242,11 @@ export default function MapToolbar({
         {onAddLabel && (
           <ToolButton onClick={onAddLabel} title="Agregar etiqueta de texto" label="Etiqueta">
             <Type className="h-3.5 w-3.5" />
+          </ToolButton>
+        )}
+        {onOnvifScan && (
+          <ToolButton onClick={onOnvifScan} title="Escanear cámaras ONVIF en la red" label="ONVIF">
+            <Radar className="h-3.5 w-3.5" />
           </ToolButton>
         )}
         <ToolButton onClick={onToggleConnectMode} title="Modo conexion" active={connectMode} label="Link">

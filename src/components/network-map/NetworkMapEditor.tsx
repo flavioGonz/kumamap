@@ -37,6 +37,7 @@ import { safeFetch } from "@/lib/error-handler";
 import { Pencil, Type, Plus } from "lucide-react";
 import Tooltip from "./Tooltip";
 import EditorSidebarControls from "./EditorSidebarControls";
+import OnvifDiscoveryModal from "./OnvifDiscoveryModal";
 import InterfaceEdge, { setEdgeStyleStraight } from "./InterfaceEdge";
 import { getIconForType } from "@/utils/get-icon-for-type";
 
@@ -80,6 +81,7 @@ function CanvasInner({
   const [timeMachineOpen, setTimeMachineOpen] = useState(false);
   const [historicalStatuses, setHistoricalStatuses] = useState<Map<number, number>>(new Map());
   const [connectMode, setConnectMode] = useState(false);
+  const [onvifModalOpen, setOnvifModalOpen] = useState(false);
   const [nodeSearchActive, setNodeSearchActive] = useState(false);
   const [nodeSearchQuery, setNodeSearchQuery] = useState("");
   const [importMapPickerOpen, setImportMapPickerOpen] = useState(false);
@@ -1099,6 +1101,12 @@ function CanvasInner({
               <span className="text-[10px] font-semibold hidden xl:inline">Punto</span>
             </button>
             </Tooltip>
+            <Tooltip content="Escanear cámaras ONVIF en la red" placement="bottom">
+            <button onClick={() => setOnvifModalOpen(true)} className="group flex items-center gap-1 rounded-xl px-2 py-1.5 text-[#888] hover:text-[#06b6d4] hover:bg-cyan-500/[0.06] transition-all">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19.07 4.93A10 10 0 0 0 6.99 3.34"/><path d="M4 6h.01"/><path d="M2.29 9.62A10 10 0 1 0 21.31 8.35"/><path d="M16.24 7.76A6 6 0 1 0 8.23 16.67"/><path d="M12 18h.01"/><path d="M17.99 11.66A6 6 0 0 1 15.77 16.67"/><circle cx="12" cy="12" r="2"/></svg>
+              <span className="text-[10px] font-semibold hidden xl:inline">ONVIF</span>
+            </button>
+            </Tooltip>
           </div>
 
           <div className="h-5 w-px mx-0.5" style={{ background: "rgba(255,255,255,0.06)" }} />
@@ -1517,6 +1525,42 @@ function CanvasInner({
             setSizePickerNodeId(null);
           }}
           onClose={() => setSizePickerNodeId(null)}
+        />
+      )}
+
+      {/* ONVIF Discovery Modal */}
+      {onvifModalOpen && (
+        <OnvifDiscoveryModal
+          onClose={() => setOnvifModalOpen(false)}
+          existingIps={nodes.map((n) => (n.data as any)?.custom_data?.managementIp || (n.data as any)?.custom_data?.ip || "").filter(Boolean)}
+          onAddCamera={(dev) => {
+            const vp = reactFlow.getViewport();
+            const offsetX = Math.random() * 100 - 50;
+            const offsetY = Math.random() * 100 - 50;
+            const label = [dev.manufacturer, dev.model].filter(Boolean).join(" ") || `Cámara ${dev.ip}`;
+            const newNode: Node = {
+              id: `onvif-${Date.now()}-${dev.ip.replace(/\./g, "")}`,
+              type: "kumaNode",
+              position: {
+                x: -vp.x / vp.zoom + 400 + offsetX,
+                y: -vp.y / vp.zoom + 300 + offsetY,
+              },
+              data: {
+                label,
+                kumaMonitorId: null,
+                icon: "camera",
+                status: 2,
+                custom_data: {
+                  ip: dev.ip,
+                  streamType: dev.streamUri ? "rtsp" : undefined,
+                  streamUrl: dev.streamUri || undefined,
+                  description: [dev.manufacturer, dev.model].filter(Boolean).join(" "),
+                },
+              } satisfies KumaNodeData,
+            };
+            setNodes((nds) => [...nds, newNode]);
+            toast.success(`Cámara agregada: ${label}`);
+          }}
         />
       )}
     </div>

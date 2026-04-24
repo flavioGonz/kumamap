@@ -9,9 +9,30 @@ export interface ChangelogEntry {
   items: string[];
 }
 
-export const APP_VERSION = "2.2.0";
+export const APP_VERSION = "2.3.0";
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: "2.3.0",
+    date: "2026-04-24",
+    title: "ONVIF Discovery, Dashboard de Camaras y MikroTik Refactoring",
+    items: [
+      "Dashboard de Camaras: nueva pagina /cameras con selector de mapa (cliente) y grilla de video en vivo (1x1, 2x2, 3x3, 4x4)",
+      "PWA Camaras: tab Camaras en la barra inferior con selector de cliente y grilla movil optimizada",
+      "ONVIF Auto-Discovery: boton 'Escanear red' en el editor de mapas y en el dashboard, escanea la red con WS-Discovery UDP multicast para detectar camaras automaticamente",
+      "Modal ONVIF: credenciales configurables, timeout seleccionable, obtiene URI RTSP y snapshot de cada camara detectada",
+      "Agregar camara desde ONVIF: un click crea el nodo en el mapa con icono, IP, stream RTSP y fabricante pre-configurados",
+      "MikroTik seguridad: credenciales movidas de URL a POST body en todas las llamadas",
+      "MikroTik TLS: agente HTTPS scoped por request en vez de bypass TLS global",
+      "MikroTik modulo compartido: mikrotik-client.ts centraliza fetch, whitelist de paths y manejo de errores",
+      "MikroTik whitelist: solo paths autorizados (/rest/system, /rest/interface, etc.) pueden consultarse via /api/mikrotik/query",
+      "Pestana MikroTik solo visible para routers con brand=mikrotik (no para todos los routers)",
+      "Selector de marca en rack device editor: MikroTik, Cisco, Ubiquiti, Juniper, Huawei, TP-Link y otros",
+      "Ventanas de video redimensionables: drag por bordes/esquinas, multi-view hasta 4 camaras simultaneas con posicionamiento en cuadrantes",
+      "Link tooltip: click en un enlace del mapa muestra tooltip con informacion del link (tipo, velocidad, equipos conectados)",
+      "Fix PWA: proxy auth ahora permite /api/maps GET sin autenticacion para la app movil",
+    ],
+  },
   {
     version: "2.2.0",
     date: "2026-04-14",

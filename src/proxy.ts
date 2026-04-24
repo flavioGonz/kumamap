@@ -17,7 +17,7 @@ const PUBLIC_PATHS = [
 
 // API routes accessible via GET without auth (needed by public /view/[id] kiosk)
 const PUBLIC_GET_PREFIXES = [
-  "/api/maps/",            // GET single map by id
+  "/api/maps",             // GET maps list + single map by id (needed by mobile PWA)
   "/api/kuma",             // monitor data (needed by mobile PWA + kiosk)
   "/api/kuma/down-since",  // monitor down-since timestamps
   "/api/kuma/history/",    // monitor ping history
@@ -35,8 +35,6 @@ function isPublicPath(pathname: string): boolean {
 
 function isPublicGetRoute(method: string, pathname: string): boolean {
   if (method !== "GET") return false;
-  // Block listing all maps (/api/maps without ID) — only single map by ID is public
-  if (pathname === "/api/maps/" || pathname === "/api/maps") return false;
   return PUBLIC_GET_PREFIXES.some((p) => pathname.startsWith(p));
 }
 

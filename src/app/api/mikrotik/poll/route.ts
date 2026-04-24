@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { mikrotikFetch } from "@/lib/mikrotik-client";
 
 export const dynamic = "force-dynamic";
 
@@ -99,126 +100,6 @@ interface MikrotikResult {
   dhcpLeases?: MikrotikDhcpLease[];
 }
 
-// ── REST API helpers ───────────────────────────────────────────────────────
-
-async function mikrotikGet(
-  ip: string,
-  path: string,
-  user: string,
-  pass: string,
-  timeoutMs = 8000
-): Promise<any> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-
-  // Try HTTPS first, fall back to HTTP
-  for (const scheme of ["https", "http"]) {
-    try {
-      const url = `${scheme}://${ip}/rest${path}`;
-      const res = await fetch(url, {
-        headers: {
-          Authorization: "Basic " + Buffer.from(`${user}:${pass}`).toString("base64"),
-          "Content-Type": "application/json",
-        },
-        signal: controller.signal,
-        // @ts-expect-error Node fetch option
-        rejectUnauthorized: false,
-      });
-
-      clearTimeout(timer);
-
-      if (res.ok) {
-        return await res.json();
-      }
-
-      // If 401, wrong credentials
-      if (res.status === 401) {
-        throw new Error("Credenciales inválidas");
-      }
-
-      // If HTTPS fails with non-auth error, try HTTP
-      if (scheme === "https") continue;
-
-      throw new Error(`HTTP ${res.status}`);
-    } catch (err: any) {
-      clearTimeout(timer);
-
-      // Credential errors should not retry
-      if (err.message === "Credenciales inválidas") throw err;
-
-      // If HTTPS failed, try HTTP
-      if (scheme === "https") continue;
-
-      throw err;
-    }
-  }
-
-  throw new Error("No se pudo conectar al router");
-}
-
-// Node.js fetch doesn't support rejectUnauthorized directly,
-// so we use the agent approach for HTTPS
-async function mikrotikFetch(
-  ip: string,
-  path: string,
-  user: string,
-  pass: string,
-  timeoutMs = 8000,
-  port?: number
-): Promise<any> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-
-  for (const scheme of ["https", "http"]) {
-    try {
-      const effectivePort = port || (scheme === "https" ? 443 : 80);
-      const portSuffix = (scheme === "https" && effectivePort === 443) || (scheme === "http" && effectivePort === 80) ? "" : `:${effectivePort}`;
-      const url = `${scheme}://${ip}${portSuffix}/rest${path}`;
-
-      // For HTTPS, we need to set NODE_TLS_REJECT_UNAUTHORIZED temporarily
-      // or use a custom agent. Using env var approach for simplicity.
-      const prevTls = process.env.NODE_TLS_REJECT_UNAUTHORIZED;
-      if (scheme === "https") {
-        process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
-      }
-
-      const res = await fetch(url, {
-        headers: {
-          Authorization: "Basic " + Buffer.from(`${user}:${pass}`).toString("base64"),
-          "Content-Type": "application/json",
-        },
-        signal: controller.signal,
-      });
-
-      // Restore TLS setting
-      if (scheme === "https") {
-        if (prevTls === undefined) delete process.env.NODE_TLS_REJECT_UNAUTHORIZED;
-        else process.env.NODE_TLS_REJECT_UNAUTHORIZED = prevTls;
-      }
-
-      clearTimeout(timer);
-
-      if (res.ok) {
-        return await res.json();
-      }
-
-      if (res.status === 401) {
-        throw new Error("Credenciales inválidas (401)");
-      }
-
-      if (scheme === "https") continue;
-      throw new Error(`HTTP ${res.status}`);
-    } catch (err: any) {
-      clearTimeout(timer);
-      if (err.message?.includes("Credenciales")) throw err;
-      if (scheme === "https") continue;
-      throw err;
-    }
-  }
-
-  throw new Error("No se pudo conectar al router");
-}
-
 // ── Parse helpers ──────────────────────────────────────────────────────────
 
 function parseInterfaces(raw: any[]): MikrotikInterface[] {
@@ -288,14 +169,17 @@ function parseDhcpLeases(raw: any[]): MikrotikDhcpLease[] {
   }));
 }
 
-// ── Main handler ───────────────────────────────────────────────────────────
+// ── POST handler (credentials in body, not URL) ──────────────────────────
 
-export async function GET(req: NextRequest) {
-  const { searchParams } = req.nextUrl;
-  const ip = searchParams.get("ip");
-  const port = searchParams.get("port") ? parseInt(searchParams.get("port")!) : undefined;
-  const user = searchParams.get("user") || "admin";
-  const pass = searchParams.get("pass") || "";
+export async function POST(req: NextRequest) {
+  let body: any;
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
+
+  const { ip, port, user = "admin", pass = "" } = body;
 
   if (!ip) {
     return NextResponse.json({ error: "ip is required" }, { status: 400 });
@@ -356,6 +240,67 @@ export async function GET(req: NextRequest) {
     const allFailed = [identityRaw, resourceRaw, interfacesRaw].every(
       (r) => r.status === "rejected"
     );
+    if (allFailed) {
+      result.reachable = false;
+      const firstErr = (identityRaw as PromiseRejectedResult).reason;
+      result.error = firstErr?.message || "No se pudo conectar";
+    }
+
+    setCache(cacheKey, result);
+    return NextResponse.json(result);
+  } catch (err: any) {
+    result.error = err.message || "Error desconocido";
+    return NextResponse.json(result);
+  }
+}
+
+// ── Legacy GET (backwards compat during transition — remove later) ───────
+
+export async function GET(req: NextRequest) {
+  const { searchParams } = req.nextUrl;
+  const ip = searchParams.get("ip");
+  const port = searchParams.get("port") ? parseInt(searchParams.get("port")!) : undefined;
+  const user = searchParams.get("user") || "admin";
+  const pass = searchParams.get("pass") || "";
+
+  if (!ip) {
+    return NextResponse.json({ error: "ip is required" }, { status: 400 });
+  }
+
+  // Check cache
+  const cacheKey = `${ip}:${user}`;
+  const cached = getCached(cacheKey);
+  if (cached) {
+    return NextResponse.json(cached);
+  }
+
+  const result: MikrotikResult = {
+    ip,
+    timestamp: Date.now(),
+    reachable: false,
+  };
+
+  try {
+    const [identityRaw, resourceRaw, routerboardRaw, interfacesRaw, ipRaw, dhcpRaw] =
+      await Promise.allSettled([
+        mikrotikFetch(ip, "/system/identity", user, pass, 8000, port),
+        mikrotikFetch(ip, "/system/resource", user, pass, 8000, port),
+        mikrotikFetch(ip, "/system/routerboard", user, pass, 8000, port),
+        mikrotikFetch(ip, "/interface", user, pass, 8000, port),
+        mikrotikFetch(ip, "/ip/address", user, pass, 8000, port),
+        mikrotikFetch(ip, "/ip/dhcp-server/lease", user, pass, 5000, port),
+      ]);
+
+    result.reachable = true;
+
+    if (identityRaw.status === "fulfilled") result.identity = { name: identityRaw.value?.name || identityRaw.value?.[0]?.name || "?" };
+    if (resourceRaw.status === "fulfilled") result.resource = parseResource(resourceRaw.value);
+    if (routerboardRaw.status === "fulfilled") result.routerboard = parseRouterboard(routerboardRaw.value);
+    if (interfacesRaw.status === "fulfilled") result.interfaces = parseInterfaces(interfacesRaw.value);
+    if (ipRaw.status === "fulfilled") result.ipAddresses = parseIpAddresses(ipRaw.value);
+    if (dhcpRaw.status === "fulfilled") result.dhcpLeases = parseDhcpLeases(dhcpRaw.value);
+
+    const allFailed = [identityRaw, resourceRaw, interfacesRaw].every((r) => r.status === "rejected");
     if (allFailed) {
       result.reachable = false;
       const firstErr = (identityRaw as PromiseRejectedResult).reason;

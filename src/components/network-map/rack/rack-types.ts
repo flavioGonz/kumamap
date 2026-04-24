@@ -97,6 +97,7 @@ export interface RackDevice {
   sizeUnits: number;
   label: string;
   type: "server" | "switch" | "patchpanel" | "ups" | "router" | "pdu" | "pbx" | "nvr" | "tray-fiber" | "tray-1u" | "tray-2u" | "cable-organizer" | "other";
+  brand?: "mikrotik" | "cisco" | "ubiquiti" | "juniper" | "huawei" | "tp-link" | "other" | string;
   color?: string;
   monitorId?: number | null;
   ports?: PatchPort[];

@@ -136,6 +136,15 @@ export default function MikrotikStatusPanel({ ip, port, user, password, compact 
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const prevBytesRef = useRef<Record<string, { rx: number; tx: number; ts: number }>>({});
 
+  const bodyPayload = useCallback(() => {
+    const payload: any = { ip };
+    if (port) payload.port = port;
+    if (user) payload.user = user;
+    if (password) payload.pass = password;
+    return payload;
+  }, [ip, port, user, password]);
+
+  // Legacy helper for sub-components that still use URLSearchParams
   const baseParams = useCallback(() => {
     const p = new URLSearchParams({ ip });
     if (port) p.set("port", String(port));
@@ -146,8 +155,11 @@ export default function MikrotikStatusPanel({ ip, port, user, password, compact 
 
   const fetchData = useCallback(async () => {
     try {
-      const params = baseParams();
-      const res = await fetch(apiUrl(`/api/mikrotik/poll?${params}`));
+      const res = await fetch(apiUrl("/api/mikrotik/poll"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(bodyPayload()),
+      });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const result: MikrotikResult = await res.json();
       setData(result);
@@ -157,7 +169,7 @@ export default function MikrotikStatusPanel({ ip, port, user, password, compact 
     } finally {
       setLoading(false);
     }
-  }, [baseParams]);
+  }, [bodyPayload]);
 
   useEffect(() => {
     fetchData();
@@ -542,9 +554,15 @@ function RemoteSection({ ip, port, user, password, path, title, columns, basePar
   useEffect(() => {
     setLoading(true);
     setErr(null);
-    const p = baseParams();
-    p.set("path", path);
-    fetch(apiUrl(`/api/mikrotik/query?${p}`))
+    const payload: any = { ip, path };
+    if (port) payload.port = port;
+    if (user) payload.user = user;
+    if (password) payload.pass = password;
+    fetch(apiUrl("/api/mikrotik/query"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    })
       .then((r) => r.json())
       .then((j) => {
         if (j.error) { setErr(j.error); return; }

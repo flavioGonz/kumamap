@@ -213,7 +213,7 @@ function DeviceEditor({
             ...(device.type === "pbx" ? [{ id: "trunks", label: "Líneas" }] : []),
             ...(device.type === "nvr" ? [{ id: "trunks", label: "Discos" }] : []),
             ...(showManagementIp && device.managementIp ? [{ id: "snmp", label: "SNMP" }] : []),
-            ...(device.type === "router" && showManagementIp && device.managementIp ? [{ id: "mikrotik", label: "MikroTik" }] : []),
+            ...(device.type === "router" && device.brand === "mikrotik" && showManagementIp && device.managementIp ? [{ id: "mikrotik", label: "MikroTik" }] : []),
             { id: "general", label: "General" },
           ].map((tab) => (
             <button
@@ -346,6 +346,21 @@ function DeviceEditor({
                   {Object.entries(TYPE_META).map(([k, v]) => (<option key={k} value={k} style={{ background: "#1a1a1a" }}>{v.label}</option>))}
                 </select>
               </div>
+              {(device.type === "router" || device.type === "switch") && (
+                <div>
+                  <FieldLabel>Marca</FieldLabel>
+                  <select value={device.brand || ""} onChange={e => onChange({ ...device, brand: e.target.value || undefined })} disabled={isLocked} style={{ ...fieldStyle, opacity: isLocked ? 0.5 : 1 }}>
+                    <option value="" style={{ background: "#1a1a1a" }}>— Sin especificar —</option>
+                    <option value="mikrotik" style={{ background: "#1a1a1a" }}>MikroTik</option>
+                    <option value="cisco" style={{ background: "#1a1a1a" }}>Cisco</option>
+                    <option value="ubiquiti" style={{ background: "#1a1a1a" }}>Ubiquiti</option>
+                    <option value="juniper" style={{ background: "#1a1a1a" }}>Juniper</option>
+                    <option value="huawei" style={{ background: "#1a1a1a" }}>Huawei</option>
+                    <option value="tp-link" style={{ background: "#1a1a1a" }}>TP-Link</option>
+                    <option value="other" style={{ background: "#1a1a1a" }}>Otra</option>
+                  </select>
+                </div>
+              )}
               <div>
                 <FieldLabel>Color</FieldLabel>
                 <div className="flex items-center gap-2">
@@ -381,7 +396,7 @@ function DeviceEditor({
                         <FieldLabel>Contraseña Admin</FieldLabel>
                         <input type="password" value={device.mgmtPassword || ""} onChange={e => onChange({ ...device, mgmtPassword: e.target.value })} placeholder="••••••" disabled={isLocked} style={{ ...fieldStyle, fontFamily: "monospace", opacity: isLocked ? 0.5 : 1 }} />
                       </div>
-                      {device.type === "router" && (
+                      {device.type === "router" && device.brand === "mikrotik" && (
                         <div>
                           <FieldLabel>Puerto API</FieldLabel>
                           <input type="number" min={1} max={65535} value={device.mgmtPort || ""} onChange={e => onChange({ ...device, mgmtPort: e.target.value ? parseInt(e.target.value) : undefined })} placeholder="443" disabled={isLocked} style={{ ...fieldStyle, fontFamily: "monospace", opacity: isLocked ? 0.5 : 1 }} />

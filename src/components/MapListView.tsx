@@ -384,6 +384,19 @@ export default function MapListView({
           </a>
           </Tooltip>
 
+          {/* ── Cameras ── */}
+          <Tooltip content="Dashboard de Cámaras" placement="bottom">
+          <a
+            href={`${process.env.NEXT_PUBLIC_BASE_PATH || ""}/cameras`}
+            className="flex h-8 w-8 items-center justify-center rounded-lg transition-all"
+            style={{ color: "#555", border: "1px solid transparent" }}
+            onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = "#06b6d4"; (e.currentTarget as HTMLElement).style.borderColor = "rgba(6,182,212,0.25)"; (e.currentTarget as HTMLElement).style.background = "rgba(6,182,212,0.08)"; }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = "#555"; (e.currentTarget as HTMLElement).style.borderColor = "transparent"; (e.currentTarget as HTMLElement).style.background = "transparent"; }}
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2" ry="2"/></svg>
+          </a>
+          </Tooltip>
+
           {/* ── Metrics ── */}
           <Tooltip content="Métricas del servidor" placement="bottom">
           <a

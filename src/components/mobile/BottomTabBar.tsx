@@ -47,6 +47,18 @@ const tabs: Tab[] = [
     ),
   },
   {
+    href: "/mobile/cameras",
+    label: "Camaras",
+    activeColor: "#06b6d4",
+    glowColor: "rgba(6,182,212,0.4)",
+    icon: (active, inactive) => (
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={active ? "#06b6d4" : inactive} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <path d="m22 8-6 4 6 4V8Z" />
+        <rect width="14" height="12" x="2" y="6" rx="2" ry="2" />
+      </svg>
+    ),
+  },
+  {
     href: "/mobile/alerts",
     label: "Alertas",
     activeColor: "#f87171",
@@ -84,7 +96,7 @@ export default function BottomTabBar() {
     pathname.startsWith("/mobile/rack") ||
     pathname.startsWith("/mobile/camera")
   ) {
-    if (!pathname.startsWith("/mobile/racks")) return null;
+    if (!pathname.startsWith("/mobile/racks") && !pathname.startsWith("/mobile/cameras")) return null;
   }
 
   return (

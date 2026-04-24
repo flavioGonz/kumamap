@@ -22,6 +22,7 @@ const PUBLIC_GET_PREFIXES = [
   "/api/kuma/down-since",  // monitor down-since timestamps
   "/api/kuma/history/",    // monitor ping history
   "/api/kuma/stream",      // SSE real-time events
+  "/api/cameras",          // camera grid listing (needed by mobile PWA)
   "/api/camera/snapshot",  // camera snapshot proxy
   "/api/camera/rtsp-stream", // RTSP → MJPEG transcoding proxy
   "/api/health",           // health check (monitored by Uptime Kuma)

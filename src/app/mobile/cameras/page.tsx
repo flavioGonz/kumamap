@@ -152,34 +152,53 @@ function MobileMapCard({ map, onSelect }: { map: MapWithCameras; onSelect: () =>
   const nvrCount = map.cameras.filter((c) => c.source === "nvr").length;
   const isEmpty = map.cameras.length === 0;
 
+  const cardContent = (
+    <div className="p-3.5 flex items-center gap-3">
+      <div className="h-10 w-10 rounded-xl flex items-center justify-center shrink-0" style={{
+        background: isEmpty ? "rgba(255,255,255,0.03)" : activeStreams > 0 ? "rgba(6,182,212,0.08)" : "rgba(139,92,246,0.08)",
+      }}>
+        {isEmpty ? (
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#555" strokeWidth="1.5" strokeLinecap="round"><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M12 8v8m-4-4h8" /></svg>
+        ) : nvrCount > 0 && activeStreams === 0 ? (
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" strokeWidth="1.5" strokeLinecap="round"><rect x="2" y="6" width="20" height="12" rx="2" /><path d="M2 10h20" /></svg>
+        ) : (
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#06b6d4" strokeWidth="1.5" strokeLinecap="round"><path d="m22 8-6 4 6 4V8Z" /><rect width="14" height="12" x="2" y="6" rx="2" ry="2" /></svg>
+        )}
+      </div>
+      <div className="flex-1 min-w-0">
+        <h3 className={`text-[13px] font-semibold truncate ${isEmpty ? "text-white/40" : "text-white/85"}`}>{map.mapName}</h3>
+        <div className="flex items-center gap-2 mt-0.5">
+          {activeStreams > 0 && <span className="text-[10px] text-cyan-400/40">{activeStreams} live</span>}
+          {nvrCount > 0 && <span className="text-[10px] text-purple-400/40">{nvrCount} NVR</span>}
+          {isEmpty && <span className="text-[10px] text-white/20">Sin cámaras</span>}
+        </div>
+      </div>
+      {!isEmpty && (
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#444" strokeWidth="2" strokeLinecap="round" className="shrink-0"><polyline points="9 18 15 12 9 6" /></svg>
+      )}
+    </div>
+  );
+
+  // Empty maps: non-clickable informational card with muted styling
+  if (isEmpty) {
+    return (
+      <div
+        className="w-full text-left"
+        style={{ background: "rgba(255,255,255,0.01)", border: "1px solid rgba(255,255,255,0.03)", borderRadius: "14px", opacity: 0.6 }}
+      >
+        {cardContent}
+      </div>
+    );
+  }
+
+  // Maps with cameras: clickable with tap effect
   return (
     <button
       onClick={onSelect}
       className="w-full text-left active:scale-[0.98] transition-transform"
       style={{ background: "rgba(255,255,255,0.015)", border: "1px solid rgba(255,255,255,0.04)", borderRadius: "14px" }}
     >
-      <div className="p-3.5 flex items-center gap-3">
-        <div className="h-10 w-10 rounded-xl flex items-center justify-center shrink-0" style={{
-          background: isEmpty ? "rgba(255,255,255,0.03)" : activeStreams > 0 ? "rgba(6,182,212,0.08)" : "rgba(139,92,246,0.08)",
-        }}>
-          {isEmpty ? (
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#555" strokeWidth="1.5" strokeLinecap="round"><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M12 8v8m-4-4h8" /></svg>
-          ) : nvrCount > 0 && activeStreams === 0 ? (
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" strokeWidth="1.5" strokeLinecap="round"><rect x="2" y="6" width="20" height="12" rx="2" /><path d="M2 10h20" /></svg>
-          ) : (
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#06b6d4" strokeWidth="1.5" strokeLinecap="round"><path d="m22 8-6 4 6 4V8Z" /><rect width="14" height="12" x="2" y="6" rx="2" ry="2" /></svg>
-          )}
-        </div>
-        <div className="flex-1 min-w-0">
-          <h3 className="text-[13px] font-semibold text-white/85 truncate">{map.mapName}</h3>
-          <div className="flex items-center gap-2 mt-0.5">
-            {activeStreams > 0 && <span className="text-[10px] text-cyan-400/40">{activeStreams} live</span>}
-            {nvrCount > 0 && <span className="text-[10px] text-purple-400/40">{nvrCount} NVR</span>}
-            {isEmpty && <span className="text-[10px] text-white/20">Sin cámaras</span>}
-          </div>
-        </div>
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#444" strokeWidth="2" strokeLinecap="round" className="shrink-0"><polyline points="9 18 15 12 9 6" /></svg>
-      </div>
+      {cardContent}
     </button>
   );
 }

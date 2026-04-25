@@ -20,7 +20,8 @@ interface RouterInterface {
 
 interface PbxExtension {
   extension: string; name: string; ipPhone?: string; macAddress?: string;
-  username?: string; password?: string; model?: string; location?: string; notes?: string;
+  username?: string; password?: string; webUser?: string; webPassword?: string;
+  model?: string; location?: string; notes?: string;
 }
 
 interface PbxTrunkLine {
@@ -49,6 +50,7 @@ interface RackDevice {
   nvrTotalChannels?: number; nvrDiskBays?: number;
   portCount?: number; managementIp?: string; model?: string;
   serial?: string; cableLength?: number; isPoeCapable?: boolean; notes?: string;
+  brand?: string; snmpCommunity?: string; mgmtUser?: string; mgmtPassword?: string;
   fiberCapacity?: number; fiberConnectorType?: string; fiberMode?: string; spliceCount?: number;
   pduHasBreaker?: boolean; pduInputCount?: number; mountedItems?: string;
 }
@@ -107,6 +109,10 @@ function generatePDFHtml(rackName: string, totalUnits: number, devices: RackDevi
       <td class="c">${TYPE_LABELS[d.type] || d.type}</td>
       <td class="c">${esc(modelSerial)}</td>
       <td class="c mono">${d.managementIp || "—"}</td>
+      <td class="c">${esc(d.brand || "—")}</td>
+      <td class="c mono">${esc(d.snmpCommunity || "—")}</td>
+      <td class="c mono">${esc(d.mgmtUser || "—")}</td>
+      <td class="c mono">${esc(d.mgmtPassword || "—")}</td>
       <td class="c mono">${connPorts}</td>
       <td class="c mono">${d.cableLength != null ? `${d.cableLength}m` : "—"}</td>
       <td class="c" style="color:${d.isPoeCapable ? "#D97706" : "#aaa"}">${d.isPoeCapable ? "✓" : "—"}</td>
@@ -198,7 +204,7 @@ function generatePDFHtml(rackName: string, totalUnits: number, devices: RackDevi
 
       if (d.type === "pbx" && d.pbxExtensions && d.pbxExtensions.length > 0) {
         portDetailsHtml += `<p class="port-summary" style="color:#0891B2">${d.pbxExtensions.length} extensiones</p>`;
-        portDetailsHtml += `<table><thead><tr>${["Ext.","Nombre","IP Teléfono","MAC","Modelo","Ubicación","Usuario SIP","Notas"].map(h => `<th>${h}</th>`).join("")}</tr></thead><tbody>`;
+        portDetailsHtml += `<table><thead><tr>${["Ext.","Nombre","IP Teléfono","MAC","Modelo","Ubicación","Usuario SIP","Contraseña SIP","User Web","Pass Web","Notas"].map(h => `<th>${h}</th>`).join("")}</tr></thead><tbody>`;
         d.pbxExtensions.forEach((ext, ri) => {
           const bg = ri % 2 === 0 ? "#fff" : "#F3F4F6";
           portDetailsHtml += `<tr style="background:${bg}">
@@ -209,6 +215,9 @@ function generatePDFHtml(rackName: string, totalUnits: number, devices: RackDevi
             <td class="c">${esc(ext.model || "—")}</td>
             <td class="c">${esc(ext.location || "—")}</td>
             <td class="c mono">${ext.username || "—"}</td>
+            <td class="c mono">${ext.password || "—"}</td>
+            <td class="c mono">${ext.webUser || "—"}</td>
+            <td class="c mono">${ext.webPassword || "—"}</td>
             <td class="c">${esc(ext.notes || "")}</td>
           </tr>`;
         });
@@ -217,7 +226,7 @@ function generatePDFHtml(rackName: string, totalUnits: number, devices: RackDevi
 
       if (d.type === "pbx" && d.pbxTrunkLines && d.pbxTrunkLines.length > 0) {
         portDetailsHtml += `<p class="trunk-title"><strong style="color:#0891B2">Líneas del proveedor</strong> · <span style="color:#888">${d.pbxTrunkLines.length} líneas</span></p>`;
-        portDetailsHtml += `<table><thead><tr>${["Proveedor","Número/DID","Tipo","Canales","Servidor SIP","Códec","Estado","Notas"].map(h => `<th>${h}</th>`).join("")}</tr></thead><tbody>`;
+        portDetailsHtml += `<table><thead><tr>${["Proveedor","Número/DID","Tipo","Canales","Servidor SIP","Usuario SIP","Contraseña SIP","Códec","Estado","Notas"].map(h => `<th>${h}</th>`).join("")}</tr></thead><tbody>`;
         d.pbxTrunkLines.forEach((t, ri) => {
           const bg = ri % 2 === 0 ? "#fff" : "#F3F4F6";
           const sc = STATUS_COLORS[t.status || "active"] || "#555";
@@ -227,6 +236,8 @@ function generatePDFHtml(rackName: string, totalUnits: number, devices: RackDevi
             <td class="c mono" style="color:#0891B2">${t.type}</td>
             <td class="c mono">${t.channels || "—"}</td>
             <td class="c mono">${t.sipServer || "—"}</td>
+            <td class="c mono">${t.sipUser || "—"}</td>
+            <td class="c mono">${t.sipPassword || "—"}</td>
             <td class="c">${t.codec || "—"}</td>
             <td class="c" style="color:${sc};font-weight:600">${STATUS_LABELS[t.status || "active"] || "—"}</td>
             <td class="c">${esc(t.notes || "")}</td>
@@ -369,7 +380,7 @@ function generatePDFHtml(rackName: string, totalUnits: number, devices: RackDevi
       <thead>
         <tr>
           <th>U</th><th>Nombre</th><th>Tipo</th><th>Modelo / Serie</th>
-          <th>IP de Gestión</th><th>Puertos</th><th>Cable</th><th>PoE</th><th>Notas</th>
+          <th>IP de Gestión</th><th>Marca</th><th>SNMP</th><th>Usuario</th><th>Contraseña</th><th>Puertos</th><th>Cable</th><th>PoE</th><th>Notas</th>
         </tr>
       </thead>
       <tbody>${inventoryRows}</tbody>

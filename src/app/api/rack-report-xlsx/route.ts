@@ -51,6 +51,7 @@ interface RackDevice {
   nvrTotalChannels?: number; nvrDiskBays?: number;
   portCount?: number; managementIp?: string; model?: string;
   serial?: string; cableLength?: number; isPoeCapable?: boolean; notes?: string;
+  brand?: string; snmpCommunity?: string; mgmtUser?: string; mgmtPassword?: string;
   fiberCapacity?: number; fiberConnectorType?: string; fiberMode?: string; spliceCount?: number;
   pduHasBreaker?: boolean; pduInputCount?: number; mountedItems?: string;
 }
@@ -155,11 +156,15 @@ export async function POST(request: NextRequest) {
       { key: "model", header: "Modelo", width: 26 },
       { key: "serial", header: "Serial", width: 18 },
       { key: "ip", header: "IP Gestión", width: 18 },
+      { key: "brand", header: "Marca", width: 16 },
+      { key: "snmp", header: "SNMP Community", width: 18 },
+      { key: "mgmtUser", header: "Usuario", width: 14 },
+      { key: "mgmtPass", header: "Contraseña", width: 14 },
       { key: "ports", header: "Puertos", width: 14 },
       { key: "notes", header: "Notas", width: 34 },
     ];
     styleHeaderRow(wsEq.getRow(1));
-    wsEq.autoFilter = { from: "A1", to: "H1" };
+    wsEq.autoFilter = { from: "A1", to: "L1" };
 
     sorted.forEach((d, i) => {
       const connPorts = d.type === "patchpanel"
@@ -173,7 +178,10 @@ export async function POST(request: NextRequest) {
         pos: `U${d.unit}${d.sizeUnits > 1 ? `–${d.unit + d.sizeUnits - 1}` : ""}`,
         name: d.label, type: TYPE_LABELS[d.type] || "Otro",
         model: d.model || "", serial: d.serial || "",
-        ip: d.managementIp || "", ports: connPorts, notes: d.notes || "",
+        ip: d.managementIp || "",
+        brand: d.brand || "", snmp: d.snmpCommunity || "",
+        mgmtUser: d.mgmtUser || "", mgmtPass: d.mgmtPassword || "",
+        ports: connPorts, notes: d.notes || "",
       });
       styleDataRow(row, i % 2 === 0);
       row.getCell("ports").alignment = { horizontal: "center", vertical: "middle" };

@@ -57,6 +57,7 @@ interface RackDevice {
   nvrTotalChannels?: number;
   nvrDiskBays?: number;
   portCount?: number; managementIp?: string; model?: string;
+  brand?: string; snmpCommunity?: string; mgmtUser?: string; mgmtPassword?: string;
   serial?: string; cableLength?: number; isPoeCapable?: boolean; notes?: string;
   fiberCapacity?: number; fiberConnectorType?: string; fiberMode?: string; spliceCount?: number;
   pduHasBreaker?: boolean; pduInputCount?: number;
@@ -197,8 +198,8 @@ function buildRackReport(rackName: string, totalUnits: number, devices: RackDevi
   );
 
   // Column widths for inventory table
-  const invCols = [520, 1900, 1020, 1800, 1200, 600, 580, 600, 806];  // = 9026
-  const invHeaders = ["U", "Nombre", "Tipo", "Modelo / Serie", "IP de Gestión", "Puertos", "Cable", "PoE", "Notas"];
+  const invCols = [460, 1300, 900, 1200, 1000, 650, 650, 650, 650, 500, 460, 400, 206];  // = 9026
+  const invHeaders = ["U", "Nombre", "Tipo", "Modelo / Serie", "IP de Gestión", "Marca", "SNMP", "Usuario", "Contraseña", "Puertos", "Cable", "PoE", "Notas"];
 
   children.push(
     new Table({
@@ -229,13 +230,17 @@ function buildRackReport(rackName: string, totalUnits: number, devices: RackDevi
               dataCell(TYPE_LABELS[d.type] || d.type, invCols[2], { shade }),
               dataCell(modelSerial, invCols[3], { shade }),
               dataCell(d.managementIp || "—", invCols[4], { mono: true, shade }),
-              dataCell(connPorts, invCols[5], { mono: true, shade }),
-              dataCell(d.cableLength != null ? `${d.cableLength}m` : "—", invCols[6], { mono: true, shade }),
-              dataCell(d.isPoeCapable ? "✓" : "—", invCols[7], {
+              dataCell(d.brand || "—", invCols[5], { shade }),
+              dataCell(d.snmpCommunity || "—", invCols[6], { mono: true, shade }),
+              dataCell(d.mgmtUser || "—", invCols[7], { mono: true, shade }),
+              dataCell(d.mgmtPassword || "—", invCols[8], { mono: true, shade }),
+              dataCell(connPorts, invCols[9], { mono: true, shade }),
+              dataCell(d.cableLength != null ? `${d.cableLength}m` : "—", invCols[10], { mono: true, shade }),
+              dataCell(d.isPoeCapable ? "✓" : "—", invCols[11], {
                 shade,
                 color: d.isPoeCapable ? "D97706" : "AAAAAA",
               }),
-              dataCell(d.notes || "", invCols[8], { shade }),
+              dataCell(d.notes || "", invCols[12], { shade }),
             ],
           });
         }),
@@ -507,8 +512,8 @@ function buildRouterTable(interfaces: RouterInterface[], CW: number): any[] {
 }
 
 function buildTrunkTable(trunks: PbxTrunkLine[], CW: number): any[] {
-  const cols = [1400, 1200, 700, 700, 1600, 1200, 700, 1526];
-  const headers = ["Proveedor", "Número/DID", "Tipo", "Canales", "Servidor SIP", "Códec", "Estado", "Notas"];
+  const cols = [1200, 1000, 600, 550, 1200, 750, 750, 700, 600, 1676];  // = 9026
+  const headers = ["Proveedor", "Número/DID", "Tipo", "Canales", "Servidor SIP", "Usuario SIP", "Contraseña SIP", "Códec", "Estado", "Notas"];
   const statusLabels: Record<string, string> = { active: "Activa", inactive: "Inactiva", backup: "Backup" };
   const statusColors: Record<string, string> = { active: "059669", inactive: "DC2626", backup: "D97706" };
 
@@ -522,9 +527,11 @@ function buildTrunkTable(trunks: PbxTrunkLine[], CW: number): any[] {
         dataCell(t.type, cols[2], { mono: true, shade, color: "0891B2" }),
         dataCell(t.channels ? String(t.channels) : "—", cols[3], { mono: true, shade }),
         dataCell(t.sipServer || "—", cols[4], { mono: true, shade }),
-        dataCell(t.codec || "—", cols[5], { shade }),
-        dataCell(statusLabels[t.status || "active"] || "—", cols[6], { shade, color: statusColors[t.status || "active"] || "555555" }),
-        dataCell(t.notes || "", cols[7], { shade }),
+        dataCell(t.sipUser || "—", cols[5], { mono: true, shade }),
+        dataCell(t.sipPassword || "—", cols[6], { mono: true, shade }),
+        dataCell(t.codec || "—", cols[7], { shade }),
+        dataCell(statusLabels[t.status || "active"] || "—", cols[8], { shade, color: statusColors[t.status || "active"] || "555555" }),
+        dataCell(t.notes || "", cols[9], { shade }),
       ]});
     }),
   ];
@@ -542,8 +549,8 @@ function buildTrunkTable(trunks: PbxTrunkLine[], CW: number): any[] {
 }
 
 function buildPbxTable(extensions: PbxExtension[], CW: number): any[] {
-  const cols = [600, 1400, 1200, 1200, 900, 1000, 900, 826];
-  const headers = ["Ext.", "Nombre", "IP Teléfono", "MAC", "Modelo", "Ubicación", "Usuario SIP", "Notas"];
+  const cols = [500, 1100, 1000, 1000, 750, 800, 750, 750, 700, 700, 976];  // = 9026
+  const headers = ["Ext.", "Nombre", "IP Teléfono", "MAC", "Modelo", "Ubicación", "Usuario SIP", "Contraseña SIP", "User Web", "Pass Web", "Notas"];
 
   const rows = [
     new TableRow({ tableHeader: true, children: headers.map((h, i) => headerCell(h, cols[i])) }),
@@ -557,7 +564,10 @@ function buildPbxTable(extensions: PbxExtension[], CW: number): any[] {
         dataCell(ext.model || "—", cols[4], { shade }),
         dataCell(ext.location || "—", cols[5], { shade }),
         dataCell(ext.username || "—", cols[6], { mono: true, shade }),
-        dataCell(ext.notes || "", cols[7], { shade }),
+        dataCell(ext.password || "—", cols[7], { mono: true, shade }),
+        dataCell(ext.webUser || "—", cols[8], { mono: true, shade }),
+        dataCell(ext.webPassword || "—", cols[9], { mono: true, shade }),
+        dataCell(ext.notes || "", cols[10], { shade }),
       ]});
     }),
   ];

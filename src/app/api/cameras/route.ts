@@ -291,3 +291,42 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: err.message || "Error associating camera" }, { status: 500 });
   }
 }
+
+// ─── PATCH: configure stream on a camera node ──
+// Used by ONVIF auto-config to set streamUrl/streamType on existing camera nodes,
+// or to update any camera node's stream configuration.
+export async function PATCH(req: NextRequest) {
+  try {
+    const body = await req.json();
+    const { nodeId, streamUrl, streamType, snapshotUrl, manufacturer, model } = body;
+
+    if (!nodeId) {
+      return NextResponse.json({ error: "Missing nodeId" }, { status: 400 });
+    }
+
+    const db = getDb;
+
+    const node = db.prepare("SELECT id, custom_data FROM network_map_nodes WHERE id = ?")
+      .get(nodeId) as { id: string; custom_data: string | null } | undefined;
+
+    if (!node) {
+      return NextResponse.json({ error: "Node not found" }, { status: 404 });
+    }
+
+    const data = safeJson(node.custom_data) || {};
+
+    // Update stream config
+    if (streamUrl !== undefined) data.streamUrl = streamUrl;
+    if (streamType !== undefined) data.streamType = streamType;
+    if (snapshotUrl !== undefined) data.snapshotUrl = snapshotUrl;
+    if (manufacturer !== undefined) data.description = manufacturer;
+    if (model !== undefined) data.model = model;
+
+    db.prepare("UPDATE network_map_nodes SET custom_data = ? WHERE id = ?")
+      .run(JSON.stringify(data), nodeId);
+
+    return NextResponse.json({ ok: true });
+  } catch (err: any) {
+    return NextResponse.json({ error: err.message || "Error updating camera" }, { status: 500 });
+  }
+}

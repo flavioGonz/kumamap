@@ -590,7 +590,7 @@ function FullscreenViewer({ camera, onClose, onPrev, onNext, label, rackNvrs }: 
 }
 
 // ─── ONVIF Discovery Modal ────────────────────
-function OnvifScanModal({ onClose, onFound }: { onClose: () => void; onFound: () => void }) {
+function OnvifScanModal({ onClose, onFound, cameras }: { onClose: () => void; onFound: () => void; cameras: CameraInfo[] }) {
   const [scanning, setScanning] = useState(false);
   const [scanned, setScanned] = useState(false);
   const [devices, setDevices] = useState<any[]>([]);
@@ -598,9 +598,10 @@ function OnvifScanModal({ onClose, onFound }: { onClose: () => void; onFound: ()
   const [user, setUser] = useState("admin");
   const [pass, setPass] = useState("");
   const [timeout, setTimeout_] = useState(5);
+  const [configuring, setConfiguring] = useState<Record<string, "loading" | "done" | "error">>({});
 
   const scan = useCallback(async () => {
-    setScanning(true); setError(null); setDevices([]);
+    setScanning(true); setError(null); setDevices([]); setConfiguring({});
     try {
       const res = await fetch(apiUrl("/api/onvif/discover"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ timeout: timeout * 1000, user, pass }) });
       const data = await res.json();
@@ -611,9 +612,57 @@ function OnvifScanModal({ onClose, onFound }: { onClose: () => void; onFound: ()
     finally { setScanning(false); }
   }, [user, pass, timeout]);
 
+  // Find matching camera node by IP
+  const findCameraByIp = (ip: string) => cameras.find((c) => c.ip === ip && c.source === "camera");
+
+  // Auto-configure stream on a camera node
+  const autoConfigStream = async (dev: any) => {
+    const cam = findCameraByIp(dev.ip);
+    if (!cam || !dev.streamUri) return;
+
+    setConfiguring((p) => ({ ...p, [dev.ip]: "loading" }));
+    try {
+      // Inject credentials into the RTSP URL if not already present
+      let rtspUrl = dev.streamUri;
+      if (user && pass && !rtspUrl.includes("@")) {
+        rtspUrl = rtspUrl.replace("rtsp://", `rtsp://${user}:${pass}@`);
+      }
+
+      const res = await fetch(apiUrl("/api/cameras"), {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          nodeId: cam.nodeId,
+          streamUrl: rtspUrl,
+          streamType: "rtsp",
+          manufacturer: [dev.manufacturer, dev.model].filter(Boolean).join(" "),
+        }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        setConfiguring((p) => ({ ...p, [dev.ip]: "done" }));
+        onFound(); // refresh camera list
+      } else {
+        setConfiguring((p) => ({ ...p, [dev.ip]: "error" }));
+      }
+    } catch {
+      setConfiguring((p) => ({ ...p, [dev.ip]: "error" }));
+    }
+  };
+
+  // Auto-configure ALL matching cameras at once
+  const autoConfigAll = async () => {
+    const matchable = devices.filter((d) => d.connected && d.streamUri && findCameraByIp(d.ip) && !configuring[d.ip]);
+    for (const dev of matchable) {
+      await autoConfigStream(dev);
+    }
+  };
+
+  const matchableCount = devices.filter((d) => d.connected && d.streamUri && findCameraByIp(d.ip) && configuring[d.ip] !== "done").length;
+
   return (
     <div className="fixed inset-0 z-[9999] flex items-center justify-center" style={{ background: "rgba(0,0,0,0.8)" }}>
-      <div className="relative overflow-hidden flex flex-col" style={{ background: "#111", border: "1px solid #333", width: "min(560px, 92vw)", maxHeight: "80vh" }}>
+      <div className="relative overflow-hidden flex flex-col" style={{ background: "#111", border: "1px solid #333", width: "min(620px, 94vw)", maxHeight: "85vh" }}>
         <div className="px-4 py-3 flex items-center justify-between" style={{ borderBottom: "1px solid #222" }}>
           <div className="flex items-center gap-2">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#06b6d4" strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="2" /><path d="M16.24 7.76a6 6 0 0 1 0 8.49m-8.48-.01a6 6 0 0 1 0-8.49m11.31-2.82a10 10 0 0 1 0 14.14m-14.14 0a10 10 0 0 1 0-14.14" /></svg>
@@ -647,25 +696,101 @@ function OnvifScanModal({ onClose, onFound }: { onClose: () => void; onFound: ()
           {scanning && <div className="flex flex-col items-center justify-center py-12"><div className="h-8 w-8 rounded-full border-2 border-cyan-500/20 border-t-cyan-500 animate-spin" /><p className="text-xs text-white/30 mt-3 font-mono">Searching...</p></div>}
           {error && <div className="p-2" style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)" }}><p className="text-xs text-red-400 font-mono">{error}</p></div>}
           {scanned && !scanning && devices.length === 0 && !error && <div className="flex flex-col items-center justify-center py-10"><p className="text-xs text-white/20 font-mono">No devices found</p></div>}
-          {devices.map((dev: any, i: number) => (
-            <div key={`${dev.ip}-${i}`} className="p-2 flex items-center gap-3" style={{ background: "#0a0a0a", border: "1px solid #1a1a1a" }}>
-              <div className="h-8 w-8 flex items-center justify-center shrink-0" style={{ background: dev.connected ? "rgba(34,197,94,0.1)" : "#111" }}>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={dev.connected ? "#22c55e" : "#555"} strokeWidth="1.8"><path d="m22 8-6 4 6 4V8Z" /><rect width="14" height="12" x="2" y="6" rx="2" ry="2" /></svg>
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-bold text-white font-mono">{dev.ip}</span>
-                  {dev.connected && <span className="text-[8px] px-1 py-0.5 font-bold font-mono" style={{ background: "#22c55e", color: "#000" }}>ONLINE</span>}
+          {devices.map((dev: any, i: number) => {
+            const matchedCam = findCameraByIp(dev.ip);
+            const cfgState = configuring[dev.ip];
+            const hasStream = dev.connected && dev.streamUri;
+            const alreadyConfigured = matchedCam && matchedCam.streamUrl && matchedCam.streamType === "rtsp";
+
+            return (
+              <div key={`${dev.ip}-${i}`} className="p-2.5 flex items-start gap-3" style={{ background: "#0a0a0a", border: `1px solid ${cfgState === "done" ? "rgba(34,197,94,0.3)" : matchedCam ? "rgba(6,182,212,0.15)" : "#1a1a1a"}` }}>
+                <div className="h-8 w-8 flex items-center justify-center shrink-0 mt-0.5" style={{ background: dev.connected ? "rgba(34,197,94,0.1)" : "#111" }}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={dev.connected ? "#22c55e" : "#555"} strokeWidth="1.8"><path d="m22 8-6 4 6 4V8Z" /><rect width="14" height="12" x="2" y="6" rx="2" ry="2" /></svg>
                 </div>
-                <div className="text-[10px] text-white/30 mt-0.5 truncate font-mono">{[dev.manufacturer, dev.model].filter(Boolean).join(" · ") || "ONVIF Device"}</div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-xs font-bold text-white font-mono">{dev.ip}</span>
+                    {dev.port !== 80 && <span className="text-[10px] text-white/20 font-mono">:{dev.port}</span>}
+                    {dev.connected && <span className="text-[8px] px-1 py-0.5 font-bold font-mono" style={{ background: "#22c55e", color: "#000" }}>ONLINE</span>}
+                    {matchedCam && <span className="text-[8px] px-1 py-0.5 font-bold font-mono" style={{ background: "rgba(6,182,212,0.2)", color: "#06b6d4" }}>NODO: {matchedCam.label}</span>}
+                    {cfgState === "done" && <span className="text-[8px] px-1 py-0.5 font-bold font-mono" style={{ background: "rgba(34,197,94,0.2)", color: "#22c55e" }}>CONFIGURADO</span>}
+                  </div>
+                  <div className="text-[10px] text-white/30 mt-0.5 truncate font-mono">{[dev.manufacturer, dev.model].filter(Boolean).join(" · ") || "ONVIF Device"}</div>
+                  {dev.streamUri && (
+                    <div className="text-[9px] text-cyan-400/40 font-mono mt-0.5 truncate">{dev.streamUri}</div>
+                  )}
+                  {dev.snapshotUri && (
+                    <div className="text-[9px] text-amber-400/30 font-mono mt-0.5 truncate">SNAP: {dev.snapshotUri}</div>
+                  )}
+                </div>
+                {/* Auto-config button */}
+                <div className="shrink-0 flex flex-col items-end gap-1 mt-0.5">
+                  {hasStream && matchedCam && !alreadyConfigured && cfgState !== "done" && (
+                    <button
+                      onClick={() => autoConfigStream(dev)}
+                      disabled={cfgState === "loading"}
+                      className="flex items-center gap-1 px-2 py-1 text-[9px] font-bold font-mono transition-all"
+                      style={{ background: "rgba(6,182,212,0.15)", border: "1px solid rgba(6,182,212,0.3)", color: "#06b6d4" }}
+                    >
+                      {cfgState === "loading" ? (
+                        <div className="h-3 w-3 rounded-full border border-cyan-400/30 border-t-cyan-400 animate-spin" />
+                      ) : (
+                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="20 6 9 17 4 12" /></svg>
+                      )}
+                      AUTO-CONFIG
+                    </button>
+                  )}
+                  {hasStream && matchedCam && alreadyConfigured && cfgState !== "done" && (
+                    <button
+                      onClick={() => autoConfigStream(dev)}
+                      disabled={cfgState === "loading"}
+                      className="flex items-center gap-1 px-2 py-1 text-[9px] font-bold font-mono transition-all"
+                      style={{ background: "rgba(245,158,11,0.1)", border: "1px solid rgba(245,158,11,0.2)", color: "#f59e0b" }}
+                    >
+                      {cfgState === "loading" ? (
+                        <div className="h-3 w-3 rounded-full border border-amber-400/30 border-t-amber-400 animate-spin" />
+                      ) : (
+                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" /><path d="M21 3v5h-5" /></svg>
+                      )}
+                      RE-CONFIG
+                    </button>
+                  )}
+                  {cfgState === "done" && (
+                    <span className="text-[9px] font-bold font-mono text-green-400">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" className="inline mr-0.5"><polyline points="20 6 9 17 4 12" /></svg>
+                      OK
+                    </span>
+                  )}
+                  {cfgState === "error" && (
+                    <span className="text-[9px] font-bold font-mono text-red-400">ERROR</span>
+                  )}
+                  {!matchedCam && hasStream && (
+                    <span className="text-[8px] text-white/20 font-mono">Sin nodo en mapa</span>
+                  )}
+                  {!hasStream && dev.connected && (
+                    <span className="text-[8px] text-white/20 font-mono">Sin stream URI</span>
+                  )}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
         {scanned && (
-          <div className="px-4 py-2 flex items-center justify-between" style={{ borderTop: "1px solid #222" }}>
+          <div className="px-4 py-2.5 flex items-center justify-between" style={{ borderTop: "1px solid #222" }}>
             <span className="text-[10px] text-white/20 font-mono">{devices.length} device{devices.length !== 1 ? "s" : ""}</span>
-            <button onClick={onClose} className="px-3 py-1 text-xs font-bold font-mono text-white/50 hover:text-white" style={{ border: "1px solid #333" }}>CLOSE</button>
+            <div className="flex items-center gap-2">
+              {matchableCount > 0 && (
+                <button
+                  onClick={autoConfigAll}
+                  className="flex items-center gap-1.5 px-3 py-1 text-[10px] font-bold font-mono transition-all"
+                  style={{ background: "#06b6d4", color: "#000" }}
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="20 6 9 17 4 12" /></svg>
+                  AUTO-CONFIG ALL ({matchableCount})
+                </button>
+              )}
+              <button onClick={onClose} className="px-3 py-1 text-xs font-bold font-mono text-white/50 hover:text-white" style={{ border: "1px solid #333" }}>CLOSE</button>
+            </div>
           </div>
         )}
       </div>
@@ -819,7 +944,7 @@ export default function CamerasPage() {
           {!loading && !error && mapsWithCameras.length === 0 && <div className="flex flex-col items-center justify-center py-20"><p className="text-sm text-white/30 font-mono">NO MAPS CONFIGURED</p></div>}
           {!loading && !error && mapsWithCameras.length > 0 && <div className="space-y-1">{mapsWithCameras.map((m) => <MapCard key={m.mapId} map={m} onSelect={() => setSelectedMap(m)} />)}</div>}
         </main>
-        {showOnvif && <OnvifScanModal onClose={() => setShowOnvif(false)} onFound={fetchCameras} />}
+        {showOnvif && <OnvifScanModal onClose={() => setShowOnvif(false)} onFound={fetchCameras} cameras={cameras} />}
       </div>
     );
   }
@@ -905,7 +1030,7 @@ export default function CamerasPage() {
         />
       )}
 
-      {showOnvif && <OnvifScanModal onClose={() => setShowOnvif(false)} onFound={fetchCameras} />}
+      {showOnvif && <OnvifScanModal onClose={() => setShowOnvif(false)} onFound={fetchCameras} cameras={cameras} />}
       <style>{`@keyframes nvr-rec { 0%,100%{opacity:1} 50%{opacity:0.3} }`}</style>
     </div>
   );

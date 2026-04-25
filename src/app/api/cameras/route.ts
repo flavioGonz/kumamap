@@ -15,7 +15,7 @@ export async function GET() {
   try {
     const db = getDb;
 
-    const maps = db.prepare("SELECT id, name FROM maps").all() as { id: string; name: string }[];
+    const maps = db.prepare("SELECT id, name FROM network_maps").all() as { id: string; name: string }[];
 
     const cameras: CameraInfo[] = [];
     const allMaps: MapInfo[] = [];

@@ -38,8 +38,8 @@ interface MapWithCameras {
 
 type MobileGrid = "1" | "2" | "4";
 
-// ─── Camera Cell ───────────────────────────────
-function MobileCameraCell({ camera }: { camera: CameraInfo }) {
+// ─── NVR Cell (mobile) ─────────────────────────
+function MobileNvrCell({ camera, label, onTap }: { camera: CameraInfo; label: string; onTap: () => void }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [bufA, setBufA] = useState("");
@@ -78,71 +78,174 @@ function MobileCameraCell({ camera }: { camera: CameraInfo }) {
 
   const isPlaceholder = !hasStream;
 
-  // Placeholder state
-  if (isPlaceholder) {
-    return (
-      <div
-        className="relative block overflow-hidden"
-        style={{ background: "#111318", border: "1px solid rgba(255,255,255,0.04)", borderRadius: "12px", aspectRatio: "16/9" }}
-      >
-        <div className="absolute inset-0 flex flex-col items-center justify-center">
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#444" strokeWidth="1.5" strokeLinecap="round">
-            {camera.source === "nvr" ? (
-              <><rect x="2" y="6" width="20" height="12" rx="2" /><circle cx="8" cy="12" r="1.5" /><circle cx="16" cy="12" r="1.5" /><path d="M2 10h20" /></>
-            ) : (
-              <><path d="m22 8-6 4 6 4V8Z" /><rect width="14" height="12" x="2" y="6" rx="2" ry="2" /></>
-            )}
-          </svg>
-          <p className="text-[9px] text-white/20 mt-1">{camera.source === "nvr" ? "NVR sin canales" : "Sin stream"}</p>
-        </div>
-        <div className="absolute inset-x-0 bottom-0 z-20 px-2.5 py-1.5" style={{ background: "linear-gradient(transparent, rgba(0,0,0,0.7))" }}>
-          <div className="flex items-center gap-1.5">
-            <div className="h-1.5 w-1.5 rounded-full bg-[#555]" />
-            <span className="text-[9px] font-semibold text-white/50 truncate">{camera.label}</span>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <Link
-      href={`/mobile/camera?mapId=${camera.mapId}&nodeId=${camera.nodeId}`}
-      className="relative block overflow-hidden active:scale-[0.98] transition-transform"
-      style={{ background: "#111318", border: "1px solid rgba(255,255,255,0.04)", borderRadius: "12px", aspectRatio: "16/9" }}
+    <div
+      className="relative overflow-hidden"
+      onClick={hasStream ? onTap : undefined}
+      style={{ background: "#000", border: "1px solid #1a1a1a" }}
     >
-      {loading && !error && (
+      {/* Channel label */}
+      <div className="absolute top-0 left-0 z-30">
+        <span className="text-[9px] font-bold px-1 py-0.5" style={{ background: "rgba(0,0,0,0.7)", color: "#06b6d4", fontFamily: "monospace" }}>
+          {label}
+        </span>
+      </div>
+
+      {/* Status */}
+      <div className="absolute top-1 right-1.5 z-30">
+        {hasStream && !error && !loading && (
+          <div className="flex items-center gap-0.5">
+            <div className="h-1 w-1 rounded-full" style={{ background: "#22c55e", animation: "nvr-rec 2s ease-in-out infinite" }} />
+            <span className="text-[7px] font-bold text-green-500 font-mono">REC</span>
+          </div>
+        )}
+        {hasStream && error && <span className="text-[7px] font-bold text-red-500 font-mono">ERR</span>}
+      </div>
+
+      {/* Loading */}
+      {hasStream && loading && !error && (
         <div className="absolute inset-0 flex items-center justify-center z-10">
-          <div className="h-6 w-6 rounded-full border-2 border-blue-500/20 border-t-blue-500 animate-spin" />
+          <div className="h-5 w-5 rounded-full border-2 border-cyan-500/20 border-t-cyan-500 animate-spin" />
         </div>
       )}
-      {error && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center z-10">
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="rgba(239,68,68,0.4)" strokeWidth="1.5"><path d="m22 8-6 4 6 4V8Z" /><rect width="14" height="12" x="2" y="6" rx="2" ry="2" /><line x1="2" y1="2" x2="22" y2="22" stroke="rgba(239,68,68,0.4)" strokeWidth="2" /></svg>
-          <p className="text-[8px] text-white/20 mt-1">Sin señal</p>
+
+      {/* Placeholder */}
+      {isPlaceholder && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center z-10" style={{ background: "#0a0a0a" }}>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#333" strokeWidth="1.5">
+            <path d="m22 8-6 4 6 4V8Z" /><rect width="14" height="12" x="2" y="6" rx="2" ry="2" />
+            <line x1="2" y1="2" x2="22" y2="22" stroke="#333" strokeWidth="1.5" />
+          </svg>
         </div>
       )}
-      {(camera.streamType === "rtsp" || camera.streamType === "mjpeg") && (
-        <img src={getStreamSrc()} alt={camera.label} className="absolute inset-0 w-full h-full object-contain" style={{ display: error ? "none" : "block" }} onLoad={() => { setLoading(false); setError(false); }} onError={() => { setLoading(false); setError(true); }} />
+
+      {/* Error */}
+      {hasStream && error && (
+        <div className="absolute inset-0 flex items-center justify-center z-10" style={{ background: "#0a0a0a" }}>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#333" strokeWidth="1.5">
+            <path d="m22 8-6 4 6 4V8Z" /><rect width="14" height="12" x="2" y="6" rx="2" ry="2" />
+            <line x1="2" y1="2" x2="22" y2="22" stroke="#ef4444" strokeWidth="1.5" />
+          </svg>
+        </div>
       )}
-      {camera.streamType === "snapshot" && (
+
+      {/* Stream */}
+      {hasStream && (camera.streamType === "rtsp" || camera.streamType === "mjpeg") && (
+        <img src={getStreamSrc()} alt={camera.label} className="absolute inset-0 w-full h-full object-cover"
+          style={{ display: error ? "none" : "block" }}
+          onLoad={() => { setLoading(false); setError(false); }}
+          onError={() => { setLoading(false); setError(true); }}
+        />
+      )}
+      {hasStream && camera.streamType === "snapshot" && (
         <>
-          {bufA && <img src={bufA} alt={camera.label} className="absolute inset-0 w-full h-full object-contain transition-opacity duration-500" style={{ opacity: activeBuf === "a" ? 1 : 0 }} onLoad={() => { setLoading(false); setError(false); }} />}
-          {bufB && <img src={bufB} alt={camera.label} className="absolute inset-0 w-full h-full object-contain transition-opacity duration-500" style={{ opacity: activeBuf === "b" ? 1 : 0 }} />}
+          {bufA && <img src={bufA} alt={camera.label} className="absolute inset-0 w-full h-full object-cover transition-opacity duration-500" style={{ opacity: activeBuf === "a" ? 1 : 0 }} onLoad={() => { setLoading(false); setError(false); }} />}
+          {bufB && <img src={bufB} alt={camera.label} className="absolute inset-0 w-full h-full object-cover transition-opacity duration-500" style={{ opacity: activeBuf === "b" ? 1 : 0 }} />}
         </>
       )}
-      {camera.streamType === "iframe" && (
-        <iframe src={camera.streamUrl} className="absolute inset-0 w-full h-full border-none pointer-events-none" allow="autoplay" onLoad={() => { setLoading(false); setError(false); }} onError={() => { setLoading(false); setError(true); }} />
+      {hasStream && camera.streamType === "iframe" && (
+        <iframe src={camera.streamUrl} className="absolute inset-0 w-full h-full border-none pointer-events-none" allow="autoplay"
+          onLoad={() => { setLoading(false); setError(false); }}
+          onError={() => { setLoading(false); setError(true); }}
+        />
       )}
-      <div className="absolute inset-x-0 bottom-0 z-20 px-2.5 py-1.5" style={{ background: "linear-gradient(transparent, rgba(0,0,0,0.8))" }}>
-        <div className="flex items-center gap-1.5">
-          <div className="h-1.5 w-1.5 rounded-full shrink-0" style={{ background: error ? "#ef4444" : loading ? "#f59e0b" : "#22c55e", animation: !error && !loading ? "cam-pulse 2s ease-in-out infinite" : "none" }} />
-          <span className="text-[9px] font-semibold text-white/70 truncate">{camera.label}</span>
-          {camera.source === "nvr" && <span className="text-[7px] px-1 py-0.5 rounded bg-purple-500/15 text-purple-300/60 font-bold shrink-0">NVR</span>}
-          <span className="text-[7px] text-white/20 uppercase ml-auto shrink-0">{camera.streamType}</span>
-        </div>
+
+      {/* Bottom label */}
+      <div className="absolute inset-x-0 bottom-0 z-20 flex items-center justify-between px-1.5 py-0.5" style={{ background: "linear-gradient(transparent, rgba(0,0,0,0.85))" }}>
+        <span className="text-[9px] font-semibold text-white/60 truncate font-mono">{camera.label}</span>
+        <span className="text-[8px] text-white/25 shrink-0 font-mono">{camera.ip}</span>
       </div>
-    </Link>
+    </div>
+  );
+}
+
+// ─── Fullscreen Viewer (mobile) ────────────────
+function MobileFullscreen({ camera, label, onClose }: { camera: CameraInfo; label: string; onClose: () => void }) {
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+  const [bufA, setBufA] = useState("");
+  const [bufB, setBufB] = useState("");
+  const [activeBuf, setActiveBuf] = useState<"a" | "b">("a");
+  const loadingRef = useRef(false);
+
+  const getStreamSrc = useCallback((): string => {
+    if (!camera.streamUrl) return "";
+    switch (camera.streamType) {
+      case "rtsp": return apiUrl(`/api/camera/rtsp-stream?url=${encodeURIComponent(camera.streamUrl)}&fps=${camera.rtspFps || 2}`);
+      case "snapshot": return apiUrl(`/api/camera/snapshot?url=${encodeURIComponent(camera.streamUrl)}&_t=${Date.now()}`);
+      case "mjpeg": return camera.streamUrl;
+      default: return camera.streamUrl;
+    }
+  }, [camera]);
+
+  useEffect(() => {
+    if (camera.streamType !== "snapshot" || !camera.streamUrl) return;
+    const ms = (camera.snapshotInterval || 2) * 1000;
+    setBufA(apiUrl(`/api/camera/snapshot?url=${encodeURIComponent(camera.streamUrl)}&_t=${Date.now()}`));
+    setActiveBuf("a");
+    const id = setInterval(() => {
+      if (loadingRef.current) return;
+      loadingRef.current = true;
+      const nextUrl = apiUrl(`/api/camera/snapshot?url=${encodeURIComponent(camera.streamUrl)}&_t=${Date.now()}`);
+      const img = new Image();
+      img.onload = () => { loadingRef.current = false; setActiveBuf((p) => { if (p === "a") { setBufB(nextUrl); return "b"; } else { setBufA(nextUrl); return "a"; } }); setLoading(false); setError(false); };
+      img.onerror = () => { loadingRef.current = false; };
+      img.src = nextUrl;
+    }, ms);
+    return () => clearInterval(id);
+  }, [camera]);
+
+  return (
+    <div className="fixed inset-0 z-[9999] flex flex-col bg-black">
+      <div className="flex items-center justify-between px-3 py-2 shrink-0" style={{ background: "#111", borderBottom: "1px solid #222" }}>
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] font-bold px-1.5 py-0.5" style={{ background: "#06b6d4", color: "#000", fontFamily: "monospace" }}>{label}</span>
+          <span className="text-xs font-bold text-white/80 font-mono truncate">{camera.label}</span>
+          {!error && !loading && (
+            <div className="flex items-center gap-0.5 ml-1">
+              <div className="h-1.5 w-1.5 rounded-full" style={{ background: "#22c55e", animation: "nvr-rec 2s ease-in-out infinite" }} />
+              <span className="text-[8px] font-bold text-green-500 font-mono">LIVE</span>
+            </div>
+          )}
+        </div>
+        <button onClick={onClose} className="p-1.5 text-white/40 active:text-white">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+        </button>
+      </div>
+      <div className="flex-1 relative flex items-center justify-center">
+        {loading && !error && <div className="absolute inset-0 flex items-center justify-center z-10"><div className="h-8 w-8 rounded-full border-2 border-cyan-500/20 border-t-cyan-500 animate-spin" /></div>}
+        {(camera.streamType === "rtsp" || camera.streamType === "mjpeg") && (
+          <img src={getStreamSrc()} alt={camera.label} className="max-w-full max-h-full object-contain"
+            style={{ display: error ? "none" : "block" }}
+            onLoad={() => { setLoading(false); setError(false); }}
+            onError={() => { setLoading(false); setError(true); }}
+          />
+        )}
+        {camera.streamType === "snapshot" && (
+          <div className="relative w-full h-full flex items-center justify-center">
+            {bufA && <img src={bufA} alt={camera.label} className="max-w-full max-h-full object-contain transition-opacity duration-500"
+              style={{ opacity: activeBuf === "a" ? 1 : 0, position: activeBuf === "a" ? "relative" : "absolute" }}
+              onLoad={() => { setLoading(false); setError(false); }}
+            />}
+            {bufB && <img src={bufB} alt={camera.label} className="max-w-full max-h-full object-contain transition-opacity duration-500"
+              style={{ opacity: activeBuf === "b" ? 1 : 0, position: activeBuf === "b" ? "relative" : "absolute" }}
+            />}
+          </div>
+        )}
+        {error && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center">
+            <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#333" strokeWidth="1.5">
+              <path d="m22 8-6 4 6 4V8Z" /><rect width="14" height="12" x="2" y="6" rx="2" ry="2" />
+              <line x1="2" y1="2" x2="22" y2="22" stroke="#ef4444" strokeWidth="2" />
+            </svg>
+            <p className="text-xs text-white/20 mt-2 font-mono">NO SIGNAL</p>
+          </div>
+        )}
+      </div>
+      <div className="px-3 py-1 flex items-center justify-between shrink-0" style={{ background: "#111", borderTop: "1px solid #222" }}>
+        <span className="text-[9px] text-white/20 font-mono">{camera.streamType?.toUpperCase()} · {camera.ip}</span>
+      </div>
+    </div>
   );
 }
 
@@ -152,53 +255,32 @@ function MobileMapCard({ map, onSelect }: { map: MapWithCameras; onSelect: () =>
   const nvrCount = map.cameras.filter((c) => c.source === "nvr").length;
   const isEmpty = map.cameras.length === 0;
 
-  const cardContent = (
-    <div className="p-3.5 flex items-center gap-3">
-      <div className="h-10 w-10 rounded-xl flex items-center justify-center shrink-0" style={{
-        background: isEmpty ? "rgba(255,255,255,0.03)" : activeStreams > 0 ? "rgba(6,182,212,0.08)" : "rgba(139,92,246,0.08)",
-      }}>
-        {isEmpty ? (
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#555" strokeWidth="1.5" strokeLinecap="round"><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M12 8v8m-4-4h8" /></svg>
-        ) : nvrCount > 0 && activeStreams === 0 ? (
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" strokeWidth="1.5" strokeLinecap="round"><rect x="2" y="6" width="20" height="12" rx="2" /><path d="M2 10h20" /></svg>
-        ) : (
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#06b6d4" strokeWidth="1.5" strokeLinecap="round"><path d="m22 8-6 4 6 4V8Z" /><rect width="14" height="12" x="2" y="6" rx="2" ry="2" /></svg>
-        )}
+  const content = (
+    <div className="px-3 py-2.5 flex items-center gap-3">
+      <div className="h-9 w-9 flex items-center justify-center shrink-0" style={{ background: isEmpty ? "#111" : "#0a2a2a", border: `1px solid ${isEmpty ? "#1a1a1a" : "#164e4e"}` }}>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={isEmpty ? "#333" : "#06b6d4"} strokeWidth="1.5" strokeLinecap="round">
+          <path d="m22 8-6 4 6 4V8Z" /><rect width="14" height="12" x="2" y="6" rx="2" ry="2" />
+        </svg>
       </div>
       <div className="flex-1 min-w-0">
-        <h3 className={`text-[13px] font-semibold truncate ${isEmpty ? "text-white/40" : "text-white/85"}`}>{map.mapName}</h3>
+        <h3 className={`text-[13px] font-bold truncate font-mono ${isEmpty ? "text-white/30" : "text-white/85"}`}>{map.mapName}</h3>
         <div className="flex items-center gap-2 mt-0.5">
-          {activeStreams > 0 && <span className="text-[10px] text-cyan-400/40">{activeStreams} live</span>}
-          {nvrCount > 0 && <span className="text-[10px] text-purple-400/40">{nvrCount} NVR</span>}
-          {isEmpty && <span className="text-[10px] text-white/20">Sin cámaras</span>}
+          {activeStreams > 0 && <span className="text-[10px] text-cyan-400/50 font-mono">{activeStreams} LIVE</span>}
+          {nvrCount > 0 && <span className="text-[10px] text-purple-400/40 font-mono">{nvrCount} NVR</span>}
+          {isEmpty && <span className="text-[10px] text-white/15 font-mono">NO CAMERAS</span>}
         </div>
       </div>
-      {!isEmpty && (
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#444" strokeWidth="2" strokeLinecap="round" className="shrink-0"><polyline points="9 18 15 12 9 6" /></svg>
-      )}
+      {!isEmpty && <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#444" strokeWidth="2" strokeLinecap="round"><polyline points="9 6 15 12 9 18" /></svg>}
     </div>
   );
 
-  // Empty maps: non-clickable informational card with muted styling
   if (isEmpty) {
-    return (
-      <div
-        className="w-full text-left"
-        style={{ background: "rgba(255,255,255,0.01)", border: "1px solid rgba(255,255,255,0.03)", borderRadius: "14px", opacity: 0.6 }}
-      >
-        {cardContent}
-      </div>
-    );
+    return <div style={{ background: "#0a0a0a", border: "1px solid #1a1a1a", opacity: 0.5 }}>{content}</div>;
   }
 
-  // Maps with cameras: clickable with tap effect
   return (
-    <button
-      onClick={onSelect}
-      className="w-full text-left active:scale-[0.98] transition-transform"
-      style={{ background: "rgba(255,255,255,0.015)", border: "1px solid rgba(255,255,255,0.04)", borderRadius: "14px" }}
-    >
-      {cardContent}
+    <button onClick={onSelect} className="w-full text-left active:scale-[0.98] transition-transform" style={{ background: "#0a0a0a", border: "1px solid #1a1a1a" }}>
+      {content}
     </button>
   );
 }
@@ -211,6 +293,8 @@ export default function MobileCamerasPage() {
   const [error, setError] = useState<string | null>(null);
   const [selectedMap, setSelectedMap] = useState<MapWithCameras | null>(null);
   const [grid, setGrid] = useState<MobileGrid>("2");
+  const [cameraOrder, setCameraOrder] = useState<CameraInfo[]>([]);
+  const [fullscreenCam, setFullscreenCam] = useState<{ cam: CameraInfo; label: string } | null>(null);
 
   const fetchCameras = useCallback(async () => {
     setLoading(true); setError(null);
@@ -228,12 +312,14 @@ export default function MobileCamerasPage() {
 
   useEffect(() => { fetchCameras(); }, [fetchCameras]);
 
-  // Build maps with cameras — include ALL maps
+  useEffect(() => {
+    if (selectedMap) setCameraOrder(selectedMap.cameras);
+  }, [selectedMap]);
+
   const mapsWithCameras: MapWithCameras[] = allMaps.map((m) => ({
     ...m,
     cameras: cameras.filter((c) => c.mapId === m.mapId),
   }));
-
   mapsWithCameras.sort((a, b) => {
     const aHas = a.cameras.length > 0 ? 0 : 1;
     const bHas = b.cameras.length > 0 ? 0 : 1;
@@ -244,132 +330,103 @@ export default function MobileCamerasPage() {
   // ── Map Selector ──
   if (!selectedMap) {
     return (
-      <div className="min-h-screen pb-28" style={{ background: "#0a0a0a" }}>
-        <header className="sticky top-0 z-50 px-4 pt-3 pb-2" style={{ background: "rgba(10,10,10,0.9)", backdropFilter: "blur(20px)", borderBottom: "1px solid rgba(255,255,255,0.04)", paddingTop: "max(12px, env(safe-area-inset-top))" }}>
-          <div className="flex items-center gap-3">
-            <div className="h-9 w-9 rounded-xl flex items-center justify-center" style={{ background: "rgba(6,182,212,0.08)" }}>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#06b6d4" strokeWidth="1.8" strokeLinecap="round"><path d="m22 8-6 4 6 4V8Z" /><rect width="14" height="12" x="2" y="6" rx="2" ry="2" /></svg>
-            </div>
-            <div className="flex-1">
-              <h1 className="text-sm font-semibold text-white/90">Cámaras</h1>
-              <span className="text-[10px] text-white/25">Selecciona un cliente</span>
-            </div>
-            <button onClick={fetchCameras} className="h-8 w-8 rounded-lg flex items-center justify-center" style={{ background: "rgba(255,255,255,0.03)", color: "#555" }}>
+      <div className="min-h-screen pb-28 bg-black">
+        <header className="sticky top-0 z-50 px-4 py-2.5" style={{ background: "#0a0a0a", borderBottom: "1px solid #1a1a1a", paddingTop: "max(10px, env(safe-area-inset-top))" }}>
+          <div className="flex items-center gap-2">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#06b6d4" strokeWidth="1.8" strokeLinecap="round"><path d="m22 8-6 4 6 4V8Z" /><rect width="14" height="12" x="2" y="6" rx="2" ry="2" /></svg>
+            <h1 className="text-sm font-bold text-white/90 font-mono flex-1">CAMERAS</h1>
+            <button onClick={fetchCameras} className="h-7 w-7 flex items-center justify-center text-white/30">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" /><path d="M21 3v5h-5" /></svg>
             </button>
           </div>
         </header>
 
-        <main className="px-4 py-3">
+        <main className="px-3 py-3">
           {loading && (
             <div className="flex items-center justify-center py-16">
-              <div className="h-7 w-7 rounded-full border-2 border-blue-500/20 border-t-blue-500 animate-spin" />
+              <div className="h-7 w-7 rounded-full border-2 border-cyan-500/20 border-t-cyan-500 animate-spin" />
             </div>
           )}
-
           {error && !loading && (
             <div className="flex flex-col items-center justify-center py-16">
-              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="rgba(239,68,68,0.4)" strokeWidth="1.5" className="mb-2"><circle cx="12" cy="12" r="10" /><line x1="15" y1="9" x2="9" y2="15" /><line x1="9" y1="9" x2="15" y2="15" /></svg>
-              <p className="text-xs text-white/30">{error}</p>
+              <p className="text-xs text-red-400/60 font-mono">{error}</p>
             </div>
           )}
-
           {!loading && !error && mapsWithCameras.length === 0 && (
             <div className="flex flex-col items-center justify-center py-16">
-              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#333" strokeWidth="1.5" className="mb-2"><path d="m22 8-6 4 6 4V8Z" /><rect width="14" height="12" x="2" y="6" rx="2" ry="2" /></svg>
-              <p className="text-xs text-white/25">No hay mapas</p>
+              <p className="text-xs text-white/25 font-mono">NO MAPS</p>
             </div>
           )}
-
           {!loading && !error && mapsWithCameras.length > 0 && (
-            <div className="space-y-2">
+            <div className="space-y-1">
               {mapsWithCameras.map((m) => (
                 <MobileMapCard key={m.mapId} map={m} onSelect={() => setSelectedMap(m)} />
               ))}
             </div>
           )}
         </main>
-
-        <style>{`@keyframes cam-pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }`}</style>
+        <style>{`@keyframes nvr-rec { 0%,100%{opacity:1} 50%{opacity:0.3} }`}</style>
       </div>
     );
   }
 
-  // ── Camera Grid ──
-  const activeCameras = selectedMap.cameras.filter((c) => c.streamUrl && c.streamType !== "nvr");
-  const inactiveCameras = selectedMap.cameras.filter((c) => !c.streamUrl || c.streamType === "nvr");
+  // ── Camera Grid — NVR Style ──
+  const gridCols = grid === "1" ? 1 : grid === "2" ? 1 : 2;
+  const rows = Math.ceil(cameraOrder.length / gridCols);
 
   return (
-    <div className="min-h-screen pb-28" style={{ background: "#0a0a0a" }}>
-      <header className="sticky top-0 z-50 px-4 pt-3 pb-2" style={{ background: "rgba(10,10,10,0.9)", backdropFilter: "blur(20px)", borderBottom: "1px solid rgba(255,255,255,0.04)", paddingTop: "max(12px, env(safe-area-inset-top))" }}>
-        <div className="flex items-center gap-2 mb-2">
-          <button onClick={() => setSelectedMap(null)} className="h-8 w-8 rounded-lg flex items-center justify-center active:scale-95 shrink-0" style={{ background: "rgba(255,255,255,0.03)", color: "#666" }}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polyline points="15 18 9 12 15 6" /></svg>
-          </button>
-          <div className="flex-1 min-w-0">
-            <h1 className="text-[13px] font-semibold text-white/85 truncate">{selectedMap.mapName}</h1>
-            <div className="flex items-center gap-2 mt-0.5">
-              {activeCameras.length > 0 && <span className="text-[9px] text-cyan-400/40">{activeCameras.length} live</span>}
-              {inactiveCameras.length > 0 && <span className="text-[9px] text-white/20">{inactiveCameras.length} offline</span>}
-              {selectedMap.cameras.length === 0 && <span className="text-[9px] text-white/20">Sin cámaras</span>}
-            </div>
-          </div>
-          {/* Grid selector */}
-          <div className="flex items-center rounded-lg overflow-hidden shrink-0" style={{ border: "1px solid rgba(255,255,255,0.05)" }}>
-            {(["1", "2", "4"] as MobileGrid[]).map((g) => (
-              <button key={g} onClick={() => setGrid(g)} className="px-2 py-1 text-[9px] font-semibold transition-all" style={{ background: grid === g ? "rgba(6,182,212,0.12)" : "transparent", color: grid === g ? "#06b6d4" : "#555", borderRight: g !== "4" ? "1px solid rgba(255,255,255,0.04)" : "none" }}>
-                {g === "1" ? "1x1" : g === "2" ? "1x2" : "2x2"}
-              </button>
-            ))}
-          </div>
+    <div className="h-screen flex flex-col bg-black overflow-hidden">
+      {/* NVR header */}
+      <header className="shrink-0 px-3 py-1.5 flex items-center gap-2" style={{ background: "#111", borderBottom: "1px solid #222", paddingTop: "max(6px, env(safe-area-inset-top))" }}>
+        <button onClick={() => setSelectedMap(null)} className="p-1 text-white/30 active:text-white">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polyline points="15 18 9 12 15 6" /></svg>
+        </button>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#06b6d4" strokeWidth="2" strokeLinecap="round"><path d="m22 8-6 4 6 4V8Z" /><rect width="14" height="12" x="2" y="6" rx="2" ry="2" /></svg>
+        <h1 className="text-[11px] font-bold text-white/85 truncate font-mono flex-1">{selectedMap.mapName}</h1>
+        <span className="text-[9px] text-cyan-400/50 font-mono">{cameraOrder.filter((c) => c.streamUrl && c.streamType !== "nvr").length} live</span>
+        <div className="flex items-center ml-1" style={{ border: "1px solid #333" }}>
+          {(["1", "2", "4"] as MobileGrid[]).map((g) => (
+            <button key={g} onClick={() => setGrid(g)} className="px-1.5 py-0.5 text-[9px] font-bold font-mono transition-all"
+              style={{ background: grid === g ? "#06b6d4" : "transparent", color: grid === g ? "#000" : "#555", borderRight: g !== "4" ? "1px solid #333" : "none" }}>
+              {g === "1" ? "1" : g === "2" ? "2" : "4"}
+            </button>
+          ))}
         </div>
       </header>
 
-      <main className="px-3 py-3">
-        {/* Empty map */}
-        {selectedMap.cameras.length === 0 && (
-          <div className="flex flex-col items-center justify-center py-16">
-            <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#333" strokeWidth="1.5" strokeLinecap="round" className="mb-3"><path d="m22 8-6 4 6 4V8Z" /><rect width="14" height="12" x="2" y="6" rx="2" ry="2" /><path d="M12 10v4m-2-2h4" /></svg>
-            <p className="text-xs text-white/30 mb-1">Sin cámaras</p>
-            <p className="text-[10px] text-white/15">Agrega cámaras desde el editor de mapas</p>
+      {/* Grid */}
+      <main className="flex-1 overflow-hidden">
+        {cameraOrder.length === 0 ? (
+          <div className="h-full flex flex-col items-center justify-center">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#333" strokeWidth="1.5"><path d="m22 8-6 4 6 4V8Z" /><rect width="14" height="12" x="2" y="6" rx="2" ry="2" /></svg>
+            <p className="text-xs text-white/20 mt-2 font-mono">NO CAMERAS</p>
           </div>
-        )}
-
-        {/* Active cameras grid */}
-        {activeCameras.length > 0 && (
-          <div className="grid gap-2" style={{ gridTemplateColumns: grid === "1" ? "1fr" : grid === "2" ? "1fr" : "1fr 1fr" }}>
-            {activeCameras.map((cam) => (
-              <MobileCameraCell key={cam.nodeId} camera={cam} />
-            ))}
-          </div>
-        )}
-
-        {/* Inactive cameras */}
-        {inactiveCameras.length > 0 && activeCameras.length > 0 && (
-          <div className="mt-3">
-            <div className="flex items-center gap-2 mb-2">
-              <div className="h-px flex-1 bg-white/5" />
-              <span className="text-[9px] text-white/15 font-medium">Sin stream ({inactiveCameras.length})</span>
-              <div className="h-px flex-1 bg-white/5" />
-            </div>
-            <div className="grid gap-2" style={{ gridTemplateColumns: "1fr 1fr" }}>
-              {inactiveCameras.map((cam) => (
-                <MobileCameraCell key={cam.nodeId} camera={cam} />
-              ))}
-            </div>
-          </div>
-        )}
-
-        {inactiveCameras.length > 0 && activeCameras.length === 0 && (
-          <div className="grid gap-2" style={{ gridTemplateColumns: grid === "1" ? "1fr" : grid === "2" ? "1fr" : "1fr 1fr" }}>
-            {inactiveCameras.map((cam) => (
-              <MobileCameraCell key={cam.nodeId} camera={cam} />
+        ) : (
+          <div
+            className="w-full h-full grid"
+            style={{
+              gridTemplateColumns: `repeat(${gridCols}, 1fr)`,
+              gridTemplateRows: `repeat(${rows}, 1fr)`,
+              gap: "1px",
+              background: "#1a1a1a",
+            }}
+          >
+            {cameraOrder.map((cam, idx) => (
+              <MobileNvrCell
+                key={cam.nodeId}
+                camera={cam}
+                label={`CH${String(idx + 1).padStart(2, "0")}`}
+                onTap={() => setFullscreenCam({ cam, label: `CH${String(idx + 1).padStart(2, "0")}` })}
+              />
             ))}
           </div>
         )}
       </main>
 
-      <style>{`@keyframes cam-pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }`}</style>
+      {fullscreenCam && (
+        <MobileFullscreen camera={fullscreenCam.cam} label={fullscreenCam.label} onClose={() => setFullscreenCam(null)} />
+      )}
+      <style>{`@keyframes nvr-rec { 0%,100%{opacity:1} 50%{opacity:0.3} }`}</style>
     </div>
   );
 }

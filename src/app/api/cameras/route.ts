@@ -37,8 +37,10 @@ export async function GET() {
           const streamType = data.streamType || "";
           const deviceType = data.deviceType || "";
 
+          const isCamera = icon === "camera" || icon === "_camera" || data.type === "camera";
+
           // Direct camera nodes with stream configured
-          if (icon === "camera" && streamUrl) {
+          if (isCamera && streamUrl) {
             cameras.push({
               nodeId: node.id,
               mapId: map.id,
@@ -104,7 +106,7 @@ export async function GET() {
           }
 
           // Camera nodes without stream but with IP — still count as cameras
-          if (icon === "camera" && !streamUrl && data.ip) {
+          if (isCamera && !streamUrl && data.ip) {
             cameras.push({
               nodeId: node.id,
               mapId: map.id,

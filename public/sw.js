@@ -1,4 +1,4 @@
-const CACHE_NAME = "kumamap-mobile-v3";
+const CACHE_NAME = "kumamap-mobile-v4";
 const PRECACHE_URLS = [
   "/mobile",
   "/mobile/alerts",

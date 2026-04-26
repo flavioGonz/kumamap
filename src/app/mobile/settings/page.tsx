@@ -422,6 +422,43 @@ export default function MobileSettings() {
             <IOSSwitch on={pushEnabled} loading={pushLoading} />
           </button>
 
+          {/* Test push button */}
+          {pushEnabled && (
+            <button
+              onClick={async () => {
+                hapticTap();
+                try {
+                  const res = await fetch(apiUrl("/api/push/test"), { method: "POST" });
+                  const data = await res.json();
+                  if (data.ok) {
+                    hapticSuccess();
+                    show(`Push enviado a ${data.sent} dispositivo${data.sent !== 1 ? "s" : ""}`, "success");
+                  } else {
+                    show(data.error || "Error al enviar push", "error");
+                  }
+                } catch {
+                  hapticError();
+                  show("Error de conexión", "error");
+                }
+              }}
+              className="w-full flex items-center justify-between px-4 py-3.5 active:bg-white/[0.02] transition-all border-t"
+              style={{ borderColor: "var(--surface-hover)" }}
+            >
+              <div className="flex items-center gap-3">
+                <SettingsIcon color="#60a5fa" bg="rgba(96,165,250,0.12)" border="rgba(96,165,250,0.25)">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#60a5fa" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M22 2L11 13"/><path d="M22 2L15 22L11 13L2 9L22 2Z"/>
+                  </svg>
+                </SettingsIcon>
+                <div className="text-left">
+                  <div className="text-xs font-bold text-[var(--text-primary)]">Enviar push de prueba</div>
+                  <div className="text-[10px] text-[var(--text-tertiary)]">Verificar que las notificaciones funcionan</div>
+                </div>
+              </div>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#555" strokeWidth="2" strokeLinecap="round"><polyline points="9 18 15 12 9 6" /></svg>
+            </button>
+          )}
+
           <div className="px-4 py-2 border-t flex items-center gap-2" style={{ borderColor: "var(--surface-hover)" }}>
             <div
               className="h-2 w-2 rounded-full"

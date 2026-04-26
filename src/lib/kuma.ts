@@ -1,5 +1,6 @@
 import { io, Socket } from "socket.io-client";
 import type { KumaMonitor, KumaHeartbeat } from "./types";
+import { onHeartbeat as pushOnHeartbeat } from "./push-sender";
 
 // Re-export types for backward compatibility
 export type { KumaMonitor, KumaHeartbeat } from "./types";
@@ -121,6 +122,11 @@ class KumaClient {
         history.push(data);
         if (history.length > MAX_HISTORY) history.shift();
         this.heartbeatHistory.set(data.monitorID, history);
+
+        // Send push notification on status change
+        try {
+          pushOnHeartbeat(data.monitorID, monitor?.name || `Monitor #${data.monitorID}`, data.status, data.msg, data.ping);
+        } catch {}
 
         // If heartbeat arrives for unknown monitor, request updated list
         if (!monitor && this.authenticated) {

@@ -113,6 +113,8 @@ export default function MobileHome() {
               </p>
             </div>
           </div>
+          {/* Push notification indicator */}
+          <PushIndicator />
         </div>
       </div>
 
@@ -251,6 +253,25 @@ export default function MobileHome() {
       `}</style>
     </PullToRefresh>
     </PageTransition>
+  );
+}
+
+function PushIndicator() {
+  const [enabled, setEnabled] = useState(false);
+  useEffect(() => {
+    if ("serviceWorker" in navigator && "PushManager" in window) {
+      navigator.serviceWorker.ready.then((reg) => {
+        reg.pushManager.getSubscription().then((sub) => setEnabled(!!sub));
+      });
+    }
+  }, []);
+  if (!enabled) return null;
+  return (
+    <div className="h-8 w-8 rounded-xl flex items-center justify-center" style={{ background: "rgba(34,197,94,0.1)", border: "1px solid rgba(34,197,94,0.2)" }}>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>
+      </svg>
+    </div>
   );
 }
 

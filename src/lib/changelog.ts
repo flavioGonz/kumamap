@@ -9,9 +9,27 @@ export interface ChangelogEntry {
   items: string[];
 }
 
-export const APP_VERSION = "2.4.0";
+export const APP_VERSION = "2.5.0";
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: "2.5.0",
+    date: "2026-04-26",
+    title: "Push Notifications, ONVIF en Contexto y UX Mejorada",
+    items: [
+      "Push Notifications: notificaciones nativas al celular cuando un monitor cambia de estado (DOWN/UP)",
+      "Backend push: VAPID keys, suscripciones persistentes a disco, sender integrado en heartbeat de Kuma",
+      "Test Push: botón en Settings para verificar que las notificaciones funcionan",
+      "ONVIF Discovery: movido del toolbar al menú contextual del nodo cámara (ambos editores)",
+      "ONVIF: credenciales inyectadas automáticamente en URL RTSP para autenticación",
+      "Modal de alertas inline: historial de eventos directamente en /monitors sin navegar a /alerts",
+      "PWA Alertas: nueva pestaña Timeline con eventos de las últimas 6 horas",
+      "PWA Alertas: tarjetas KPI de resumen (caídos, activos, pendientes, disponibilidad %)",
+      "PWA Alertas: uptime 24h visible en cada tarjeta de monitor",
+      "PWA Home: indicador de push notifications activas",
+      "Service Worker actualizado a v4 con mejor cache y deep linking de notificaciones",
+    ],
+  },
   {
     version: "2.4.0",
     date: "2026-04-26",

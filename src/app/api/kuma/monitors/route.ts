@@ -35,11 +35,19 @@ export async function POST(req: NextRequest) {
     const cleanData: Record<string, unknown> = { ...parsed.data };
     if (cleanData.parent == null) delete cleanData.parent;
     if (cleanData.description === "") delete cleanData.description;
-    // Uptime Kuma expects notificationIDList to always be present (even empty {})
-    // Deleting it causes ".every()" errors in Kuma's internal validation
+    // Uptime Kuma v2 requires these fields — omitting them causes internal crashes
     if (!cleanData.notificationIDList || typeof cleanData.notificationIDList !== "object") {
       cleanData.notificationIDList = {};
     }
+    // Kuma v2 calls .every() on accepted_statuscodes — MUST be present as string array
+    if (!Array.isArray(cleanData.accepted_statuscodes)) {
+      cleanData.accepted_statuscodes = ["200-299"];
+    }
+    // Other JSON fields Kuma v2 expects (see server.js lines 718-730)
+    if (cleanData.conditions === undefined) cleanData.conditions = [];
+    if (cleanData.kafkaProducerBrokers === undefined) cleanData.kafkaProducerBrokers = [];
+    if (cleanData.kafkaProducerSaslOptions === undefined) cleanData.kafkaProducerSaslOptions = {};
+    if (cleanData.rabbitmqNodes === undefined) cleanData.rabbitmqNodes = [];
 
     step = "get-kuma";
     const kuma = getKumaClient();

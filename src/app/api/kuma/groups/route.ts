@@ -46,7 +46,12 @@ export async function POST(req: NextRequest) {
     const data: Record<string, unknown> = {
       name: parsed.data.name,
       type: "group",
-      notificationIDList: {},  // Kuma expects this even for groups
+      notificationIDList: {},
+      accepted_statuscodes: ["200-299"],
+      conditions: [],
+      kafkaProducerBrokers: [],
+      kafkaProducerSaslOptions: {},
+      rabbitmqNodes: [],
     };
     if (parsed.data.parent != null) data.parent = parsed.data.parent;
     const result = await kuma.addMonitor(data);

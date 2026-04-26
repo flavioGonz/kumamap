@@ -49,44 +49,41 @@ function CameraCell({
   const hasStream =
     camera.streamUrl && camera.streamType && camera.streamType !== "nvr";
 
-  const getStreamSrc = useCallback((): string => {
+  // On mobile, RTSP uses snapshot polling (Safari doesn't support MJPEG multipart/x-mixed-replace).
+  // The /api/camera/snapshot endpoint already supports RTSP URLs via ffmpeg single-frame capture.
+  const useSnapshotPolling = camera.streamType === "rtsp" || camera.streamType === "snapshot";
+
+  const getSnapshotUrl = useCallback((): string => {
     if (!camera.streamUrl) return "";
-    switch (camera.streamType) {
-      case "rtsp":
-        return apiUrl(
-          `/api/camera/rtsp-stream?url=${encodeURIComponent(camera.streamUrl)}&fps=${camera.rtspFps || 2}`
-        );
-      case "snapshot":
-        return apiUrl(
-          `/api/camera/snapshot?url=${encodeURIComponent(camera.streamUrl)}&_t=${Date.now()}`
-        );
-      case "mjpeg":
-        return camera.streamUrl;
-      default:
-        return camera.streamUrl;
-    }
+    return apiUrl(
+      `/api/camera/snapshot?url=${encodeURIComponent(camera.streamUrl)}&_t=${Date.now()}`
+    );
   }, [camera]);
 
-  // Snapshot double-buffer polling
+  const getStreamSrc = useCallback((): string => {
+    if (!camera.streamUrl) return "";
+    // For non-polled types (mjpeg, iframe) return direct URL
+    if (camera.streamType === "mjpeg") return camera.streamUrl;
+    return camera.streamUrl;
+  }, [camera]);
+
+  // Snapshot double-buffer polling — used for both "snapshot" AND "rtsp" on mobile
   useEffect(() => {
     if (!hasStream) {
       setLoading(false);
       return;
     }
-    if (camera.streamType !== "snapshot" || !camera.streamUrl) return;
-    const ms = (camera.snapshotInterval || 2) * 1000;
-    setBufA(
-      apiUrl(
-        `/api/camera/snapshot?url=${encodeURIComponent(camera.streamUrl)}&_t=${Date.now()}`
-      )
-    );
+    if (!useSnapshotPolling || !camera.streamUrl) return;
+    // RTSP snapshots via ffmpeg take ~2-5s, so poll interval must be longer
+    const ms = camera.streamType === "rtsp"
+      ? Math.max((camera.snapshotInterval || 4) * 1000, 4000)
+      : (camera.snapshotInterval || 2) * 1000;
+    setBufA(getSnapshotUrl());
     setActiveBuf("a");
     const id = setInterval(() => {
       if (loadingRef.current) return;
       loadingRef.current = true;
-      const nextUrl = apiUrl(
-        `/api/camera/snapshot?url=${encodeURIComponent(camera.streamUrl)}&_t=${Date.now()}`
-      );
+      const nextUrl = getSnapshotUrl();
       const img = new Image();
       img.onload = () => {
         loadingRef.current = false;
@@ -104,11 +101,13 @@ function CameraCell({
       };
       img.onerror = () => {
         loadingRef.current = false;
+        setError(true);
+        setLoading(false);
       };
       img.src = nextUrl;
     }, ms);
     return () => clearInterval(id);
-  }, [camera, hasStream]);
+  }, [camera, hasStream, useSnapshotPolling, getSnapshotUrl]);
 
   const isPlaceholder = !hasStream;
 
@@ -176,37 +175,22 @@ function CameraCell({
         </div>
       )}
 
-      {/* RTSP / MJPEG stream */}
-      {hasStream &&
-        (camera.streamType === "rtsp" || camera.streamType === "mjpeg") && (
-          <img
-            src={getStreamSrc()}
-            alt={camera.label}
-            className="absolute inset-0 w-full h-full object-cover"
-            style={{ display: error ? "none" : "block" }}
-            onLoad={() => {
-              setLoading(false);
-              setError(false);
-            }}
-            onError={() => {
-              setLoading(false);
-              setError(true);
-            }}
-          />
-        )}
-
-      {/* Snapshot double-buffer */}
-      {hasStream && camera.streamType === "snapshot" && (
+      {/* Snapshot-polled streams (RTSP + snapshot) — double-buffer crossfade */}
+      {hasStream && useSnapshotPolling && (
         <>
           {bufA && (
             <img
               src={bufA}
               alt={camera.label}
-              className="absolute inset-0 w-full h-full object-cover transition-opacity duration-500"
+              className="absolute inset-0 w-full h-full object-cover transition-opacity duration-700"
               style={{ opacity: activeBuf === "a" ? 1 : 0 }}
               onLoad={() => {
                 setLoading(false);
                 setError(false);
+              }}
+              onError={() => {
+                setLoading(false);
+                setError(true);
               }}
             />
           )}
@@ -214,11 +198,29 @@ function CameraCell({
             <img
               src={bufB}
               alt={camera.label}
-              className="absolute inset-0 w-full h-full object-cover transition-opacity duration-500"
+              className="absolute inset-0 w-full h-full object-cover transition-opacity duration-700"
               style={{ opacity: activeBuf === "b" ? 1 : 0 }}
             />
           )}
         </>
+      )}
+
+      {/* Direct MJPEG stream (works on desktop, may not work on all mobile browsers) */}
+      {hasStream && camera.streamType === "mjpeg" && (
+        <img
+          src={getStreamSrc()}
+          alt={camera.label}
+          className="absolute inset-0 w-full h-full object-cover"
+          style={{ display: error ? "none" : "block" }}
+          onLoad={() => {
+            setLoading(false);
+            setError(false);
+          }}
+          onError={() => {
+            setLoading(false);
+            setError(true);
+          }}
+        />
       )}
 
       {/* Iframe stream */}
@@ -306,41 +308,38 @@ function FullscreenViewer({
   const loadingRef = useRef(false);
   const touchStartX = useRef<number | null>(null);
 
+  const useSnapshotPolling = camera.streamType === "rtsp" || camera.streamType === "snapshot";
+
+  const getSnapshotUrl = useCallback((): string => {
+    if (!camera.streamUrl) return "";
+    return apiUrl(
+      `/api/camera/snapshot?url=${encodeURIComponent(camera.streamUrl)}&_t=${Date.now()}`
+    );
+  }, [camera]);
+
   const getStreamSrc = useCallback((): string => {
     if (!camera.streamUrl) return "";
-    switch (camera.streamType) {
-      case "rtsp":
-        return apiUrl(
-          `/api/camera/rtsp-stream?url=${encodeURIComponent(camera.streamUrl)}&fps=${camera.rtspFps || 4}`
-        );
-      case "snapshot":
-        return apiUrl(
-          `/api/camera/snapshot?url=${encodeURIComponent(camera.streamUrl)}&_t=${Date.now()}`
-        );
-      case "mjpeg":
-        return camera.streamUrl;
-      default:
-        return camera.streamUrl;
-    }
+    if (camera.streamType === "mjpeg") return camera.streamUrl;
+    return camera.streamUrl;
   }, [camera]);
 
   useEffect(() => {
     setLoading(true);
     setError(false);
-    if (camera.streamType !== "snapshot" || !camera.streamUrl) return;
-    const ms = (camera.snapshotInterval || 2) * 1000;
-    setBufA(
-      apiUrl(
-        `/api/camera/snapshot?url=${encodeURIComponent(camera.streamUrl)}&_t=${Date.now()}`
-      )
-    );
+    setBufA("");
+    setBufB("");
+    if (!useSnapshotPolling || !camera.streamUrl) return;
+    // RTSP snapshots take longer, use 4s+ interval
+    const ms = camera.streamType === "rtsp"
+      ? Math.max((camera.snapshotInterval || 3) * 1000, 3000)
+      : (camera.snapshotInterval || 2) * 1000;
+    const firstUrl = getSnapshotUrl();
+    setBufA(firstUrl);
     setActiveBuf("a");
     const id = setInterval(() => {
       if (loadingRef.current) return;
       loadingRef.current = true;
-      const nextUrl = apiUrl(
-        `/api/camera/snapshot?url=${encodeURIComponent(camera.streamUrl)}&_t=${Date.now()}`
-      );
+      const nextUrl = getSnapshotUrl();
       const img = new Image();
       img.onload = () => {
         loadingRef.current = false;
@@ -358,11 +357,13 @@ function FullscreenViewer({
       };
       img.onerror = () => {
         loadingRef.current = false;
+        setError(true);
+        setLoading(false);
       };
       img.src = nextUrl;
     }, ms);
     return () => clearInterval(id);
-  }, [camera]);
+  }, [camera, useSnapshotPolling, getSnapshotUrl]);
 
   // Swipe left/right to navigate cameras
   const handleTouchStart = (e: React.TouchEvent) => {
@@ -444,7 +445,43 @@ function FullscreenViewer({
             <div className="h-10 w-10 rounded-full border-2 border-white/10 border-t-white/60 animate-spin" />
           </div>
         )}
-        {(camera.streamType === "rtsp" || camera.streamType === "mjpeg") && (
+        {/* Snapshot-polled streams (RTSP + snapshot) — double-buffer */}
+        {useSnapshotPolling && (
+          <div className="relative w-full h-full flex items-center justify-center">
+            {bufA && (
+              <img
+                src={bufA}
+                alt={camera.label}
+                className="max-w-full max-h-full object-contain transition-opacity duration-700"
+                style={{
+                  opacity: activeBuf === "a" ? 1 : 0,
+                  position: activeBuf === "a" ? "relative" : "absolute",
+                }}
+                onLoad={() => {
+                  setLoading(false);
+                  setError(false);
+                }}
+                onError={() => {
+                  setLoading(false);
+                  setError(true);
+                }}
+              />
+            )}
+            {bufB && (
+              <img
+                src={bufB}
+                alt={camera.label}
+                className="max-w-full max-h-full object-contain transition-opacity duration-700"
+                style={{
+                  opacity: activeBuf === "b" ? 1 : 0,
+                  position: activeBuf === "b" ? "relative" : "absolute",
+                }}
+              />
+            )}
+          </div>
+        )}
+        {/* Direct MJPEG */}
+        {camera.streamType === "mjpeg" && (
           <img
             src={getStreamSrc()}
             alt={camera.label}
@@ -459,36 +496,6 @@ function FullscreenViewer({
               setError(true);
             }}
           />
-        )}
-        {camera.streamType === "snapshot" && (
-          <div className="relative w-full h-full flex items-center justify-center">
-            {bufA && (
-              <img
-                src={bufA}
-                alt={camera.label}
-                className="max-w-full max-h-full object-contain transition-opacity duration-500"
-                style={{
-                  opacity: activeBuf === "a" ? 1 : 0,
-                  position: activeBuf === "a" ? "relative" : "absolute",
-                }}
-                onLoad={() => {
-                  setLoading(false);
-                  setError(false);
-                }}
-              />
-            )}
-            {bufB && (
-              <img
-                src={bufB}
-                alt={camera.label}
-                className="max-w-full max-h-full object-contain transition-opacity duration-500"
-                style={{
-                  opacity: activeBuf === "b" ? 1 : 0,
-                  position: activeBuf === "b" ? "relative" : "absolute",
-                }}
-              />
-            )}
-          </div>
         )}
         {error && (
           <div className="absolute inset-0 flex flex-col items-center justify-center">

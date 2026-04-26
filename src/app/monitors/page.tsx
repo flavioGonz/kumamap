@@ -4,6 +4,20 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { apiUrl } from "@/lib/api";
 import { safeFetch } from "@/lib/error-handler";
 
+/** Fetch that returns {data, error} instead of swallowing errors */
+async function apiFetch<T>(url: string, opts?: RequestInit): Promise<{ data: T | null; error: string | null }> {
+  try {
+    const res = await fetch(url, opts);
+    const body = await res.json().catch(() => null);
+    if (!res.ok) {
+      return { data: null, error: body?.error || body?.msg || `HTTP ${res.status}` };
+    }
+    return { data: body as T, error: null };
+  } catch (err) {
+    return { data: null, error: err instanceof Error ? err.message : "Error de red" };
+  }
+}
+
 // ─── Types ──────────────────────────────────────────
 interface KumaMonitor {
   id: number;
@@ -375,7 +389,7 @@ function MonitorFormModal({ monitor, groups, notifications, onClose, onSave }: {
       else data.parent = null;
 
       const ok = await onSave(data);
-      if (!ok) setError("Error al guardar. Verificá los datos e intentá de nuevo.");
+      if (!ok) setError("No se pudo guardar. Revisá el toast de error para más detalles.");
     } finally { setSaving(false); }
   };
 
@@ -843,32 +857,34 @@ export default function MonitorsPage() {
     return () => clearInterval(pollRef.current);
   }, [fetchData]);
 
-  // ── CRUD handlers (return boolean for success) ──
+  // ── CRUD handlers (return {ok, error}) ──
   const handleCreateMonitor = async (data: Record<string, unknown>): Promise<boolean> => {
-    const res = await safeFetch<{ ok: boolean }>(apiUrl("/api/kuma/monitors"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) }, "Crear monitor");
+    const { data: res, error } = await apiFetch<{ ok: boolean }>(apiUrl("/api/kuma/monitors"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) });
     if (res?.ok) { setFormModal({ open: false }); addToast(`Monitor "${data.name}" creado`); fetchData(); return true; }
-    addToast("Error al crear monitor", "error");
+    addToast(error || "Error al crear monitor", "error");
     return false;
   };
 
   const handleEditMonitor = async (data: Record<string, unknown>): Promise<boolean> => {
     if (!formModal.monitor) return false;
-    const res = await safeFetch<{ ok: boolean }>(apiUrl(`/api/kuma/monitors/${formModal.monitor.id}`), { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) }, "Editar monitor");
+    const { data: res, error } = await apiFetch<{ ok: boolean }>(apiUrl(`/api/kuma/monitors/${formModal.monitor.id}`), { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) });
     if (res?.ok) { setFormModal({ open: false }); addToast(`Monitor "${data.name}" actualizado`); fetchData(); return true; }
-    addToast("Error al editar monitor", "error");
+    addToast(error || "Error al editar monitor", "error");
     return false;
   };
 
   const handleDelete = async () => {
     if (!deleteModal) return;
     setLoadingAction(`delete-${deleteModal.id}`);
-    const res = await safeFetch<{ ok: boolean }>(apiUrl(`/api/kuma/monitors/${deleteModal.id}`), { method: "DELETE" }, "Eliminar");
+    const { data: res, error } = await apiFetch<{ ok: boolean }>(apiUrl(`/api/kuma/monitors/${deleteModal.id}`), { method: "DELETE" });
     if (res?.ok) {
       addToast(`"${deleteModal.name}" eliminado`);
+      // Optimistic: remove from list immediately
+      setMonitors((prev) => prev.filter((m) => m.id !== deleteModal.id));
       setDeleteModal(null);
       fetchData();
     } else {
-      addToast("Error al eliminar", "error");
+      addToast(error || "Error al eliminar", "error");
     }
     setLoadingAction("");
   };
@@ -876,12 +892,13 @@ export default function MonitorsPage() {
   const handleTogglePause = async (id: number, currentActive: boolean) => {
     setLoadingAction(`toggle-${id}`);
     const action = currentActive ? "pause" : "resume";
-    const res = await safeFetch<{ ok: boolean }>(apiUrl(`/api/kuma/monitors/${id}`), { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action }) }, `${action} monitor`);
+    const { data: res, error } = await apiFetch<{ ok: boolean }>(apiUrl(`/api/kuma/monitors/${id}`), { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action }) });
     if (res) {
       const mon = monitors.find((m) => m.id === id);
       addToast(`${mon?.name || "Monitor"} ${currentActive ? "pausado" : "reanudado"}`);
-      // Optimistic update
       setMonitors((prev) => prev.map((m) => m.id === id ? { ...m, active: !currentActive } : m));
+    } else {
+      addToast(error || `Error al ${action}`, "error");
     }
     setLoadingAction("");
     fetchData();
@@ -890,9 +907,9 @@ export default function MonitorsPage() {
   const handleCreateGroup = async (name: string, parent: number | null): Promise<boolean> => {
     const body: Record<string, unknown> = { name };
     if (parent != null) body.parent = parent;
-    const res = await safeFetch<{ ok: boolean }>(apiUrl("/api/kuma/groups"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }, "Crear grupo");
+    const { data: res, error } = await apiFetch<{ ok: boolean }>(apiUrl("/api/kuma/groups"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
     if (res?.ok) { setGroupModal({ open: false }); addToast(`Grupo "${name}" creado`); fetchData(); return true; }
-    addToast("Error al crear grupo", "error");
+    addToast(error || "Error al crear grupo", "error");
     return false;
   };
 
@@ -900,10 +917,9 @@ export default function MonitorsPage() {
     if (!groupModal.group) return false;
     const data: Record<string, unknown> = { name, type: "group" };
     if (parent != null) data.parent = parent;
-    else data.parent = null;
-    const res = await safeFetch<{ ok: boolean }>(apiUrl(`/api/kuma/monitors/${groupModal.group.id}`), { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) }, "Editar grupo");
+    const { data: res, error } = await apiFetch<{ ok: boolean }>(apiUrl(`/api/kuma/monitors/${groupModal.group.id}`), { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) });
     if (res?.ok) { setGroupModal({ open: false }); addToast(`Grupo "${name}" actualizado`); fetchData(); return true; }
-    addToast("Error al editar grupo", "error");
+    addToast(error || "Error al editar grupo", "error");
     return false;
   };
 
@@ -931,15 +947,16 @@ export default function MonitorsPage() {
     if (!monitor || monitor.parent === groupId) return;
 
     setLoadingAction(`move-${mid}`);
-    const res = await safeFetch<{ ok: boolean }>(apiUrl(`/api/kuma/monitors/${mid}`), {
+    const { data: res, error } = await apiFetch<{ ok: boolean }>(apiUrl(`/api/kuma/monitors/${mid}`), {
       method: "PUT", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ parent: groupId }),
-    }, "Mover monitor");
+    });
     if (res?.ok) {
       const gName = groupId ? groups.find((g) => g.id === groupId)?.name || "grupo" : "Sin grupo";
       addToast(`"${monitor.name}" movido a ${gName}`);
-      // Optimistic update
       setMonitors((prev) => prev.map((m) => m.id === mid ? { ...m, parent: groupId } : m));
+    } else {
+      addToast(error || "Error al mover", "error");
     }
     setLoadingAction("");
     fetchData();

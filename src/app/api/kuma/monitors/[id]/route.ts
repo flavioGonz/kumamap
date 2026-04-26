@@ -57,7 +57,11 @@ export async function PUT(
     }
 
     // Merge existing data with edits
-    const editData = { ...existing, ...parsed.data, id: monitorId };
+    const editData: Record<string, unknown> = { ...existing, ...parsed.data, id: monitorId };
+    // Uptime Kuma expects notificationIDList to always be present
+    if (!editData.notificationIDList || typeof editData.notificationIDList !== "object") {
+      editData.notificationIDList = {};
+    }
     const result = await kuma.editMonitor(editData);
 
     if (result.ok) {

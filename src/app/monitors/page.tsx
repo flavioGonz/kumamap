@@ -147,12 +147,13 @@ function ToastContainer({ toasts }: { toasts: ToastMsg[] }) {
 }
 
 // ─── Heartbeat Bar (interactive, Uptime-Kuma-inspired) ──
-function HeartbeatBar({ beats, width = 300, height = 28 }: {
+function HeartbeatBar({ beats: rawBeats, width = 300, height = 28 }: {
   beats: Heartbeat[];
   width?: number;
   height?: number;
 }) {
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
+  const beats = Array.isArray(rawBeats) ? rawBeats : [];
   const barW = 4;
   const gap = 1.5;
   const maxBars = Math.floor(width / (barW + gap));
@@ -265,7 +266,8 @@ function GroupHeartbeatBar({ groupId, heartbeats, monitors, width = 300, height 
 
 // ─── Notification indicator ──────────────────────────
 function NotifIndicator({ monitor }: { monitor: KumaMonitor }) {
-  const hasNotifs = monitor.notificationIDList && Object.values(monitor.notificationIDList).some(Boolean);
+  const nList = monitor.notificationIDList;
+  const hasNotifs = nList && typeof nList === "object" && Object.values(nList).some(Boolean);
   return (
     <div title={hasNotifs ? "Notificaciones activas" : "Sin notificaciones"} style={{
       display: "flex", alignItems: "center", justifyContent: "center",
@@ -844,16 +846,26 @@ export default function MonitorsPage() {
   const pollRef = useRef<ReturnType<typeof setInterval>>(undefined);
 
   const fetchData = useCallback(async () => {
-    const [kumaData, groupData, configData, hbData] = await Promise.all([
-      safeFetch<{ connected: boolean; monitors: KumaMonitor[] }>(apiUrl("/api/kuma")),
-      safeFetch<{ groups: KumaGroup[] }>(apiUrl("/api/kuma/groups")),
-      safeFetch<{ notifications: Notification[] }>(apiUrl("/api/kuma/config")),
-      safeFetch<{ heartbeats: Record<number, Heartbeat[]> }>(apiUrl("/api/kuma/heartbeats?count=90")),
-    ]);
-    if (kumaData) { setMonitors((kumaData.monitors || []).filter((m) => m.type !== "group")); setConnected(kumaData.connected); }
-    if (groupData) setGroups(groupData.groups);
-    if (configData) setNotifications(configData.notifications || []);
-    if (hbData) setHeartbeats(hbData.heartbeats || {});
+    try {
+      const [kumaData, groupData, configData, hbData] = await Promise.all([
+        safeFetch<{ connected: boolean; monitors: KumaMonitor[] }>(apiUrl("/api/kuma")),
+        safeFetch<{ groups: KumaGroup[] }>(apiUrl("/api/kuma/groups")),
+        safeFetch<{ notifications: Notification[] }>(apiUrl("/api/kuma/config")),
+        safeFetch<{ heartbeats: Record<number, Heartbeat[]> }>(apiUrl("/api/kuma/heartbeats?count=90")),
+      ]);
+      if (kumaData) {
+        const mons = Array.isArray(kumaData.monitors) ? kumaData.monitors : [];
+        setMonitors(mons.filter((m) => m.type !== "group"));
+        setConnected(kumaData.connected);
+      }
+      if (groupData) setGroups(Array.isArray(groupData.groups) ? groupData.groups : []);
+      if (configData) setNotifications(Array.isArray(configData.notifications) ? configData.notifications : []);
+      if (hbData && hbData.heartbeats && typeof hbData.heartbeats === "object") {
+        setHeartbeats(hbData.heartbeats);
+      }
+    } catch (e) {
+      console.error("[monitors] fetchData error:", e);
+    }
     setLoading(false);
   }, []);
 

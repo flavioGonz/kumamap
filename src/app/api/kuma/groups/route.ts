@@ -46,6 +46,7 @@ export async function POST(req: NextRequest) {
     const data: Record<string, unknown> = {
       name: parsed.data.name,
       type: "group",
+      notificationIDList: {},  // Kuma expects this even for groups
     };
     if (parsed.data.parent != null) data.parent = parsed.data.parent;
     const result = await kuma.addMonitor(data);

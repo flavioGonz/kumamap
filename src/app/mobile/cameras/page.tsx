@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { apiUrl } from "@/lib/api";
 import { hapticTap } from "@/lib/haptics";
+import { useMjpegStream } from "@/hooks/useMjpegStream";
 
 // ─── Types ─────────────────────────────────────
 interface CameraInfo {
@@ -294,7 +295,7 @@ function CameraCell({
   );
 }
 
-// ─── Fullscreen Viewer ────────────────────────
+// ─── Fullscreen Live Viewer ───────────────────
 function FullscreenViewer({
   camera,
   onClose,
@@ -310,70 +311,18 @@ function FullscreenViewer({
   hasPrev: boolean;
   hasNext: boolean;
 }) {
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(false);
-  const [bufA, setBufA] = useState("");
-  const [bufB, setBufB] = useState("");
-  const [activeBuf, setActiveBuf] = useState<"a" | "b">("a");
-  const loadingRef = useRef(false);
   const touchStartX = useRef<number | null>(null);
+  const hasRtsp = camera.streamType === "rtsp" && camera.streamUrl;
 
-  const useSnapshotPolling = camera.streamType === "rtsp" || camera.streamType === "snapshot";
+  // Live RTSP stream via canvas-based MJPEG renderer (works on all browsers)
+  const { canvasRef, status } = useMjpegStream(
+    hasRtsp ? camera.streamUrl : null,
+    { fps: camera.rtspFps || 8, quality: 5 },
+  );
 
-  const getSnapshotUrl = useCallback((): string => {
-    if (!camera.streamUrl) return "";
-    return apiUrl(
-      `/api/camera/snapshot?url=${encodeURIComponent(camera.streamUrl)}&_t=${Date.now()}`
-    );
-  }, [camera]);
-
-  const getStreamSrc = useCallback((): string => {
-    if (!camera.streamUrl) return "";
-    if (camera.streamType === "mjpeg") return camera.streamUrl;
-    return camera.streamUrl;
-  }, [camera]);
-
-  useEffect(() => {
-    setLoading(true);
-    setError(false);
-    setBufA("");
-    setBufB("");
-    if (!useSnapshotPolling || !camera.streamUrl) return;
-    // RTSP snapshots take longer, use 4s+ interval
-    const ms = camera.streamType === "rtsp"
-      ? Math.max((camera.snapshotInterval || 3) * 1000, 3000)
-      : (camera.snapshotInterval || 2) * 1000;
-    const firstUrl = getSnapshotUrl();
-    setBufA(firstUrl);
-    setActiveBuf("a");
-    const id = setInterval(() => {
-      if (loadingRef.current) return;
-      loadingRef.current = true;
-      const nextUrl = getSnapshotUrl();
-      const img = new Image();
-      img.onload = () => {
-        loadingRef.current = false;
-        setActiveBuf((p) => {
-          if (p === "a") {
-            setBufB(nextUrl);
-            return "b";
-          } else {
-            setBufA(nextUrl);
-            return "a";
-          }
-        });
-        setLoading(false);
-        setError(false);
-      };
-      img.onerror = () => {
-        loadingRef.current = false;
-        setError(true);
-        setLoading(false);
-      };
-      img.src = nextUrl;
-    }, ms);
-    return () => clearInterval(id);
-  }, [camera, useSnapshotPolling, getSnapshotUrl]);
+  const isLive = status === "streaming";
+  const isConnecting = status === "connecting";
+  const isError = status === "error";
 
   // Swipe left/right to navigate cameras
   const handleTouchStart = (e: React.TouchEvent) => {
@@ -409,15 +358,7 @@ function FullscreenViewer({
           onClick={onClose}
           className="p-1.5 -ml-1.5 active:opacity-50"
         >
-          <svg
-            width="20"
-            height="20"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="white"
-            strokeWidth="2"
-            strokeLinecap="round"
-          >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round">
             <polyline points="15 18 9 12 15 6" />
           </svg>
         </button>
@@ -426,107 +367,86 @@ function FullscreenViewer({
             {camera.label}
           </p>
           <div className="flex items-center justify-center gap-2 mt-0.5">
-            {!error && !loading && (
+            {isLive && (
               <div className="flex items-center gap-1">
                 <div
-                  className="h-1.5 w-1.5 rounded-full"
+                  className="h-2 w-2 rounded-full"
                   style={{
-                    background: "#22c55e",
-                    boxShadow: "0 0 6px rgba(34,197,94,0.5)",
+                    background: "#ef4444",
+                    boxShadow: "0 0 8px rgba(239,68,68,0.6)",
+                    animation: "pulse-dot 1.5s ease-in-out infinite",
                   }}
                 />
-                <span className="text-[10px] text-green-400/80 font-medium">
-                  En vivo
+                <span className="text-[10px] text-red-400 font-bold tracking-wider">
+                  LIVE
                 </span>
               </div>
+            )}
+            {isConnecting && (
+              <span className="text-[10px] text-yellow-400/80 font-medium">
+                Conectando...
+              </span>
+            )}
+            {isError && (
+              <span className="text-[10px] text-red-400/80 font-medium">
+                Error de conexión
+              </span>
             )}
             <span className="text-[10px] text-white/30">
               {camera.streamType?.toUpperCase()} · {camera.ip}
             </span>
           </div>
         </div>
-        <div className="w-8" /> {/* Spacer for centering */}
+        <div className="w-8" />
       </div>
 
       {/* Stream area */}
-      <div className="flex-1 relative flex items-center justify-center">
-        {loading && !error && (
-          <div className="absolute inset-0 flex items-center justify-center z-10">
+      <div className="flex-1 relative flex items-center justify-center overflow-hidden">
+        {/* Connecting spinner */}
+        {isConnecting && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center z-10">
             <div className="h-10 w-10 rounded-full border-2 border-white/10 border-t-white/60 animate-spin" />
+            <p className="text-xs text-white/30 mt-4">Conectando al stream RTSP...</p>
           </div>
         )}
-        {/* Snapshot-polled streams (RTSP + snapshot) — double-buffer */}
-        {useSnapshotPolling && (
-          <div className="relative w-full h-full flex items-center justify-center">
-            {bufA && (
-              <img
-                src={bufA}
-                alt={camera.label}
-                className="max-w-full max-h-full object-contain transition-opacity duration-700"
-                style={{
-                  opacity: activeBuf === "a" ? 1 : 0,
-                  position: activeBuf === "a" ? "relative" : "absolute",
-                }}
-                onLoad={() => {
-                  setLoading(false);
-                  setError(false);
-                }}
-                onError={() => {
-                  setLoading(false);
-                  setError(true);
-                }}
-              />
-            )}
-            {bufB && (
-              <img
-                src={bufB}
-                alt={camera.label}
-                className="max-w-full max-h-full object-contain transition-opacity duration-700"
-                style={{
-                  opacity: activeBuf === "b" ? 1 : 0,
-                  position: activeBuf === "b" ? "relative" : "absolute",
-                }}
-              />
-            )}
-          </div>
-        )}
-        {/* Direct MJPEG */}
-        {camera.streamType === "mjpeg" && (
-          <img
-            src={getStreamSrc()}
-            alt={camera.label}
+
+        {/* Live RTSP canvas — renders MJPEG frames from fetch() stream */}
+        {hasRtsp && (
+          <canvas
+            ref={canvasRef}
             className="max-w-full max-h-full object-contain"
-            style={{ display: error ? "none" : "block" }}
-            onLoad={() => {
-              setLoading(false);
-              setError(false);
-            }}
-            onError={() => {
-              setLoading(false);
-              setError(true);
+            style={{
+              opacity: isLive ? 1 : 0,
+              transition: "opacity 0.3s ease",
             }}
           />
         )}
-        {error && (
+
+        {/* Fallback for non-RTSP: MJPEG img */}
+        {!hasRtsp && camera.streamType === "mjpeg" && camera.streamUrl && (
+          <img
+            src={camera.streamUrl}
+            alt={camera.label}
+            className="max-w-full max-h-full object-contain"
+          />
+        )}
+
+        {/* No stream */}
+        {!camera.streamUrl && (
+          <div className="flex flex-col items-center justify-center">
+            <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="#333" strokeWidth="1.5">
+              <path d="m22 8-6 4 6 4V8Z" /><rect width="14" height="12" x="2" y="6" rx="2" ry="2" />
+            </svg>
+            <p className="text-sm text-white/25 mt-3">Sin stream configurado</p>
+          </div>
+        )}
+
+        {/* Error state */}
+        {isError && (
           <div className="absolute inset-0 flex flex-col items-center justify-center">
-            <svg
-              width="44"
-              height="44"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="#333"
-              strokeWidth="1.5"
-            >
-              <path d="m22 8-6 4 6 4V8Z" />
-              <rect width="14" height="12" x="2" y="6" rx="2" ry="2" />
-              <line
-                x1="2"
-                y1="2"
-                x2="22"
-                y2="22"
-                stroke="#ef4444"
-                strokeWidth="2"
-              />
+            <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="#333" strokeWidth="1.5">
+              <path d="m22 8-6 4 6 4V8Z" /><rect width="14" height="12" x="2" y="6" rx="2" ry="2" />
+              <line x1="2" y1="2" x2="22" y2="22" stroke="#ef4444" strokeWidth="2" />
             </svg>
             <p className="text-sm text-white/25 mt-3">Sin señal</p>
           </div>

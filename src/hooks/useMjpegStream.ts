@@ -1,49 +1,48 @@
 "use client";
 
-import { useEffect, useRef, useCallback, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { apiUrl } from "@/lib/api";
 
 /**
- * useMjpegStream — renders a live MJPEG stream onto a <canvas>.
+ * useMjpegStream — live RTSP video on any browser (including Safari iOS).
  *
- * Works on ALL browsers (including Safari iOS) by using fetch() to read
- * the multipart/x-mixed-replace stream and drawing JPEG frames to canvas.
+ * Strategy:
+ * 1. Try fetch() + ReadableStream to parse MJPEG frames → canvas (Chrome, Firefox)
+ * 2. If ReadableStream not available (Safari iOS), fallback to rapid snapshot
+ *    polling via /api/camera/snapshot with double-buffer crossfade on <img>.
  *
- * Usage:
- *   const { canvasRef, status } = useMjpegStream(rtspUrl, { fps: 4 });
- *   return <canvas ref={canvasRef} />;
+ * The hook renders to EITHER a canvas OR an img pair — caller should render both
+ * and use `mode` to know which is active.
  */
 
 interface MjpegOptions {
   fps?: number;
   quality?: number;
-  scale?: string;
-  enabled?: boolean; // default true — set false to pause
+  enabled?: boolean;
 }
 
 type StreamStatus = "connecting" | "streaming" | "error" | "stopped";
+type StreamMode = "canvas" | "img";
 
 export function useMjpegStream(
   rtspUrl: string | null,
   options: MjpegOptions = {},
 ) {
-  const { fps = 4, quality = 8, scale, enabled = true } = options;
+  const { fps = 4, quality = 8, enabled = true } = options;
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [status, setStatus] = useState<StreamStatus>("stopped");
+  const [mode, setMode] = useState<StreamMode>("canvas");
+  const [imgSrcA, setImgSrcA] = useState("");
+  const [imgSrcB, setImgSrcB] = useState("");
+  const [activeBuf, setActiveBuf] = useState<"a" | "b">("a");
   const abortRef = useRef<AbortController | null>(null);
   const frameCountRef = useRef(0);
-
-  const stop = useCallback(() => {
-    if (abortRef.current) {
-      abortRef.current.abort();
-      abortRef.current = null;
-    }
-    setStatus("stopped");
-  }, []);
+  const loadingRef = useRef(false);
 
   useEffect(() => {
     if (!rtspUrl || !enabled) {
-      stop();
+      if (abortRef.current) { abortRef.current.abort(); abortRef.current = null; }
+      setStatus("stopped");
       return;
     }
 
@@ -51,27 +50,31 @@ export function useMjpegStream(
     abortRef.current = controller;
     setStatus("connecting");
     frameCountRef.current = 0;
-
-    const streamUrl = apiUrl(
-      `/api/camera/rtsp-stream?url=${encodeURIComponent(rtspUrl)}&fps=${fps}&quality=${quality}${scale ? `&scale=${scale}` : ""}`
-    );
-
     let running = true;
 
-    (async () => {
+    // ── Try ReadableStream first (Chrome, Firefox, modern Edge) ──
+    const tryStreamMode = async (): Promise<boolean> => {
       try {
+        const streamUrl = apiUrl(
+          `/api/camera/rtsp-stream?url=${encodeURIComponent(rtspUrl)}&fps=${fps}&quality=${quality}`
+        );
         const res = await fetch(streamUrl, { signal: controller.signal });
-        if (!res.ok || !res.body) {
-          if (running) setStatus("error");
-          return;
+
+        // Safari returns res.body === null for streaming responses
+        if (!res.ok || !res.body) return false;
+
+        let reader: ReadableStreamDefaultReader<Uint8Array>;
+        try {
+          reader = res.body.getReader();
+        } catch {
+          return false; // Safari may throw on getReader()
         }
 
-        const reader = res.body.getReader();
-        let buffer = new Uint8Array(0);
+        setMode("canvas");
 
-        // JPEG markers
         const SOI = [0xff, 0xd8];
         const EOI = [0xff, 0xd9];
+        let buffer = new Uint8Array(0);
 
         const findMarker = (buf: Uint8Array, marker: number[], from: number): number => {
           for (let i = from; i < buf.length - 1; i++) {
@@ -89,7 +92,6 @@ export function useMjpegStream(
           const url = URL.createObjectURL(blob);
           const img = new Image();
           img.onload = () => {
-            // Size canvas to match frame on first frame or if dimensions change
             if (canvas.width !== img.width || canvas.height !== img.height) {
               canvas.width = img.width;
               canvas.height = img.height;
@@ -104,44 +106,93 @@ export function useMjpegStream(
           img.src = url;
         };
 
+        // Set a timeout: if no frame arrives within 8s, consider it failed
+        let gotFirstFrame = false;
+        const frameTimeout = setTimeout(() => {
+          if (!gotFirstFrame && running) {
+            reader.cancel().catch(() => {});
+          }
+        }, 8000);
+
         while (running) {
           const { done, value } = await reader.read();
           if (done) break;
 
-          // Append chunk to buffer
           const newBuf = new Uint8Array(buffer.length + value.length);
           newBuf.set(buffer);
           newBuf.set(value, buffer.length);
           buffer = newBuf;
 
-          // Extract complete JPEG frames (SOI → EOI)
           let searchFrom = 0;
           while (true) {
             const soi = findMarker(buffer, SOI, searchFrom);
             if (soi === -1) break;
             const eoi = findMarker(buffer, EOI, soi + 2);
             if (eoi === -1) break;
-
             const frame = buffer.slice(soi, eoi + 2);
             drawFrame(frame);
+            gotFirstFrame = true;
             searchFrom = eoi + 2;
           }
+          if (searchFrom > 0) buffer = buffer.slice(searchFrom);
+          if (buffer.length > 2 * 1024 * 1024) buffer = buffer.slice(buffer.length - 512 * 1024);
+        }
 
-          // Keep unprocessed bytes
-          if (searchFrom > 0) {
-            buffer = buffer.slice(searchFrom);
-          }
-          // Cap buffer to prevent memory leak
-          if (buffer.length > 2 * 1024 * 1024) {
-            buffer = buffer.slice(buffer.length - 512 * 1024);
-          }
-        }
+        clearTimeout(frameTimeout);
+        return true; // stream mode worked
       } catch (err: unknown) {
-        if (err instanceof DOMException && err.name === "AbortError") {
-          // Normal cleanup
-        } else {
-          if (running) setStatus("error");
-        }
+        if (err instanceof DOMException && err.name === "AbortError") return true;
+        return false;
+      }
+    };
+
+    // ── Fallback: rapid snapshot polling (Safari iOS, any browser) ──
+    const startSnapshotMode = () => {
+      setMode("img");
+      const ms = 3000; // 3s per snapshot (ffmpeg takes ~2-4s)
+      let errCount = 0;
+
+      const getUrl = () => apiUrl(
+        `/api/camera/snapshot?url=${encodeURIComponent(rtspUrl)}&_t=${Date.now()}`
+      );
+
+      // Load first frame
+      setImgSrcA(getUrl());
+      setActiveBuf("a");
+
+      const id = setInterval(() => {
+        if (!running || loadingRef.current) return;
+        loadingRef.current = true;
+        const nextUrl = getUrl();
+        const img = new Image();
+        img.onload = () => {
+          loadingRef.current = false;
+          errCount = 0;
+          setActiveBuf((p) => {
+            if (p === "a") { setImgSrcB(nextUrl); return "b"; }
+            else { setImgSrcA(nextUrl); return "a"; }
+          });
+          frameCountRef.current++;
+          if (frameCountRef.current === 1) setStatus("streaming");
+        };
+        img.onerror = () => {
+          loadingRef.current = false;
+          errCount++;
+          if (errCount >= 3) setStatus("error");
+        };
+        img.src = nextUrl;
+      }, ms);
+
+      return () => clearInterval(id);
+    };
+
+    // ── Launch: try stream, fallback to snapshots ──
+    let cleanupSnapshot: (() => void) | null = null;
+
+    (async () => {
+      const streamWorked = await tryStreamMode();
+      if (!streamWorked && running) {
+        cleanupSnapshot = startSnapshotMode();
       }
     })();
 
@@ -149,8 +200,9 @@ export function useMjpegStream(
       running = false;
       controller.abort();
       abortRef.current = null;
+      if (cleanupSnapshot) cleanupSnapshot();
     };
-  }, [rtspUrl, fps, quality, scale, enabled, stop]);
+  }, [rtspUrl, fps, quality, enabled]);
 
-  return { canvasRef, status, stop, frameCount: frameCountRef };
+  return { canvasRef, status, mode, imgSrcA, imgSrcB, activeBuf };
 }

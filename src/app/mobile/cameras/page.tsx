@@ -4,6 +4,7 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import { apiUrl } from "@/lib/api";
 import { hapticTap } from "@/lib/haptics";
 import { useMjpegStream } from "@/hooks/useMjpegStream";
+import { SkeletonCameraGrid } from "@/components/mobile/Skeleton";
 
 // ─── Types ─────────────────────────────────────
 interface CameraInfo {
@@ -314,8 +315,8 @@ function FullscreenViewer({
   const touchStartX = useRef<number | null>(null);
   const hasRtsp = camera.streamType === "rtsp" && camera.streamUrl;
 
-  // Live RTSP stream via canvas-based MJPEG renderer (works on all browsers)
-  const { canvasRef, status } = useMjpegStream(
+  // Live RTSP stream — tries canvas (Chrome/Firefox), falls back to snapshot polling (Safari)
+  const { canvasRef, status, mode, imgSrcA, imgSrcB, activeBuf } = useMjpegStream(
     hasRtsp ? camera.streamUrl : null,
     { fps: camera.rtspFps || 8, quality: 5 },
   );
@@ -410,8 +411,8 @@ function FullscreenViewer({
           </div>
         )}
 
-        {/* Live RTSP canvas — renders MJPEG frames from fetch() stream */}
-        {hasRtsp && (
+        {/* Live RTSP — canvas mode (Chrome/Firefox) */}
+        {hasRtsp && mode === "canvas" && (
           <canvas
             ref={canvasRef}
             className="max-w-full max-h-full object-contain"
@@ -420,6 +421,35 @@ function FullscreenViewer({
               transition: "opacity 0.3s ease",
             }}
           />
+        )}
+
+        {/* Live RTSP — img fallback mode (Safari iOS) */}
+        {hasRtsp && mode === "img" && (
+          <div className="relative w-full h-full flex items-center justify-center">
+            {imgSrcA && (
+              <img
+                src={imgSrcA}
+                alt={camera.label}
+                className="max-w-full max-h-full object-contain transition-opacity duration-700"
+                style={{
+                  opacity: activeBuf === "a" ? 1 : 0,
+                  position: activeBuf === "a" ? "relative" : "absolute",
+                }}
+                onLoad={() => { /* handled by hook */ }}
+              />
+            )}
+            {imgSrcB && (
+              <img
+                src={imgSrcB}
+                alt={camera.label}
+                className="max-w-full max-h-full object-contain transition-opacity duration-700"
+                style={{
+                  opacity: activeBuf === "b" ? 1 : 0,
+                  position: activeBuf === "b" ? "relative" : "absolute",
+                }}
+              />
+            )}
+          </div>
         )}
 
         {/* Fallback for non-RTSP: MJPEG img */}
@@ -789,8 +819,8 @@ export default function MobileCamerasPage() {
       {/* ── Camera Grid ── */}
       <main className="flex-1 px-2 py-3">
         {loading && (
-          <div className="flex items-center justify-center py-20">
-            <div className="h-8 w-8 rounded-full border-2 border-white/10 border-t-white/60 animate-spin" />
+          <div className="px-1">
+            <SkeletonCameraGrid count={4} cols={gridCols} />
           </div>
         )}
 

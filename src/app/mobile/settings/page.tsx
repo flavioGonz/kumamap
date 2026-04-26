@@ -7,6 +7,7 @@ import { useToast } from "@/components/mobile/MobileToast";
 import { hapticTap, hapticSuccess, hapticError, hapticMedium } from "@/lib/haptics";
 import { useOnlineStatus } from "@/hooks/useOnlineStatus";
 import { useTheme } from "@/components/mobile/ThemeProvider";
+import { SkeletonSettings } from "@/components/mobile/Skeleton";
 
 function urlBase64ToUint8Array(base64String: string): Uint8Array {
   const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
@@ -42,6 +43,7 @@ export default function MobileSettings() {
   const [pinging, setPinging] = useState(false);
   const [cacheSize, setCacheSize] = useState<string | null>(null);
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
   const { show } = useToast();
   const online = useOnlineStatus();
   const { theme, setTheme, resolvedTheme } = useTheme();
@@ -65,15 +67,10 @@ export default function MobileSettings() {
     }
 
     // Fetch version + health
-    fetch(apiUrl("/api/version"))
-      .then((r) => r.json())
-      .then(setVersion)
-      .catch(() => {});
-
-    fetch(apiUrl("/api/health"))
-      .then((r) => r.json())
-      .then(setHealth)
-      .catch(() => {});
+    Promise.all([
+      fetch(apiUrl("/api/version")).then((r) => r.json()).then(setVersion).catch(() => {}),
+      fetch(apiUrl("/api/health")).then((r) => r.json()).then(setHealth).catch(() => {}),
+    ]).finally(() => setLoading(false));
 
     // Estimate cache size
     if ("storage" in navigator && "estimate" in navigator.storage) {
@@ -262,6 +259,8 @@ export default function MobileSettings() {
       </div>
 
       <div className="flex-1 px-4 py-4 space-y-3">
+
+        {loading && <SkeletonSettings />}
 
         {/* ── Quick Ping / Server Status ── */}
         <SettingsSection title="Servidor">

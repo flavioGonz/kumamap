@@ -4,7 +4,7 @@ import React, { useEffect, useState, useCallback, useRef } from "react";
 import { apiUrl } from "@/lib/api";
 import PullToRefresh from "@/components/mobile/PullToRefresh";
 import PageTransition from "@/components/mobile/PageTransition";
-import { SkeletonList } from "@/components/mobile/Skeleton";
+import { SkeletonKpiRow, SkeletonAlertList } from "@/components/mobile/Skeleton";
 import { useToast } from "@/components/mobile/MobileToast";
 import { hapticTap, hapticSuccess, hapticMedium, hapticError } from "@/lib/haptics";
 
@@ -222,12 +222,16 @@ export default function MobileAlerts() {
 
       {/* KPI Summary Cards */}
       <div className="px-5 py-2">
-        <div className="grid grid-cols-4 gap-2">
-          <KpiCard label="Caídos" value={downCount} color="#ef4444" pulse={downCount > 0} />
-          <KpiCard label="Activos" value={upCount} color="#22c55e" />
-          <KpiCard label="Pend." value={pendingCount} color="#f59e0b" />
-          <KpiCard label="Disp." value={`${availability}%`} color={availability >= 99 ? "#22c55e" : availability >= 95 ? "#f59e0b" : "#ef4444"} />
-        </div>
+        {loading ? (
+          <SkeletonKpiRow count={4} />
+        ) : (
+          <div className="grid grid-cols-4 gap-2">
+            <KpiCard label="Caídos" value={downCount} color="#ef4444" pulse={downCount > 0} />
+            <KpiCard label="Activos" value={upCount} color="#22c55e" />
+            <KpiCard label="Pend." value={pendingCount} color="#f59e0b" />
+            <KpiCard label="Disp." value={`${availability}%`} color={availability >= 99 ? "#22c55e" : availability >= 95 ? "#f59e0b" : "#ef4444"} />
+          </div>
+        )}
       </div>
 
       {/* Tab switcher: Status / Timeline */}
@@ -285,7 +289,7 @@ export default function MobileAlerts() {
 
           {/* Monitor list */}
           <div className="flex-1 px-5 space-y-2 py-3 pb-4">
-            {loading && <SkeletonList count={5} />}
+            {loading && <SkeletonAlertList count={5} />}
             {!loading && filtered.length === 0 && (
               <EmptyState filter={filter} />
             )}
@@ -303,7 +307,7 @@ export default function MobileAlerts() {
       ) : (
         /* Timeline tab */
         <div className="flex-1 px-5 py-3 pb-4 space-y-1.5">
-          {loading && <SkeletonList count={8} />}
+          {loading && <SkeletonAlertList count={8} />}
           {!loading && timeline.length === 0 && (
             <div className="flex flex-col items-center py-12 text-[#555]">
               <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#333" strokeWidth="1.5" style={{ marginBottom: 12 }}>

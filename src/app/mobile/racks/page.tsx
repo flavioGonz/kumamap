@@ -5,7 +5,7 @@ import { apiUrl } from "@/lib/api";
 import Link from "next/link";
 import PullToRefresh from "@/components/mobile/PullToRefresh";
 import PageTransition from "@/components/mobile/PageTransition";
-import { SkeletonList } from "@/components/mobile/Skeleton";
+import { SkeletonRackList } from "@/components/mobile/Skeleton";
 import { useToast } from "@/components/mobile/MobileToast";
 import { useOnlineStatus } from "@/hooks/useOnlineStatus";
 import { hapticTap, hapticSuccess } from "@/lib/haptics";
@@ -247,7 +247,7 @@ export default function MobileRacks() {
 
         {/* Content */}
         <div className="flex-1 px-4 py-3 space-y-4">
-          {loading && <SkeletonList count={4} />}
+          {loading && <SkeletonRackList count={4} />}
 
           {!loading && racks.length === 0 && (
             <div className="flex flex-col items-center py-16" style={{ color: "var(--text-tertiary)" }}>

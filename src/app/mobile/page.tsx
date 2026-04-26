@@ -5,7 +5,7 @@ import { apiUrl } from "@/lib/api";
 import Link from "next/link";
 import PullToRefresh from "@/components/mobile/PullToRefresh";
 import PageTransition from "@/components/mobile/PageTransition";
-import { SkeletonList } from "@/components/mobile/Skeleton";
+import { SkeletonList, SkeletonBanner, SkeletonStatsRow } from "@/components/mobile/Skeleton";
 import { useToast } from "@/components/mobile/MobileToast";
 import { useOnlineStatus } from "@/hooks/useOnlineStatus";
 import { hapticTap, hapticSuccess } from "@/lib/haptics";
@@ -173,6 +173,14 @@ export default function MobileHome() {
           </div>
         );
       })()}
+
+      {/* Skeleton loading state for banner + stats + list */}
+      {loading && (
+        <>
+          <SkeletonBanner />
+          <SkeletonStatsRow />
+        </>
+      )}
 
       {/* Map list */}
       <div className="flex-1 px-4 py-4 space-y-2.5">

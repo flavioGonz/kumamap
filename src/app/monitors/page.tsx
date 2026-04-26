@@ -62,6 +62,12 @@ interface Heartbeat {
   msg: string;
 }
 
+interface MapInfo {
+  id: number;
+  name: string;
+  monitor_ids: number[];
+}
+
 // ─── Monitor type definitions with descriptions ─────
 const MONITOR_TYPES: {
   value: string; label: string; icon: string;
@@ -280,6 +286,96 @@ function NotifIndicator({ monitor }: { monitor: KumaMonitor }) {
       </svg>
       {hasNotifs && (
         <div style={{ position: "absolute", top: 0, right: 0, width: 5, height: 5, borderRadius: "50%", background: "#f59e0b" }} />
+      )}
+    </div>
+  );
+}
+
+// ─── Map Indicator ──────────────────────────────────
+function MapIndicator({ monitorId, mapMonitorIds, maps }: {
+  monitorId: number;
+  mapMonitorIds: Set<number>;
+  maps: MapInfo[];
+}) {
+  const hasMap = mapMonitorIds.has(monitorId);
+  const mapNames = hasMap ? maps.filter((m) => m.monitor_ids.includes(monitorId)).map((m) => m.name) : [];
+  return (
+    <div title={hasMap ? `En mapa: ${mapNames.join(", ")}` : "Sin mapa asignado"} style={{
+      display: "flex", alignItems: "center", justifyContent: "center",
+      width: 20, height: 20, flexShrink: 0, position: "relative",
+    }}>
+      <svg width="12" height="12" viewBox="0 0 24 24" fill={hasMap ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2"
+        style={{ color: hasMap ? "#22d3ee" : "#333" }}>
+        <polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6" />
+        <line x1="8" y1="2" x2="8" y2="18" />
+        <line x1="16" y1="6" x2="16" y2="22" />
+      </svg>
+      {hasMap && (
+        <div style={{ position: "absolute", top: 0, right: 0, width: 5, height: 5, borderRadius: "50%", background: "#22d3ee" }} />
+      )}
+    </div>
+  );
+}
+
+// ─── Alert History Button ───────────────────────────
+function AlertHistoryBtn({ monitorId, monitorName }: { monitorId: number; monitorName: string }) {
+  return (
+    <a href={`/alerts?monitorIds=${monitorId}`} title={`Ver historial de alertas de "${monitorName}"`}
+      onClick={(e) => e.stopPropagation()}
+      className="action-btn" style={{ color: "#a78bfa", textDecoration: "none" }}>
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <circle cx="12" cy="12" r="10" />
+        <polyline points="12 6 12 12 16 14" />
+      </svg>
+    </a>
+  );
+}
+
+// ─── Group Notif Indicator (aggregate) ──────────────
+function GroupNotifIndicator({ groupId, monitors }: { groupId: number; monitors: KumaMonitor[] }) {
+  const children = monitors.filter((m) => m.parent === groupId);
+  const withNotifs = children.filter((m) => {
+    const n = m.notificationIDList;
+    return n && typeof n === "object" && Object.values(n).some(Boolean);
+  });
+  const count = withNotifs.length;
+  return (
+    <div title={count > 0 ? `${count}/${children.length} con notificaciones` : "Sin notificaciones en el grupo"} style={{
+      display: "flex", alignItems: "center", justifyContent: "center", gap: 3,
+      flexShrink: 0, position: "relative",
+    }}>
+      <svg width="12" height="12" viewBox="0 0 24 24" fill={count > 0 ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2"
+        style={{ color: count > 0 ? "#f59e0b" : "#333" }}>
+        <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+        <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+      </svg>
+      {count > 0 && (
+        <span style={{ fontSize: 9, fontWeight: 700, color: "#f59e0b", fontFamily: "monospace" }}>{count}</span>
+      )}
+    </div>
+  );
+}
+
+// ─── Group Map Indicator ────────────────────────────
+function GroupMapIndicator({ groupId, monitors, mapMonitorIds }: {
+  groupId: number; monitors: KumaMonitor[]; mapMonitorIds: Set<number>;
+}) {
+  const children = monitors.filter((m) => m.parent === groupId);
+  const withMap = children.filter((m) => mapMonitorIds.has(m.id));
+  const count = withMap.length;
+  return (
+    <div title={count > 0 ? `${count}/${children.length} en mapas` : "Sin monitores en mapas"} style={{
+      display: "flex", alignItems: "center", justifyContent: "center", gap: 3,
+      flexShrink: 0,
+    }}>
+      <svg width="12" height="12" viewBox="0 0 24 24" fill={count > 0 ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2"
+        style={{ color: count > 0 ? "#22d3ee" : "#333" }}>
+        <polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6" />
+        <line x1="8" y1="2" x2="8" y2="18" />
+        <line x1="16" y1="6" x2="16" y2="22" />
+      </svg>
+      {count > 0 && (
+        <span style={{ fontSize: 9, fontWeight: 700, color: "#22d3ee", fontFamily: "monospace" }}>{count}</span>
       )}
     </div>
   );
@@ -609,12 +705,14 @@ function ConfirmModal({ title, message, onConfirm, onClose }: { title: string; m
 }
 
 // ─── Monitor Row ─────────────────────────────────────
-function MonitorRow({ m, beats, onEdit, onDelete, onToggle, loadingAction, onDragStart, onDragEnd }: {
+function MonitorRow({ m, beats, onEdit, onDelete, onToggle, loadingAction, onDragStart, onDragEnd, mapMonitorIds, maps }: {
   m: KumaMonitor; beats: Heartbeat[];
   onEdit: () => void; onDelete: () => void; onToggle: () => void;
   loadingAction?: string;
   onDragStart: (e: React.DragEvent) => void;
   onDragEnd: (e: React.DragEvent) => void;
+  mapMonitorIds: Set<number>;
+  maps: MapInfo[];
 }) {
   const ti = getTypeInfo(m.type);
   const sc = statusColor(m.active ? m.status : undefined);
@@ -649,6 +747,7 @@ function MonitorRow({ m, beats, onEdit, onDelete, onToggle, loadingAction, onDra
       </div>
 
       <NotifIndicator monitor={m} />
+      <MapIndicator monitorId={m.id} mapMonitorIds={mapMonitorIds} maps={maps} />
 
       <div className="status-badge" style={{ background: `${sc}15`, borderColor: `${sc}30`, color: sc, opacity: m.active ? 1 : 0.5 }}>
         {statusLabel(m.status, m.active)}
@@ -664,6 +763,7 @@ function MonitorRow({ m, beats, onEdit, onDelete, onToggle, loadingAction, onDra
       </div>
 
       <div style={{ display: "flex", gap: 3, flexShrink: 0 }}>
+        <AlertHistoryBtn monitorId={m.id} monitorName={m.name} />
         <button onClick={onToggle} title={m.active ? "Pausar" : "Reanudar"} className="action-btn"
           style={{ color: m.active ? "#f59e0b" : "#22c55e" }} disabled={isTogglingThis}>
           {isTogglingThis
@@ -688,6 +788,7 @@ function GroupNode({ group, allGroups, allMonitors, heartbeats, expandedGroups,
   toggleGroup, filterStatus, search, loadingAction,
   onEditGroup, onDeleteGroup, onEditMonitor, onDeleteMonitor, onTogglePause,
   onDragStartMonitor, onDragEndMonitor, onDragOver, onDrop, dragOverGroup,
+  mapMonitorIds, maps,
 }: {
   group: KumaGroup;
   allGroups: KumaGroup[];
@@ -708,6 +809,8 @@ function GroupNode({ group, allGroups, allMonitors, heartbeats, expandedGroups,
   onDragOver: (e: React.DragEvent, groupId: number) => void;
   onDrop: (e: React.DragEvent, groupId: number | null) => void;
   dragOverGroup: number | null;
+  mapMonitorIds: Set<number>;
+  maps: MapInfo[];
 }) {
   const expanded = expandedGroups.has(group.id);
 
@@ -765,6 +868,9 @@ function GroupNode({ group, allGroups, allMonitors, heartbeats, expandedGroups,
           <GroupHeartbeatBar groupId={group.id} heartbeats={heartbeats || {}} monitors={safeMonitors} width={200} height={16} />
         </div>
 
+        <GroupNotifIndicator groupId={group.id} monitors={safeMonitors} />
+        <GroupMapIndicator groupId={group.id} monitors={safeMonitors} mapMonitorIds={mapMonitorIds} />
+
         <span className="status-badge" style={{ background: `${gs.color}15`, borderColor: `${gs.color}30`, color: gs.color, fontSize: 9 }}>
           {gs.label}
         </span>
@@ -772,6 +878,7 @@ function GroupNode({ group, allGroups, allMonitors, heartbeats, expandedGroups,
           {allChildMons.filter((c) => c.status === 1 && c.active).length}/{allChildMons.length}
         </span>
         <div style={{ display: "flex", gap: 3 }}>
+          <AlertHistoryBtn monitorId={group.id} monitorName={group.name} />
           <button onClick={(e) => { e.stopPropagation(); onEditGroup(group); }} className="action-btn" style={{ color: "#60a5fa" }} title="Editar grupo">
             <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
           </button>
@@ -795,6 +902,7 @@ function GroupNode({ group, allGroups, allMonitors, heartbeats, expandedGroups,
                 onTogglePause={onTogglePause}
                 onDragStartMonitor={onDragStartMonitor} onDragEndMonitor={onDragEndMonitor}
                 onDragOver={onDragOver} onDrop={onDrop} dragOverGroup={dragOverGroup}
+                mapMonitorIds={mapMonitorIds} maps={maps}
               />
             </div>
           ))}
@@ -813,6 +921,7 @@ function GroupNode({ group, allGroups, allMonitors, heartbeats, expandedGroups,
               onToggle={() => onTogglePause(m.id, m.active)}
               onDragStart={(e) => onDragStartMonitor(e, m.id)}
               onDragEnd={onDragEndMonitor}
+              mapMonitorIds={mapMonitorIds} maps={maps}
             />
           ))}
         </div>
@@ -827,6 +936,8 @@ export default function MonitorsPage() {
   const [groups, setGroups] = useState<KumaGroup[]>([]);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [heartbeats, setHeartbeats] = useState<Record<number, Heartbeat[]>>({});
+  const [maps, setMaps] = useState<MapInfo[]>([]);
+  const [mapMonitorIds, setMapMonitorIds] = useState<Set<number>>(new Set());
   const [connected, setConnected] = useState(false);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -834,6 +945,9 @@ export default function MonitorsPage() {
   const [expandedGroups, setExpandedGroups] = useState<Set<number>>(new Set());
   const [loadingAction, setLoadingAction] = useState("");
   const [dragOverGroup, setDragOverGroup] = useState<number | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const importFileRef = useRef<HTMLInputElement>(null);
   const draggedMonitorId = useRef<number | null>(null);
 
   const { toasts, add: addToast } = useToasts();
@@ -847,11 +961,12 @@ export default function MonitorsPage() {
 
   const fetchData = useCallback(async () => {
     try {
-      const [kumaData, groupData, configData, hbData] = await Promise.all([
+      const [kumaData, groupData, configData, hbData, mapsData] = await Promise.all([
         safeFetch<{ connected: boolean; monitors: KumaMonitor[] }>(apiUrl("/api/kuma")),
         safeFetch<{ groups: KumaGroup[] }>(apiUrl("/api/kuma/groups")),
         safeFetch<{ notifications: Notification[] }>(apiUrl("/api/kuma/config")),
         safeFetch<{ heartbeats: Record<number, Heartbeat[]> }>(apiUrl("/api/kuma/heartbeats?count=90")),
+        safeFetch<MapInfo[]>(apiUrl("/api/maps")),
       ]);
       if (kumaData) {
         const mons = Array.isArray(kumaData.monitors) ? kumaData.monitors : [];
@@ -862,6 +977,14 @@ export default function MonitorsPage() {
       if (configData) setNotifications(Array.isArray(configData.notifications) ? configData.notifications : []);
       if (hbData && hbData.heartbeats && typeof hbData.heartbeats === "object") {
         setHeartbeats(hbData.heartbeats);
+      }
+      if (Array.isArray(mapsData)) {
+        setMaps(mapsData);
+        const ids = new Set<number>();
+        mapsData.forEach((m) => {
+          if (Array.isArray(m.monitor_ids)) m.monitor_ids.forEach((id) => ids.add(id));
+        });
+        setMapMonitorIds(ids);
       }
     } catch (e) {
       console.error("[monitors] fetchData error:", e);
@@ -980,6 +1103,57 @@ export default function MonitorsPage() {
     fetchData();
   };
 
+  // ── Export/Import ──
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      const { data, error } = await apiFetch<any>(apiUrl("/api/kuma/export"));
+      if (data) {
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `kumamap-export-${new Date().toISOString().slice(0, 10)}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+        addToast(`Exportados ${data.totalGroups} grupos y ${data.totalMonitors} monitores`);
+      } else {
+        addToast(error || "Error al exportar", "error");
+      }
+    } catch (err: any) {
+      addToast(err.message || "Error al exportar", "error");
+    }
+    setExporting(false);
+  };
+
+  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImporting(true);
+    try {
+      const text = await file.text();
+      const json = JSON.parse(text);
+      const { data, error } = await apiFetch<{ ok: boolean; groupsCreated: number; monitorsCreated: number; errors: string[] }>(
+        apiUrl("/api/kuma/import"),
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(json) },
+      );
+      if (data?.ok) {
+        addToast(`Importados: ${data.groupsCreated} grupos, ${data.monitorsCreated} monitores`);
+        if (data.errors.length > 0) {
+          addToast(`${data.errors.length} errores durante la importación`, "error");
+        }
+        fetchData();
+      } else {
+        addToast(error || "Error al importar", "error");
+      }
+    } catch (err: any) {
+      addToast(err.message || "Error al leer archivo", "error");
+    }
+    setImporting(false);
+    // Reset file input
+    if (importFileRef.current) importFileRef.current.value = "";
+  };
+
   // ── Filtered monitors (for ungrouped section) ──
   const filteredMonitors = useMemo(() => {
     let result = monitors;
@@ -1044,7 +1218,20 @@ export default function MonitorsPage() {
               </div>
             </div>
           </div>
-          <div style={{ display: "flex", gap: 8 }}>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button onClick={handleExport} disabled={exporting} className="header-btn" style={{ "--btn-color": "#22d3ee" } as React.CSSProperties}>
+              {exporting ? <span className="btn-spinner" style={{ width: 12, height: 12 }} /> : (
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              )}
+              Exportar
+            </button>
+            <button onClick={() => importFileRef.current?.click()} disabled={importing} className="header-btn" style={{ "--btn-color": "#f472b6" } as React.CSSProperties}>
+              {importing ? <span className="btn-spinner" style={{ width: 12, height: 12 }} /> : (
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+              )}
+              Importar
+            </button>
+            <input ref={importFileRef} type="file" accept=".json" style={{ display: "none" }} onChange={handleImportFile} />
             <button onClick={() => setGroupModal({ open: true })} className="header-btn" style={{ "--btn-color": "#a78bfa" } as React.CSSProperties}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
               Nuevo Grupo
@@ -1128,6 +1315,7 @@ export default function MonitorsPage() {
                 onDragOver={handleDragOver}
                 onDrop={handleDropOnGroup}
                 dragOverGroup={dragOverGroup}
+                mapMonitorIds={mapMonitorIds} maps={maps}
               />
             ))}
 
@@ -1151,6 +1339,7 @@ export default function MonitorsPage() {
                     onToggle={() => handleTogglePause(m.id, m.active)}
                     onDragStart={(e) => handleDragStartMonitor(e, m.id)}
                     onDragEnd={handleDragEndMonitor}
+                    mapMonitorIds={mapMonitorIds} maps={maps}
                   />
                 ))}
               </div>

@@ -9,9 +9,24 @@ export interface ChangelogEntry {
   items: string[];
 }
 
-export const APP_VERSION = "2.3.0";
+export const APP_VERSION = "2.4.0";
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: "2.4.0",
+    date: "2026-04-26",
+    title: "Gestión Avanzada de Monitores y Export/Import",
+    items: [
+      "Fix crítico: error 'Cannot read properties of undefined (reading every)' al crear monitores — Kuma v2 requiere accepted_statuscodes y otros campos obligatorios",
+      "Indicador de alertas/notificaciones activas en cada sensor y grupo con conteo visual",
+      "Indicador de mapa asignado: ícono de mapa en sensores que están vinculados a un nodo de mapa",
+      "Integración con Alert Manager: botón para ver historial de eventos de cada sensor o grupo directamente desde /monitors",
+      "Export completo: exportar todos los monitores, sensores y grupos de Uptime Kuma a archivo JSON",
+      "Import completo: restaurar monitores y grupos desde archivo JSON exportado previamente",
+      "Fix: campos obligatorios de Kuma v2 inyectados en creación y edición de monitores y grupos (notificationIDList, conditions, kafkaProducerBrokers, etc.)",
+      "Fix: guards Array.isArray en todas las respuestas API del frontend para evitar crashes con datos inesperados",
+    ],
+  },
   {
     version: "2.3.0",
     date: "2026-04-24",

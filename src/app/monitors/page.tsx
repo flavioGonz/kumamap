@@ -226,15 +226,17 @@ function GroupHeartbeatBar({ groupId, heartbeats, monitors, width = 300, height 
   height?: number;
 }) {
   // Get all children IDs recursively (for nested groups this includes sub-children)
-  const childIds = monitors.filter((m) => m.parent === groupId).map((m) => m.id);
+  const safeMonitors = monitors || [];
+  const safeHeartbeats = heartbeats || {};
+  const childIds = safeMonitors.filter((m) => m.parent === groupId).map((m) => m.id);
   if (childIds.length === 0) return null;
 
   // Merge beats: for each time slot, compute aggregate status
   // Collect all beats sorted by time, then bucket into ~90 slots
   const allBeats: Heartbeat[] = [];
   childIds.forEach((id) => {
-    const b = heartbeats[id];
-    if (b) allBeats.push(...b);
+    const b = safeHeartbeats[id];
+    if (Array.isArray(b)) allBeats.push(...b);
   });
   if (allBeats.length === 0) return null;
 
@@ -707,10 +709,14 @@ function GroupNode({ group, allGroups, allMonitors, heartbeats, expandedGroups,
 }) {
   const expanded = expandedGroups.has(group.id);
 
+  // Safe arrays (guard against undefined props)
+  const safeGroups = allGroups || [];
+  const safeMonitors = allMonitors || [];
+
   // Child groups
-  const childGroups = allGroups.filter((g) => g.parent === group.id);
+  const childGroups = safeGroups.filter((g) => g.parent === group.id);
   // Child monitors (non-group)
-  const childMonitors = allMonitors.filter((m) => m.parent === group.id);
+  const childMonitors = safeMonitors.filter((m) => m.parent === group.id);
   // Filtered child monitors
   const filteredChildren = childMonitors.filter((m) => {
     let pass = true;
@@ -725,7 +731,7 @@ function GroupNode({ group, allGroups, allMonitors, heartbeats, expandedGroups,
   });
 
   // Group status from ALL children (not filtered)
-  const allChildMons = allMonitors.filter((m) => m.parent === group.id);
+  const allChildMons = safeMonitors.filter((m) => m.parent === group.id);
   const gs = (() => {
     if (allChildMons.length === 0 && childGroups.length === 0) return { color: "#555", label: "EMPTY" };
     const anyDown = allChildMons.some((m) => m.status === 0 && m.active);
@@ -754,7 +760,7 @@ function GroupNode({ group, allGroups, allMonitors, heartbeats, expandedGroups,
 
         {/* Group heartbeat bar */}
         <div style={{ flex: 1, minWidth: 60 }} onClick={(e) => e.stopPropagation()}>
-          <GroupHeartbeatBar groupId={group.id} heartbeats={heartbeats} monitors={allMonitors} width={200} height={16} />
+          <GroupHeartbeatBar groupId={group.id} heartbeats={heartbeats || {}} monitors={safeMonitors} width={200} height={16} />
         </div>
 
         <span className="status-badge" style={{ background: `${gs.color}15`, borderColor: `${gs.color}30`, color: gs.color, fontSize: 9 }}>
@@ -844,7 +850,7 @@ export default function MonitorsPage() {
       safeFetch<{ notifications: Notification[] }>(apiUrl("/api/kuma/config")),
       safeFetch<{ heartbeats: Record<number, Heartbeat[]> }>(apiUrl("/api/kuma/heartbeats?count=90")),
     ]);
-    if (kumaData) { setMonitors(kumaData.monitors.filter((m) => m.type !== "group")); setConnected(kumaData.connected); }
+    if (kumaData) { setMonitors((kumaData.monitors || []).filter((m) => m.type !== "group")); setConnected(kumaData.connected); }
     if (groupData) setGroups(groupData.groups);
     if (configData) setNotifications(configData.notifications || []);
     if (hbData) setHeartbeats(hbData.heartbeats || {});

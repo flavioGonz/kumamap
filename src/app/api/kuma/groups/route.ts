@@ -6,6 +6,7 @@ export const dynamic = "force-dynamic";
 
 const groupSchema = z.object({
   name: z.string().min(1, "Group name is required"),
+  parent: z.number().nullable().optional(),
 });
 
 // ─── GET: list all groups ────────────────────────
@@ -19,6 +20,7 @@ export async function GET() {
         id: g.id,
         name: g.name,
         active: g.active,
+        parent: g.parent ?? null,
         childCount: monitors.filter((m) => m.parent === g.id).length,
       }));
 
@@ -41,10 +43,12 @@ export async function POST(req: NextRequest) {
     }
 
     const kuma = getKumaClient();
-    const result = await kuma.addMonitor({
+    const data: Record<string, unknown> = {
       name: parsed.data.name,
       type: "group",
-    });
+    };
+    if (parsed.data.parent != null) data.parent = parsed.data.parent;
+    const result = await kuma.addMonitor(data);
 
     if (result.ok) {
       return NextResponse.json(

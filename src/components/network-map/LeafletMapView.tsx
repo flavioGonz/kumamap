@@ -2994,6 +2994,48 @@ export default function LeafletMapView({
           setAssignModalOpen(true);
         },
       },
+      // Quick-create monitor from node data
+      ...(!node?.kuma_monitor_id && ncd.ip ? [{
+        label: "Crear monitor rápido",
+        icon: menuIcons.Plus,
+        onClick: async () => {
+          const ip = ncd.ip || "";
+          const label = node?.label || ip;
+          // Detect best monitor type from node icon
+          const icon = node?.icon || "";
+          let monType = "ping";
+          let monData: Record<string, unknown> = { name: label, type: "ping", hostname: ip, interval: 60 };
+          if (icon === "server" || icon === "_server") {
+            monType = "http";
+            monData = { name: label, type: "http", url: `http://${ip}`, interval: 60 };
+          } else if (icon === "router" || icon === "_router" || icon === "switch" || icon === "_switch") {
+            monType = "ping";
+            monData = { name: label, type: "ping", hostname: ip, interval: 60 };
+          } else if (ncd.streamUrl || icon === "camera" || icon === "_camera") {
+            monType = "port";
+            monData = { name: label, type: "port", hostname: ip, port: 554, interval: 60 };
+          }
+          try {
+            const res = await safeFetch<{ ok: boolean; monitorID?: number; msg?: string }>(
+              apiUrl("/api/kuma/monitors"),
+              { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(monData) },
+              "QuickCreateMonitor"
+            );
+            if (res?.ok && res.monitorID) {
+              const idx = nodesRef.current.findIndex((n) => n.id === nodeId);
+              if (idx >= 0) {
+                nodesRef.current[idx] = { ...nodesRef.current[idx], kuma_monitor_id: res.monitorID };
+                if (LRef.current && mapRef.current) { renderNodes(LRef.current, mapRef.current); renderEdges(LRef.current, mapRef.current); }
+              }
+              toast.success(`Monitor "${label}" creado (${monType})`, { description: `ID: ${res.monitorID}` });
+            } else {
+              toast.error(res?.msg || "Error al crear monitor");
+            }
+          } catch (e: any) {
+            toast.error("Error al crear monitor: " + e.message);
+          }
+        },
+      }] : []),
       ...(node?.kuma_monitor_id ? [{
         label: "Desasignar monitor",
         icon: menuIcons.Trash2,

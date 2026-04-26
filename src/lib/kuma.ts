@@ -272,6 +272,62 @@ class KumaClient {
     });
   }
 
+  /** Edit an existing monitor */
+  editMonitor(data: Record<string, unknown>): Promise<{ ok: boolean; msg?: string }> {
+    if (!this.socket || !this.authenticated) {
+      return Promise.resolve({ ok: false, msg: "Not connected to Uptime Kuma" });
+    }
+    return new Promise((resolve) => {
+      const timeout = setTimeout(() => resolve({ ok: false, msg: "Timeout editing monitor" }), 10000);
+      this.socket!.emit("editMonitor", data, (res: any) => {
+        clearTimeout(timeout);
+        resolve({ ok: !!res?.ok, msg: res?.msg });
+      });
+    });
+  }
+
+  /** Delete a monitor by ID */
+  deleteMonitor(monitorId: number): Promise<{ ok: boolean; msg?: string }> {
+    if (!this.socket || !this.authenticated) {
+      return Promise.resolve({ ok: false, msg: "Not connected to Uptime Kuma" });
+    }
+    return new Promise((resolve) => {
+      const timeout = setTimeout(() => resolve({ ok: false, msg: "Timeout deleting monitor" }), 10000);
+      this.socket!.emit("deleteMonitor", monitorId, (res: any) => {
+        clearTimeout(timeout);
+        resolve({ ok: !!res?.ok, msg: res?.msg });
+      });
+    });
+  }
+
+  /** Pause (disable) a monitor */
+  pauseMonitor(monitorId: number): Promise<{ ok: boolean; msg?: string }> {
+    if (!this.socket || !this.authenticated) {
+      return Promise.resolve({ ok: false, msg: "Not connected to Uptime Kuma" });
+    }
+    return new Promise((resolve) => {
+      const timeout = setTimeout(() => resolve({ ok: false, msg: "Timeout pausing monitor" }), 10000);
+      this.socket!.emit("pauseMonitor", monitorId, (res: any) => {
+        clearTimeout(timeout);
+        resolve({ ok: !!res?.ok, msg: res?.msg });
+      });
+    });
+  }
+
+  /** Resume (enable) a monitor */
+  resumeMonitor(monitorId: number): Promise<{ ok: boolean; msg?: string }> {
+    if (!this.socket || !this.authenticated) {
+      return Promise.resolve({ ok: false, msg: "Not connected to Uptime Kuma" });
+    }
+    return new Promise((resolve) => {
+      const timeout = setTimeout(() => resolve({ ok: false, msg: "Timeout resuming monitor" }), 10000);
+      this.socket!.emit("resumeMonitor", monitorId, (res: any) => {
+        clearTimeout(timeout);
+        resolve({ ok: !!res?.ok, msg: res?.msg });
+      });
+    });
+  }
+
   // Fetch historical beats from Kuma DB (cached 5 min per monitor)
   private beatsCache: Map<string, { data: KumaHeartbeat[]; ts: number }> = new Map();
   private CACHE_TTL = 5 * 60 * 1000; // 5 min

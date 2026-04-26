@@ -371,6 +371,19 @@ export default function MapListView({
           </button>
           </Tooltip>
 
+          {/* ── Monitors ── */}
+          <Tooltip content="Gestión de Monitores" placement="bottom">
+          <a
+            href={`${process.env.NEXT_PUBLIC_BASE_PATH || ""}/monitors`}
+            className="flex h-8 w-8 items-center justify-center rounded-lg transition-all"
+            style={{ color: "#555", border: "1px solid transparent" }}
+            onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = "#22c55e"; (e.currentTarget as HTMLElement).style.borderColor = "rgba(34,197,94,0.25)"; (e.currentTarget as HTMLElement).style.background = "rgba(34,197,94,0.08)"; }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = "#555"; (e.currentTarget as HTMLElement).style.borderColor = "transparent"; (e.currentTarget as HTMLElement).style.background = "transparent"; }}
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+          </a>
+          </Tooltip>
+
           {/* ── Alert Manager ── */}
           <Tooltip content="Centro de Alertas" placement="bottom">
           <a

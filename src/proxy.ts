@@ -27,7 +27,11 @@ const PUBLIC_GET_PREFIXES = [
   "/api/camera/rtsp-stream", // RTSP → MJPEG transcoding proxy
   "/api/health",           // health check (monitored by Uptime Kuma)
   "/api/version",          // version info for OTA updater
-  "/api/push",             // push subscription GET (VAPID public key)
+];
+
+// API routes accessible via ANY method without auth (needed by mobile PWA)
+const PUBLIC_ANY_PREFIXES = [
+  "/api/push",             // push subscription CRUD + test (needed by mobile PWA)
 ];
 
 function isPublicPath(pathname: string): boolean {
@@ -37,6 +41,10 @@ function isPublicPath(pathname: string): boolean {
 function isPublicGetRoute(method: string, pathname: string): boolean {
   if (method !== "GET") return false;
   return PUBLIC_GET_PREFIXES.some((p) => pathname.startsWith(p));
+}
+
+function isPublicAnyRoute(pathname: string): boolean {
+  return PUBLIC_ANY_PREFIXES.some((p) => pathname.startsWith(p));
 }
 
 function validateToken(token: string): string | null {
@@ -89,6 +97,9 @@ export function proxy(req: NextRequest) {
 
   // Allow read-only API access for public kiosk view (/view/[id])
   if (isPublicGetRoute(req.method, pathname)) return NextResponse.next();
+
+  // Allow any-method public routes (push subscriptions for mobile PWA)
+  if (isPublicAnyRoute(pathname)) return NextResponse.next();
 
   // Validate session cookie
   const token = req.cookies.get("kumamap_session")?.value;

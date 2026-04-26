@@ -317,17 +317,190 @@ function MapIndicator({ monitorId, mapMonitorIds, maps }: {
   );
 }
 
-// ─── Alert History Button ───────────────────────────
+// ─── Alert History Button (opens inline modal) ─────
 function AlertHistoryBtn({ monitorId, monitorName }: { monitorId: number; monitorName: string }) {
+  const [open, setOpen] = useState(false);
   return (
-    <a href={`/alerts?monitorIds=${monitorId}`} title={`Ver historial de alertas de "${monitorName}"`}
-      onClick={(e) => e.stopPropagation()}
-      className="action-btn" style={{ color: "#a78bfa", textDecoration: "none" }}>
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-        <circle cx="12" cy="12" r="10" />
-        <polyline points="12 6 12 12 16 14" />
-      </svg>
-    </a>
+    <>
+      <button title={`Ver historial de alertas de "${monitorName}"`}
+        onClick={(e) => { e.stopPropagation(); setOpen(true); }}
+        className="action-btn" style={{ color: "#a78bfa", background: "none", border: "none", cursor: "pointer", padding: 0 }}>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <circle cx="12" cy="12" r="10" />
+          <polyline points="12 6 12 12 16 14" />
+        </svg>
+      </button>
+      {open && <AlertHistoryModal monitorId={monitorId} monitorName={monitorName} onClose={() => setOpen(false)} />}
+    </>
+  );
+}
+
+// ─── Alert History Modal ────────────────────────────
+interface TimelineEvent {
+  monitorId: number;
+  monitorName: string;
+  time: string;
+  status: number;
+  prevStatus: number;
+  ping: number | null;
+  msg: string;
+}
+
+function timeAgo(dateStr: string): string {
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "ahora";
+  if (mins < 60) return `hace ${mins}m`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `hace ${hrs}h ${mins % 60}m`;
+  const days = Math.floor(hrs / 24);
+  return `hace ${days}d ${hrs % 24}h`;
+}
+
+function AlertHistoryModal({ monitorId, monitorName, onClose }: { monitorId: number; monitorName: string; onClose: () => void }) {
+  const [events, setEvents] = useState<TimelineEvent[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [hours, setHours] = useState(24);
+
+  useEffect(() => {
+    setLoading(true);
+    fetch(apiUrl(`/api/kuma/timeline?monitorIds=${monitorId}&hours=${hours}`))
+      .then((r) => r.json())
+      .then((data) => {
+        const evts = Array.isArray(data?.events) ? data.events : [];
+        setEvents(evts);
+      })
+      .catch(() => setEvents([]))
+      .finally(() => setLoading(false));
+  }, [monitorId, hours]);
+
+  const statusLabel = (s: number) => {
+    if (s === 0) return { text: "CAÍDO", color: "#ef4444", bg: "rgba(239,68,68,0.15)" };
+    if (s === 1) return { text: "ACTIVO", color: "#22c55e", bg: "rgba(34,197,94,0.15)" };
+    if (s === 2) return { text: "PENDIENTE", color: "#f59e0b", bg: "rgba(245,158,11,0.15)" };
+    if (s === 3) return { text: "MANTENIMIENTO", color: "#60a5fa", bg: "rgba(96,165,250,0.15)" };
+    return { text: `Estado ${s}`, color: "#888", bg: "rgba(136,136,136,0.15)" };
+  };
+
+  const hourOptions = [1, 6, 12, 24, 48, 72, 168];
+
+  return (
+    <div onClick={(e) => e.stopPropagation()} style={{
+      position: "fixed", inset: 0, zIndex: 9999,
+      display: "flex", alignItems: "center", justifyContent: "center",
+      background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)",
+    }}>
+      <div style={{
+        background: "#1a1a2e", border: "1px solid rgba(255,255,255,0.08)",
+        borderRadius: 16, width: "min(560px, 95vw)", maxHeight: "80vh",
+        display: "flex", flexDirection: "column", overflow: "hidden",
+        boxShadow: "0 25px 60px rgba(0,0,0,0.5)",
+      }}>
+        {/* Header */}
+        <div style={{
+          padding: "16px 20px", borderBottom: "1px solid rgba(255,255,255,0.06)",
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" strokeWidth="2">
+              <circle cx="12" cy="12" r="10" />
+              <polyline points="12 6 12 12 16 14" />
+            </svg>
+            <div>
+              <div style={{ color: "#ededed", fontWeight: 600, fontSize: 14 }}>Historial de Alertas</div>
+              <div style={{ color: "#888", fontSize: 11 }}>{monitorName}</div>
+            </div>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <select value={hours} onChange={(e) => setHours(Number(e.target.value))} style={{
+              background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)",
+              borderRadius: 8, color: "#ccc", padding: "4px 8px", fontSize: 11, cursor: "pointer",
+            }}>
+              {hourOptions.map((h) => (
+                <option key={h} value={h}>{h < 24 ? `${h}h` : `${h / 24}d`}</option>
+              ))}
+            </select>
+            <button onClick={onClose} style={{
+              background: "rgba(255,255,255,0.06)", border: "none", borderRadius: 8,
+              color: "#888", cursor: "pointer", padding: "4px 8px", fontSize: 16,
+            }}>✕</button>
+          </div>
+        </div>
+
+        {/* Body */}
+        <div style={{ flex: 1, overflowY: "auto", padding: "12px 20px" }}>
+          {loading ? (
+            <div style={{ textAlign: "center", padding: 40, color: "#666" }}>
+              <div style={{ width: 20, height: 20, border: "2px solid #333", borderTopColor: "#a78bfa", borderRadius: "50%", margin: "0 auto 12px", animation: "spin 0.8s linear infinite" }} />
+              Cargando eventos...
+            </div>
+          ) : events.length === 0 ? (
+            <div style={{ textAlign: "center", padding: 40, color: "#555" }}>
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ margin: "0 auto 12px", display: "block", color: "#333" }}>
+                <circle cx="12" cy="12" r="10" /><path d="M8 15h8" /><circle cx="9" cy="9" r="1" /><circle cx="15" cy="9" r="1" />
+              </svg>
+              Sin eventos en las últimas {hours < 24 ? `${hours} horas` : `${hours / 24} días`}
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {events.map((ev, i) => {
+                const st = statusLabel(ev.status);
+                const prev = statusLabel(ev.prevStatus);
+                const date = new Date(ev.time);
+                return (
+                  <div key={i} style={{
+                    display: "flex", alignItems: "center", gap: 10,
+                    padding: "8px 12px", borderRadius: 10,
+                    background: "rgba(255,255,255,0.02)",
+                    borderLeft: `3px solid ${st.color}`,
+                  }}>
+                    <div style={{ flex: "0 0 auto" }}>
+                      <span style={{
+                        display: "inline-block", padding: "2px 6px", borderRadius: 6,
+                        fontSize: 9, fontWeight: 700, fontFamily: "monospace",
+                        color: st.color, background: st.bg,
+                      }}>{st.text}</span>
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ color: "#ccc", fontSize: 11, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                        {prev.text} → {st.text}
+                        {ev.msg && <span style={{ color: "#666", marginLeft: 6 }}>— {ev.msg}</span>}
+                      </div>
+                      {ev.ping != null && ev.ping > 0 && (
+                        <span style={{ color: "#555", fontSize: 10 }}>{ev.ping}ms</span>
+                      )}
+                    </div>
+                    <div style={{ flex: "0 0 auto", textAlign: "right" }}>
+                      <div style={{ color: "#666", fontSize: 10, fontFamily: "monospace" }}>
+                        {date.toLocaleTimeString("es-UY", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+                      </div>
+                      <div style={{ color: "#444", fontSize: 9 }}>{timeAgo(ev.time)}</div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div style={{
+          padding: "10px 20px", borderTop: "1px solid rgba(255,255,255,0.06)",
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+        }}>
+          <span style={{ color: "#555", fontSize: 10 }}>
+            {events.length} evento{events.length !== 1 ? "s" : ""}
+          </span>
+          <a href={`/alerts?monitorIds=${monitorId}`} style={{
+            color: "#a78bfa", fontSize: 11, textDecoration: "none",
+          }}>
+            Ver en Alert Manager →
+          </a>
+        </div>
+      </div>
+
+      <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
+    </div>
   );
 }
 

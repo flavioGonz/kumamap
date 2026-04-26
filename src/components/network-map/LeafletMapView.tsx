@@ -28,6 +28,7 @@ import {
 } from "lucide-react";
 import Tooltip from "./Tooltip";
 import TimeMachine from "./TimeMachine";
+import OnvifDiscoveryModal from "./OnvifDiscoveryModal";
 import EventReportModal from "./EventReportModal";
 import CameraStreamConfigModal, { type CameraStreamConfig } from "./CameraStreamConfigModal";
 import CameraStreamViewer from "./CameraStreamViewer";
@@ -544,6 +545,7 @@ export default function LeafletMapView({
   const [importingMapId, setImportingMapId] = useState<string | null>(null);
   const [nodeMapModalNodeId, setNodeMapModalNodeId] = useState<string | null>(null);
   const [discoveryModalOpen, setDiscoveryModalOpen] = useState(false);
+  const [onvifModalOpen, setOnvifModalOpen] = useState(false);
   const [timeMachineOpen, setTimeMachineOpen] = useState(false);
   const [timeMachineTime, setTimeMachineTime] = useState<Date | null>(null);
   const [tmFocusMonitorId, setTmFocusMonitorId] = useState<number | null>(null);
@@ -3146,6 +3148,12 @@ export default function LeafletMapView({
               }
             },
           },
+          {
+            label: "Descubrir ONVIF",
+            icon: menuIcons.Signal,
+            divider: true,
+            onClick: () => setOnvifModalOpen(true),
+          },
         ],
       }] : []),
       // ── Copiar / Duplicar ──
@@ -4214,6 +4222,37 @@ export default function LeafletMapView({
             if (LRef.current) { renderNodes(LRef.current, mapRef.current); renderEdges(LRef.current, mapRef.current); }
           }}
           onClose={() => setDiscoveryModalOpen(false)}
+        />
+      )}
+
+      {/* ═══ ONVIF Discovery Modal ═══ */}
+      {onvifModalOpen && (
+        <OnvifDiscoveryModal
+          onClose={() => setOnvifModalOpen(false)}
+          existingIps={nodesRef.current.map((n) => { const cd = safeJsonParse<NodeCustomData>(n.custom_data); return cd.ip; }).filter(Boolean) as string[]}
+          onAddCamera={(dev) => {
+            if (!mapRef.current) return;
+            const center = mapRef.current.getCenter();
+            const offsetLat = (Math.random() - 0.5) * 0.001;
+            const offsetLng = (Math.random() - 0.5) * 0.001;
+            const label = [dev.manufacturer, dev.model].filter(Boolean).join(" ") || `Cámara ${dev.ip}`;
+            const cd: NodeCustomData = {
+              ip: dev.ip,
+              streamType: dev.streamUri ? "rtsp" : undefined,
+              streamUrl: dev.streamUri || undefined,
+              description: [dev.manufacturer, dev.model].filter(Boolean).join(" "),
+            };
+            const id = `onvif-${Date.now()}-${dev.ip.replace(/\./g, "")}`;
+            nodesRef.current = [...nodesRef.current, {
+              id, kuma_monitor_id: null, label,
+              x: center.lat + offsetLat,
+              y: center.lng + offsetLng,
+              icon: "_camera",
+              custom_data: JSON.stringify(cd),
+            }];
+            if (LRef.current) { renderNodes(LRef.current, mapRef.current); renderEdges(LRef.current, mapRef.current); }
+            toast.success(`Cámara agregada: ${label}`);
+          }}
         />
       )}
 

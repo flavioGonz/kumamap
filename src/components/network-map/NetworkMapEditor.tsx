@@ -435,6 +435,17 @@ function CanvasInner({
       },
     });
 
+    // Camera-specific: ONVIF discovery
+    const isCamera = (node.data as any)?.icon === "camera" || (node.data as any)?.icon === "_camera";
+    if (isCamera) {
+      items.push({
+        label: "Descubrir ONVIF",
+        icon: menuIcons.Signal,
+        divider: true,
+        onClick: () => setOnvifModalOpen(true),
+      });
+    }
+
     items.push(
       { label: "Editar nombre", icon: menuIcons.Pencil, onClick: () => editNodeLabel(nodeId) },
       { label: "Cambiar icono", icon: menuIcons.Palette, onClick: () => changeNodeIcon(nodeId) },
@@ -1099,12 +1110,6 @@ function CanvasInner({
             }} className="group flex items-center gap-1 rounded-xl px-2 py-1.5 text-[#888] hover:text-[#ededed] hover:bg-white/[0.06] transition-all">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M3 12h6M15 12h6" strokeDasharray="2 2"/></svg>
               <span className="text-[10px] font-semibold hidden xl:inline">Punto</span>
-            </button>
-            </Tooltip>
-            <Tooltip content="Escanear cámaras ONVIF en la red" placement="bottom">
-            <button onClick={() => setOnvifModalOpen(true)} className="group flex items-center gap-1 rounded-xl px-2 py-1.5 text-[#888] hover:text-[#06b6d4] hover:bg-cyan-500/[0.06] transition-all">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19.07 4.93A10 10 0 0 0 6.99 3.34"/><path d="M4 6h.01"/><path d="M2.29 9.62A10 10 0 1 0 21.31 8.35"/><path d="M16.24 7.76A6 6 0 1 0 8.23 16.67"/><path d="M12 18h.01"/><path d="M17.99 11.66A6 6 0 0 1 15.77 16.67"/><circle cx="12" cy="12" r="2"/></svg>
-              <span className="text-[10px] font-semibold hidden xl:inline">ONVIF</span>
             </button>
             </Tooltip>
           </div>

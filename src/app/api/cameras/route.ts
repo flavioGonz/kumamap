@@ -83,17 +83,17 @@ export async function GET() {
 
     for (const map of maps) {
       const nodes = db
-        .prepare("SELECT id, label, custom_data FROM network_map_nodes WHERE map_id = ?")
-        .all(map.id) as { id: string; label: string; custom_data: string | null }[];
+        .prepare("SELECT id, label, icon, custom_data FROM network_map_nodes WHERE map_id = ?")
+        .all(map.id) as { id: string; label: string; icon: string | null; custom_data: string | null }[];
 
       let mapCameraCount = 0;
       let mapNvrCount = 0;
 
       for (const node of nodes) {
-        const data = safeJson(node.custom_data);
-        if (!data) continue;
+        const data = safeJson(node.custom_data) || {};
 
-        const icon = data.icon || "";
+        // icon can be in the node column OR inside custom_data
+        const icon = node.icon || data.icon || "";
         const streamUrl = data.streamUrl || "";
         const streamType = data.streamType || "";
         const deviceType = data.deviceType || "";
@@ -162,14 +162,14 @@ export async function GET() {
           }
         }
 
-        // Camera nodes without stream but with IP
-        if (isCamera && !streamUrl && data.ip) {
+        // Camera nodes without stream (with or without IP)
+        if (isCamera && !streamUrl) {
           cameras.push({
             nodeId: node.id,
             mapId: map.id,
             mapName: map.name,
             label: node.label || data.label || "Cámara (sin stream)",
-            ip: data.ip,
+            ip: data.ip || "",
             streamType: "",
             streamUrl: "",
             manufacturer: data.description || "",

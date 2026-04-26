@@ -68,18 +68,23 @@ function CameraCell({
   }, [camera]);
 
   // Snapshot double-buffer polling — used for both "snapshot" AND "rtsp" on mobile
+  // For RTSP: /api/camera/snapshot captures a single frame via ffmpeg (~3-5s per frame)
+  const errCountRef = useRef(0);
   useEffect(() => {
     if (!hasStream) {
       setLoading(false);
       return;
     }
     if (!useSnapshotPolling || !camera.streamUrl) return;
-    // RTSP snapshots via ffmpeg take ~2-5s, so poll interval must be longer
-    const ms = camera.streamType === "rtsp"
-      ? Math.max((camera.snapshotInterval || 4) * 1000, 4000)
-      : (camera.snapshotInterval || 2) * 1000;
-    setBufA(getSnapshotUrl());
+    errCountRef.current = 0;
+    // RTSP snapshots via ffmpeg take ~3-5s, poll must be longer
+    const ms = camera.streamType === "rtsp" ? 5000 : (camera.snapshotInterval || 2) * 1000;
+
+    // Load first frame immediately
+    const firstUrl = getSnapshotUrl();
+    setBufA(firstUrl);
     setActiveBuf("a");
+
     const id = setInterval(() => {
       if (loadingRef.current) return;
       loadingRef.current = true;
@@ -87,6 +92,7 @@ function CameraCell({
       const img = new Image();
       img.onload = () => {
         loadingRef.current = false;
+        errCountRef.current = 0;
         setActiveBuf((p) => {
           if (p === "a") {
             setBufB(nextUrl);
@@ -101,8 +107,12 @@ function CameraCell({
       };
       img.onerror = () => {
         loadingRef.current = false;
-        setError(true);
-        setLoading(false);
+        errCountRef.current++;
+        // Only show error after 3 consecutive failures (allows retries)
+        if (errCountRef.current >= 3) {
+          setError(true);
+          setLoading(false);
+        }
       };
       img.src = nextUrl;
     }, ms);

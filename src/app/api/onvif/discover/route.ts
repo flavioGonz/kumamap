@@ -140,6 +140,20 @@ function extractPortFromXaddrs(xaddrs: string): number {
   }
 }
 
+/** Inject user:pass into an RTSP URI so the proxy/ffmpeg can authenticate.
+ *  rtsp://192.168.1.10:554/path → rtsp://admin:pass@192.168.1.10:554/path */
+function injectRtspCredentials(uri: string, user: string, pass: string): string {
+  if (!user || !pass) return uri;
+  try {
+    // Already has credentials?
+    if (uri.match(/^rtsp:\/\/[^@/]+:[^@/]+@/)) return uri;
+    const encoded = `${encodeURIComponent(user)}:${encodeURIComponent(pass)}`;
+    return uri.replace(/^rtsp:\/\//, `rtsp://${encoded}@`);
+  } catch {
+    return uri;
+  }
+}
+
 async function connectAndGetStreams(
   Cam: any,
   dev: DiscoveredDevice,
@@ -187,7 +201,8 @@ async function connectAndGetStreams(
             { protocol: "RTSP", profileToken: cam.activeSource?.profileToken },
             (err2: any, stream: any) => {
               if (!err2 && stream?.uri) {
-                dev.streamUri = stream.uri;
+                // Inject credentials into the RTSP URI so ffmpeg/proxy can authenticate
+                dev.streamUri = injectRtspCredentials(stream.uri, user, pass);
               }
 
               // Get snapshot URI

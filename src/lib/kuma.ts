@@ -242,6 +242,15 @@ class KumaClient {
     return this.heartbeatHistory.get(monitorId) || [];
   }
 
+  /** Get recent heartbeats for ALL monitors (last N beats each) */
+  getAllHistory(count: number = 50): Record<number, KumaHeartbeat[]> {
+    const result: Record<number, KumaHeartbeat[]> = {};
+    for (const [id, beats] of this.heartbeatHistory) {
+      result[id] = beats.slice(-count);
+    }
+    return result;
+  }
+
   /** Fetch notification providers configured in Uptime Kuma */
   getNotifications(): Promise<{ id: number; name: string; type: string }[]> {
     if (!this.socket || !this.authenticated) return Promise.resolve([]);

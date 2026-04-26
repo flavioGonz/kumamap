@@ -39,6 +39,14 @@ interface Notification {
   type: string;
 }
 
+interface Heartbeat {
+  monitorID: number;
+  status: number;
+  time: string;
+  ping: number | null;
+  msg: string;
+}
+
 // ─── Monitor type definitions with descriptions ─────
 const MONITOR_TYPES: {
   value: string; label: string; icon: string;
@@ -147,6 +155,83 @@ function statusLabel(status?: number, active?: boolean) {
   if (status === 0) return "DOWN";
   if (status === 2) return "PENDING";
   return "—";
+}
+
+// ─── Heartbeat Bar (SVG, Uptime-Kuma style) ─────────
+function HeartbeatBar({ beats, width = 300, height = 24 }: {
+  beats: Heartbeat[];
+  width?: number;
+  height?: number;
+}) {
+  // Show last N beats that fit in the width (each bar ~4px + 1px gap)
+  const barW = 3;
+  const gap = 1;
+  const maxBars = Math.floor(width / (barW + gap));
+  const displayed = beats.slice(-maxBars);
+
+  if (displayed.length === 0) {
+    return (
+      <div style={{ width, height, display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <span style={{ fontSize: 9, color: "#444", fontStyle: "italic" }}>sin datos</span>
+      </div>
+    );
+  }
+
+  // Tooltip state managed via CSS :hover
+  const totalW = displayed.length * (barW + gap) - gap;
+  const offsetX = width - totalW; // right-align
+
+  return (
+    <div style={{ width, height, position: "relative", flexShrink: 0 }}>
+      <svg width={width} height={height} style={{ display: "block" }}>
+        {displayed.map((b, i) => {
+          const x = offsetX + i * (barW + gap);
+          const color = b.status === 1 ? "#22c55e" : b.status === 0 ? "#ef4444" : b.status === 2 ? "#f59e0b" : "#333";
+          const barH = b.status === 1
+            ? height - 4
+            : b.status === 0
+              ? height - 2
+              : height - 6;
+          const y = (height - barH) / 2;
+          return (
+            <g key={i}>
+              <rect
+                x={x} y={y} width={barW} height={barH}
+                rx={1} fill={color}
+                opacity={0.85}
+                style={{ transition: "opacity 0.15s" }}
+              >
+                <title>{`${new Date(b.time).toLocaleString()} — ${b.status === 1 ? "UP" : b.status === 0 ? "DOWN" : "PENDING"}${b.ping != null ? ` (${b.ping}ms)` : ""}${b.msg ? `\n${b.msg}` : ""}`}</title>
+              </rect>
+            </g>
+          );
+        })}
+      </svg>
+    </div>
+  );
+}
+
+// ─── Notification indicator ──────────────────────────
+function NotifIndicator({ monitor }: { monitor: KumaMonitor }) {
+  const hasNotifs = monitor.notificationIDList && Object.values(monitor.notificationIDList).some(Boolean);
+  return (
+    <div title={hasNotifs ? "Notificaciones activas" : "Sin notificaciones"} style={{
+      display: "flex", alignItems: "center", justifyContent: "center",
+      width: 22, height: 22, flexShrink: 0,
+    }}>
+      <svg width="13" height="13" viewBox="0 0 24 24" fill={hasNotifs ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2"
+        style={{ color: hasNotifs ? "#f59e0b" : "#333" }}>
+        <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+        <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+      </svg>
+      {hasNotifs && (
+        <div style={{
+          position: "absolute", top: -1, right: -1, width: 5, height: 5,
+          borderRadius: "50%", background: "#f59e0b",
+        }} />
+      )}
+    </div>
+  );
 }
 
 // ─── Styled custom select (dark theme) ──────────────
@@ -497,8 +582,8 @@ function ConfirmModal({ title, message, onConfirm, onClose }: { title: string; m
 }
 
 // ─── Monitor Row ─────────────────────────────────────
-function MonitorRow({ m, groupName, onEdit, onDelete, onToggle }: {
-  m: KumaMonitor; groupName?: string;
+function MonitorRow({ m, beats, groupName, onEdit, onDelete, onToggle }: {
+  m: KumaMonitor; beats: Heartbeat[]; groupName?: string;
   onEdit: () => void; onDelete: () => void; onToggle: () => void;
 }) {
   const ti = getTypeInfo(m.type);
@@ -516,19 +601,32 @@ function MonitorRow({ m, groupName, onEdit, onDelete, onToggle }: {
       </div>
 
       {/* Type icon */}
-      <span style={{ fontSize: 18, flexShrink: 0, opacity: m.active ? 1 : 0.4 }}>{ti.icon}</span>
+      <span style={{ fontSize: 16, flexShrink: 0, opacity: m.active ? 1 : 0.4 }}>{ti.icon}</span>
 
-      {/* Info */}
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 13, fontWeight: 700, color: m.active ? "#ededed" : "#777", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-          {m.name}
+      {/* Info + heartbeat bar in the same row */}
+      <div style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 10 }}>
+        {/* Name & details */}
+        <div style={{ minWidth: 120, maxWidth: 240, flexShrink: 1 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: m.active ? "#ededed" : "#777", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+            {m.name}
+          </div>
+          <div style={{ fontSize: 10, color: "#555", display: "flex", gap: 8, marginTop: 1, flexWrap: "wrap" }}>
+            <span style={{ color: "#666" }}>{ti.label}</span>
+            {m.url && <span style={{ maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.url}</span>}
+            {m.hostname && <span>{m.hostname}{m.port ? `:${m.port}` : ""}</span>}
+            {groupName && <span style={{ color: "#a78bfa" }}>📁 {groupName}</span>}
+          </div>
         </div>
-        <div style={{ fontSize: 10, color: "#555", display: "flex", gap: 8, marginTop: 2, flexWrap: "wrap" }}>
-          <span style={{ color: "#666" }}>{ti.label}</span>
-          {m.url && <span style={{ maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.url}</span>}
-          {m.hostname && <span>{m.hostname}{m.port ? `:${m.port}` : ""}</span>}
-          {groupName && <span style={{ color: "#a78bfa" }}>📁 {groupName}</span>}
+
+        {/* Heartbeat bar — right of name */}
+        <div style={{ flex: 1, minWidth: 80 }}>
+          <HeartbeatBar beats={beats} width={280} height={22} />
         </div>
+      </div>
+
+      {/* Notification indicator */}
+      <div style={{ position: "relative", flexShrink: 0 }}>
+        <NotifIndicator monitor={m} />
       </div>
 
       {/* Status badge */}
@@ -571,10 +669,12 @@ export default function MonitorsPage() {
   const [monitors, setMonitors] = useState<KumaMonitor[]>([]);
   const [groups, setGroups] = useState<KumaGroup[]>([]);
   const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [heartbeats, setHeartbeats] = useState<Record<number, Heartbeat[]>>({});
   const [connected, setConnected] = useState(false);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState<string>("all");
+  // Start collapsed — empty set means no groups expanded
   const [expandedGroups, setExpandedGroups] = useState<Set<number>>(new Set());
 
   // Modals
@@ -585,14 +685,16 @@ export default function MonitorsPage() {
   const pollRef = useRef<ReturnType<typeof setInterval>>(undefined);
 
   const fetchData = useCallback(async () => {
-    const [kumaData, groupData, configData] = await Promise.all([
+    const [kumaData, groupData, configData, hbData] = await Promise.all([
       safeFetch<{ connected: boolean; monitors: KumaMonitor[] }>(apiUrl("/api/kuma")),
       safeFetch<{ groups: KumaGroup[] }>(apiUrl("/api/kuma/groups")),
       safeFetch<{ notifications: Notification[] }>(apiUrl("/api/kuma/config")),
+      safeFetch<{ heartbeats: Record<number, Heartbeat[]> }>(apiUrl("/api/kuma/heartbeats?count=90")),
     ]);
     if (kumaData) { setMonitors(kumaData.monitors.filter((m) => m.type !== "group")); setConnected(kumaData.connected); }
     if (groupData) setGroups(groupData.groups);
     if (configData) setNotifications(configData.notifications || []);
+    if (hbData) setHeartbeats(hbData.heartbeats || {});
     setLoading(false);
   }, []);
 
@@ -601,13 +703,6 @@ export default function MonitorsPage() {
     pollRef.current = setInterval(fetchData, 5000);
     return () => clearInterval(pollRef.current);
   }, [fetchData]);
-
-  // Auto-expand all groups on first load
-  useEffect(() => {
-    if (groups.length > 0 && expandedGroups.size === 0) {
-      setExpandedGroups(new Set(groups.map((g) => g.id)));
-    }
-  }, [groups]);
 
   // ── CRUD handlers ──
   const handleCreateMonitor = async (data: Record<string, unknown>) => {
@@ -677,6 +772,9 @@ export default function MonitorsPage() {
       return next;
     });
   };
+
+  const expandAll = () => setExpandedGroups(new Set(groups.map((g) => g.id)));
+  const collapseAll = () => setExpandedGroups(new Set());
 
   // Group status computed from children
   const groupStatus = (gid: number) => {
@@ -760,6 +858,17 @@ export default function MonitorsPage() {
               </button>
             ))}
           </div>
+          {/* Expand/collapse all */}
+          {groups.length > 0 && (
+            <div style={{ display: "flex", gap: 4, marginLeft: "auto" }}>
+              <button onClick={expandAll} className="expand-btn" title="Expandir todos">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="6 9 12 15 18 9"/></svg>
+              </button>
+              <button onClick={collapseAll} className="expand-btn" title="Colapsar todos">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="6 15 12 9 18 15"/></svg>
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Loading */}
@@ -808,14 +917,14 @@ export default function MonitorsPage() {
                   </div>
                   {/* Group children */}
                   {expanded && (
-                    <div className="group-children">
+                    <div className="group-children" style={{ animation: "slideDown 0.2s ease-out" }}>
                       {children.length === 0 && (
                         <div style={{ padding: "12px 16px 12px 40px", fontSize: 12, color: "#444", fontStyle: "italic" }}>
                           {search ? "Sin resultados en este grupo" : "Grupo vacío — arrastrá monitores aquí"}
                         </div>
                       )}
                       {children.map((m) => (
-                        <MonitorRow key={m.id} m={m} groupName={undefined}
+                        <MonitorRow key={m.id} m={m} beats={heartbeats[m.id] || []} groupName={undefined}
                           onEdit={() => setFormModal({ open: true, monitor: m })}
                           onDelete={() => setDeleteModal({ open: true, id: m.id, name: m.name, isGroup: false })}
                           onToggle={() => handleTogglePause(m.id, m.active)}
@@ -837,7 +946,7 @@ export default function MonitorsPage() {
                   </div>
                 )}
                 {groupedMonitors.ungrouped.map((m) => (
-                  <MonitorRow key={m.id} m={m}
+                  <MonitorRow key={m.id} m={m} beats={heartbeats[m.id] || []}
                     onEdit={() => setFormModal({ open: true, monitor: m })}
                     onDelete={() => setDeleteModal({ open: true, id: m.id, name: m.name, isGroup: false })}
                     onToggle={() => handleTogglePause(m.id, m.active)}
@@ -900,7 +1009,7 @@ export default function MonitorsPage() {
         }
         .header-btn {
           display: flex; align-items: center; gap: 6px;
-          padding: 7px 14px; border-radius: 10; font-size: 12px; font-weight: 700;
+          padding: 7px 14px; border-radius: 10px; font-size: 12px; font-weight: 700;
           color: var(--btn-color); background: color-mix(in srgb, var(--btn-color) 8%, transparent);
           border: 1px solid color-mix(in srgb, var(--btn-color) 20%, transparent);
           cursor: pointer; transition: all 0.2s;
@@ -963,6 +1072,15 @@ export default function MonitorsPage() {
           font-size: 9px; padding: 1px 4px; border-radius: 4px;
           background: rgba(255,255,255,0.05); min-width: 16px; text-align: center;
         }
+
+        /* Expand/collapse buttons */
+        .expand-btn {
+          width: 26px; height: 26px; border-radius: 6px;
+          background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06);
+          color: #555; cursor: pointer; display: flex; align-items: center; justify-content: center;
+          transition: all 0.15s;
+        }
+        .expand-btn:hover { background: rgba(255,255,255,0.06); color: #888; }
 
         /* Monitor list */
         .monitor-list { animation: fadeIn 0.6s ease; }
@@ -1056,6 +1174,7 @@ export default function MonitorsPage() {
         /* Animations */
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
         @keyframes slideUp { from { opacity: 0; transform: translateY(16px) scale(0.97); } to { opacity: 1; transform: translateY(0) scale(1); } }
+        @keyframes slideDown { from { opacity: 0; max-height: 0; } to { opacity: 1; max-height: 2000px; } }
         @keyframes spin { to { transform: rotate(360deg); } }
         @keyframes dropIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
         @keyframes pulse-ring { 0% { transform: scale(1); opacity: 0.6; } 100% { transform: scale(2); opacity: 0; } }
@@ -1068,6 +1187,11 @@ export default function MonitorsPage() {
         /* Select dropdown scrollbar */
         div[style*="overflowY: auto"]::-webkit-scrollbar { width: 4px; }
         div[style*="overflowY: auto"]::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
+
+        /* Responsive heartbeat bars */
+        @media (max-width: 900px) {
+          .monitor-row { flex-wrap: wrap; }
+        }
       `}</style>
     </div>
   );

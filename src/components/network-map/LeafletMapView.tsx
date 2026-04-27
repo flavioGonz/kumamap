@@ -41,7 +41,7 @@ import type { NodeCustomData, EdgeCustomData, RackDeviceSummary } from "@/lib/ty
 import { formatTraffic } from "@/utils/format";
 import { statusColors, getStatusColor as _getStatusColor, getMonitorData as _getMonitorData } from "@/utils/status";
 import { iconSvgPaths, getIconSvg, createMarkerIcon } from "@/utils/map-icons";
-import { exportMapPng, printMap, exportNodesXlsx } from "@/utils/map-export";
+// map-export utils no longer used — export is now ZIP only
 import MapClock from "./MapClock";
 import VisualizationPanel from "./VisualizationPanel";
 import AlertManagerPanel, { useAlertCount, type TimelineEvent } from "./AlertManagerPanel";
@@ -457,7 +457,7 @@ export default function LeafletMapView({
   const LRef = useRef<any>(null);
   const [searchVisible, setSearchVisible] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
-  const [exportMenuOpen, setExportMenuOpen] = useState(false);
+  // exportMenuOpen removed — export is now a single ZIP button
   const [saving, setSaving] = useState(false);
   const [editMode, setEditMode] = useState(false);
   // Effective readonly: true when prop readonly OR editMode is off
@@ -3446,20 +3446,7 @@ export default function LeafletMapView({
     }
   }, [searchQuery, handleNodeSearch, isImageMode]);
 
-  // ── Export as PNG (html2canvas) ──
-  const handleExportPng = useCallback(() => {
-    if (containerRef.current) exportMapPng(containerRef.current, mapName || "kumamap");
-  }, [mapName]);
-
-  // ── Print map ──
-  const handlePrint = useCallback(() => {
-    printMap(mapRef.current, LRef.current, nodesRef.current, isImageMode);
-  }, [isImageMode]);
-
-  // ── Export node list as styled XLSX ──
-  const handleExportCsv = useCallback(() => {
-    exportNodesXlsx(nodesRef.current, kumaMonitors, mapName || "kumamap");
-  }, [mapName, kumaMonitors]);
+  // Old export handlers (PNG, Print, XLSX) removed — replaced by single ZIP export
 
   // ── Export all racks as ZIP (Word + Excel per rack) ──
   const [zipExporting, setZipExporting] = useState(false);
@@ -4076,63 +4063,19 @@ export default function LeafletMapView({
         <div className="flex items-center gap-0.5 rounded-xl px-1.5 py-1 ml-0.5"
           style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
           
-          {/* Export */}
-          <div className="relative">
-            <Tooltip content="Exportar Mapa" placement="bottom">
+          {/* Export — single ZIP button (no dropdown) */}
+          <Tooltip content="Exportar Mapa (ZIP)" placement="bottom">
             <button
-              onClick={() => setExportMenuOpen(v => !v)}
-              className="flex items-center justify-center rounded-lg p-1.5 transition-all outline-none"
-              style={{ color: exportMenuOpen ? "#ededed" : "#888", background: exportMenuOpen ? "rgba(255,255,255,0.08)" : "transparent" }}
+              onClick={handleExportZip}
+              disabled={zipExporting}
+              className="flex items-center justify-center rounded-lg p-1.5 transition-all outline-none disabled:opacity-50"
+              style={{ color: zipExporting ? "#f97316" : "#888", background: zipExporting ? "rgba(249,115,22,0.1)" : "transparent" }}
             >
-              <Download className="h-4 w-4" />
+              {zipExporting
+                ? <div className="h-4 w-4 border-2 border-t-transparent border-orange-400 rounded-full animate-spin" />
+                : <Download className="h-4 w-4" />}
             </button>
-            </Tooltip>
-            {exportMenuOpen && (
-              <div
-                className="absolute top-full mt-2 right-0 rounded-xl overflow-hidden shadow-2xl animate-in fade-in zoom-in-95 duration-150"
-                style={{ background: "rgba(12,12,12,0.98)", border: "1px solid rgba(255,255,255,0.1)", zIndex: 99999, minWidth: "190px", backdropFilter: "blur(20px)" }}
-                onMouseLeave={() => setExportMenuOpen(false)}
-              >
-                <button onClick={() => { setExportMenuOpen(false); handleExportPng(); }}
-                  className="flex items-center gap-2.5 w-full px-4 py-2.5 text-[11px] text-left transition-all hover:bg-white/[0.05]"
-                  style={{ color: "#ccc" }}>
-                  <div className="h-6 w-6 rounded-lg flex items-center justify-center bg-blue-500/10 border border-blue-500/20">
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><rect width="18" height="18" x="3" y="3" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>
-                  </div>
-                  Exportar como PNG
-                </button>
-                <button onClick={() => { setExportMenuOpen(false); handlePrint(); }}
-                  className="flex items-center gap-2.5 w-full px-4 py-2.5 text-[11px] text-left transition-all hover:bg-white/[0.05]"
-                  style={{ color: "#ccc" }}>
-                  <div className="h-6 w-6 rounded-lg flex items-center justify-center bg-purple-500/10 border border-purple-500/20">
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect width="12" height="8" x="6" y="14"/></svg>
-                  </div>
-                  Imprimir mapa
-                </button>
-                <div style={{ height: "1px", background: "rgba(255,255,255,0.06)", margin: "2px 0" }} />
-                <button onClick={() => { setExportMenuOpen(false); handleExportCsv(); }}
-                  className="flex items-center gap-2.5 w-full px-4 py-2.5 text-[11px] text-left transition-all hover:bg-white/[0.05]"
-                  style={{ color: "#ccc" }}>
-                  <div className="h-6 w-6 rounded-lg flex items-center justify-center bg-emerald-500/10 border border-emerald-500/20">
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><line x1="8" x2="16" y1="13" y2="13"/><line x1="8" x2="16" y1="17" y2="17"/><line x1="8" x2="11" y1="9" y2="9"/></svg>
-                  </div>
-                  Exportar XLSX
-                </button>
-                <div style={{ height: "1px", background: "rgba(255,255,255,0.06)", margin: "2px 0" }} />
-                <button onClick={() => { setExportMenuOpen(false); handleExportZip(); }}
-                  disabled={zipExporting}
-                  className="flex items-center gap-2.5 w-full px-4 py-2.5 text-[11px] text-left transition-all hover:bg-white/[0.05] disabled:opacity-50"
-                  style={{ color: "#ccc" }}>
-                  <div className="h-6 w-6 rounded-lg flex items-center justify-center bg-orange-500/10 border border-orange-500/20">
-                    {zipExporting
-                      ? <div className="w-3 h-3 border-2 border-t-transparent border-orange-400 rounded-full animate-spin" />
-                      : <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>}
-                  </div>
-                  {zipExporting ? "Generando..." : "Exportar TODO (ZIP)"}
-                </button>
-              </div>
-            )}
-          </div>
+          </Tooltip>
 
           <div className="h-4 w-px mx-0.5" style={{ background: "rgba(255,255,255,0.08)" }} />
 

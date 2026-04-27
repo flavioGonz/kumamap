@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import getDb from "@/lib/db";
+import getDb, { mapsDb } from "@/lib/db";
 // @ts-ignore — archiver has no bundled types
 import archiver from "archiver";
 import { PassThrough } from "stream";
@@ -11,12 +11,10 @@ export const dynamic = "force-dynamic";
 /**
  * POST /api/map-export-zip
  *
- * Receives { mapId } and exports ALL rack nodes in that map as a ZIP archive.
- * Each rack gets:
- *   - Word (.docx) report — same as /api/rack-report
- *   - Excel (.xlsx) report — same as /api/rack-report-xlsx
- *
- * Also includes the node list XLSX (basic summary of every node on the map).
+ * Receives { mapId } and exports the ENTIRE map as a ZIP archive:
+ *   - kumamap-export.json  → importable map (kumamap-v1 format, same as /api/maps/[id]/export)
+ *   - Per rack folder with Word (.docx) + Excel (.xlsx) reports
+ *   - resumen.json with metadata
  */
 
 function safeJson(s: string | null): any {
@@ -37,36 +35,63 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Missing mapId" }, { status: 400 });
     }
 
-    const db = getDb;
-
-    // Verify map exists
-    const map = db.prepare("SELECT id, name FROM network_maps WHERE id = ?").get(mapId) as
-      { id: string; name: string } | undefined;
+    // ── Fetch full map data ──
+    const map = mapsDb.getById(mapId);
     if (!map) {
       return NextResponse.json({ error: "Map not found" }, { status: 404 });
     }
 
-    // Find all rack nodes in this map
-    const nodes = db
-      .prepare("SELECT id, label, icon, custom_data FROM network_map_nodes WHERE map_id = ?")
-      .all(mapId) as { id: string; label: string; icon: string | null; custom_data: string | null }[];
+    const allNodes = mapsDb.getNodes(mapId);
+    const allEdges = mapsDb.getEdges(mapId);
 
-    const rackNodes = nodes.filter(n => {
+    // ── Build importable map JSON (kumamap-v1 format) ──
+    const mapExportJson = {
+      _format: "kumamap-v1",
+      _exportedAt: new Date().toISOString(),
+      map: {
+        name: map.name,
+        background_type: map.background_type,
+        kuma_group_id: map.kuma_group_id,
+        width: map.width,
+        height: map.height,
+        view_state: (map as any).view_state || null,
+      },
+      nodes: allNodes.map((n) => ({
+        id: n.id,
+        kuma_monitor_id: n.kuma_monitor_id,
+        label: n.label,
+        x: n.x,
+        y: n.y,
+        width: n.width,
+        height: n.height,
+        icon: n.icon,
+        color: n.color,
+        custom_data: n.custom_data,
+      })),
+      edges: allEdges.map((e) => ({
+        id: e.id,
+        source_node_id: e.source_node_id,
+        target_node_id: e.target_node_id,
+        label: e.label,
+        style: e.style,
+        color: e.color,
+        animated: e.animated,
+        custom_data: (e as any).custom_data || null,
+      })),
+    };
+
+    // ── Find rack nodes ──
+    const rackNodes = allNodes.filter(n => {
       const icon = n.icon || "";
       const data = safeJson(n.custom_data) || {};
       return icon === "_rack" || data.type === "rack";
     });
 
-    if (rackNodes.length === 0) {
-      return NextResponse.json({ error: "No hay racks en este mapa" }, { status: 404 });
-    }
-
-    // Build ZIP archive
+    // ── Build ZIP archive ──
     const archive = archiver("zip", { zlib: { level: 6 } });
     const passthrough = new PassThrough();
     archive.pipe(passthrough);
 
-    // Collect all buffers
     const chunks: Uint8Array[] = [];
     passthrough.on("data", (chunk: Buffer) => chunks.push(new Uint8Array(chunk)));
 
@@ -85,39 +110,42 @@ export async function POST(req: NextRequest) {
       archive.on("error", reject);
     });
 
-    // Process each rack
+    // 1. Importable map JSON (can be re-imported via /api/maps/import)
+    archive.append(JSON.stringify(mapExportJson, null, 2), { name: "kumamap-export.json" });
+
+    // 2. Per-rack reports (Word + Excel)
     for (const node of rackNodes) {
       const data = safeJson(node.custom_data) || {};
       const rackName = data.rackName || node.label || "Rack";
       const totalUnits = data.totalUnits || 12;
       const devices = Array.isArray(data.devices) ? data.devices : [];
-      const folder = safeName(rackName);
+      const folder = `racks/${safeName(rackName)}`;
 
       if (devices.length === 0) continue;
 
       try {
-        // Generate Word report
         const docxBuffer = await buildRackReport(rackName, totalUnits, devices);
-        archive.append(Buffer.from(docxBuffer), { name: `${folder}/${folder}-report.docx` });
+        archive.append(Buffer.from(docxBuffer), { name: `${folder}/${safeName(rackName)}-report.docx` });
       } catch (err) {
         console.error(`Error generating Word for rack ${rackName}:`, err);
       }
 
       try {
-        // Generate Excel report
         const xlsxBuffer = await buildRackXlsx(rackName, totalUnits, devices);
-        archive.append(xlsxBuffer, { name: `${folder}/${folder}-report.xlsx` });
+        archive.append(xlsxBuffer, { name: `${folder}/${safeName(rackName)}-report.xlsx` });
       } catch (err) {
         console.error(`Error generating Excel for rack ${rackName}:`, err);
       }
     }
 
-    // Add a summary JSON with map info and rack list
+    // 3. Summary
     const summary = {
       mapName: map.name,
       exportedAt: new Date().toISOString(),
-      totalNodes: nodes.length,
+      totalNodes: allNodes.length,
+      totalEdges: allEdges.length,
       totalRacks: rackNodes.length,
+      importFile: "kumamap-export.json",
       racks: rackNodes.map(n => {
         const data = safeJson(n.custom_data) || {};
         const devices = Array.isArray(data.devices) ? data.devices : [];
@@ -134,7 +162,7 @@ export async function POST(req: NextRequest) {
     await archive.finalize();
     const zipBytes = await done;
 
-    const filename = `${safeName(map.name)}-racks-export-${new Date().toISOString().slice(0, 10)}.zip`;
+    const filename = `${safeName(map.name)}-export-${new Date().toISOString().slice(0, 10)}.zip`;
 
     return new Response(zipBytes as unknown as BodyInit, {
       status: 200,

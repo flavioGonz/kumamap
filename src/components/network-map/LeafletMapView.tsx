@@ -44,6 +44,7 @@ import { iconSvgPaths, getIconSvg, createMarkerIcon } from "@/utils/map-icons";
 // map-export utils no longer used — export is now ZIP only
 import MapClock from "./MapClock";
 import VisualizationPanel from "./VisualizationPanel";
+import MapSearchPanel from "./MapSearchPanel";
 import AlertManagerPanel, { useAlertCount, type TimelineEvent } from "./AlertManagerPanel";
 import FOVColorPickerModal from "./FOVColorPickerModal";
 import LensPickerModal from "./LensPickerModal";
@@ -455,8 +456,7 @@ export default function LeafletMapView({
   const nodesRef = useRef<SavedNode[]>(initialNodes);
   const edgesRef = useRef<SavedEdge[]>(initialEdges);
   const LRef = useRef<any>(null);
-  const [searchVisible, setSearchVisible] = useState(false);
-  const [searchQuery, setSearchQuery] = useState("");
+  // Search state moved to MapSearchPanel component
   // exportMenuOpen removed — export is now a single ZIP button
   const [saving, setSaving] = useState(false);
   const [editMode, setEditMode] = useState(false);
@@ -3417,46 +3417,7 @@ export default function LeafletMapView({
     };
   }, [tooltipViewer]);
 
-  // Node search — used by both image mode and livemap (nodes take priority over geocoding)
-  const handleNodeSearch = useCallback((): boolean => {
-    if (!searchQuery.trim() || !mapRef.current) return false;
-    const q = searchQuery.toLowerCase();
-    const match = nodesRef.current.find(n =>
-      n.label?.toLowerCase().includes(q) ||
-      (() => { const cd = safeJsonParse<NodeCustomData>(n.custom_data); return cd.ip?.includes(q) || cd.mac?.toLowerCase().includes(q); })()
-    );
-    if (match) {
-      mapRef.current.setView([match.x, match.y], Math.max(mapRef.current.getZoom(), isImageMode ? mapRef.current.getZoom() : 16), { animate: true });
-      toast.success("Nodo encontrado", { description: match.label });
-      return true;
-    }
-    return false;
-  }, [searchQuery, isImageMode]);
-
-  // Search: nodes first, then geocoding (livemap only)
-  const handleSearch = useCallback(async () => {
-    if (!searchQuery.trim() || !mapRef.current) return;
-    // Always try node search first (works in both modes)
-    if (handleNodeSearch()) return;
-    // Livemap only: fall back to Nominatim geocoding
-    if (isImageMode) { toast.error("No se encontró ningún nodo con ese nombre"); return; }
-    try {
-      const results = await safeFetch<{ lat: string; lon: string; display_name: string }[]>(
-        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchQuery)}&limit=1`,
-        { headers: { "User-Agent": "KumaMap/1.0" } },
-        "Geocode"
-      );
-      if (results && results.length > 0) {
-        const { lat, lon, display_name } = results[0];
-        mapRef.current.setView([parseFloat(lat), parseFloat(lon)], 16, { animate: true });
-        toast.success("Ubicacion encontrada", { description: display_name.substring(0, 60) });
-      } else {
-        toast.error("No se encontro la direccion ni nodo con ese nombre");
-      }
-    } catch {
-      toast.error("Error buscando");
-    }
-  }, [searchQuery, handleNodeSearch, isImageMode]);
+  // Search logic moved to MapSearchPanel component
 
   // Old export handlers (PNG, Print, XLSX) removed — replaced by single ZIP export
 
@@ -3806,45 +3767,6 @@ export default function LeafletMapView({
         {isImageMode ? (
           /* ── Image-mode right controls ── */
           <>
-          <div className="h-5 w-px mx-0.5" style={{ background: "rgba(255,255,255,0.06)" }} />
-
-          {/* Node search */}
-          {searchVisible ? (
-            <div className="flex items-center gap-1">
-              <input
-                autoFocus
-                type="text"
-                placeholder="Buscar nodo..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") handleNodeSearch();
-                  if (e.key === "Escape") { setSearchVisible(false); setSearchQuery(""); }
-                }}
-                className="h-7 w-44 rounded-lg px-3 py-1 text-[11px] text-[#ededed] placeholder:text-[#555] focus:outline-none"
-                style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)" }}
-              />
-              <button onClick={handleNodeSearch} className="rounded-lg p-1 transition-all text-[#60a5fa]"
-                onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "rgba(59,130,246,0.12)"; }}
-                onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
-              </button>
-              <button onClick={() => { setSearchVisible(false); setSearchQuery(""); }}
-                className="rounded-lg p-1 text-[#555] hover:text-[#ededed] transition-all">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
-              </button>
-            </div>
-          ) : (
-            <Tooltip content="Buscar nodo" placement="bottom">
-            <button onClick={() => setSearchVisible(true)} className="rounded-xl p-1.5 transition-all"
-              style={{ color: "#888" }}
-              onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.06)"; (e.currentTarget as HTMLElement).style.color = "#ededed"; }}
-              onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; (e.currentTarget as HTMLElement).style.color = "#888"; }}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
-            </button>
-            </Tooltip>
-          )}
-
           {/* Brightness + Rotation (only in edit mode) */}
           {editMode && <>
           <div className="h-5 w-px mx-0.5" style={{ background: "rgba(255,255,255,0.06)" }} />
@@ -3879,52 +3801,7 @@ export default function LeafletMapView({
             </Tooltip>
           </div>
           </>
-        ) : (
-          /* ── Livemap search ── */
-          searchVisible ? (
-            <div className="flex items-center gap-1">
-              <input
-                autoFocus
-                type="text"
-                placeholder="Buscar direccion..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") handleSearch();
-                  if (e.key === "Escape") { setSearchVisible(false); setSearchQuery(""); }
-                }}
-                className="h-7 w-48 rounded-lg px-3 py-1 text-[11px] text-[#ededed] placeholder:text-[#555] focus:outline-none"
-                style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)" }}
-              />
-              <button
-                onClick={handleSearch}
-                className="rounded-lg p-1 transition-all text-[#60a5fa]"
-                onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "rgba(59,130,246,0.12)"; }}
-                onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
-              </button>
-              <button
-                onClick={() => { setSearchVisible(false); setSearchQuery(""); }}
-                className="rounded-lg p-1 text-[#555] hover:text-[#ededed] transition-all"
-              >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
-              </button>
-            </div>
-          ) : (
-            <Tooltip content="Buscar dirección" placement="bottom">
-            <button
-              onClick={() => setSearchVisible(true)}
-              className="rounded-xl p-1.5 transition-all"
-              style={{ color: "#888" }}
-              onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.06)"; (e.currentTarget as HTMLElement).style.color = "#ededed"; }}
-              onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; (e.currentTarget as HTMLElement).style.color = "#888"; }}
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
-            </button>
-            </Tooltip>
-          )
-        )}
+        ) : null}
 
         {/* ═══ EDIT MODE: Map controls (livemap only) ═══ */}
         {editMode && !isImageMode && <>
@@ -4170,6 +4047,35 @@ export default function LeafletMapView({
           });
         } : undefined}
       />}
+
+      {/* ── Map Search Panel (top-left) ── */}
+      {!readonly && !rackDrawerNodeId && (
+        <MapSearchPanel
+          nodes={nodesRef.current}
+          isImageMode={isImageMode}
+          onFlyTo={(lat, lng, label) => {
+            if (!mapRef.current) return;
+            mapRef.current.setView([lat, lng], Math.max(mapRef.current.getZoom(), isImageMode ? mapRef.current.getZoom() : 16), { animate: true });
+            // Flash the matching marker
+            const matchNode = nodesRef.current.find(n => n.x === lat && n.y === lng);
+            if (matchNode) {
+              const marker = markersRef.current.get(matchNode.id);
+              if (marker?.getElement()) {
+                const el = marker.getElement();
+                el.style.filter = "drop-shadow(0 0 20px #3b82f6) drop-shadow(0 0 40px #3b82f6) brightness(1.8)";
+                el.style.transition = "filter 0.2s";
+                el.classList.add("node-vibrate");
+                setTimeout(() => {
+                  el.style.filter = "drop-shadow(0 0 8px #3b82f688) brightness(1.1)";
+                  el.style.transition = "filter 1.5s";
+                  el.classList.remove("node-vibrate");
+                }, 1500);
+              }
+            }
+            toast.success("Encontrado", { description: label.substring(0, 60) });
+          }}
+        />
+      )}
 
       {/* Alert Manager Panel */}
       <AlertManagerPanel

@@ -1166,7 +1166,17 @@ export default function MonitorsPage() {
   }, []);
 
   useEffect(() => {
-    fetchData();
+    // Initial fetch with retry: if Kuma is not connected, retry sooner
+    let retryCount = 0;
+    const doInitial = async () => {
+      await fetchData();
+      // After first fetch, if not connected and retries left, retry faster
+      if (!connected && retryCount < 3) {
+        retryCount++;
+        setTimeout(doInitial, 1500);
+      }
+    };
+    doInitial();
     pollRef.current = setInterval(fetchData, 4000);
     return () => clearInterval(pollRef.current);
   }, [fetchData]);
@@ -1369,7 +1379,7 @@ export default function MonitorsPage() {
 
   return (
     <div className="monitors-page">
-      <div style={{ maxWidth: 1200, margin: "0 auto" }}>
+      <div style={{ maxWidth: 1600, margin: "0 auto" }}>
         {/* Header */}
         <header className="page-header">
           <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
@@ -1386,33 +1396,44 @@ export default function MonitorsPage() {
               <div style={{ fontSize: 10, color: "#666", display: "flex", alignItems: "center", gap: 6, marginTop: 2 }}>
                 <span className="status-dot" style={{ background: connected ? "#22c55e" : "#ef4444" }} />
                 {connected ? "Kuma conectado" : "Kuma desconectado"}
+                {!connected && (
+                  <button onClick={fetchData} className="reconnect-btn">Reintentar</button>
+                )}
                 <span style={{ color: "#444" }}>&middot;</span>
                 {stats.total} monitores &middot; {groups.length} grupos
               </div>
             </div>
           </div>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <button onClick={handleExport} disabled={exporting} className="header-btn" style={{ "--btn-color": "#22d3ee" } as React.CSSProperties}>
-              {exporting ? <span className="btn-spinner" style={{ width: 12, height: 12 }} /> : (
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-              )}
-              Exportar
-            </button>
-            <button onClick={() => importFileRef.current?.click()} disabled={importing} className="header-btn" style={{ "--btn-color": "#f472b6" } as React.CSSProperties}>
-              {importing ? <span className="btn-spinner" style={{ width: 12, height: 12 }} /> : (
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-              )}
-              Importar
-            </button>
+          <div style={{ display: "flex", gap: 6 }}>
+            <div className="icon-btn-tooltip">
+              <button onClick={handleExport} disabled={exporting} className="icon-btn" style={{ "--btn-color": "#22d3ee" } as React.CSSProperties}>
+                {exporting ? <span className="btn-spinner" style={{ width: 14, height: 14 }} /> : (
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                )}
+              </button>
+              <span className="icon-btn-tip">Exportar</span>
+            </div>
+            <div className="icon-btn-tooltip">
+              <button onClick={() => importFileRef.current?.click()} disabled={importing} className="icon-btn" style={{ "--btn-color": "#f472b6" } as React.CSSProperties}>
+                {importing ? <span className="btn-spinner" style={{ width: 14, height: 14 }} /> : (
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                )}
+              </button>
+              <span className="icon-btn-tip">Importar</span>
+            </div>
             <input ref={importFileRef} type="file" accept=".json" style={{ display: "none" }} onChange={handleImportFile} />
-            <button onClick={() => setGroupModal({ open: true })} className="header-btn" style={{ "--btn-color": "#a78bfa" } as React.CSSProperties}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
-              Nuevo Grupo
-            </button>
-            <button onClick={() => setFormModal({ open: true })} className="header-btn" style={{ "--btn-color": "#60a5fa" } as React.CSSProperties}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-              Nuevo Monitor
-            </button>
+            <div className="icon-btn-tooltip">
+              <button onClick={() => setGroupModal({ open: true })} className="icon-btn" style={{ "--btn-color": "#a78bfa" } as React.CSSProperties}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+              </button>
+              <span className="icon-btn-tip">Nuevo Grupo</span>
+            </div>
+            <div className="icon-btn-tooltip">
+              <button onClick={() => setFormModal({ open: true })} className="icon-btn" style={{ "--btn-color": "#60a5fa" } as React.CSSProperties}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              </button>
+              <span className="icon-btn-tip">Nuevo Monitor</span>
+            </div>
           </div>
         </header>
 
@@ -1463,10 +1484,17 @@ export default function MonitorsPage() {
           )}
         </div>
 
-        {/* Loading */}
+        {/* Skeleton loader */}
         {loading && (
-          <div style={{ display: "flex", justifyContent: "center", padding: 80 }}>
-            <div className="spinner" />
+          <div className="skeleton-container">
+            {[...Array(6)].map((_, i) => (
+              <div key={i} className="skeleton-row" style={{ animationDelay: `${i * 0.08}s` }}>
+                <div className="skeleton-dot" />
+                <div className="skeleton-bar" style={{ width: `${40 + Math.random() * 30}%` }} />
+                <div className="skeleton-bar-sm" />
+                <div className="skeleton-bar-sm" />
+              </div>
+            ))}
           </div>
         )}
 
@@ -1568,17 +1596,57 @@ export default function MonitorsPage() {
         }
         .back-link:hover { color: #888; }
         .status-dot { width: 6px; height: 6px; border-radius: 50%; box-shadow: 0 0 6px currentColor; }
-        .header-btn {
-          display: flex; align-items: center; gap: 6px;
-          padding: 7px 14px; border-radius: 10px; font-size: 12px; font-weight: 700;
+        .icon-btn {
+          width: 36px; height: 36px; border-radius: 10px;
+          display: flex; align-items: center; justify-content: center;
           color: var(--btn-color); background: color-mix(in srgb, var(--btn-color) 8%, transparent);
           border: 1px solid color-mix(in srgb, var(--btn-color) 20%, transparent);
           cursor: pointer; transition: all 0.2s;
         }
-        .header-btn:hover {
-          background: color-mix(in srgb, var(--btn-color) 15%, transparent);
-          border-color: color-mix(in srgb, var(--btn-color) 35%, transparent);
+        .icon-btn:hover {
+          background: color-mix(in srgb, var(--btn-color) 18%, transparent);
+          border-color: color-mix(in srgb, var(--btn-color) 40%, transparent);
           transform: translateY(-1px);
+        }
+        .icon-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+        .icon-btn-tooltip { position: relative; }
+        .icon-btn-tip {
+          position: absolute; bottom: -28px; left: 50%; transform: translateX(-50%);
+          font-size: 9px; font-weight: 700; color: #ccc; white-space: nowrap;
+          padding: 3px 8px; border-radius: 6px;
+          background: rgba(0,0,0,0.9); border: 1px solid rgba(255,255,255,0.1);
+          opacity: 0; pointer-events: none; transition: opacity 0.15s;
+          z-index: 50;
+        }
+        .icon-btn-tooltip:hover .icon-btn-tip { opacity: 1; }
+        .reconnect-btn {
+          font-size: 9px; font-weight: 700; color: #60a5fa; cursor: pointer;
+          background: rgba(59,130,246,0.1); border: 1px solid rgba(59,130,246,0.2);
+          padding: 1px 8px; border-radius: 4px; margin-left: 4px;
+          transition: all 0.15s;
+        }
+        .reconnect-btn:hover { background: rgba(59,130,246,0.2); }
+        .skeleton-container { padding: 8px 0; }
+        .skeleton-row {
+          display: flex; align-items: center; gap: 12px; padding: 14px;
+          border-bottom: 1px solid rgba(255,255,255,0.03);
+          animation: skeletonFade 1.2s ease-in-out infinite;
+        }
+        .skeleton-dot {
+          width: 10px; height: 10px; border-radius: 50%;
+          background: rgba(255,255,255,0.06);
+        }
+        .skeleton-bar {
+          height: 12px; border-radius: 6px;
+          background: rgba(255,255,255,0.04);
+        }
+        .skeleton-bar-sm {
+          width: 50px; height: 10px; border-radius: 5px;
+          background: rgba(255,255,255,0.03); margin-left: auto;
+        }
+        @keyframes skeletonFade {
+          0%, 100% { opacity: 0.4; }
+          50% { opacity: 1; }
         }
         .stats-grid {
           display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px;

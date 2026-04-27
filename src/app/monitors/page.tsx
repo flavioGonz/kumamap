@@ -1174,7 +1174,7 @@ export default function MonitorsPage() {
   // ── CRUD handlers (return {ok, error}) ──
   const handleCreateMonitor = async (data: Record<string, unknown>): Promise<boolean> => {
     const { data: res, error } = await apiFetch<{ ok: boolean }>(apiUrl("/api/kuma/monitors"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) });
-    if (res?.ok) { setFormModal({ open: false }); addToast(`Monitor "${data.name}" creado`); fetchData(); return true; }
+    if (res?.ok) { setFormModal({ open: false }); addToast(`Monitor "${data.name}" creado`); setTimeout(fetchData, 800); return true; }
     addToast(error || "Error al crear monitor", "error");
     return false;
   };
@@ -1182,7 +1182,7 @@ export default function MonitorsPage() {
   const handleEditMonitor = async (data: Record<string, unknown>): Promise<boolean> => {
     if (!formModal.monitor) return false;
     const { data: res, error } = await apiFetch<{ ok: boolean }>(apiUrl(`/api/kuma/monitors/${formModal.monitor.id}`), { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) });
-    if (res?.ok) { setFormModal({ open: false }); addToast(`Monitor "${data.name}" actualizado`); fetchData(); return true; }
+    if (res?.ok) { setFormModal({ open: false }); addToast(`Monitor "${data.name}" actualizado`); setTimeout(fetchData, 800); return true; }
     addToast(error || "Error al editar monitor", "error");
     return false;
   };
@@ -1222,7 +1222,7 @@ export default function MonitorsPage() {
     const body: Record<string, unknown> = { name };
     if (parent != null) body.parent = parent;
     const { data: res, error } = await apiFetch<{ ok: boolean }>(apiUrl("/api/kuma/groups"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-    if (res?.ok) { setGroupModal({ open: false }); addToast(`Grupo "${name}" creado`); fetchData(); return true; }
+    if (res?.ok) { setGroupModal({ open: false }); addToast(`Grupo "${name}" creado`); setTimeout(fetchData, 800); return true; }
     addToast(error || "Error al crear grupo", "error");
     return false;
   };
@@ -1232,7 +1232,7 @@ export default function MonitorsPage() {
     const data: Record<string, unknown> = { name, type: "group" };
     if (parent != null) data.parent = parent;
     const { data: res, error } = await apiFetch<{ ok: boolean }>(apiUrl(`/api/kuma/monitors/${groupModal.group.id}`), { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) });
-    if (res?.ok) { setGroupModal({ open: false }); addToast(`Grupo "${name}" actualizado`); fetchData(); return true; }
+    if (res?.ok) { setGroupModal({ open: false }); addToast(`Grupo "${name}" actualizado`); setTimeout(fetchData, 800); return true; }
     addToast(error || "Error al editar grupo", "error");
     return false;
   };

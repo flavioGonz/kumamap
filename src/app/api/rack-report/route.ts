@@ -120,7 +120,7 @@ function dataCell(text: string, width: number, opts: { mono?: boolean; color?: s
 
 // ── Main report builder ───────────────────────────────────────────────────────
 
-function buildRackReport(rackName: string, totalUnits: number, devices: RackDevice[], rackImage?: string | null): Buffer {
+export function buildRackReport(rackName: string, totalUnits: number, devices: RackDevice[], rackImage?: string | null): Buffer {
   const now = new Date();
   const dateStr = now.toLocaleDateString("es-UY", { day: "2-digit", month: "2-digit", year: "numeric" });
   const usedUnits = devices.reduce((s, d) => s + d.sizeUnits, 0);

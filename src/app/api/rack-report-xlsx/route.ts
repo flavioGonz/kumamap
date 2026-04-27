@@ -104,11 +104,9 @@ function styleDataRow(row: ExcelJS.Row, even: boolean) {
 
 // ── Main handler ─────────────────────────────────────────────────────────────
 
-export async function POST(request: NextRequest) {
-  try {
-    const { rackName, totalUnits, devices } = await request.json();
-
-    const usedUnits = (devices as RackDevice[]).reduce((s, d) => s + d.sizeUnits, 0);
+/** Build an ExcelJS workbook for a single rack — reusable from ZIP export */
+export async function buildRackXlsx(rackName: string, totalUnits: number, devices: RackDevice[]): Promise<Buffer> {
+    const usedUnits = devices.reduce((s, d) => s + d.sizeUnits, 0);
     const freeUnits = totalUnits - usedUnits;
     const occupancy  = totalUnits > 0 ? Math.round((usedUnits / totalUnits) * 100) : 0;
     const sorted     = [...(devices as RackDevice[])].sort((a, b) => b.unit - a.unit);
@@ -427,10 +425,19 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // ── Serialize and return ──
+    // ── Serialize ──
     const buffer = await wb.xlsx.writeBuffer();
+    return Buffer.from(buffer);
+}
 
-    return new Response(buffer, {
+// ── Route handler ─────────────────────────────────────────────────────────────
+
+export async function POST(request: NextRequest) {
+  try {
+    const { rackName, totalUnits, devices } = await request.json();
+    const buffer = await buildRackXlsx(rackName, totalUnits, devices);
+
+    return new Response(buffer as unknown as BodyInit, {
       status: 200,
       headers: {
         "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

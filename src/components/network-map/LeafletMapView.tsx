@@ -3461,6 +3461,37 @@ export default function LeafletMapView({
     exportNodesXlsx(nodesRef.current, kumaMonitors, mapName || "kumamap");
   }, [mapName, kumaMonitors]);
 
+  // ── Export all racks as ZIP (Word + Excel per rack) ──
+  const [zipExporting, setZipExporting] = useState(false);
+  const handleExportZip = useCallback(async () => {
+    setZipExporting(true);
+    toast.info("Generando ZIP con todos los racks...", { duration: 5000 });
+    try {
+      const res = await fetch(apiUrl("/api/map-export-zip"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mapId }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: "Error desconocido" }));
+        throw new Error(err.error || `HTTP ${res.status}`);
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      const safeName = (mapName || "kumamap").replace(/[^a-zA-Z0-9_-]/g, "_");
+      a.download = `${safeName}-racks-export-${new Date().toISOString().slice(0, 10)}.zip`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success("ZIP exportado con éxito");
+    } catch (err: any) {
+      toast.error(`Error al exportar ZIP: ${err.message}`);
+    } finally {
+      setZipExporting(false);
+    }
+  }, [mapId, mapName]);
+
   return (
     <div className="relative h-full w-full transition-all duration-300 kumamap-print-area" style={{ marginRight: `${sidebarWidth}px` }}>
       <div
@@ -4086,6 +4117,18 @@ export default function LeafletMapView({
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><line x1="8" x2="16" y1="13" y2="13"/><line x1="8" x2="16" y1="17" y2="17"/><line x1="8" x2="11" y1="9" y2="9"/></svg>
                   </div>
                   Exportar XLSX
+                </button>
+                <div style={{ height: "1px", background: "rgba(255,255,255,0.06)", margin: "2px 0" }} />
+                <button onClick={() => { setExportMenuOpen(false); handleExportZip(); }}
+                  disabled={zipExporting}
+                  className="flex items-center gap-2.5 w-full px-4 py-2.5 text-[11px] text-left transition-all hover:bg-white/[0.05] disabled:opacity-50"
+                  style={{ color: "#ccc" }}>
+                  <div className="h-6 w-6 rounded-lg flex items-center justify-center bg-orange-500/10 border border-orange-500/20">
+                    {zipExporting
+                      ? <div className="w-3 h-3 border-2 border-t-transparent border-orange-400 rounded-full animate-spin" />
+                      : <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>}
+                  </div>
+                  {zipExporting ? "Generando..." : "Exportar TODO (ZIP)"}
                 </button>
               </div>
             )}

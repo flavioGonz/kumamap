@@ -697,22 +697,27 @@ export default function LeafletMapView({
       popup.addTo(map);
       failPopupsRef.current.set(node.id, popup);
 
-      // Register global handler
-      (window as any).__kumamap_showEventDetail = (mid: number) => {
-        const m = kumaMonitors.find(km => km.id === mid);
-        setEventDetail({
-          nodeLabel: node.label || "?",
-          monitorId: mid,
-          msg: m?.msg || mon?.msg || "",
-          time: new Date(),
-          type: m?.type || "unknown",
-          ping: m?.ping ?? null,
-          status: m?.status ?? 0,
-        });
-      };
+      // Global handler is now registered via useEffect above
 
       safeTimeout(() => { try { map.removeLayer(popup); failPopupsRef.current.delete(node.id); } catch {} }, 8000);
     }, 300);
+  }, [kumaMonitors]);
+
+  // ── Global handler so rack‑popup device rows can open EventReportModal ──
+  useEffect(() => {
+    (window as any).__kumamap_showEventDetail = (mid: number, label?: string) => {
+      const m = kumaMonitors.find(km => km.id === mid);
+      setEventDetail({
+        nodeLabel: label || m?.name || "?",
+        monitorId: mid,
+        msg: m?.msg || "",
+        time: new Date(),
+        type: m?.type || "unknown",
+        ping: m?.ping ?? null,
+        status: m?.status ?? 0,
+      });
+    };
+    return () => { delete (window as any).__kumamap_showEventDetail; };
   }, [kumaMonitors]);
 
   // Handler for clicking an event in AlertManagerPanel
@@ -1154,7 +1159,7 @@ export default function LeafletMapView({
   function getRackStatus(node: SavedNode): {
     status: number; color: string; pulse: boolean; monitoredCount: number;
     totalDevices: number;
-    deviceStatuses: Array<{ label: string; type: string; status: number; color: string; ping: number | null; uptime24: number | null }>;
+    deviceStatuses: Array<{ label: string; type: string; status: number; color: string; ping: number | null; uptime24: number | null; monitorId: number | null; ip: string }>;
   } {
     const cd = safeJsonParse<NodeCustomData>(node.custom_data);
     const devices: RackDeviceSummary[] = cd.devices || [];
@@ -1165,7 +1170,7 @@ export default function LeafletMapView({
     const deviceStatuses = monitored.map((d) => {
       const m = getMonitorData(d.monitorId!);
       const s = m?.status ?? 2;
-      return { label: d.label || "Equipo", type: d.type || "other", status: s, color: statusColors[s] || "#6b7280", ping: m?.ping ?? null, uptime24: m?.uptime24 ?? null };
+      return { label: d.label || "Equipo", type: d.type || "other", status: s, color: statusColors[s] || "#6b7280", ping: m?.ping ?? null, uptime24: m?.uptime24 ?? null, monitorId: d.monitorId ?? null, ip: (d as any).managementIp || "" };
     });
     let worstStatus = 1;
     if (deviceStatuses.some(d => d.status === 0)) worstStatus = 0;
@@ -1201,9 +1206,16 @@ export default function LeafletMapView({
       const rows = rack.deviceStatuses.map(d => {
         const stT = d.status === 0 ? "DOWN" : d.status === 2 ? "PEND" : d.status === 3 ? "MAINT" : "UP";
         const pingT = d.ping != null ? `${d.ping}ms` : "";
-        return `<div style="display:flex;align-items:center;gap:6px;padding:3px 0;border-bottom:1px solid rgba(255,255,255,0.04);">
+        const clickable = d.monitorId != null;
+        const onclick = clickable ? `onclick="window.__kumamap_showEventDetail(${d.monitorId}, '${d.label.replace(/'/g, "\\'")}')"` : "";
+        const cursorStyle = clickable ? "cursor:pointer;" : "";
+        const hoverBg = clickable ? "onmouseenter=\"this.style.background='rgba(255,255,255,0.06)'\" onmouseleave=\"this.style.background='transparent'\"" : "";
+        return `<div style="display:flex;align-items:center;gap:6px;padding:3px 4px;border-bottom:1px solid rgba(255,255,255,0.04);border-radius:4px;${cursorStyle}" ${onclick} ${hoverBg}>
           <div style="width:7px;height:7px;border-radius:50%;background:${d.color};box-shadow:0 0 5px ${d.color}88;flex-shrink:0;${d.status===0||d.status===2?"animation:ping-badge 1.5s ease-in-out infinite;":""}"></div>
-          <span style="flex:1;font-size:10px;color:#ccc;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${d.label}</span>
+          <div style="flex:1;overflow:hidden;">
+            <div style="font-size:10px;color:#ccc;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${d.label}</div>
+            ${d.ip ? `<div style="font-size:8px;color:#666;font-family:monospace;">${d.ip}</div>` : ""}
+          </div>
           <span style="font-size:8px;font-weight:700;color:${d.color};background:${d.color}22;padding:1px 4px;border-radius:3px;">${stT}</span>
           ${pingT ? `<span style="font-size:8px;color:#666;font-family:monospace;">${pingT}</span>` : ""}
         </div>`;

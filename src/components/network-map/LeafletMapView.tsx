@@ -3144,60 +3144,58 @@ export default function LeafletMapView({
             onClick: () => setStreamConfigNodeId(nodeId),
           },
           {
-            label: `Tipo: ${ncd.cameraType === "lpr" ? "LPR (Matrícula)" : ncd.cameraType === "face" ? "Face Recognition" : "IP estándar"}`,
+            label: "Tipo: IP estándar",
             icon: menuIcons.Signal,
-            onClick: () => {},
-            children: [
-              {
-                label: "IP estándar",
-                icon: menuIcons.Signal,
-                onClick: () => {
-                  const idx = nodesRef.current.findIndex((n) => n.id === nodeId);
-                  if (idx >= 0) {
-                    const nc = safeJsonParse<NodeCustomData>(nodesRef.current[idx].custom_data);
-                    delete nc.cameraType;
-                    delete nc.eventEndpoint;
-                    nodesRef.current[idx] = { ...nodesRef.current[idx], custom_data: JSON.stringify(nc) };
-                    toast.success("Tipo: IP estándar");
-                  }
-                },
-              },
-              {
-                label: "LPR (Matrícula)",
-                icon: menuIcons.Signal,
-                onClick: () => {
-                  const idx = nodesRef.current.findIndex((n) => n.id === nodeId);
-                  if (idx >= 0) {
-                    const nc = safeJsonParse<NodeCustomData>(nodesRef.current[idx].custom_data);
-                    nc.cameraType = "lpr";
-                    nc.eventEndpoint = `/api/hik/events/${nodeId}`;
-                    nodesRef.current[idx] = { ...nodesRef.current[idx], custom_data: JSON.stringify(nc) };
-                    if (LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current);
-                    toast.success("Tipo: LPR", { description: `Endpoint: ${nc.eventEndpoint}` });
-                  }
-                },
-              },
-              {
-                label: "Face Recognition",
-                icon: menuIcons.Signal,
-                onClick: () => {
-                  const idx = nodesRef.current.findIndex((n) => n.id === nodeId);
-                  if (idx >= 0) {
-                    const nc = safeJsonParse<NodeCustomData>(nodesRef.current[idx].custom_data);
-                    nc.cameraType = "face";
-                    nc.eventEndpoint = `/api/hik/events/${nodeId}`;
-                    nodesRef.current[idx] = { ...nodesRef.current[idx], custom_data: JSON.stringify(nc) };
-                    if (LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current);
-                    toast.success("Tipo: Face Recognition", { description: `Endpoint: ${nc.eventEndpoint}` });
-                  }
-                },
-              },
-            ],
+            active: !ncd.cameraType,
+            onClick: () => {
+              const idx = nodesRef.current.findIndex((n) => n.id === nodeId);
+              if (idx >= 0) {
+                const nc = safeJsonParse<NodeCustomData>(nodesRef.current[idx].custom_data);
+                delete nc.cameraType;
+                delete nc.eventEndpoint;
+                nodesRef.current[idx] = { ...nodesRef.current[idx], custom_data: JSON.stringify(nc) };
+                if (LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current);
+                toast.success("Tipo: IP estándar");
+              }
+            },
+          },
+          {
+            label: "Tipo: LPR (Matrícula)",
+            icon: menuIcons.Signal,
+            active: ncd.cameraType === "lpr",
+            onClick: () => {
+              const idx = nodesRef.current.findIndex((n) => n.id === nodeId);
+              if (idx >= 0) {
+                const nc = safeJsonParse<NodeCustomData>(nodesRef.current[idx].custom_data);
+                nc.cameraType = "lpr";
+                nc.eventEndpoint = `/api/hik/events/${nodeId}`;
+                nodesRef.current[idx] = { ...nodesRef.current[idx], custom_data: JSON.stringify(nc) };
+                if (LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current);
+                toast.success("Tipo: LPR", { description: `Endpoint: ${nc.eventEndpoint}` });
+              }
+            },
+          },
+          {
+            label: "Tipo: Face Recognition",
+            icon: menuIcons.Signal,
+            active: ncd.cameraType === "face",
+            onClick: () => {
+              const idx = nodesRef.current.findIndex((n) => n.id === nodeId);
+              if (idx >= 0) {
+                const nc = safeJsonParse<NodeCustomData>(nodesRef.current[idx].custom_data);
+                nc.cameraType = "face";
+                nc.eventEndpoint = `/api/hik/events/${nodeId}`;
+                nodesRef.current[idx] = { ...nodesRef.current[idx], custom_data: JSON.stringify(nc) };
+                if (LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current);
+                toast.success("Tipo: Face Recognition", { description: `Endpoint: ${nc.eventEndpoint}` });
+              }
+            },
           },
           // Show endpoint URL for copying (only for LPR/Face)
           ...(ncd.cameraType === "lpr" || ncd.cameraType === "face" ? [{
             label: "Copiar endpoint",
             icon: menuIcons.Copy,
+            divider: true,
             onClick: () => {
               const endpoint = ncd.eventEndpoint || `/api/hik/events/${nodeId}`;
               navigator.clipboard.writeText(`${window.location.origin}${endpoint}`).then(

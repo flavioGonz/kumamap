@@ -414,18 +414,22 @@ class KumaClient {
   }
 }
 
-// Singleton
-let kumaInstance: KumaClient | null = null;
+// Singleton — use globalThis to share across module boundaries.
+// server.ts (compiled by tsx) and Next.js API routes (compiled by webpack/turbopack)
+// get separate module instances. Without globalThis, two KumaClient instances would
+// compete for the same Uptime Kuma socket, causing one to lose its connection.
+const KUMA_GLOBAL_KEY = "__kumaClient__";
 
 export function getKumaClient(): KumaClient {
-  if (!kumaInstance) {
-    kumaInstance = new KumaClient();
+  if (!(globalThis as any)[KUMA_GLOBAL_KEY]) {
+    const instance = new KumaClient();
+    (globalThis as any)[KUMA_GLOBAL_KEY] = instance;
     const url = process.env.KUMA_URL;
     const user = process.env.KUMA_USER;
     const pass = process.env.KUMA_PASS;
     if (url && user && pass) {
-      kumaInstance.connect(url, user, pass);
+      instance.connect(url, user, pass);
     }
   }
-  return kumaInstance;
+  return (globalThis as any)[KUMA_GLOBAL_KEY];
 }

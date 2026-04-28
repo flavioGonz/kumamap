@@ -1,6 +1,8 @@
-const CACHE_NAME = "kumamap-mobile-v5";
-// Base path must match NEXT_PUBLIC_BASE_PATH (empty string if none)
-const BASE = "/maps";
+const CACHE_NAME = "kumamap-mobile-v6";
+// Auto-detect basePath from service worker URL:
+//   /maps/sw.js → BASE = "/maps"
+//   /sw.js       → BASE = ""
+const BASE = new URL(self.location).pathname.replace(/\/sw\.js$/, "");
 const PRECACHE_URLS = [
   BASE + "/mobile",
   BASE + "/mobile/alerts",

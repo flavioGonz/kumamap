@@ -56,6 +56,8 @@ export interface NodeCustomData {
   streamUrl?: string;
   snapshotInterval?: number;
   rtspFps?: number;
+  cameraType?: "ip" | "lpr" | "face";  // Camera intelligence type
+  eventEndpoint?: string;               // Auto-generated webhook path for Hikvision events
 
   // Text label
   fontSize?: number;
@@ -149,4 +151,37 @@ export interface TimelineEvent {
   msg: string;
   ping: number | null;
   duration: number;
+}
+
+// ── Hikvision Camera Event Types ──
+
+export type HikEventType = "anpr" | "face" | "vmd" | "line" | "field" | "tamper" | "unknown";
+
+export interface HikEvent {
+  id: string;               // unique event ID (uuid)
+  nodeId: string;            // map node ID receiving this event
+  mapId?: string;            // map the node belongs to
+  eventType: HikEventType;
+  timestamp: string;         // ISO datetime
+  cameraIp: string;
+  channelId?: string;
+
+  // ANPR / LPR fields
+  licensePlate?: string;
+  plateColor?: string;
+  vehicleType?: string;
+  vehicleColor?: string;
+  direction?: string;        // "forward" | "reverse" | "unknown"
+  confidence?: number;       // 0–100
+
+  // Face Recognition fields
+  faceName?: string;         // matched person name (if any)
+  faceScore?: number;        // detection confidence
+  similarity?: number;       // match similarity %
+  employeeNo?: string;       // matched employee ID
+
+  // Image references
+  plateImageId?: string;     // ID to fetch via /api/hik/images/[id]
+  faceImageId?: string;
+  fullImageId?: string;
 }

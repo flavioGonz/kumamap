@@ -32,6 +32,7 @@ const PUBLIC_GET_PREFIXES = [
 // API routes accessible via ANY method without auth (needed by mobile PWA)
 const PUBLIC_ANY_PREFIXES = [
   "/api/push",             // push subscription CRUD + test (needed by mobile PWA)
+  "/api/hik/events",       // Hikvision camera event webhooks (NVR pushes here)
 ];
 
 function isPublicPath(pathname: string): boolean {

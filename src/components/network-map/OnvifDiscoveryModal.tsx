@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useCallback } from "react";
-import { Radar, Loader2, Camera, Check, AlertTriangle, X, Plus, Wifi } from "lucide-react";
+import { Radar, Loader2, Camera, Check, AlertTriangle, X, Plus, Wifi, Crosshair } from "lucide-react";
 import { apiUrl } from "@/lib/api";
 
 interface DiscoveredDevice {
@@ -22,6 +22,8 @@ interface OnvifDiscoveryModalProps {
   existingIps: string[];
 }
 
+type ScanMode = "multicast" | "range";
+
 export default function OnvifDiscoveryModal({ onClose, onAddCamera, existingIps }: OnvifDiscoveryModalProps) {
   const [scanning, setScanning] = useState(false);
   const [devices, setDevices] = useState<DiscoveredDevice[]>([]);
@@ -31,22 +33,41 @@ export default function OnvifDiscoveryModal({ onClose, onAddCamera, existingIps 
   const [pass, setPass] = useState("");
   const [timeout, setTimeout_] = useState(5);
   const [addedIps, setAddedIps] = useState<Set<string>>(new Set());
+  const [mode, setMode] = useState<ScanMode>("multicast");
+  const [rangeStart, setRangeStart] = useState("");
+  const [rangeEnd, setRangeEnd] = useState("");
+  const [scanProgress, setScanProgress] = useState<{ scanned?: number; total?: number } | null>(null);
 
   const scan = useCallback(async () => {
     setScanning(true);
     setError(null);
     setDevices([]);
+    setScanProgress(null);
     try {
+      const payload: any = { timeout: timeout * 1000, user, pass };
+      if (mode === "range") {
+        if (!rangeStart || !rangeEnd) {
+          setError("Indicá IP inicio y fin del rango");
+          setScanning(false);
+          return;
+        }
+        payload.mode = "range";
+        payload.rangeStart = rangeStart;
+        payload.rangeEnd = rangeEnd;
+      }
       const res = await fetch(apiUrl("/api/onvif/discover"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ timeout: timeout * 1000, user, pass }),
+        body: JSON.stringify(payload),
       });
       const data = await res.json();
       if (data.error) {
         setError(data.error);
       } else {
         setDevices(data.devices || []);
+        if (data.scanned) {
+          setScanProgress({ scanned: data.scanned, total: data.count });
+        }
       }
       setScanned(true);
     } catch (err: any) {
@@ -55,7 +76,7 @@ export default function OnvifDiscoveryModal({ onClose, onAddCamera, existingIps 
     } finally {
       setScanning(false);
     }
-  }, [user, pass, timeout]);
+  }, [user, pass, timeout, mode, rangeStart, rangeEnd]);
 
   const handleAdd = (dev: DiscoveredDevice) => {
     onAddCamera(dev);
@@ -90,6 +111,62 @@ export default function OnvifDiscoveryModal({ onClose, onAddCamera, existingIps 
             <X className="w-4 h-4" />
           </button>
         </div>
+
+        {/* Mode toggle */}
+        <div className="px-5 pt-3 pb-1 flex gap-1" style={{ borderBottom: "none" }}>
+          <button
+            onClick={() => setMode("multicast")}
+            className="flex-1 flex items-center justify-center gap-2 py-1.5 rounded-lg text-[11px] font-semibold transition-all"
+            style={{
+              background: mode === "multicast" ? "rgba(6,182,212,0.15)" : "rgba(255,255,255,0.03)",
+              border: `1px solid ${mode === "multicast" ? "rgba(6,182,212,0.3)" : "rgba(255,255,255,0.06)"}`,
+              color: mode === "multicast" ? "#06b6d4" : "#666",
+            }}
+          >
+            <Wifi className="w-3.5 h-3.5" />
+            Multicast
+          </button>
+          <button
+            onClick={() => setMode("range")}
+            className="flex-1 flex items-center justify-center gap-2 py-1.5 rounded-lg text-[11px] font-semibold transition-all"
+            style={{
+              background: mode === "range" ? "rgba(168,85,247,0.15)" : "rgba(255,255,255,0.03)",
+              border: `1px solid ${mode === "range" ? "rgba(168,85,247,0.3)" : "rgba(255,255,255,0.06)"}`,
+              color: mode === "range" ? "#a855f7" : "#666",
+            }}
+          >
+            <Crosshair className="w-3.5 h-3.5" />
+            Rango IP
+          </button>
+        </div>
+
+        {/* IP Range inputs (only in range mode) */}
+        {mode === "range" && (
+          <div className="px-5 pt-2 pb-1 flex gap-3 items-end">
+            <div className="flex-1">
+              <label className="text-[10px] text-white/40 block mb-1">IP Inicio</label>
+              <input
+                type="text"
+                value={rangeStart}
+                onChange={(e) => setRangeStart(e.target.value)}
+                placeholder="192.168.1.1"
+                className="w-full rounded-lg px-3 py-1.5 text-xs text-white font-mono placeholder:text-white/20 focus:outline-none focus:ring-1 focus:ring-purple-500/30"
+                style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}
+              />
+            </div>
+            <div className="flex-1">
+              <label className="text-[10px] text-white/40 block mb-1">IP Fin</label>
+              <input
+                type="text"
+                value={rangeEnd}
+                onChange={(e) => setRangeEnd(e.target.value)}
+                placeholder="192.168.1.254"
+                className="w-full rounded-lg px-3 py-1.5 text-xs text-white font-mono placeholder:text-white/20 focus:outline-none focus:ring-1 focus:ring-purple-500/30"
+                style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}
+              />
+            </div>
+          </div>
+        )}
 
         {/* Credentials */}
         <div className="px-5 py-3 flex gap-3 items-end" style={{ borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
@@ -131,13 +208,13 @@ export default function OnvifDiscoveryModal({ onClose, onAddCamera, existingIps 
           </div>
           <button
             onClick={scan}
-            disabled={scanning}
+            disabled={scanning || (mode === "range" && (!rangeStart || !rangeEnd))}
             className="px-4 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-2"
             style={{
               background: scanning ? "rgba(6,182,212,0.1)" : "rgba(6,182,212,0.2)",
               border: "1px solid rgba(6,182,212,0.3)",
               color: "#06b6d4",
-              opacity: scanning ? 0.6 : 1,
+              opacity: scanning || (mode === "range" && (!rangeStart || !rangeEnd)) ? 0.6 : 1,
             }}
           >
             {scanning ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Radar className="w-3.5 h-3.5" />}
@@ -149,9 +226,13 @@ export default function OnvifDiscoveryModal({ onClose, onAddCamera, existingIps 
         <div className="flex-1 overflow-y-auto px-5 py-3 space-y-2" style={{ minHeight: "200px" }}>
           {!scanned && !scanning && (
             <div className="flex flex-col items-center justify-center py-12 text-white/20">
-              <Wifi className="w-10 h-10 mb-3" />
-              <p className="text-xs">Presiona "Escanear" para buscar cámaras ONVIF en la red</p>
-              <p className="text-[10px] mt-1 text-white/15">Se envía un probe WS-Discovery UDP multicast</p>
+              {mode === "multicast" ? <Wifi className="w-10 h-10 mb-3" /> : <Crosshair className="w-10 h-10 mb-3" />}
+              <p className="text-xs">Presiona "Escanear" para buscar cámaras ONVIF</p>
+              <p className="text-[10px] mt-1 text-white/15">
+                {mode === "multicast"
+                  ? "Se envía un probe WS-Discovery UDP multicast"
+                  : "Se conecta directamente a cada IP del rango buscando ONVIF"}
+              </p>
             </div>
           )}
 
@@ -163,8 +244,14 @@ export default function OnvifDiscoveryModal({ onClose, onAddCamera, existingIps 
                   <Radar className="w-12 h-12 text-cyan-400/30" />
                 </div>
               </div>
-              <p className="text-xs text-white/40 mt-4">Buscando dispositivos ONVIF...</p>
-              <p className="text-[10px] text-white/20 mt-1">Esto puede tomar hasta {timeout} segundos</p>
+              <p className="text-xs text-white/40 mt-4">
+                {mode === "multicast" ? "Buscando dispositivos ONVIF..." : `Probando rango ${rangeStart} → ${rangeEnd}...`}
+              </p>
+              <p className="text-[10px] text-white/20 mt-1">
+                {mode === "multicast"
+                  ? `Esto puede tomar hasta ${timeout} segundos`
+                  : "Conectando a cada IP en busca de ONVIF — esto puede tomar un rato"}
+              </p>
             </div>
           )}
 
@@ -262,6 +349,7 @@ export default function OnvifDiscoveryModal({ onClose, onAddCamera, existingIps 
             <span className="text-[10px] text-white/30">
               {devices.length} dispositivo{devices.length !== 1 ? "s" : ""} encontrado{devices.length !== 1 ? "s" : ""}
               {devices.filter((d) => d.connected).length > 0 && ` · ${devices.filter((d) => d.connected).length} autenticado${devices.filter((d) => d.connected).length !== 1 ? "s" : ""}`}
+              {scanProgress?.scanned && ` · ${scanProgress.scanned} IPs escaneadas`}
             </span>
             <button
               onClick={onClose}

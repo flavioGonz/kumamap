@@ -58,6 +58,8 @@ import { formatElapsed, formatSince, buildSparkline } from "./map-utils";
 import NodeEditModal, { type NodeEditConfig } from "./NodeEditModal";
 import AssignMonitorModal from "./AssignMonitorModal";
 import LinkedMapsModal from "./LinkedMapsModal";
+import HikDetectionPopup from "./HikDetectionPopup";
+import { useHikEvents } from "@/lib/useHikEvents";
 import SubnetDiscoveryModal from "./SubnetDiscoveryModal";
 
 
@@ -395,6 +397,37 @@ export default function LeafletMapView({
   const alertCount = liveAlertCount ?? polledAlertCount;
   // Sync polled count when it updates (reset live override)
   useEffect(() => { setLiveAlertCount(null); }, [polledAlertCount]);
+  // ── Hikvision camera events (LPR / Face recognition) ──
+  const hikEvents = useHikEvents(mapId);
+  const [hikPopup, setHikPopup] = useState<{ event: import("@/lib/types").HikEvent; x: number; y: number } | null>(null);
+  const hikPulsingNodes = useRef<Set<string>>(new Set());
+
+  // Show popup when a new detection arrives
+  useEffect(() => {
+    if (!hikEvents.latestEvent) return;
+    const ev = hikEvents.latestEvent;
+    // Only show popup for LPR / face events
+    if (ev.eventType !== "anpr" && ev.eventType !== "face") {
+      hikEvents.clearLatest();
+      return;
+    }
+    // Find the node's screen position
+    const node = nodesRef.current.find((n) => n.id === ev.nodeId);
+    if (node && mapRef.current && LRef.current) {
+      const point = mapRef.current.latLngToContainerOffset
+        ? mapRef.current.latLngToContainerOffset(LRef.current.latLng(node.x, node.y))
+        : mapRef.current.latLngToContainerPoint(LRef.current.latLng(node.x, node.y));
+      setHikPopup({ event: ev, x: point.x, y: point.y });
+
+      // Add pulsing animation to the node marker
+      hikPulsingNodes.current.add(ev.nodeId);
+      setTimeout(() => {
+        hikPulsingNodes.current.delete(ev.nodeId);
+      }, 5000);
+    }
+    hikEvents.clearLatest();
+  }, [hikEvents.latestEvent]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // When alerts panel is open it replaces the monitor sidebar
   const sidebarWidth = readonly ? 0 : alertOpen ? 380 : panelCollapsed ? 40 : 320;
   const monitorsRef = useRef<KumaMonitor[]>(kumaMonitors);
@@ -1401,12 +1434,19 @@ export default function LeafletMapView({
       } else if (isCamera) {
         const camSize = Math.round(22 * nodeScale);
         const camIcon = Math.round(12 * nodeScale);
+        const camType = cd.cameraType;
+        const typeBadge = camType === "lpr"
+          ? `<span style="position:absolute;top:-6px;right:-8px;background:#06b6d4;color:#fff;font-size:7px;font-weight:900;padding:1px 3px;border-radius:3px;letter-spacing:0.5px;line-height:1;box-shadow:0 1px 4px rgba(0,0,0,0.5);">LPR</span>`
+          : camType === "face"
+          ? `<span style="position:absolute;top:-6px;right:-8px;background:#a855f7;color:#fff;font-size:7px;font-weight:900;padding:1px 3px;border-radius:3px;letter-spacing:0.5px;line-height:1;box-shadow:0 1px 4px rgba(0,0,0,0.5);">FACE</span>`
+          : "";
         nodeIcon = L.divIcon({
           className: "camera-marker",
           html: `<div style="position:relative;display:flex;align-items:center;justify-content:center;transform:rotate(${rotation}deg);">
             <div style="width:${camSize}px;height:${camSize}px;border-radius:4px;background:${color};border:2px solid ${isSource ? "#60a5fa" : color};box-shadow:0 0 12px ${color}88;cursor:pointer;display:flex;align-items:center;justify-content:center;">
               <svg width="${camIcon}" height="${camIcon}" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m16.24 7.76-1.804 5.412a2 2 0 0 1-1.265 1.265L7.76 16.24l1.804-5.412a2 2 0 0 1 1.265-1.265z"/><circle cx="12" cy="12" r="10"/></svg>
             </div>
+            ${typeBadge}
           </div>`,
           iconSize: [camSize, camSize],
           iconAnchor: [camSize / 2, camSize / 2],
@@ -3103,6 +3143,69 @@ export default function LeafletMapView({
             icon: menuIcons.Signal,
             onClick: () => setStreamConfigNodeId(nodeId),
           },
+          {
+            label: `Tipo: ${ncd.cameraType === "lpr" ? "LPR (Matrícula)" : ncd.cameraType === "face" ? "Face Recognition" : "IP estándar"}`,
+            icon: menuIcons.Signal,
+            onClick: () => {},
+            children: [
+              {
+                label: "IP estándar",
+                icon: menuIcons.Signal,
+                onClick: () => {
+                  const idx = nodesRef.current.findIndex((n) => n.id === nodeId);
+                  if (idx >= 0) {
+                    const nc = safeJsonParse<NodeCustomData>(nodesRef.current[idx].custom_data);
+                    delete nc.cameraType;
+                    delete nc.eventEndpoint;
+                    nodesRef.current[idx] = { ...nodesRef.current[idx], custom_data: JSON.stringify(nc) };
+                    toast.success("Tipo: IP estándar");
+                  }
+                },
+              },
+              {
+                label: "LPR (Matrícula)",
+                icon: menuIcons.Signal,
+                onClick: () => {
+                  const idx = nodesRef.current.findIndex((n) => n.id === nodeId);
+                  if (idx >= 0) {
+                    const nc = safeJsonParse<NodeCustomData>(nodesRef.current[idx].custom_data);
+                    nc.cameraType = "lpr";
+                    nc.eventEndpoint = `/api/hik/events/${nodeId}`;
+                    nodesRef.current[idx] = { ...nodesRef.current[idx], custom_data: JSON.stringify(nc) };
+                    if (LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current);
+                    toast.success("Tipo: LPR", { description: `Endpoint: ${nc.eventEndpoint}` });
+                  }
+                },
+              },
+              {
+                label: "Face Recognition",
+                icon: menuIcons.Signal,
+                onClick: () => {
+                  const idx = nodesRef.current.findIndex((n) => n.id === nodeId);
+                  if (idx >= 0) {
+                    const nc = safeJsonParse<NodeCustomData>(nodesRef.current[idx].custom_data);
+                    nc.cameraType = "face";
+                    nc.eventEndpoint = `/api/hik/events/${nodeId}`;
+                    nodesRef.current[idx] = { ...nodesRef.current[idx], custom_data: JSON.stringify(nc) };
+                    if (LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current);
+                    toast.success("Tipo: Face Recognition", { description: `Endpoint: ${nc.eventEndpoint}` });
+                  }
+                },
+              },
+            ],
+          },
+          // Show endpoint URL for copying (only for LPR/Face)
+          ...(ncd.cameraType === "lpr" || ncd.cameraType === "face" ? [{
+            label: "Copiar endpoint",
+            icon: menuIcons.Copy,
+            onClick: () => {
+              const endpoint = ncd.eventEndpoint || `/api/hik/events/${nodeId}`;
+              navigator.clipboard.writeText(`${window.location.origin}${endpoint}`).then(
+                () => toast.success("Endpoint copiado al portapapeles", { description: `${window.location.origin}${endpoint}` }),
+                () => toast.error("Error al copiar")
+              );
+            },
+          }] : []),
           ...(ncd.streamUrl ? [{
             label: "Ver stream",
             icon: menuIcons.Signal,
@@ -4356,6 +4459,16 @@ export default function LeafletMapView({
           monitorId={eventDetail.monitorId}
           nodeLabel={eventDetail.nodeLabel}
           onClose={() => setEventDetail(null)}
+        />
+      )}
+
+      {/* ── Hikvision Detection Popup (LPR / Face) ── */}
+      {hikPopup && (
+        <HikDetectionPopup
+          event={hikPopup.event}
+          anchorX={hikPopup.x}
+          anchorY={hikPopup.y}
+          onClose={() => setHikPopup(null)}
         />
       )}
 

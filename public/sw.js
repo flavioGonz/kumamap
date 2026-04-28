@@ -1,11 +1,13 @@
-const CACHE_NAME = "kumamap-mobile-v4";
+const CACHE_NAME = "kumamap-mobile-v5";
+// Base path must match NEXT_PUBLIC_BASE_PATH (empty string if none)
+const BASE = "/maps";
 const PRECACHE_URLS = [
-  "/mobile",
-  "/mobile/alerts",
-  "/mobile/settings",
-  "/mobile/offline",
-  "/icon-192.svg",
-  "/icon-512.svg",
+  BASE + "/mobile",
+  BASE + "/mobile/alerts",
+  BASE + "/mobile/settings",
+  BASE + "/mobile/offline",
+  BASE + "/icon-192.svg",
+  BASE + "/icon-512.svg",
 ];
 
 // Install: precache shell
@@ -31,7 +33,7 @@ self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
 
   // API calls: network only with offline fallback
-  if (url.pathname.startsWith("/api/")) {
+  if (url.pathname.startsWith(BASE + "/api/") || url.pathname.startsWith("/api/")) {
     event.respondWith(
       fetch(event.request)
         .catch(() => new Response('{"error":"offline"}', {
@@ -60,7 +62,7 @@ self.addEventListener("fetch", (event) => {
         })
         .catch(() =>
           caches.match(event.request)
-            .then((cached) => cached || caches.match("/mobile/offline"))
+            .then((cached) => cached || caches.match(BASE + "/mobile/offline"))
         )
     );
     return;
@@ -98,8 +100,8 @@ self.addEventListener("push", (event) => {
   const title = payload.title || "KumaMap";
   const options = {
     body: payload.body || "",
-    icon: "/icon-192.svg",
-    badge: "/icon-192.svg",
+    icon: BASE + "/icon-192.svg",
+    badge: BASE + "/icon-192.svg",
     vibrate: [200, 100, 200],
     tag: payload.tag || "kumamap-alert",
     renotify: true,
@@ -114,7 +116,7 @@ self.addEventListener("push", (event) => {
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
 
-  const urlToOpen = event.notification.data?.url || "/mobile";
+  const urlToOpen = event.notification.data?.url || (BASE + "/mobile");
 
   event.waitUntil(
     self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clients) => {

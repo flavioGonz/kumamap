@@ -11,6 +11,25 @@ import type { HikEvent } from "@/lib/types";
 export const dynamic = "force-dynamic";
 
 /**
+ * Returns an ISAPI-compatible XML response that Hikvision NVRs/cameras
+ * understand. Without this format, the NVR "Test" button reports failure
+ * even when the HTTP status is 200.
+ */
+function isapi200(msg = "OK") {
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<ResponseStatus version="2.0" xmlns="http://www.isapi.org/ver20/XMLSchema">
+  <requestURL>/</requestURL>
+  <statusCode>1</statusCode>
+  <statusString>${msg}</statusString>
+  <subStatusCode>ok</subStatusCode>
+</ResponseStatus>`;
+  return new Response(xml, {
+    status: 200,
+    headers: { "Content-Type": "application/xml; charset=utf-8" },
+  });
+}
+
+/**
  * POST /api/hik/events/[nodeId]
  *
  * Receives Hikvision alarm server HTTP notifications.
@@ -66,8 +85,8 @@ export async function POST(
     }
 
     if (!xmlText || !xmlText.includes("EventNotificationAlert")) {
-      // Might be a heartbeat / videoloss keepalive — acknowledge
-      return NextResponse.json({ ok: true, msg: "no event data" });
+      // Might be a heartbeat / videoloss keepalive / test button — acknowledge
+      return isapi200("OK");
     }
 
     // Parse event type
@@ -76,7 +95,7 @@ export async function POST(
 
     // Skip inactive events (heartbeats)
     if (eventState === "inactive") {
-      return NextResponse.json({ ok: true, msg: "inactive event skipped" });
+      return isapi200("OK");
     }
 
     const eventType = parseHikEventType(rawEventType);
@@ -141,15 +160,11 @@ export async function POST(
       (event.faceName ? ` | Face: ${event.faceName}` : "")
     );
 
-    return NextResponse.json({
-      ok: true,
-      eventId: stored.id,
-      eventType: stored.eventType,
-    });
+    return isapi200("OK");
   } catch (err: any) {
     console.error("[Hik] Error processing event:", err.message);
     // Always return 200 to the NVR to prevent retries
-    return NextResponse.json({ ok: true, msg: "processed with errors" });
+    return isapi200("OK");
   }
 }
 

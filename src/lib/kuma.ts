@@ -34,6 +34,47 @@ class KumaClient {
         transports: ["websocket"],
       });
 
+      const startPolling = () => {
+        if (this.pollIntervalId) clearInterval(this.pollIntervalId);
+        this.pollIntervalId = setInterval(() => {
+          if (this.socket && this.authenticated) {
+            this.socket.emit("getMonitorList", (res: any) => {
+              if (res?.ok && res.data) {
+                const data: Record<string, any> = res.data;
+                const newIds = new Set(Object.keys(data).map((k) => parseInt(k)));
+                for (const existingId of this.monitors.keys()) {
+                  if (!newIds.has(existingId)) this.monitors.delete(existingId);
+                }
+                for (const [id, monitor] of Object.entries(data)) {
+                  const mid = parseInt(id);
+                  if (isNaN(mid)) continue;
+                  const existing = this.monitors.get(mid);
+                  const hb = this.heartbeats.get(mid);
+                  const effectiveStatus2 = existing?.status ?? hb?.status ?? monitor.status;
+                  this.monitors.set(mid, {
+                    id: mid,
+                    name: monitor.name,
+                    type: monitor.type,
+                    url: monitor.url || "",
+                    hostname: monitor.hostname || "",
+                    port: monitor.port || 0,
+                    interval: monitor.interval || 60,
+                    active: monitor.active !== false,
+                    parent: monitor.parent ?? null,
+                    tags: (monitor.tags || []).map((t: any) => ({ name: t.name, color: t.color })),
+                    status: effectiveStatus2,
+                    ping: existing?.ping ?? hb?.ping ?? null,
+                    msg: existing?.msg ?? hb?.msg ?? "",
+                    uptime24: existing?.uptime24,
+                    downTime: effectiveStatus2 === 0 ? (existing?.downTime ?? hb?.time) : undefined,
+                  });
+                }
+              }
+            });
+          }
+        }, 30000);
+      };
+
       const doLogin = (cb?: () => void) => {
         this.socket!.emit(
           "login",
@@ -42,6 +83,7 @@ class KumaClient {
             if (res.ok) {
               console.log("[Kuma] Authenticated successfully");
               this.authenticated = true;
+              startPolling(); // Restart polling after every successful auth
             } else {
               console.error("[Kuma] Auth failed:", res.msg);
               this.authenticated = false;
@@ -51,17 +93,12 @@ class KumaClient {
         );
       };
 
+      // "connect" fires on BOTH initial connection and reconnections in Socket.IO v4
       this.socket.on("connect", () => {
-        console.log("[Kuma] Socket connected, authenticating...");
+        const wasConnected = this.connected;
         this.connected = true;
+        console.log(`[Kuma] Socket ${wasConnected ? "re" : ""}connected, authenticating...`);
         doLogin(() => resolve());
-      });
-
-      // Re-authenticate on reconnect (Kuma requires login after each connect)
-      this.socket.on("reconnect", () => {
-        console.log("[Kuma] Reconnected, re-authenticating...");
-        this.connected = true;
-        doLogin();
       });
 
       this.socket.on(
@@ -173,50 +210,8 @@ class KumaClient {
         }
       });
 
-      // Periodic monitor list refresh — ensures new sensors are detected
-      // even if Kuma doesn't fire monitorList for additions
-      if (this.pollIntervalId) clearInterval(this.pollIntervalId);
-      this.pollIntervalId = setInterval(() => {
-        if (this.socket && this.authenticated) {
-          this.socket.emit("getMonitorList", (res: any) => {
-            if (res?.ok && res.data) {
-              const data: Record<string, any> = res.data;
-              const newIds = new Set(Object.keys(data).map((k) => parseInt(k)));
-              for (const existingId of this.monitors.keys()) {
-                if (!newIds.has(existingId)) this.monitors.delete(existingId);
-              }
-              for (const [id, monitor] of Object.entries(data)) {
-                const mid = parseInt(id);
-                if (isNaN(mid)) continue;
-                const existing = this.monitors.get(mid);
-                const hb = this.heartbeats.get(mid);
-                const effectiveStatus2 = existing?.status ?? hb?.status ?? monitor.status;
-                this.monitors.set(mid, {
-                  id: mid,
-                  name: monitor.name,
-                  type: monitor.type,
-                  url: monitor.url || "",
-                  hostname: monitor.hostname || "",
-                  port: monitor.port || 0,
-                  interval: monitor.interval || 60,
-                  active: monitor.active !== false,
-                  parent: monitor.parent ?? null,
-                  tags: (monitor.tags || []).map((t: any) => ({ name: t.name, color: t.color })),
-                  status: effectiveStatus2,
-                  ping: existing?.ping ?? hb?.ping ?? null,
-                  msg: existing?.msg ?? hb?.msg ?? "",
-                  uptime24: existing?.uptime24,
-                  // Preserve downTime if still DOWN
-                  downTime: effectiveStatus2 === 0 ? (existing?.downTime ?? hb?.time) : undefined,
-                });
-              }
-            }
-          });
-        }
-      }, 30000); // Every 30 seconds
-
-      this.socket.on("disconnect", () => {
-        console.log("[Kuma] Disconnected");
+      this.socket.on("disconnect", (reason: string) => {
+        console.log(`[Kuma] Disconnected (reason: ${reason})`);
         this.connected = false;
         this.authenticated = false;
         if (this.pollIntervalId) { clearInterval(this.pollIntervalId); this.pollIntervalId = null; }

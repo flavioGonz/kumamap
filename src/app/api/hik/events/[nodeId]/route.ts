@@ -14,12 +14,27 @@ import type { HikEvent } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
+// ── Request logging (helps diagnose camera test failures) ──
+
+function logRequest(method: string, nodeId: string, req: NextRequest) {
+  const headers: Record<string, string> = {};
+  req.headers.forEach((v, k) => { headers[k] = v; });
+  console.log(
+    `[Hik] ${method} /api/hik/events/${nodeId} | ` +
+    `UA: ${headers["user-agent"] || "none"} | ` +
+    `CT: ${headers["content-type"] || "none"} | ` +
+    `Accept: ${headers["accept"] || "none"} | ` +
+    `From: ${headers["x-forwarded-for"] || headers["x-real-ip"] || "direct"}`
+  );
+}
+
 // ── Shared handler for POST and PUT ──────────────────────────────────────────
 
 async function handleEvent(
   req: NextRequest,
   nodeId: string
 ): Promise<Response> {
+  logRequest(req.method, nodeId, req);
   const store = getHikEventStore();
   const contentType = req.headers.get("content-type") || "";
 
@@ -329,22 +344,64 @@ export async function PUT(
 /**
  * GET /api/hik/events/[nodeId]
  * Returns recent events for a specific node (used by frontend).
+ * Cameras may also GET this URL during test — return ISAPI XML for them.
  */
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ nodeId: string }> }
 ) {
   const { nodeId } = await params;
-  const store = getHikEventStore();
-  const limit = parseInt(req.nextUrl.searchParams.get("limit") || "50");
+  logRequest("GET", nodeId, req);
 
-  // If the request looks like it's from a Hikvision camera (Accept: xml or no Accept),
-  // return ISAPI XML. Otherwise return JSON for the frontend.
   const accept = req.headers.get("accept") || "";
-  if (!accept.includes("json") && !accept.includes("html") && !accept.includes("*/*")) {
+  const hasQueryParams = req.nextUrl.searchParams.has("limit") || req.nextUrl.searchParams.has("format");
+
+  // Return JSON only if the request explicitly asks for JSON or has frontend query params.
+  // Otherwise return ISAPI XML — cameras send Accept: */* or empty and expect XML.
+  const wantsJson = accept.includes("application/json") || hasQueryParams ||
+    (accept.includes("text/html") && !accept.includes("xml"));
+
+  if (!wantsJson) {
     return isapiResponse("OK");
   }
 
+  const store = getHikEventStore();
+  const limit = parseInt(req.nextUrl.searchParams.get("limit") || "50");
   const events = store.getNodeEvents(nodeId, limit);
   return NextResponse.json({ nodeId, count: events.length, events });
+}
+
+/**
+ * OPTIONS /api/hik/events/[nodeId]
+ * Some cameras send OPTIONS preflight before POST/PUT.
+ */
+export async function OPTIONS(
+  req: NextRequest,
+  { params }: { params: Promise<{ nodeId: string }> }
+) {
+  const { nodeId } = await params;
+  logRequest("OPTIONS", nodeId, req);
+  return new Response(null, {
+    status: 200,
+    headers: {
+      "Allow": "GET, POST, PUT, OPTIONS",
+      "Content-Type": "application/xml",
+    },
+  });
+}
+
+/**
+ * HEAD /api/hik/events/[nodeId]
+ * Connectivity check — some devices use HEAD.
+ */
+export async function HEAD(
+  req: NextRequest,
+  { params }: { params: Promise<{ nodeId: string }> }
+) {
+  const { nodeId } = await params;
+  logRequest("HEAD", nodeId, req);
+  return new Response(null, {
+    status: 200,
+    headers: { "Content-Type": "application/xml" },
+  });
 }

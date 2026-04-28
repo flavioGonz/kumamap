@@ -199,6 +199,26 @@ export function getHikEventStore(): HikEventStore {
   return instance;
 }
 
+// ── Debounce Cache ──
+
+const DEBOUNCE_MS = 3000;
+const debounceCache = new Map<string, number>(); // key → lastSeenTimestamp
+
+/** Returns true if this event should be skipped (debounced) */
+export function isDuplicateEvent(key: string): boolean {
+  const now = Date.now();
+  const last = debounceCache.get(key);
+  if (last && now - last < DEBOUNCE_MS) return true;
+  debounceCache.set(key, now);
+  // Cleanup old entries periodically
+  if (debounceCache.size > 500) {
+    for (const [k, t] of debounceCache) {
+      if (now - t > DEBOUNCE_MS * 10) debounceCache.delete(k);
+    }
+  }
+  return false;
+}
+
 // ── XML Parsing Helpers ──
 
 /** Extract a tag value from simple XML (no namespace handling needed for Hik payloads) */
@@ -220,19 +240,74 @@ export function parseHikEventType(raw: string): HikEventType {
   return "unknown";
 }
 
-/** Parse ANPR fields from XML */
+/** Check if XML content is a heartbeat / test / non-event message */
+export function isHeartbeatOrTest(xml: string): boolean {
+  const lower = xml.toLowerCase();
+  return lower.includes("heartbeat") || lower.includes("stun") ||
+         (!lower.includes("eventnotificationalert") && !lower.includes("anpr") && !lower.includes("face"));
+}
+
+/** Parse ANPR fields from XML — rich extraction following OmniAccess patterns */
 export function parseAnprFields(xml: string): Partial<HikEvent> {
+  const { getVehicleColorName, getVehicleBrandName } = require("./hikvision-codes");
+
+  const plateRaw = xmlTag(xml, "licensePlate");
+  const cleanPlate = plateRaw.toUpperCase().replace(/[^A-Z0-9]/g, "");
+
+  // Color: try text first, then numeric code
+  const colorText = xmlTag(xml, "color");
+  const colorCode = xmlTag(xml, "vehicleColor") || xmlTag(xml, "colorDepth");
+  let vehicleColor: string | undefined;
+  if (colorText) {
+    vehicleColor = colorText;
+  } else if (colorCode) {
+    vehicleColor = getVehicleColorName(colorCode);
+  }
+
+  // Brand: numeric code → name
+  const brandCode = xmlTag(xml, "vehicleLogoRecog") || xmlTag(xml, "vehicleLogo") ||
+    xmlTag(xml, "vehicleBrand") || xmlTag(xml, "brand");
+  const vehicleBrand = brandCode ? getVehicleBrandName(brandCode) : undefined;
+
+  // Model: try multiple fields (note Hikvision typo vehileModel)
+  const vehicleModel = xmlTag(xml, "vehicleModel") || xmlTag(xml, "vehileModel") || undefined;
+
+  // List type (whitelist/blacklist decision from camera)
+  const listType = xmlTag(xml, "vehicleListName") || xmlTag(xml, "listType") ||
+    xmlTag(xml, "ListType") || undefined;
+
   return {
-    licensePlate: xmlTag(xml, "licensePlate"),
+    licensePlate: cleanPlate === "UNKNOWN" || !cleanPlate ? "NO_LEIDA" : cleanPlate,
     plateColor: xmlTag(xml, "plateColor") || undefined,
     vehicleType: xmlTag(xml, "vehicleType") || undefined,
-    vehicleColor: xmlTag(xml, "vehicleColor") || undefined,
+    vehicleColor,
+    vehicleBrand: vehicleBrand && vehicleBrand !== "Unknown" ? vehicleBrand : undefined,
+    vehicleModel: vehicleModel && vehicleModel !== "Unknown" ? vehicleModel : undefined,
     direction: xmlTag(xml, "direction") || undefined,
     confidence: parseInt(xmlTag(xml, "confidenceLevel")) || undefined,
+    listType,
   };
 }
 
-/** Parse face recognition fields from XML */
+/** Parse face recognition fields from JSON (Hikvision face events use JSON, not XML) */
+export function parseFaceFromJson(jsonData: any): Partial<HikEvent> {
+  const alarmData = jsonData.alarmResult?.[0] || jsonData.faceMatchResult || jsonData;
+  const faceData = alarmData.faces?.[0] || alarmData.faceInfo || {};
+  const identifyData = faceData.identify?.[0] || {};
+  const candidate = identifyData.candidate?.[0] || {};
+
+  const personName = (candidate.reserve_field?.name || candidate.name || "").trim();
+  const similarity = candidate.similarity ? Math.floor(candidate.similarity * 100) : 0;
+
+  return {
+    faceName: personName || "Desconocido",
+    similarity: similarity || undefined,
+    cameraIp: jsonData.ipAddress || alarmData.ipAddress || "",
+    macAddress: jsonData.macAddress || alarmData.macAddress || undefined,
+  };
+}
+
+/** Parse face recognition fields from XML (legacy) */
 export function parseFaceFields(xml: string): Partial<HikEvent> {
   return {
     faceName: xmlTag(xml, "name") || undefined,
@@ -240,4 +315,19 @@ export function parseFaceFields(xml: string): Partial<HikEvent> {
     similarity: parseInt(xmlTag(xml, "similarity")) || undefined,
     employeeNo: xmlTag(xml, "employeeNoString") || xmlTag(xml, "employeeNo") || undefined,
   };
+}
+
+/** ISAPI-compatible XML response for Hikvision NVRs/cameras */
+export function isapiResponse(msg = "OK"): Response {
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<ResponseStatus version="2.0" xmlns="http://www.isapi.org/ver20/XMLSchema">
+  <requestURL>/</requestURL>
+  <statusCode>1</statusCode>
+  <statusString>${msg}</statusString>
+  <subStatusCode>ok</subStatusCode>
+</ResponseStatus>`;
+  return new Response(xml, {
+    status: 200,
+    headers: { "Content-Type": "application/xml; charset=utf-8" },
+  });
 }

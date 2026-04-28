@@ -171,8 +171,11 @@ export interface HikEvent {
   plateColor?: string;
   vehicleType?: string;
   vehicleColor?: string;
+  vehicleBrand?: string;     // decoded from Hikvision brand code
+  vehicleModel?: string;
   direction?: string;        // "forward" | "reverse" | "unknown"
   confidence?: number;       // 0–100
+  listType?: string;         // "whiteList" | "blackList" | "otherList"
 
   // Face Recognition fields
   faceName?: string;         // matched person name (if any)
@@ -184,4 +187,7 @@ export interface HikEvent {
   plateImageId?: string;     // ID to fetch via /api/hik/images/[id]
   faceImageId?: string;
   fullImageId?: string;
+
+  // Raw metadata
+  macAddress?: string;       // camera MAC
 }

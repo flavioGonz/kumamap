@@ -5,174 +5,330 @@ import {
   parseHikEventType,
   parseAnprFields,
   parseFaceFields,
+  parseFaceFromJson,
+  isHeartbeatOrTest,
+  isDuplicateEvent,
+  isapiResponse,
 } from "@/lib/hik-events";
 import type { HikEvent } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
-/**
- * Returns an ISAPI-compatible XML response that Hikvision NVRs/cameras
- * understand. Without this format, the NVR "Test" button reports failure
- * even when the HTTP status is 200.
- */
-function isapi200(msg = "OK") {
-  const xml = `<?xml version="1.0" encoding="UTF-8"?>
-<ResponseStatus version="2.0" xmlns="http://www.isapi.org/ver20/XMLSchema">
-  <requestURL>/</requestURL>
-  <statusCode>1</statusCode>
-  <statusString>${msg}</statusString>
-  <subStatusCode>ok</subStatusCode>
-</ResponseStatus>`;
-  return new Response(xml, {
-    status: 200,
-    headers: { "Content-Type": "application/xml; charset=utf-8" },
-  });
+// ── Shared handler for POST and PUT ──────────────────────────────────────────
+
+async function handleEvent(
+  req: NextRequest,
+  nodeId: string
+): Promise<Response> {
+  const store = getHikEventStore();
+  const contentType = req.headers.get("content-type") || "";
+
+  try {
+    let xmlText = "";
+    let jsonText = "";
+    const imageBuffers: { name: string; data: Buffer; type: string }[] = [];
+
+    // ── Parse body ──
+    if (contentType.includes("multipart/form-data")) {
+      // Hikvision G2+ cameras send multipart with XML + images
+      const formData = await req.formData();
+      for (const [name, value] of formData.entries()) {
+        if (value instanceof File) {
+          // Check if it's an image
+          const nameLC = name.toLowerCase();
+          if (
+            value.type?.startsWith("image/") ||
+            nameLC.includes("picture") ||
+            nameLC.includes("image") ||
+            nameLC.includes("plate") ||
+            nameLC.includes("face") ||
+            nameLC.includes("pic") ||
+            nameLC.includes("capture") ||
+            nameLC.includes("snap")
+          ) {
+            const buf = Buffer.from(await value.arrayBuffer());
+            imageBuffers.push({
+              name: nameLC,
+              data: buf,
+              type: value.type || "image/jpeg",
+            });
+          } else {
+            // Inspect content to determine if it's XML or JSON
+            const text = await value.text();
+            const trimmed = text.trim();
+            if (trimmed.startsWith("<")) {
+              xmlText = text;
+            } else if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+              jsonText = text;
+            } else if (
+              value.type?.includes("xml") ||
+              nameLC.endsWith(".xml") ||
+              nameLC.includes("event")
+            ) {
+              xmlText = text;
+            } else if (value.type?.includes("json")) {
+              jsonText = text;
+            }
+          }
+        } else if (typeof value === "string") {
+          const trimmed = value.trim();
+          if (trimmed.startsWith("<")) {
+            xmlText = value;
+          } else if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+            jsonText = value;
+          }
+        }
+      }
+    } else {
+      // Plain body — detect XML vs JSON from content
+      const raw = await req.text();
+      const trimmed = raw.trim();
+      if (trimmed.startsWith("<")) {
+        xmlText = raw;
+      } else if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+        jsonText = raw;
+      }
+    }
+
+    // ── No data at all → test/heartbeat → ISAPI OK ──
+    if (!xmlText && !jsonText) {
+      return isapiResponse("OK");
+    }
+
+    // ── PATH A: JSON content — likely face event ──
+    if (jsonText) {
+      try {
+        const jsonData = JSON.parse(jsonText);
+        const hasFaceKeys =
+          jsonData.alarmResult?.[0]?.faces ||
+          jsonData.faceMatchResult ||
+          jsonData.faces ||
+          jsonData.FaceInfo ||
+          jsonData.faceInfo;
+        const evtType = jsonData.eventType || jsonData.alarmResult?.eventType || "";
+        const isFace =
+          hasFaceKeys || (evtType && evtType.toLowerCase().includes("face"));
+
+        if (isFace) {
+          const faceFields = parseFaceFromJson(jsonData);
+          const dateTime = jsonData.dateTime || new Date().toISOString();
+
+          // Store images (full scene vs face crop)
+          let fullImageId: string | undefined;
+          let faceImageId: string | undefined;
+          if (imageBuffers.length > 0) {
+            const fullImg = imageBuffers.find(
+              (i) =>
+                i.name.includes("background") ||
+                i.name.includes("scene") ||
+                i.name.includes("full")
+            );
+            const faceImg = imageBuffers.find(
+              (i) =>
+                i.name.includes("face") ||
+                i.name.includes("tracking") ||
+                i.name.includes("capture")
+            );
+            // Fallback: largest = full, second = crop
+            const sorted = [...imageBuffers].sort(
+              (a, b) => b.data.length - a.data.length
+            );
+            const fImg = fullImg || sorted[0];
+            const cImg = faceImg || sorted[1];
+            if (fImg) fullImageId = store.storeImage(fImg.data, fImg.type);
+            if (cImg) faceImageId = store.storeImage(cImg.data, cImg.type);
+          }
+
+          const event: Omit<HikEvent, "id"> = {
+            nodeId,
+            mapId: store.getMapForNode(nodeId),
+            eventType: "face",
+            timestamp: dateTime,
+            cameraIp: faceFields.cameraIp || "",
+            ...faceFields,
+            fullImageId,
+            faceImageId,
+          };
+
+          const stored = store.addEvent(event);
+          console.log(
+            `[Hik] FACE event → node ${nodeId} | Name: ${stored.faceName || "?"} | Sim: ${stored.similarity || "?"}%`
+          );
+          return isapiResponse("OK");
+        }
+      } catch {
+        // JSON parse failed — fall through to XML
+      }
+    }
+
+    // ── PATH B: XML content — ANPR/LPR or other events ──
+    if (xmlText) {
+      // Heartbeat / test / non-event detection
+      if (isHeartbeatOrTest(xmlText)) {
+        return isapiResponse("OK");
+      }
+
+      // Must have EventNotificationAlert
+      if (!xmlText.includes("EventNotificationAlert")) {
+        return isapiResponse("OK");
+      }
+
+      // Parse event type
+      const rawEventType = xmlTag(xmlText, "eventType");
+      const eventState = xmlTag(xmlText, "eventState");
+
+      // Skip inactive events (heartbeats)
+      if (eventState === "inactive") {
+        return isapiResponse("OK");
+      }
+
+      const eventType = parseHikEventType(rawEventType);
+      const cameraIp = xmlTag(xmlText, "ipAddress");
+      const macAddress = xmlTag(xmlText, "macAddress") || undefined;
+      const channelId = xmlTag(xmlText, "channelID");
+      const dateTime = xmlTag(xmlText, "dateTime") || new Date().toISOString();
+
+      // Build base event
+      const event: Omit<HikEvent, "id"> = {
+        nodeId,
+        mapId: store.getMapForNode(nodeId),
+        eventType,
+        timestamp: dateTime,
+        cameraIp,
+        channelId: channelId || undefined,
+        macAddress,
+      };
+
+      // Parse type-specific fields
+      if (eventType === "anpr") {
+        const anprFields = parseAnprFields(xmlText);
+        Object.assign(event, anprFields);
+
+        // Debounce: skip if same plate on same node within 3 seconds
+        if (
+          anprFields.licensePlate &&
+          anprFields.licensePlate !== "NO_LEIDA" &&
+          isDuplicateEvent(`${nodeId}:${anprFields.licensePlate}`)
+        ) {
+          return isapiResponse("OK");
+        }
+      } else if (eventType === "face") {
+        Object.assign(event, parseFaceFields(xmlText));
+      }
+
+      // Store images from multipart
+      if (imageBuffers.length > 0) {
+        // Classify images by field name (OmniAccess pattern)
+        const plateImg = imageBuffers.find(
+          (i) =>
+            i.name.includes("plate") ||
+            i.name.includes("licensepic") ||
+            i.name.includes("detectionpic")
+        );
+        const faceImg = imageBuffers.find(
+          (i) =>
+            i.name.includes("face") ||
+            i.name.includes("target") ||
+            i.name.includes("snap")
+        );
+        // Fallback: largest = full scene, smallest = crop
+        const sorted = [...imageBuffers].sort(
+          (a, b) => b.data.length - a.data.length
+        );
+        const fullImg =
+          imageBuffers.find(
+            (i) =>
+              i.name.includes("background") ||
+              i.name.includes("scene") ||
+              i.name.includes("full")
+          ) || sorted[0];
+
+        if (fullImg) event.fullImageId = store.storeImage(fullImg.data, fullImg.type);
+        if (plateImg) event.plateImageId = store.storeImage(plateImg.data, plateImg.type);
+        if (faceImg) event.faceImageId = store.storeImage(faceImg.data, faceImg.type);
+
+        // If no specific plate/face image found, use second largest as crop
+        if (!event.plateImageId && !event.faceImageId && sorted.length > 1) {
+          const cropImg = sorted[1];
+          if (eventType === "anpr") {
+            event.plateImageId = store.storeImage(cropImg.data, cropImg.type);
+          } else if (eventType === "face") {
+            event.faceImageId = store.storeImage(cropImg.data, cropImg.type);
+          }
+        }
+      }
+
+      // Also check for inline base64 images in XML
+      const picDataMatch = xmlText.match(/<picData>([^<]+)<\/picData>/i);
+      if (picDataMatch && picDataMatch[1]) {
+        try {
+          const buf = Buffer.from(picDataMatch[1], "base64");
+          const imageId = store.storeImage(buf, "image/jpeg");
+          if (eventType === "anpr" && !event.plateImageId) {
+            event.plateImageId = imageId;
+          } else if (eventType === "face" && !event.faceImageId) {
+            event.faceImageId = imageId;
+          } else if (!event.fullImageId) {
+            event.fullImageId = imageId;
+          }
+        } catch {
+          // Invalid base64 — ignore
+        }
+      }
+
+      // Store event and broadcast via SSE
+      const stored = store.addEvent(event);
+
+      console.log(
+        `[Hik] ${eventType.toUpperCase()} event from ${cameraIp} → node ${nodeId}` +
+          (event.licensePlate ? ` | Plate: ${event.licensePlate}` : "") +
+          (event.vehicleBrand ? ` | ${event.vehicleBrand}` : "") +
+          (event.vehicleColor ? ` ${event.vehicleColor}` : "") +
+          (event.faceName ? ` | Face: ${event.faceName}` : "") +
+          (event.listType ? ` | List: ${event.listType}` : "")
+      );
+
+      return isapiResponse("OK");
+    }
+
+    // Fallback
+    return isapiResponse("OK");
+  } catch (err: any) {
+    console.error("[Hik] Error processing event:", err.message);
+    // Always return 200 ISAPI to the NVR to prevent retries
+    return isapiResponse("OK");
+  }
 }
+
+// ── HTTP Method Handlers ─────────────────────────────────────────────────────
 
 /**
  * POST /api/hik/events/[nodeId]
- *
- * Receives Hikvision alarm server HTTP notifications.
- * Supports both plain XML and multipart/form-data (with images).
- *
- * This endpoint is PUBLIC — no session auth required.
- * The NVR/camera pushes events here directly.
+ * Main event receiver — Hikvision alarm server notifications.
  */
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ nodeId: string }> }
 ) {
   const { nodeId } = await params;
-  const store = getHikEventStore();
-  const contentType = req.headers.get("content-type") || "";
+  return handleEvent(req, nodeId);
+}
 
-  try {
-    let xmlText = "";
-    const imageBuffers: { name: string; data: Buffer; type: string }[] = [];
-
-    if (contentType.includes("multipart/form-data")) {
-      // Hikvision G2+ cameras send multipart with XML + images
-      const formData = await req.formData();
-      for (const [name, value] of formData.entries()) {
-        if (value instanceof File) {
-          if (
-            value.type?.includes("xml") ||
-            name.toLowerCase().endsWith(".xml") ||
-            name.toLowerCase().includes("event")
-          ) {
-            xmlText = await value.text();
-          } else if (
-            value.type?.startsWith("image/") ||
-            name.toLowerCase().includes("picture") ||
-            name.toLowerCase().includes("image") ||
-            name.toLowerCase().includes("plate") ||
-            name.toLowerCase().includes("face")
-          ) {
-            const buf = Buffer.from(await value.arrayBuffer());
-            imageBuffers.push({
-              name: name.toLowerCase(),
-              data: buf,
-              type: value.type || "image/jpeg",
-            });
-          }
-        } else if (typeof value === "string" && value.includes("<EventNotificationAlert")) {
-          xmlText = value;
-        }
-      }
-    } else {
-      // Plain XML body (older cameras)
-      xmlText = await req.text();
-    }
-
-    if (!xmlText || !xmlText.includes("EventNotificationAlert")) {
-      // Might be a heartbeat / videoloss keepalive / test button — acknowledge
-      return isapi200("OK");
-    }
-
-    // Parse event type
-    const rawEventType = xmlTag(xmlText, "eventType");
-    const eventState = xmlTag(xmlText, "eventState");
-
-    // Skip inactive events (heartbeats)
-    if (eventState === "inactive") {
-      return isapi200("OK");
-    }
-
-    const eventType = parseHikEventType(rawEventType);
-    const cameraIp = xmlTag(xmlText, "ipAddress");
-    const channelId = xmlTag(xmlText, "channelID");
-    const dateTime = xmlTag(xmlText, "dateTime") || new Date().toISOString();
-
-    // Build base event
-    const event: Omit<HikEvent, "id"> = {
-      nodeId,
-      mapId: store.getMapForNode(nodeId),
-      eventType,
-      timestamp: dateTime,
-      cameraIp,
-      channelId: channelId || undefined,
-    };
-
-    // Parse type-specific fields
-    if (eventType === "anpr") {
-      Object.assign(event, parseAnprFields(xmlText));
-    } else if (eventType === "face") {
-      Object.assign(event, parseFaceFields(xmlText));
-    }
-
-    // Store images
-    for (const img of imageBuffers) {
-      const imageId = store.storeImage(img.data, img.type);
-      if (img.name.includes("plate")) {
-        event.plateImageId = imageId;
-      } else if (img.name.includes("face") || img.name.includes("target")) {
-        event.faceImageId = imageId;
-      } else {
-        // Full scene image
-        if (!event.fullImageId) event.fullImageId = imageId;
-      }
-    }
-
-    // Also check for inline base64 images in XML
-    const picDataMatch = xmlText.match(/<picData>([^<]+)<\/picData>/i);
-    if (picDataMatch && picDataMatch[1]) {
-      try {
-        const buf = Buffer.from(picDataMatch[1], "base64");
-        const imageId = store.storeImage(buf, "image/jpeg");
-        if (eventType === "anpr" && !event.plateImageId) {
-          event.plateImageId = imageId;
-        } else if (eventType === "face" && !event.faceImageId) {
-          event.faceImageId = imageId;
-        } else if (!event.fullImageId) {
-          event.fullImageId = imageId;
-        }
-      } catch {
-        // Invalid base64 — ignore
-      }
-    }
-
-    // Store event and broadcast via SSE
-    const stored = store.addEvent(event);
-
-    console.log(
-      `[Hik] ${eventType.toUpperCase()} event from ${cameraIp} → node ${nodeId}` +
-      (event.licensePlate ? ` | Plate: ${event.licensePlate}` : "") +
-      (event.faceName ? ` | Face: ${event.faceName}` : "")
-    );
-
-    return isapi200("OK");
-  } catch (err: any) {
-    console.error("[Hik] Error processing event:", err.message);
-    // Always return 200 to the NVR to prevent retries
-    return isapi200("OK");
-  }
+/**
+ * PUT /api/hik/events/[nodeId]
+ * Some Hikvision firmware versions use PUT for test/notification.
+ */
+export async function PUT(
+  req: NextRequest,
+  { params }: { params: Promise<{ nodeId: string }> }
+) {
+  const { nodeId } = await params;
+  return handleEvent(req, nodeId);
 }
 
 /**
  * GET /api/hik/events/[nodeId]
- *
- * Returns recent events for a specific node.
- * Query params: ?limit=50
+ * Returns recent events for a specific node (used by frontend).
  */
 export async function GET(
   req: NextRequest,
@@ -181,6 +337,13 @@ export async function GET(
   const { nodeId } = await params;
   const store = getHikEventStore();
   const limit = parseInt(req.nextUrl.searchParams.get("limit") || "50");
+
+  // If the request looks like it's from a Hikvision camera (Accept: xml or no Accept),
+  // return ISAPI XML. Otherwise return JSON for the frontend.
+  const accept = req.headers.get("accept") || "";
+  if (!accept.includes("json") && !accept.includes("html") && !accept.includes("*/*")) {
+    return isapiResponse("OK");
+  }
 
   const events = store.getNodeEvents(nodeId, limit);
   return NextResponse.json({ nodeId, count: events.length, events });

@@ -16,13 +16,68 @@ class KumaClient {
   private authenticated = false;
   private initPromise: Promise<void> | null = null;
   private pollIntervalId: ReturnType<typeof setInterval> | null = null;
+  private kumaUrl: string = "";
+  private lastConnectAt: string | null = null;
+  private lastDisconnectAt: string | null = null;
+  private lastAuthAt: string | null = null;
+  private lastError: string | null = null;
+  private connectAttempts = 0;
 
   get isConnected() {
     return this.connected && this.authenticated;
   }
 
+  /** Diagnostic info for health/debug endpoints */
+  getDiagnostics() {
+    return {
+      kumaUrl: this.kumaUrl.replace(/\/\/([^:]+):([^@]+)@/, "//***:***@"), // hide credentials in URL
+      connected: this.connected,
+      authenticated: this.authenticated,
+      isConnected: this.isConnected,
+      socketConnected: this.socket?.connected ?? false,
+      socketId: this.socket?.id ?? null,
+      monitors: this.monitors.size,
+      connectAttempts: this.connectAttempts,
+      lastConnectAt: this.lastConnectAt,
+      lastDisconnectAt: this.lastDisconnectAt,
+      lastAuthAt: this.lastAuthAt,
+      lastError: this.lastError,
+      pollingActive: this.pollIntervalId !== null,
+      hasInitPromise: this.initPromise !== null,
+    };
+  }
+
+  /** Force reconnect — destroys current socket and creates a fresh connection */
+  forceReconnect(): void {
+    console.log("[Kuma] Force reconnect requested");
+    if (this.socket) {
+      this.socket.removeAllListeners();
+      this.socket.disconnect();
+      this.socket = null;
+    }
+    if (this.pollIntervalId) {
+      clearInterval(this.pollIntervalId);
+      this.pollIntervalId = null;
+    }
+    this.connected = false;
+    this.authenticated = false;
+    this.initPromise = null; // Allow connect() to run again
+    this.lastError = null;
+
+    const url = process.env.KUMA_URL;
+    const user = process.env.KUMA_USER;
+    const pass = process.env.KUMA_PASS;
+    if (url && user && pass) {
+      this.connect(url, user, pass);
+    } else {
+      console.error("[Kuma] Force reconnect failed: missing KUMA_URL/KUMA_USER/KUMA_PASS env vars");
+      this.lastError = "Missing env vars: KUMA_URL, KUMA_USER, or KUMA_PASS";
+    }
+  }
+
   connect(url: string, username: string, password: string): Promise<void> {
     if (this.initPromise) return this.initPromise;
+    this.kumaUrl = url;
 
     this.initPromise = new Promise((resolve) => {
       console.log(`[Kuma] Connecting to ${url}...`);
@@ -83,10 +138,14 @@ class KumaClient {
             if (res.ok) {
               console.log("[Kuma] Authenticated successfully");
               this.authenticated = true;
+              this.lastAuthAt = new Date().toISOString();
+              this.lastError = null;
               startPolling(); // Restart polling after every successful auth
             } else {
-              console.error("[Kuma] Auth failed:", res.msg);
+              const errMsg = `Auth failed: ${res.msg || "unknown"}`;
+              console.error(`[Kuma] ${errMsg}`);
               this.authenticated = false;
+              this.lastError = errMsg;
             }
             cb?.();
           }
@@ -97,7 +156,9 @@ class KumaClient {
       this.socket.on("connect", () => {
         const wasConnected = this.connected;
         this.connected = true;
-        console.log(`[Kuma] Socket ${wasConnected ? "re" : ""}connected, authenticating...`);
+        this.connectAttempts++;
+        this.lastConnectAt = new Date().toISOString();
+        console.log(`[Kuma] Socket ${wasConnected ? "re" : ""}connected (attempt #${this.connectAttempts}), authenticating...`);
         doLogin(() => resolve());
       });
 
@@ -214,6 +275,8 @@ class KumaClient {
         console.log(`[Kuma] Disconnected (reason: ${reason})`);
         this.connected = false;
         this.authenticated = false;
+        this.lastDisconnectAt = new Date().toISOString();
+        this.lastError = `Disconnected: ${reason}`;
         if (this.pollIntervalId) { clearInterval(this.pollIntervalId); this.pollIntervalId = null; }
       });
 
@@ -221,6 +284,7 @@ class KumaClient {
         console.error("[Kuma] Connection error:", err.message);
         this.connected = false;
         this.authenticated = false;
+        this.lastError = `connect_error: ${err.message}`;
         resolve(); // Don't block forever
       });
 

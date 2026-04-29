@@ -60,6 +60,7 @@ export async function GET() {
       lastHeartbeat: latestHeartbeat,
       heartbeatAgeSeconds: heartbeatAgeMs !== null ? Math.round(heartbeatAgeMs / 1000) : null,
       heartbeatStale,
+      diagnostics: kuma.getDiagnostics(),
     };
   } catch (err) {
     healthy = false;

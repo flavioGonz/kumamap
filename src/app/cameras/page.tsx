@@ -874,7 +874,18 @@ export default function CamerasPage() {
   }, []);
 
   useEffect(() => { if (isAuthenticated) fetchCameras(); }, [isAuthenticated, fetchCameras]);
-  useEffect(() => { if (selectedMap) { setCameraOrder(selectedMap.cameras); setCurrentPage(0); } }, [selectedMap]);
+  useEffect(() => {
+    if (selectedMap) {
+      // Sort: cameras with live streams first, then without
+      const sorted = [...selectedMap.cameras].sort((a, b) => {
+        const aHas = a.streamUrl && a.streamType && a.streamType !== "nvr" ? 0 : 1;
+        const bHas = b.streamUrl && b.streamType && b.streamType !== "nvr" ? 0 : 1;
+        return aHas - bHas;
+      });
+      setCameraOrder(sorted);
+      setCurrentPage(0);
+    }
+  }, [selectedMap]);
 
   // Reset page when layout changes
   useEffect(() => { setCurrentPage(0); }, [layout]);

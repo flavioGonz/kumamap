@@ -7,6 +7,7 @@
 
 import { randomUUID } from "crypto";
 import type { HikEvent, HikEventType } from "./types";
+import { mapsDb } from "./db";
 
 // ── Configuration ──
 
@@ -49,7 +50,25 @@ class HikEventStore {
   }
 
   getMapForNode(nodeId: string): string | undefined {
-    return this.nodeMapIndex.get(nodeId);
+    const cached = this.nodeMapIndex.get(nodeId);
+    if (cached) return cached;
+
+    // Auto-resolve from maps DB: scan all maps for this nodeId
+    try {
+      const maps = mapsDb.getAll();
+      for (const map of maps) {
+        const nodes = mapsDb.getNodes(map.id);
+        if (nodes.some((n: any) => n.id === nodeId)) {
+          this.nodeMapIndex.set(nodeId, map.id);
+          console.log(`[Hik] Auto-resolved node ${nodeId} → map ${map.id} (${map.name})`);
+          return map.id;
+        }
+      }
+    } catch (err) {
+      console.error("[Hik] Failed to resolve nodeId → mapId from DB:", err);
+    }
+
+    return undefined;
   }
 
   // ── Event Storage ──

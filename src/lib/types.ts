@@ -188,6 +188,10 @@ export interface HikEvent {
   faceImageId?: string;
   fullImageId?: string;
 
+  // Plate match result (from registry)
+  matchResult?: "authorized" | "visitor" | "visitor_expired" | "blocked" | "unknown";
+  matchOwner?: string;       // owner name from plate record
+
   // Raw metadata
   macAddress?: string;       // camera MAC
 }

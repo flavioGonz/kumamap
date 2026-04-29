@@ -10,6 +10,7 @@ import {
   isDuplicateEvent,
   isapiResponse,
 } from "@/lib/hik-events";
+import { getPlateRegistry } from "@/lib/plate-registry";
 import type { HikEvent } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -291,12 +292,56 @@ async function handleEvent(
         }
       }
 
-      // Store event and broadcast via SSE
+      // ── Match plate against registry and log access ──
+      if (eventType === "anpr" && event.licensePlate && event.licensePlate !== "NO_LEIDA" && event.mapId) {
+        try {
+          const plateRegistry = getPlateRegistry();
+          const match = plateRegistry.matchPlate(event.mapId, event.licensePlate);
+          event.matchResult = match.result;
+          event.matchOwner = match.record?.ownerName;
+
+          // Log to persistent access log
+          plateRegistry.logAccess({
+            timestamp: dateTime,
+            plate: event.licensePlate!,
+            matchResult: match.result,
+            ownerName: match.record?.ownerName,
+            nodeId,
+            nodeLabel: undefined, // Populated by frontend if needed
+            mapId: event.mapId,
+            cameraIp,
+            vehicleColor: event.vehicleColor,
+            vehicleBrand: event.vehicleBrand,
+            vehicleModel: event.vehicleModel,
+            direction: event.direction,
+            confidence: event.confidence,
+            fullImageId: event.fullImageId,
+            plateImageId: event.plateImageId,
+            eventId: "", // Will be set after addEvent
+          });
+        } catch (err) {
+          console.error("[Hik] Plate match error:", err);
+        }
+      }
+
+      // Store event and broadcast via SSE (includes matchResult for frontend)
       const stored = store.addEvent(event);
 
+      // Update the access log entry with the actual event ID
+      if (eventType === "anpr" && stored.matchResult && event.mapId) {
+        try {
+          const plateRegistry = getPlateRegistry();
+          const log = plateRegistry.getAccessLog(event.mapId, { plate: stored.licensePlate, limit: 1 });
+          if (log.length > 0 && !log[0].eventId) {
+            (log[0] as any).eventId = stored.id;
+          }
+        } catch {}
+      }
+
+      const matchTag = stored.matchResult ? ` [${stored.matchResult.toUpperCase()}${stored.matchOwner ? `: ${stored.matchOwner}` : ""}]` : "";
       console.log(
         `[Hik] ${eventType.toUpperCase()} event from ${cameraIp} → node ${nodeId}` +
-          (event.licensePlate ? ` | Plate: ${event.licensePlate}` : "") +
+          (event.licensePlate ? ` | Plate: ${event.licensePlate}${matchTag}` : "") +
           (event.vehicleBrand ? ` | ${event.vehicleBrand}` : "") +
           (event.vehicleColor ? ` ${event.vehicleColor}` : "") +
           (event.faceName ? ` | Face: ${event.faceName}` : "") +

@@ -59,6 +59,7 @@ import NodeEditModal, { type NodeEditConfig } from "./NodeEditModal";
 import AssignMonitorModal from "./AssignMonitorModal";
 import LinkedMapsModal from "./LinkedMapsModal";
 import HikDetectionPopup from "./HikDetectionPopup";
+import LprFeedPanel from "./LprFeedPanel";
 import { useHikEvents } from "@/lib/useHikEvents";
 import SubnetDiscoveryModal from "./SubnetDiscoveryModal";
 
@@ -401,6 +402,22 @@ export default function LeafletMapView({
   const hikEvents = useHikEvents(mapId);
   const [hikPopup, setHikPopup] = useState<{ event: import("@/lib/types").HikEvent; x: number; y: number } | null>(null);
   const hikPulsingNodes = useRef<Set<string>>(new Set());
+
+  // Build nodeId → label map for LPR feed panel (camera names)
+  const hikNodeLabels = useMemo(() => {
+    const labels: Record<string, string> = {};
+    initialNodes.forEach((n) => { if (n.label) labels[n.id] = n.label; });
+    return labels;
+  }, [initialNodes]);
+
+  // Open stream viewer from LPR feed panel
+  const handleOpenStreamFromFeed = useCallback((nodeId: string) => {
+    setStreamViewers((prev) => {
+      if (prev.some((v) => v.nodeId === nodeId)) return prev;
+      if (prev.length >= 4) return prev;
+      return [...prev, { nodeId, mode: "pip" as const }];
+    });
+  }, []);
 
   // Show popup when a new detection arrives
   useEffect(() => {
@@ -4469,6 +4486,14 @@ export default function LeafletMapView({
           onClose={() => setHikPopup(null)}
         />
       )}
+
+      {/* ── LPR Access Feed Panel (bottom bar) ── */}
+      <LprFeedPanel
+        events={hikEvents.events.filter((e) => e.eventType === "anpr")}
+        mapId={mapId}
+        nodeLabels={hikNodeLabels}
+        onOpenStream={handleOpenStreamFromFeed}
+      />
 
       {/* ── Camera Stream Config Modal ── */}
       {streamConfigNodeId && (() => {

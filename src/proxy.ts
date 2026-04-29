@@ -27,6 +27,9 @@ const PUBLIC_GET_PREFIXES = [
   "/api/camera/rtsp-stream", // RTSP → MJPEG transcoding proxy
   "/api/health",           // health check (monitored by Uptime Kuma)
   "/api/version",          // version info for OTA updater
+  "/api/plates",           // plate registry + access log (needed by mobile PWA)
+  "/api/hik/images",       // Hikvision event images (used by LPR feed)
+  "/api/hik/events/stream", // SSE event stream (used by LPR feed)
 ];
 
 // API routes accessible via ANY method without auth (needed by mobile PWA)

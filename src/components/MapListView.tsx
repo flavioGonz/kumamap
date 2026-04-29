@@ -71,6 +71,8 @@ export default function MapListView({
   const [exportingAll, setExportingAll] = useState(false);
   const [changelogOpen, setChangelogOpen] = useState(false);
   const [deployOpen, setDeployOpen] = useState(false);
+  const [cameraMenuOpen, setCameraMenuOpen] = useState(false);
+  const cameraMenuRef = useRef<HTMLDivElement>(null);
   const [expandedMaps, setExpandedMaps] = useState<Set<string>>(new Set());
   // Drag-and-drop reparenting
   const [draggingMapId, setDraggingMapId] = useState<string | null>(null);
@@ -87,6 +89,17 @@ export default function MapListView({
   }, []);
 
   useEffect(() => { fetchMaps(); }, [fetchMaps]);
+
+  // Close camera dropdown on click outside
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (cameraMenuRef.current && !cameraMenuRef.current.contains(e.target as Node)) {
+        setCameraMenuOpen(false);
+      }
+    };
+    if (cameraMenuOpen) document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [cameraMenuOpen]);
 
   const createMap = async (name: string) => {
     const map = await safeFetch<{ id: string }>(apiUrl("/api/maps"), {
@@ -397,18 +410,68 @@ export default function MapListView({
           </a>
           </Tooltip>
 
-          {/* ── Cameras ── */}
-          <Tooltip content="Dashboard de Cámaras" placement="bottom">
-          <a
-            href={`${process.env.NEXT_PUBLIC_BASE_PATH || ""}/cameras`}
-            className="flex h-8 w-8 items-center justify-center rounded-lg transition-all"
-            style={{ color: "#555", border: "1px solid transparent" }}
-            onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = "#06b6d4"; (e.currentTarget as HTMLElement).style.borderColor = "rgba(6,182,212,0.25)"; (e.currentTarget as HTMLElement).style.background = "rgba(6,182,212,0.08)"; }}
-            onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = "#555"; (e.currentTarget as HTMLElement).style.borderColor = "transparent"; (e.currentTarget as HTMLElement).style.background = "transparent"; }}
-          >
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2" ry="2"/></svg>
-          </a>
-          </Tooltip>
+          {/* ── Cameras (dropdown) ── */}
+          <div ref={cameraMenuRef} style={{ position: "relative" }}>
+            <Tooltip content="Cámaras" placement="bottom">
+            <button
+              onClick={() => setCameraMenuOpen((v) => !v)}
+              className="flex h-8 w-8 items-center justify-center rounded-lg transition-all"
+              style={{ color: cameraMenuOpen ? "#06b6d4" : "#555", border: `1px solid ${cameraMenuOpen ? "rgba(6,182,212,0.25)" : "transparent"}`, background: cameraMenuOpen ? "rgba(6,182,212,0.08)" : "transparent", cursor: "pointer" }}
+              onMouseEnter={(e) => { if (!cameraMenuOpen) { (e.currentTarget as HTMLElement).style.color = "#06b6d4"; (e.currentTarget as HTMLElement).style.borderColor = "rgba(6,182,212,0.25)"; (e.currentTarget as HTMLElement).style.background = "rgba(6,182,212,0.08)"; } }}
+              onMouseLeave={(e) => { if (!cameraMenuOpen) { (e.currentTarget as HTMLElement).style.color = "#555"; (e.currentTarget as HTMLElement).style.borderColor = "transparent"; (e.currentTarget as HTMLElement).style.background = "transparent"; } }}
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2" ry="2"/></svg>
+            </button>
+            </Tooltip>
+            {cameraMenuOpen && (
+              <div
+                style={{
+                  position: "absolute",
+                  top: "calc(100% + 6px)",
+                  right: 0,
+                  minWidth: 180,
+                  background: "#1e1e1e",
+                  border: "1px solid rgba(255,255,255,0.1)",
+                  borderRadius: 10,
+                  boxShadow: "0 8px 32px rgba(0,0,0,0.5)",
+                  padding: "4px 0",
+                  zIndex: 100,
+                  overflow: "hidden",
+                }}
+              >
+                {[
+                  { label: "Liveview", href: "/cameras", icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2" ry="2"/></svg>, color: "#06b6d4" },
+                  { label: "LPR", href: "/plates", icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="1" y="5" width="22" height="14" rx="3"/><text x="12" y="15" textAnchor="middle" fontSize="8" fill="currentColor" stroke="none" fontWeight="bold">LPR</text></svg>, color: "#f59e0b" },
+                  { label: "Face", href: "#", icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="10" r="7"/><path d="M9 14h6"/><circle cx="9.5" cy="9" r="0.5" fill="currentColor"/><circle cx="14.5" cy="9" r="0.5" fill="currentColor"/><path d="M5 20a9 9 0 0 1 14 0"/></svg>, color: "#a78bfa", disabled: true },
+                ].map((item) => (
+                  <a
+                    key={item.label}
+                    href={item.disabled ? undefined : `${process.env.NEXT_PUBLIC_BASE_PATH || ""}${item.href}`}
+                    onClick={(e) => { if (item.disabled) e.preventDefault(); setCameraMenuOpen(false); }}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 10,
+                      padding: "8px 14px",
+                      color: item.disabled ? "#555" : "#ccc",
+                      textDecoration: "none",
+                      fontSize: 13,
+                      fontWeight: 500,
+                      cursor: item.disabled ? "not-allowed" : "pointer",
+                      transition: "background 0.15s",
+                      opacity: item.disabled ? 0.5 : 1,
+                    }}
+                    onMouseEnter={(e) => { if (!item.disabled) { (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.06)"; (e.currentTarget as HTMLElement).style.color = item.color; } }}
+                    onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; (e.currentTarget as HTMLElement).style.color = item.disabled ? "#555" : "#ccc"; }}
+                  >
+                    <span style={{ display: "flex", alignItems: "center" }}>{item.icon}</span>
+                    <span>{item.label}</span>
+                    {item.disabled && <span style={{ marginLeft: "auto", fontSize: 10, color: "#666", fontStyle: "italic" }}>pronto</span>}
+                  </a>
+                ))}
+              </div>
+            )}
+          </div>
 
           {/* ── Metrics ── */}
           <Tooltip content="Métricas del servidor" placement="bottom">

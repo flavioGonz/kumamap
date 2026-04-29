@@ -59,6 +59,19 @@ const tabs: Tab[] = [
     ),
   },
   {
+    href: "/mobile/accesos",
+    label: "Accesos",
+    activeColor: "#f59e0b",
+    glowColor: "rgba(245,158,11,0.4)",
+    icon: (active, inactive) => (
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={active ? "#f59e0b" : inactive} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="1" y="3" width="15" height="13" rx="2" />
+        <path d="m16 8 5 3-5 3z" />
+        <path d="M3 20h4M8 20h3" strokeWidth="2.5" />
+      </svg>
+    ),
+  },
+  {
     href: "/mobile/alerts",
     label: "Alertas",
     activeColor: "#f87171",
@@ -191,12 +204,12 @@ export default function BottomTabBar() {
                   flexDirection: "column",
                   alignItems: "center",
                   justifyContent: "center",
-                  gap: 4,
-                  padding: "8px 18px",
-                  borderRadius: 20,
+                  gap: 3,
+                  padding: "8px 12px",
+                  borderRadius: 18,
                   textDecoration: "none",
                   transition: "all 0.35s cubic-bezier(0.4, 0, 0.2, 1)",
-                  minWidth: isActive ? 76 : 52,
+                  minWidth: isActive ? 64 : 44,
                 }}
               >
                 {/* Active glow background */}

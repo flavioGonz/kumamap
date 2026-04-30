@@ -18,6 +18,8 @@ interface CameraInfo {
   source: "camera" | "nvr";
   nvrNodeId?: string;
   nvrChannel?: number;
+  mgmtUser?: string;
+  mgmtPassword?: string;
 }
 
 interface NvrChannelApi {
@@ -113,6 +115,8 @@ export async function GET() {
             rtspFps: data.rtspFps,
             manufacturer: data.description || "",
             source: "camera",
+            mgmtUser: data.mgmtUser,
+            mgmtPassword: data.mgmtPassword,
           });
           mapCameraCount++;
         }

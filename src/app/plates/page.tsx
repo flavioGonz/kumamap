@@ -41,6 +41,39 @@ import {
   Upload,
 } from "lucide-react";
 
+// ── Plate Image with fallback ──
+
+function PlateImg({
+  src, alt, className, style, onClick,
+}: {
+  src: string; alt?: string; className?: string; style?: React.CSSProperties; onClick?: (e: React.MouseEvent) => void;
+}) {
+  const [error, setError] = useState(false);
+  if (error) {
+    return (
+      <div
+        className={className}
+        style={{
+          ...style,
+          display: "flex", alignItems: "center", justifyContent: "center",
+          background: "rgba(255,255,255,0.03)", border: "1px dashed rgba(255,255,255,0.15)",
+          color: "rgba(255,255,255,0.25)", fontSize: "0.65rem", textAlign: "center",
+        }}
+        onClick={onClick}
+      >
+        <Camera className="w-4 h-4 opacity-30" />
+      </div>
+    );
+  }
+  return (
+    <img
+      src={src} alt={alt || ""} className={className} style={style}
+      onClick={onClick}
+      onError={() => setError(true)}
+    />
+  );
+}
+
 // ── Types ──
 
 interface PlateRecord {
@@ -324,6 +357,7 @@ function ImageLightbox({
           alt={active.label}
           className="max-w-full max-h-[75vh] object-contain rounded-xl"
           style={{ boxShadow: "0 0 60px rgba(0,0,0,0.5)" }}
+          onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
         />
         <div className="flex items-center gap-3">
           {allImages.length > 1 && (
@@ -338,7 +372,7 @@ function ImageLightbox({
                   }}
                   onClick={() => setActiveIdx(i)}
                 >
-                  <img src={img.src} alt={img.label} className="w-16 h-10 object-cover" />
+                  <img src={img.src} alt={img.label} className="w-16 h-10 object-cover" onError={(e) => { (e.target as HTMLImageElement).style.opacity = "0.2"; }} />
                 </button>
               ))}
             </div>
@@ -643,8 +677,8 @@ function RegistryTab({ mapId }: { mapId: string }) {
 
               const cameras = lprCams.map((c: any) => ({
                 ip: c.ip,
-                user: "admin",
-                pass: "",
+                user: c.mgmtUser || "admin",
+                pass: c.mgmtPassword || "",
                 label: c.label,
               }));
 
@@ -1089,7 +1123,7 @@ function AccessLogTab({ mapId }: { mapId: string }) {
                     </td>
                     <td className="px-5 py-3">
                       {(e.plateImageId || e.fullImageId) ? (
-                        <img
+                        <PlateImg
                           src={apiUrl(`/api/hik/images/${e.plateImageId || e.fullImageId}`)}
                           alt="Captura"
                           className="w-20 h-12 object-cover rounded-lg cursor-pointer hover:opacity-80 transition-opacity"
@@ -1307,6 +1341,18 @@ function BoothTab({ mapId }: { mapId: string }) {
   const [lightboxSrc, setLightboxSrc] = useState<{ src: string; alt: string; extras?: { src: string; label: string }[] } | null>(null);
   const [cameraDetections, setCameraDetections] = useState<Map<string, HikEvent>>(new Map());
   const [clock, setClock] = useState(new Date());
+  const [feedSearch, setFeedSearch] = useState("");
+
+  const filteredEvents = useMemo(() => {
+    if (!feedSearch) return events;
+    const q = feedSearch.toUpperCase();
+    return events.filter((ev) =>
+      ev.licensePlate?.toUpperCase().includes(q) ||
+      ev.matchOwner?.toUpperCase().includes(q) ||
+      ev.vehicleBrand?.toUpperCase().includes(q) ||
+      ev.vehicleModel?.toUpperCase().includes(q)
+    );
+  }, [events, feedSearch]);
 
   // Live clock
   useEffect(() => {
@@ -1583,12 +1629,13 @@ function BoothTab({ mapId }: { mapId: string }) {
                       const det = cameraDetections.get(cam.ip);
                       if (!det) return null;
                       const detColor = matchColors[det.matchResult || "unknown"] || palette.unknown;
+                      const vehicleInfo = [det.vehicleColor, det.vehicleBrand, det.vehicleModel].filter(Boolean).join(" ");
                       return (
                         <div
-                          className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none"
+                          className="absolute inset-0 pointer-events-none"
                           style={{
                             animation: "boothDetectionIn 0.3s ease-out",
-                            background: `linear-gradient(135deg, ${detColor}25, ${detColor}10)`,
+                            background: `linear-gradient(135deg, ${detColor}20, transparent 60%)`,
                             border: `2px solid ${detColor}80`,
                             borderRadius: "0.75rem",
                           }}
@@ -1602,36 +1649,94 @@ function BoothTab({ mapId }: { mapId: string }) {
                               boxShadow: `0 0 12px ${detColor}`,
                             }}
                           />
-                          {/* Plate badge */}
-                          <div
-                            className="px-5 py-2 rounded-xl font-mono text-xl font-black tracking-[0.25em]"
-                            style={{
-                              background: "rgba(0,0,0,0.8)",
-                              color: detColor,
-                              border: `2px solid ${detColor}`,
-                              boxShadow: `0 0 30px ${detColor}40, inset 0 0 20px ${detColor}10`,
-                              animation: "boothPlatePulse 1s ease-in-out infinite",
-                            }}
-                          >
-                            {det.licensePlate}
-                          </div>
-                          {/* Status */}
-                          <div
-                            className="mt-2 px-3 py-1 rounded-lg text-xs font-bold uppercase tracking-widest flex items-center gap-1.5"
-                            style={{
-                              background: "rgba(0,0,0,0.7)",
-                              color: detColor,
-                            }}
-                          >
-                            {matchIcons[det.matchResult || "unknown"]}
-                            {matchLabels[det.matchResult || "unknown"]}
-                            {det.matchOwner && <span className="font-normal ml-1 text-white/70">— {det.matchOwner}</span>}
-                          </div>
-                          {/* Corner brackets for targeting effect */}
+                          {/* Corner brackets */}
                           <div className="absolute top-3 left-3 w-6 h-6" style={{ borderLeft: `2px solid ${detColor}`, borderTop: `2px solid ${detColor}` }} />
                           <div className="absolute top-3 right-3 w-6 h-6" style={{ borderRight: `2px solid ${detColor}`, borderTop: `2px solid ${detColor}` }} />
                           <div className="absolute bottom-3 left-3 w-6 h-6" style={{ borderLeft: `2px solid ${detColor}`, borderBottom: `2px solid ${detColor}` }} />
                           <div className="absolute bottom-3 right-3 w-6 h-6" style={{ borderRight: `2px solid ${detColor}`, borderBottom: `2px solid ${detColor}` }} />
+
+                          {/* Left side: plate + status + vehicle info */}
+                          <div className="absolute bottom-8 left-3 flex flex-col gap-1.5" style={{ maxWidth: "60%" }}>
+                            {/* Plate badge */}
+                            <div
+                              className="px-4 py-1.5 rounded-lg font-mono text-lg font-black tracking-[0.2em] inline-block w-fit"
+                              style={{
+                                background: "rgba(0,0,0,0.85)",
+                                color: detColor,
+                                border: `2px solid ${detColor}`,
+                                boxShadow: `0 0 24px ${detColor}40`,
+                                animation: "boothPlatePulse 1s ease-in-out infinite",
+                              }}
+                            >
+                              {det.licensePlate}
+                            </div>
+                            {/* Status badge */}
+                            <div
+                              className="px-3 py-1 rounded-lg text-[11px] font-bold uppercase tracking-widest flex items-center gap-1.5 w-fit"
+                              style={{ background: "rgba(0,0,0,0.8)", color: detColor }}
+                            >
+                              {matchIcons[det.matchResult || "unknown"]}
+                              {matchLabels[det.matchResult || "unknown"]}
+                              {det.matchOwner && <span className="font-normal ml-1 text-white/70">— {det.matchOwner}</span>}
+                            </div>
+                            {/* Vehicle info */}
+                            {vehicleInfo && (
+                              <div
+                                className="px-3 py-1 rounded-lg text-[10px] flex items-center gap-1.5 w-fit"
+                                style={{ background: "rgba(0,0,0,0.75)", color: "rgba(255,255,255,0.8)" }}
+                              >
+                                <Car className="w-3 h-3" style={{ color: detColor }} />
+                                <span>{vehicleInfo}</span>
+                              </div>
+                            )}
+                            {/* Confidence */}
+                            {det.confidence && (
+                              <div
+                                className="px-3 py-1 rounded-lg text-[10px] flex items-center gap-1.5 w-fit"
+                                style={{ background: "rgba(0,0,0,0.75)", color: "rgba(255,255,255,0.7)" }}
+                              >
+                                <Fingerprint className="w-3 h-3" style={{ color: detColor }} />
+                                <span>Precisión: <strong style={{ color: detColor }}>{det.confidence}%</strong></span>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Right side: plate image */}
+                          {det.plateImageId && (
+                            <div className="absolute bottom-8 right-3 flex flex-col items-end gap-1">
+                              <PlateImg
+                                src={apiUrl(`/api/hik/images/${det.plateImageId}`)}
+                                alt="Placa"
+                                className="rounded-lg"
+                                style={{
+                                  height: "52px",
+                                  maxWidth: "120px",
+                                  objectFit: "cover",
+                                  border: `2px solid ${detColor}80`,
+                                  boxShadow: `0 0 16px ${detColor}30`,
+                                }}
+                              />
+                              <span className="text-[9px] font-mono px-1.5 py-0.5 rounded" style={{ background: "rgba(0,0,0,0.7)", color: detColor }}>
+                                CAPTURA
+                              </span>
+                            </div>
+                          )}
+
+                          {/* Top-right confidence meter */}
+                          {det.confidence && (
+                            <div className="absolute top-2 right-10 flex items-center gap-1.5 px-2 py-1 rounded-lg" style={{ background: "rgba(0,0,0,0.7)" }}>
+                              <div className="w-12 h-1.5 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.1)" }}>
+                                <div
+                                  className="h-full rounded-full"
+                                  style={{
+                                    width: `${det.confidence}%`,
+                                    background: det.confidence > 80 ? palette.authorized : det.confidence > 50 ? palette.unknown : palette.blocked,
+                                  }}
+                                />
+                              </div>
+                              <span className="text-[10px] font-mono font-bold" style={{ color: detColor }}>{det.confidence}%</span>
+                            </div>
+                          )}
                         </div>
                       );
                     })()}
@@ -1692,7 +1797,7 @@ function BoothTab({ mapId }: { mapId: string }) {
               {(latestEvent.plateImageId || latestEvent.fullImageId) && (
                 <div className="flex gap-2 mt-2">
                   {latestEvent.fullImageId && (
-                    <img
+                    <PlateImg
                       src={apiUrl(`/api/hik/images/${latestEvent.fullImageId}`)}
                       alt="Escena"
                       className="h-16 rounded-lg object-cover cursor-pointer hover:opacity-80 transition-opacity"
@@ -1705,7 +1810,7 @@ function BoothTab({ mapId }: { mapId: string }) {
                     />
                   )}
                   {latestEvent.plateImageId && (
-                    <img
+                    <PlateImg
                       src={apiUrl(`/api/hik/images/${latestEvent.plateImageId}`)}
                       alt="Placa"
                       className="h-16 rounded-lg object-cover cursor-pointer hover:opacity-80 transition-opacity"
@@ -1790,7 +1895,7 @@ function BoothTab({ mapId }: { mapId: string }) {
                           </td>
                           <td className="px-3 py-2 text-center">
                             {(entry.plateImageId || entry.fullImageId) ? (
-                              <img
+                              <PlateImg
                                 src={apiUrl(`/api/hik/images/${entry.plateImageId || entry.fullImageId}`)}
                                 alt="Cap"
                                 className="w-14 h-9 object-cover rounded inline-block cursor-pointer hover:opacity-80 transition-opacity"
@@ -1828,26 +1933,48 @@ function BoothTab({ mapId }: { mapId: string }) {
           }}
         >
           {/* Feed header */}
-          <div
-            className="px-4 py-2.5 flex items-center justify-between flex-shrink-0"
-            style={{ borderBottom: `1px solid ${palette.border}` }}
-          >
-            <div className="flex items-center gap-2">
-              <Activity className="w-4 h-4" style={{ color: palette.accent }} />
-              <span className="text-sm font-semibold" style={{ color: palette.text }}>Lecturas en Vivo</span>
+          <div className="flex-shrink-0" style={{ borderBottom: `1px solid ${palette.border}` }}>
+            <div className="px-4 py-2.5 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Activity className="w-4 h-4" style={{ color: palette.accent }} />
+                <span className="text-sm font-semibold" style={{ color: palette.text }}>Lecturas en Vivo</span>
+                {events.length > 0 && (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded-full font-mono" style={{ background: `${palette.accent}18`, color: palette.accent }}>
+                    {events.length}
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-1.5">
+                <div
+                  className="w-2 h-2 rounded-full"
+                  style={{
+                    background: connected ? palette.authorized : palette.blocked,
+                    boxShadow: connected ? `0 0 6px ${palette.authorized}` : "none",
+                    animation: connected ? "pulse 2s infinite" : "none",
+                  }}
+                />
+                <span className="text-[10px] uppercase tracking-wider font-medium" style={{ color: palette.textMuted }}>
+                  SSE
+                </span>
+              </div>
             </div>
-            <div className="flex items-center gap-1.5">
-              <div
-                className="w-2 h-2 rounded-full"
-                style={{
-                  background: connected ? palette.authorized : palette.blocked,
-                  boxShadow: connected ? `0 0 6px ${palette.authorized}` : "none",
-                  animation: connected ? "pulse 2s infinite" : "none",
-                }}
-              />
-              <span className="text-[10px] uppercase tracking-wider font-medium" style={{ color: palette.textMuted }}>
-                SSE
-              </span>
+            {/* Feed search */}
+            <div className="px-3 pb-2">
+              <div className="relative">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5" style={{ color: palette.textDim }} />
+                <input
+                  type="text"
+                  placeholder="Buscar matrícula..."
+                  value={feedSearch}
+                  onChange={(e) => setFeedSearch(e.target.value)}
+                  className="w-full pl-8 pr-3 py-1.5 rounded-lg text-xs outline-none"
+                  style={{
+                    background: `${palette.bg}80`,
+                    border: `1px solid ${palette.border}`,
+                    color: palette.text,
+                  }}
+                />
+              </div>
             </div>
           </div>
 
@@ -1856,16 +1983,18 @@ function BoothTab({ mapId }: { mapId: string }) {
             className="flex-1 overflow-y-auto px-2 py-2 space-y-1.5"
             style={{ scrollbarWidth: "thin", scrollbarColor: `${palette.border} transparent` }}
           >
-            {events.length === 0 ? (
+            {filteredEvents.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-16 text-center">
                 <Radar className="w-8 h-8 mb-3 animate-spin" style={{ color: palette.textDim, animationDuration: "3s" }} />
-                <p className="text-sm" style={{ color: palette.textMuted }}>Esperando detecciones...</p>
+                <p className="text-sm" style={{ color: palette.textMuted }}>
+                  {feedSearch ? "Sin resultados" : "Esperando detecciones..."}
+                </p>
                 <p className="text-xs mt-1" style={{ color: palette.textDim }}>
-                  Las lecturas LPR aparecerán aquí en tiempo real
+                  {feedSearch ? `No hay lecturas que coincidan con "${feedSearch}"` : "Las lecturas LPR aparecerán aquí en tiempo real"}
                 </p>
               </div>
             ) : (
-              events.map((ev) => {
+              filteredEvents.map((ev) => {
                 const color = matchColors[ev.matchResult || "unknown"] || palette.textMuted;
                 return (
                   <div
@@ -1887,13 +2016,24 @@ function BoothTab({ mapId }: { mapId: string }) {
                       <div className="flex-shrink-0" style={{ color }}>
                         {matchIcons[ev.matchResult || "unknown"]}
                       </div>
-                      <span
-                        className="font-mono font-bold text-sm tracking-wider"
-                        style={{ color }}
-                      >
-                        {ev.licensePlate}
-                      </span>
-                      <span className="ml-auto text-[10px] font-mono" style={{ color: palette.textDim }}>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-mono font-bold text-sm tracking-wider" style={{ color }}>
+                            {ev.licensePlate}
+                          </span>
+                          {ev.confidence && (
+                            <span className="text-[9px] px-1 py-0.5 rounded font-mono" style={{ background: `${palette.accent}15`, color: palette.accent }}>
+                              {ev.confidence}%
+                            </span>
+                          )}
+                        </div>
+                        {(ev.vehicleBrand || ev.vehicleColor || ev.matchOwner) && (
+                          <div className="text-[10px] truncate mt-0.5" style={{ color: palette.textDim }}>
+                            {ev.matchOwner ? ev.matchOwner : [ev.vehicleColor, ev.vehicleBrand, ev.vehicleModel].filter(Boolean).join(" ")}
+                          </div>
+                        )}
+                      </div>
+                      <span className="flex-shrink-0 text-[10px] font-mono" style={{ color: palette.textDim }}>
                         {formatTime(ev.timestamp)}
                       </span>
                     </div>
@@ -1927,7 +2067,7 @@ function BoothTab({ mapId }: { mapId: string }) {
                         {(ev.plateImageId || ev.fullImageId) && (
                           <div className="flex gap-2 mt-1">
                             {ev.fullImageId && (
-                              <img
+                              <PlateImg
                                 src={apiUrl(`/api/hik/images/${ev.fullImageId}`)}
                                 alt="Escena"
                                 className="h-14 rounded object-cover cursor-pointer hover:opacity-80 transition-opacity"
@@ -1941,7 +2081,7 @@ function BoothTab({ mapId }: { mapId: string }) {
                               />
                             )}
                             {ev.plateImageId && (
-                              <img
+                              <PlateImg
                                 src={apiUrl(`/api/hik/images/${ev.plateImageId}`)}
                                 alt="Placa"
                                 className="h-14 rounded object-cover cursor-pointer hover:opacity-80 transition-opacity"
@@ -2242,7 +2382,7 @@ function AnalyticsTab({ mapId }: { mapId: string }) {
                               </div>
 
                               {(s.plateImageId || s.fullImageId) && (
-                                <img
+                                <PlateImg
                                   src={apiUrl(`/api/hik/images/${s.plateImageId || s.fullImageId}`)}
                                   alt="Captura"
                                   className="w-20 h-12 object-cover rounded-lg"

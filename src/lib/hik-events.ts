@@ -6,14 +6,18 @@
  */
 
 import { randomUUID } from "crypto";
+import fs from "fs";
+import path from "path";
 import type { HikEvent, HikEventType } from "./types";
 import { mapsDb } from "./db";
 
 // ── Configuration ──
 
 const MAX_EVENTS_PER_NODE = 200;    // Ring buffer size per node
-const MAX_IMAGES = 500;              // Max cached images globally
-const IMAGE_TTL_MS = 30 * 60 * 1000; // 30 minutes TTL for images
+const MAX_IMAGES_MEMORY = 200;      // Max cached images in RAM
+const IMAGE_DIR = path.join(process.cwd(), "data", "hik-images");
+const IMAGE_INDEX_FILE = path.join(IMAGE_DIR, "_index.json");
+const MAX_IMAGES_DISK = 10000;      // Max images on disk before cleanup
 
 // ── Types ──
 
@@ -21,6 +25,13 @@ interface StoredImage {
   data: Buffer;
   contentType: string;
   createdAt: number;
+}
+
+interface ImageIndexEntry {
+  id: string;
+  contentType: string;
+  createdAt: number;
+  size: number;
 }
 
 type SSEClient = {
@@ -37,10 +48,36 @@ class HikEventStore {
   private clients: Set<SSEClient> = new Set();                 // SSE subscribers
   private nodeMapIndex: Map<string, string> = new Map();       // nodeId → mapId
   private cleanupInterval: ReturnType<typeof setInterval> | null = null;
+  private imageIndex: Map<string, ImageIndexEntry> = new Map();
 
   constructor() {
-    // Periodic cleanup of expired images
-    this.cleanupInterval = setInterval(() => this.cleanupImages(), 5 * 60 * 1000);
+    // Ensure image directory exists
+    fs.mkdirSync(IMAGE_DIR, { recursive: true });
+    // Load image index from disk
+    this.loadImageIndex();
+    // Periodic cleanup of old memory cache (not disk — disk is permanent)
+    this.cleanupInterval = setInterval(() => this.cleanupMemoryCache(), 10 * 60 * 1000);
+  }
+
+  private loadImageIndex() {
+    try {
+      if (fs.existsSync(IMAGE_INDEX_FILE)) {
+        const raw = fs.readFileSync(IMAGE_INDEX_FILE, "utf-8");
+        const entries: ImageIndexEntry[] = JSON.parse(raw);
+        for (const e of entries) this.imageIndex.set(e.id, e);
+      }
+    } catch (err) {
+      console.error("[Hik] Error loading image index:", err);
+    }
+  }
+
+  private saveImageIndex() {
+    try {
+      const entries = Array.from(this.imageIndex.values());
+      fs.writeFileSync(IMAGE_INDEX_FILE, JSON.stringify(entries), "utf-8");
+    } catch (err) {
+      console.error("[Hik] Error saving image index:", err);
+    }
   }
 
   // ── Node → Map registration ──
@@ -122,13 +159,24 @@ class HikEventStore {
     return results.slice(0, limit);
   }
 
-  // ── Image Storage ──
+  // ── Image Storage (disk-persistent + memory cache) ──
 
   storeImage(data: Buffer, contentType: string = "image/jpeg"): string {
     const id = randomUUID();
+    const ext = contentType.includes("png") ? ".png" : ".jpg";
+    const fileName = `${id}${ext}`;
+    const filePath = path.join(IMAGE_DIR, fileName);
 
-    // Evict oldest if over limit
-    if (this.images.size >= MAX_IMAGES) {
+    // Write to disk
+    try {
+      fs.writeFileSync(filePath, data);
+    } catch (err) {
+      console.error("[Hik] Error writing image to disk:", err);
+    }
+
+    // Store in memory cache
+    if (this.images.size >= MAX_IMAGES_MEMORY) {
+      // Evict oldest from memory (not disk)
       let oldestKey: string | null = null;
       let oldestTime = Infinity;
       for (const [key, img] of this.images) {
@@ -139,22 +187,84 @@ class HikEventStore {
       }
       if (oldestKey) this.images.delete(oldestKey);
     }
-
     this.images.set(id, { data, contentType, createdAt: Date.now() });
+
+    // Update index
+    this.imageIndex.set(id, { id, contentType, createdAt: Date.now(), size: data.length });
+    this.saveImageIndex();
+
+    // Disk cleanup if too many files
+    if (this.imageIndex.size > MAX_IMAGES_DISK) {
+      this.cleanupOldDiskImages();
+    }
+
     return id;
   }
 
   getImage(id: string): StoredImage | undefined {
-    return this.images.get(id);
+    // Check memory first
+    const cached = this.images.get(id);
+    if (cached) return cached;
+
+    // Fall back to disk
+    const indexEntry = this.imageIndex.get(id);
+    if (!indexEntry) {
+      // Try scanning disk directly
+      return this.loadImageFromDisk(id);
+    }
+
+    const ext = indexEntry.contentType.includes("png") ? ".png" : ".jpg";
+    const filePath = path.join(IMAGE_DIR, `${id}${ext}`);
+    try {
+      if (fs.existsSync(filePath)) {
+        const data = fs.readFileSync(filePath);
+        const img: StoredImage = { data, contentType: indexEntry.contentType, createdAt: indexEntry.createdAt };
+        // Cache in memory
+        this.images.set(id, img);
+        return img;
+      }
+    } catch {}
+
+    return undefined;
   }
 
-  private cleanupImages() {
-    const cutoff = Date.now() - IMAGE_TTL_MS;
-    for (const [id, img] of this.images) {
-      if (img.createdAt < cutoff) {
-        this.images.delete(id);
-      }
+  private loadImageFromDisk(id: string): StoredImage | undefined {
+    for (const ext of [".jpg", ".png"]) {
+      const filePath = path.join(IMAGE_DIR, `${id}${ext}`);
+      try {
+        if (fs.existsSync(filePath)) {
+          const data = fs.readFileSync(filePath);
+          const contentType = ext === ".png" ? "image/png" : "image/jpeg";
+          return { data, contentType, createdAt: Date.now() };
+        }
+      } catch {}
     }
+    return undefined;
+  }
+
+  private cleanupMemoryCache() {
+    // Only evict memory, not disk
+    if (this.images.size > MAX_IMAGES_MEMORY) {
+      const entries = Array.from(this.images.entries())
+        .sort((a, b) => a[1].createdAt - b[1].createdAt);
+      const toRemove = entries.slice(0, entries.length - MAX_IMAGES_MEMORY);
+      for (const [key] of toRemove) this.images.delete(key);
+    }
+  }
+
+  private cleanupOldDiskImages() {
+    // Remove oldest disk images when over MAX_IMAGES_DISK
+    const sorted = Array.from(this.imageIndex.values())
+      .sort((a, b) => a.createdAt - b.createdAt);
+    const toRemove = sorted.slice(0, sorted.length - MAX_IMAGES_DISK);
+    for (const entry of toRemove) {
+      const ext = entry.contentType.includes("png") ? ".png" : ".jpg";
+      const filePath = path.join(IMAGE_DIR, `${entry.id}${ext}`);
+      try { fs.unlinkSync(filePath); } catch {}
+      this.imageIndex.delete(entry.id);
+      this.images.delete(entry.id);
+    }
+    this.saveImageIndex();
   }
 
   // ── SSE Broadcasting ──

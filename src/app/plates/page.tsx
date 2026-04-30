@@ -38,6 +38,7 @@ import {
   Volume2,
   Shield,
   Zap,
+  Upload,
 } from "lucide-react";
 
 // ── Types ──
@@ -276,6 +277,79 @@ function SkeletonPulse({ className }: { className?: string }) {
   );
 }
 
+// ── Image Lightbox ──
+
+function ImageLightbox({
+  src,
+  alt,
+  onClose,
+  extraImages,
+}: {
+  src: string;
+  alt?: string;
+  onClose: () => void;
+  extraImages?: { src: string; label: string }[];
+}) {
+  const [activeIdx, setActiveIdx] = useState(0);
+  const allImages = [{ src, label: alt || "Captura" }, ...(extraImages || [])];
+  const active = allImages[activeIdx];
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+      if (e.key === "ArrowRight" && activeIdx < allImages.length - 1) setActiveIdx(activeIdx + 1);
+      if (e.key === "ArrowLeft" && activeIdx > 0) setActiveIdx(activeIdx - 1);
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [activeIdx, allImages.length, onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-[9999] flex items-center justify-center"
+      style={{ background: "rgba(0,0,0,0.92)", backdropFilter: "blur(12px)" }}
+      onClick={onClose}
+    >
+      <button
+        className="absolute top-4 right-4 p-2 rounded-full transition-colors"
+        style={{ background: "rgba(255,255,255,0.1)", color: "#fff" }}
+        onClick={onClose}
+      >
+        <X className="w-6 h-6" />
+      </button>
+
+      <div className="max-w-[90vw] max-h-[85vh] flex flex-col items-center gap-3" onClick={(e) => e.stopPropagation()}>
+        <img
+          src={active.src}
+          alt={active.label}
+          className="max-w-full max-h-[75vh] object-contain rounded-xl"
+          style={{ boxShadow: "0 0 60px rgba(0,0,0,0.5)" }}
+        />
+        <div className="flex items-center gap-3">
+          {allImages.length > 1 && (
+            <div className="flex items-center gap-2">
+              {allImages.map((img, i) => (
+                <button
+                  key={i}
+                  className="rounded-lg overflow-hidden transition-all"
+                  style={{
+                    border: `2px solid ${i === activeIdx ? palette.accent : "rgba(255,255,255,0.15)"}`,
+                    opacity: i === activeIdx ? 1 : 0.6,
+                  }}
+                  onClick={() => setActiveIdx(i)}
+                >
+                  <img src={img.src} alt={img.label} className="w-16 h-10 object-cover" />
+                </button>
+              ))}
+            </div>
+          )}
+          <span className="text-xs text-white/50">{active.label}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Main Page ──
 
 export default function PlatesPage() {
@@ -426,6 +500,20 @@ export default function PlatesPage() {
           to { opacity: 1; transform: translateY(0); }
         }
         .fade-in { animation: fade-in 0.3s ease-out both; }
+        @keyframes boothDetectionIn {
+          0% { opacity: 0; transform: scale(1.05); }
+          100% { opacity: 1; transform: scale(1); }
+        }
+        @keyframes boothScanLine {
+          0% { top: 10%; opacity: 0; }
+          10% { opacity: 1; }
+          90% { opacity: 1; }
+          100% { top: 90%; opacity: 0; }
+        }
+        @keyframes boothPlatePulse {
+          0%, 100% { transform: scale(1); }
+          50% { transform: scale(1.03); }
+        }
       `}</style>
     </div>
   );
@@ -442,6 +530,8 @@ function RegistryTab({ mapId }: { mapId: string }) {
   const [loading, setLoading] = useState(true);
   const [editModal, setEditModal] = useState<PlateRecord | null>(null);
   const [addModal, setAddModal] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [syncResult, setSyncResult] = useState<{ ok: boolean; msg: string } | null>(null);
 
   const loadPlates = useCallback(() => {
     setLoading(true);
@@ -526,6 +616,69 @@ function RegistryTab({ mapId }: { mapId: string }) {
         <div className="flex-1" />
 
         <button
+          disabled={syncing}
+          onClick={async () => {
+            if (!confirm("¿Sincronizar matrículas autorizadas y bloqueadas a todas las cámaras LPR de este mapa?")) return;
+            setSyncing(true);
+            setSyncResult(null);
+            try {
+              // Fetch LPR cameras for this map
+              const camRes = await fetch(apiUrl("/api/cameras"), { headers: { Accept: "application/json" } });
+              const camData = await camRes.json();
+              const allCams = camData.cameras || [];
+              const lprCams = allCams.filter((c: any) => {
+                const lbl = (c.label || "").toLowerCase();
+                return c.mapId === mapId && c.ip && (
+                  lbl.includes("lpr") || lbl.includes("placa") || lbl.includes("patente") ||
+                  lbl.includes("anpr") || lbl.includes("acceso") || lbl.includes("entrada") ||
+                  lbl.includes("salida") || lbl.includes("gate") || lbl.includes("barrera")
+                );
+              });
+
+              if (lprCams.length === 0) {
+                setSyncResult({ ok: false, msg: "No se encontraron cámaras LPR en este mapa. Asegurate de que las cámaras tengan 'LPR' en el nombre." });
+                setSyncing(false);
+                return;
+              }
+
+              const cameras = lprCams.map((c: any) => ({
+                ip: c.ip,
+                user: "admin",
+                pass: "",
+                label: c.label,
+              }));
+
+              const res = await fetch(apiUrl("/api/plates/sync"), {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ mapId, cameras, mode: "full" }),
+              });
+              const result = await res.json();
+
+              if (result.error) {
+                setSyncResult({ ok: false, msg: result.error });
+              } else {
+                const msg = `${result.totalPlates} matrículas → ${result.successCameras}/${result.totalCameras} cámaras sincronizadas`;
+                setSyncResult({ ok: result.successCameras > 0, msg });
+              }
+            } catch (err: any) {
+              setSyncResult({ ok: false, msg: err.message || "Error de conexión" });
+            }
+            setSyncing(false);
+          }}
+          className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all hover:scale-[1.02]"
+          style={{
+            border: `1px solid ${palette.border}`,
+            color: palette.accent,
+            background: `${palette.accent}08`,
+            opacity: syncing ? 0.6 : 1,
+          }}
+        >
+          {syncing ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
+          {syncing ? "Sincronizando..." : "Sync a Cámaras"}
+        </button>
+
+        <button
           onClick={() => setAddModal(true)}
           className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold transition-all hover:scale-[1.02]"
           style={{
@@ -537,6 +690,24 @@ function RegistryTab({ mapId }: { mapId: string }) {
           <Plus className="w-4 h-4" /> Agregar Matrícula
         </button>
       </div>
+
+      {/* Sync result notification */}
+      {syncResult && (
+        <div
+          className="flex items-center gap-3 px-4 py-2.5 rounded-xl mb-4 text-sm"
+          style={{
+            background: syncResult.ok ? `${palette.authorized}10` : `${palette.blocked}10`,
+            border: `1px solid ${syncResult.ok ? palette.authorized : palette.blocked}30`,
+            color: syncResult.ok ? palette.authorized : palette.blocked,
+          }}
+        >
+          {syncResult.ok ? <ShieldCheck className="w-4 h-4" /> : <AlertTriangle className="w-4 h-4" />}
+          <span>{syncResult.msg}</span>
+          <button onClick={() => setSyncResult(null)} className="ml-auto">
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
 
       {/* Table */}
       <div className="rounded-2xl overflow-hidden" style={{ border: `1px solid ${palette.border}`, background: palette.surface }}>
@@ -813,14 +984,15 @@ function AccessLogTab({ mapId }: { mapId: string }) {
   const [loading, setLoading] = useState(true);
   const [filterResult, setFilterResult] = useState("all");
   const [filterPlate, setFilterPlate] = useState("");
+  const [lightbox, setLightbox] = useState<{ src: string; alt: string; extras?: { src: string; label: string }[] } | null>(null);
 
   const loadLog = useCallback(() => {
     setLoading(true);
     const params = new URLSearchParams({ mapId, limit: "200" });
     if (filterResult !== "all") params.set("matchResult", filterResult);
     if (filterPlate) params.set("plate", filterPlate);
-    apiFetch<{ log: AccessLogEntry[] }>(apiUrl(`/api/plates/log?${params}`)).then(({ data }) => {
-      setEntries(data?.log || []);
+    apiFetch<{ entries: AccessLogEntry[] }>(apiUrl(`/api/plates/log?${params}`)).then(({ data }) => {
+      setEntries(data?.entries || []);
       setLoading(false);
     });
   }, [mapId, filterResult, filterPlate]);
@@ -920,8 +1092,14 @@ function AccessLogTab({ mapId }: { mapId: string }) {
                         <img
                           src={apiUrl(`/api/hik/images/${e.plateImageId || e.fullImageId}`)}
                           alt="Captura"
-                          className="w-20 h-12 object-cover rounded-lg"
+                          className="w-20 h-12 object-cover rounded-lg cursor-pointer hover:opacity-80 transition-opacity"
                           style={{ border: `1px solid ${palette.border}` }}
+                          onClick={() => {
+                            const mainId = e.fullImageId || e.plateImageId;
+                            const extras: { src: string; label: string }[] = [];
+                            if (e.fullImageId && e.plateImageId) extras.push({ src: apiUrl(`/api/hik/images/${e.plateImageId}`), label: "Placa" });
+                            setLightbox({ src: apiUrl(`/api/hik/images/${mainId!}`), alt: `${e.plate} — Captura`, extras });
+                          }}
                         />
                       ) : (
                         <span style={{ color: palette.textDim }}>—</span>
@@ -938,6 +1116,15 @@ function AccessLogTab({ mapId }: { mapId: string }) {
       <div className="text-xs mt-4" style={{ color: palette.textDim }}>
         {entries.length} registro{entries.length !== 1 ? "s" : ""}
       </div>
+
+      {lightbox && (
+        <ImageLightbox
+          src={lightbox.src}
+          alt={lightbox.alt}
+          onClose={() => setLightbox(null)}
+          extraImages={lightbox.extras}
+        />
+      )}
     </div>
   );
 }
@@ -1117,6 +1304,15 @@ function BoothTab({ mapId }: { mapId: string }) {
   const [showFlash, setShowFlash] = useState(false);
   const esRef = useRef<EventSource | null>(null);
   const eventsEndRef = useRef<HTMLDivElement>(null);
+  const [lightboxSrc, setLightboxSrc] = useState<{ src: string; alt: string; extras?: { src: string; label: string }[] } | null>(null);
+  const [cameraDetections, setCameraDetections] = useState<Map<string, HikEvent>>(new Map());
+  const [clock, setClock] = useState(new Date());
+
+  // Live clock
+  useEffect(() => {
+    const timer = setInterval(() => setClock(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, []);
 
   // Fetch LPR cameras
   useEffect(() => {
@@ -1149,9 +1345,9 @@ function BoothTab({ mapId }: { mapId: string }) {
 
   // Fetch access log history
   useEffect(() => {
-    fetch(apiUrl(`/api/plates?mapId=${mapId}&type=log&limit=50`), { headers: { Accept: "application/json" } })
+    fetch(apiUrl(`/api/plates/log?mapId=${mapId}&limit=50`), { headers: { Accept: "application/json" } })
       .then((r) => r.json())
-      .then((data) => setAccessLog(data.log || []))
+      .then((data) => setAccessLog(data.entries || []))
       .catch(() => {});
   }, [mapId]);
 
@@ -1182,6 +1378,24 @@ function BoothTab({ mapId }: { mapId: string }) {
             if (updated.length > 100) return updated.slice(0, 100);
             return updated;
           });
+          // Track detection on camera feed for overlay animation
+          if (event.cameraIp) {
+            setCameraDetections((prev) => {
+              const next = new Map(prev);
+              next.set(event.cameraIp, event);
+              return next;
+            });
+            // Clear overlay after 5 seconds
+            setTimeout(() => {
+              setCameraDetections((prev) => {
+                const next = new Map(prev);
+                if (next.get(event.cameraIp)?.id === event.id) {
+                  next.delete(event.cameraIp);
+                }
+                return next;
+              });
+            }, 5000);
+          }
         }
       } catch {}
     };
@@ -1288,6 +1502,9 @@ function BoothTab({ mapId }: { mapId: string }) {
               {connected ? "EN LÍNEA" : "SIN CONEXIÓN"}
             </span>
           </div>
+          <span className="font-mono text-sm font-bold tabular-nums" style={{ color: palette.accent }}>
+            {clock.toLocaleTimeString("es-UY", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+          </span>
         </div>
       </div>
 
@@ -1360,6 +1577,64 @@ function BoothTab({ mapId }: { mapId: string }) {
                       <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
                       <span className="text-[10px] font-semibold text-white/80 uppercase tracking-wider">REC</span>
                     </div>
+
+                    {/* ── Detection Overlay Animation ── */}
+                    {(() => {
+                      const det = cameraDetections.get(cam.ip);
+                      if (!det) return null;
+                      const detColor = matchColors[det.matchResult || "unknown"] || palette.unknown;
+                      return (
+                        <div
+                          className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none"
+                          style={{
+                            animation: "boothDetectionIn 0.3s ease-out",
+                            background: `linear-gradient(135deg, ${detColor}25, ${detColor}10)`,
+                            border: `2px solid ${detColor}80`,
+                            borderRadius: "0.75rem",
+                          }}
+                        >
+                          {/* Scanning line animation */}
+                          <div
+                            className="absolute left-0 right-0 h-0.5"
+                            style={{
+                              background: `linear-gradient(90deg, transparent, ${detColor}, transparent)`,
+                              animation: "boothScanLine 1.5s ease-in-out infinite",
+                              boxShadow: `0 0 12px ${detColor}`,
+                            }}
+                          />
+                          {/* Plate badge */}
+                          <div
+                            className="px-5 py-2 rounded-xl font-mono text-xl font-black tracking-[0.25em]"
+                            style={{
+                              background: "rgba(0,0,0,0.8)",
+                              color: detColor,
+                              border: `2px solid ${detColor}`,
+                              boxShadow: `0 0 30px ${detColor}40, inset 0 0 20px ${detColor}10`,
+                              animation: "boothPlatePulse 1s ease-in-out infinite",
+                            }}
+                          >
+                            {det.licensePlate}
+                          </div>
+                          {/* Status */}
+                          <div
+                            className="mt-2 px-3 py-1 rounded-lg text-xs font-bold uppercase tracking-widest flex items-center gap-1.5"
+                            style={{
+                              background: "rgba(0,0,0,0.7)",
+                              color: detColor,
+                            }}
+                          >
+                            {matchIcons[det.matchResult || "unknown"]}
+                            {matchLabels[det.matchResult || "unknown"]}
+                            {det.matchOwner && <span className="font-normal ml-1 text-white/70">— {det.matchOwner}</span>}
+                          </div>
+                          {/* Corner brackets for targeting effect */}
+                          <div className="absolute top-3 left-3 w-6 h-6" style={{ borderLeft: `2px solid ${detColor}`, borderTop: `2px solid ${detColor}` }} />
+                          <div className="absolute top-3 right-3 w-6 h-6" style={{ borderRight: `2px solid ${detColor}`, borderTop: `2px solid ${detColor}` }} />
+                          <div className="absolute bottom-3 left-3 w-6 h-6" style={{ borderLeft: `2px solid ${detColor}`, borderBottom: `2px solid ${detColor}` }} />
+                          <div className="absolute bottom-3 right-3 w-6 h-6" style={{ borderRight: `2px solid ${detColor}`, borderBottom: `2px solid ${detColor}` }} />
+                        </div>
+                      );
+                    })()}
                   </div>
                 );
               })
@@ -1413,23 +1688,33 @@ function BoothTab({ mapId }: { mapId: string }) {
                   </span>
                 </div>
               </div>
-              {/* Plate/scene images */}
+              {/* Plate/scene images — click to enlarge */}
               {(latestEvent.plateImageId || latestEvent.fullImageId) && (
                 <div className="flex gap-2 mt-2">
                   {latestEvent.fullImageId && (
                     <img
                       src={apiUrl(`/api/hik/images/${latestEvent.fullImageId}`)}
                       alt="Escena"
-                      className="h-16 rounded-lg object-cover"
+                      className="h-16 rounded-lg object-cover cursor-pointer hover:opacity-80 transition-opacity"
                       style={{ border: `1px solid ${palette.border}`, maxWidth: "200px" }}
+                      onClick={() => {
+                        const extras: { src: string; label: string }[] = [];
+                        if (latestEvent.plateImageId) extras.push({ src: apiUrl(`/api/hik/images/${latestEvent.plateImageId}`), label: "Placa" });
+                        setLightboxSrc({ src: apiUrl(`/api/hik/images/${latestEvent.fullImageId!}`), alt: "Escena completa", extras });
+                      }}
                     />
                   )}
                   {latestEvent.plateImageId && (
                     <img
                       src={apiUrl(`/api/hik/images/${latestEvent.plateImageId}`)}
                       alt="Placa"
-                      className="h-16 rounded-lg object-cover"
+                      className="h-16 rounded-lg object-cover cursor-pointer hover:opacity-80 transition-opacity"
                       style={{ border: `1px solid ${palette.border}`, maxWidth: "120px" }}
+                      onClick={() => {
+                        const extras: { src: string; label: string }[] = [];
+                        if (latestEvent.fullImageId) extras.push({ src: apiUrl(`/api/hik/images/${latestEvent.fullImageId}`), label: "Escena" });
+                        setLightboxSrc({ src: apiUrl(`/api/hik/images/${latestEvent.plateImageId!}`), alt: "Placa", extras });
+                      }}
                     />
                   )}
                 </div>
@@ -1508,8 +1793,16 @@ function BoothTab({ mapId }: { mapId: string }) {
                               <img
                                 src={apiUrl(`/api/hik/images/${entry.plateImageId || entry.fullImageId}`)}
                                 alt="Cap"
-                                className="w-14 h-9 object-cover rounded inline-block"
+                                className="w-14 h-9 object-cover rounded inline-block cursor-pointer hover:opacity-80 transition-opacity"
                                 style={{ border: `1px solid ${palette.border}` }}
+                                onClick={() => {
+                                  const mainId = entry.fullImageId || entry.plateImageId;
+                                  const extras: { src: string; label: string }[] = [];
+                                  if (entry.fullImageId && entry.plateImageId) {
+                                    extras.push({ src: apiUrl(`/api/hik/images/${entry.plateImageId}`), label: "Placa" });
+                                  }
+                                  setLightboxSrc({ src: apiUrl(`/api/hik/images/${mainId!}`), alt: `${entry.plate} — ${formatDate(entry.timestamp)} ${formatTime(entry.timestamp)}`, extras });
+                                }}
                               />
                             ) : (
                               <span style={{ color: palette.textDim }}>—</span>
@@ -1630,23 +1923,35 @@ function BoothTab({ mapId }: { mapId: string }) {
                             Dirección: {ev.direction}
                           </div>
                         )}
-                        {/* Images */}
+                        {/* Images — click to enlarge */}
                         {(ev.plateImageId || ev.fullImageId) && (
                           <div className="flex gap-2 mt-1">
                             {ev.fullImageId && (
                               <img
                                 src={apiUrl(`/api/hik/images/${ev.fullImageId}`)}
                                 alt="Escena"
-                                className="h-14 rounded object-cover"
+                                className="h-14 rounded object-cover cursor-pointer hover:opacity-80 transition-opacity"
                                 style={{ border: `1px solid ${palette.border}`, maxWidth: "150px" }}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  const extras: { src: string; label: string }[] = [];
+                                  if (ev.plateImageId) extras.push({ src: apiUrl(`/api/hik/images/${ev.plateImageId}`), label: "Placa" });
+                                  setLightboxSrc({ src: apiUrl(`/api/hik/images/${ev.fullImageId!}`), alt: `${ev.licensePlate} — Escena`, extras });
+                                }}
                               />
                             )}
                             {ev.plateImageId && (
                               <img
                                 src={apiUrl(`/api/hik/images/${ev.plateImageId}`)}
                                 alt="Placa"
-                                className="h-14 rounded object-cover"
+                                className="h-14 rounded object-cover cursor-pointer hover:opacity-80 transition-opacity"
                                 style={{ border: `1px solid ${palette.border}`, maxWidth: "100px" }}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  const extras: { src: string; label: string }[] = [];
+                                  if (ev.fullImageId) extras.push({ src: apiUrl(`/api/hik/images/${ev.fullImageId}`), label: "Escena" });
+                                  setLightboxSrc({ src: apiUrl(`/api/hik/images/${ev.plateImageId!}`), alt: `${ev.licensePlate} — Placa`, extras });
+                                }}
                               />
                             )}
                           </div>
@@ -1676,6 +1981,16 @@ function BoothTab({ mapId }: { mapId: string }) {
           </div>
         </div>
       </div>
+
+      {/* Lightbox */}
+      {lightboxSrc && (
+        <ImageLightbox
+          src={lightboxSrc.src}
+          alt={lightboxSrc.alt}
+          onClose={() => setLightboxSrc(null)}
+          extraImages={lightboxSrc.extras}
+        />
+      )}
     </div>
   );
 }

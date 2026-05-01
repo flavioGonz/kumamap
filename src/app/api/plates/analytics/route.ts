@@ -114,6 +114,15 @@ export async function GET(request: NextRequest) {
       (e) => e.plate && e.plate !== "NO_LEIDA" && e.plate.trim() !== ""
     );
 
+    // Exclude plates that are currently in the registry (authorized/visitor)
+    // Even if they were "unknown" at detection time, they shouldn't appear as loitering
+    const registeredPlates = new Set(
+      registry.getPlates(mapId).map((p) => p.plate)
+    );
+    const filteredEntries = entries.filter(
+      (e) => !registeredPlates.has(e.plate.toUpperCase().replace(/[^A-Z0-9]/g, ""))
+    );
+
     // Group by plate
     const plateMap = new Map<
       string,
@@ -124,7 +133,7 @@ export async function GET(request: NextRequest) {
       }
     >();
 
-    for (const entry of entries) {
+    for (const entry of filteredEntries) {
       const plate = entry.plate;
       if (!plateMap.has(plate)) {
         plateMap.set(plate, {
@@ -229,7 +238,7 @@ export async function GET(request: NextRequest) {
       minCount,
       analyzedFrom: cutoffDate.toISOString(),
       analyzedUntil: now.toISOString(),
-      totalUnknownAccesses: entries.length,
+      totalUnknownAccesses: filteredEntries.length,
       loiteringCount: results.length,
       loitering: results,
     });

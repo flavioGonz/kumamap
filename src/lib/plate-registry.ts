@@ -378,7 +378,7 @@ class PlateRegistryManager {
   }
 
   /** Export access log as CSV */
-  exportCsv(mapId: string, opts?: { from?: string; until?: string }): string {
+  exportCsv(mapId: string, opts?: { from?: string; until?: string; matchResult?: PlateMatchResult }): string {
     const entries = this.getAccessLog(mapId, { ...opts, limit: 50000 });
     const header = "Fecha,Hora,Matrícula,Estado,Propietario,Cámara,Dirección,Color,Marca,Confianza\n";
     const rows = entries.map((e) => {

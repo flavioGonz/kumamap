@@ -42,14 +42,33 @@ import {
 } from "lucide-react";
 
 // ── Plate Image with fallback ──
+// Module-level cache of URLs that returned errors — survives re-renders/remounts
+const _failedImgUrls = new Set<string>();
 
 function PlateImg({
   src, alt, className, style, onClick,
 }: {
   src: string; alt?: string; className?: string; style?: React.CSSProperties; onClick?: (e: React.MouseEvent) => void;
 }) {
-  const [error, setError] = useState(false);
-  if (error) {
+  // Use ref so setting error doesn't trigger parent re-render cascades
+  const [error, setError] = useState(() => _failedImgUrls.has(src));
+  const errorRef = useRef(error);
+
+  // If src changes and the new src is already known-bad, sync immediately
+  if (_failedImgUrls.has(src) && !errorRef.current) {
+    errorRef.current = true;
+    // We can't call setError during render, but we return the fallback below
+  }
+
+  const handleError = useCallback(() => {
+    if (!errorRef.current) {
+      errorRef.current = true;
+      _failedImgUrls.add(src);
+      setError(true);
+    }
+  }, [src]);
+
+  if (error || _failedImgUrls.has(src)) {
     return (
       <div
         className={className}
@@ -69,9 +88,78 @@ function PlateImg({
     <img
       src={src} alt={alt || ""} className={className} style={style}
       onClick={onClick}
-      onError={() => setError(true)}
+      onError={handleError}
     />
   );
+}
+
+// ── Car brand logo lookup ──
+// Uses logo.clearbit.com for high-quality brand logos (free, no API key needed)
+const CAR_BRAND_DOMAINS: Record<string, string> = {
+  toyota: "toyota.com",
+  volkswagen: "volkswagen.com",
+  vw: "volkswagen.com",
+  chevrolet: "chevrolet.com",
+  ford: "ford.com",
+  fiat: "fiat.com",
+  renault: "renault.com",
+  peugeot: "peugeot.com",
+  citroen: "citroen.com",
+  honda: "honda.com",
+  hyundai: "hyundai.com",
+  kia: "kia.com",
+  nissan: "nissan.com",
+  mazda: "mazda.com",
+  mitsubishi: "mitsubishi-motors.com",
+  subaru: "subaru.com",
+  suzuki: "suzuki.com",
+  bmw: "bmw.com",
+  "mercedes-benz": "mercedes-benz.com",
+  mercedes: "mercedes-benz.com",
+  audi: "audi.com",
+  volvo: "volvocars.com",
+  jeep: "jeep.com",
+  ram: "ramtrucks.com",
+  dodge: "dodge.com",
+  chrysler: "chrysler.com",
+  tesla: "tesla.com",
+  lexus: "lexus.com",
+  infiniti: "infiniti.com",
+  acura: "acura.com",
+  porsche: "porsche.com",
+  "land rover": "landrover.com",
+  jaguar: "jaguar.com",
+  mini: "mini.com",
+  seat: "seat.com",
+  skoda: "skoda.com",
+  chery: "cheryinternational.com",
+  geely: "global.geely.com",
+  byd: "byd.com",
+  changan: "globalchangan.com",
+  haval: "haval.com",
+  greatwall: "gwm.com.cn",
+  lifan: "lifan.com",
+  jac: "jac.com.cn",
+  ssangyong: "ssangyong.com",
+  isuzu: "isuzu.com",
+  daihatsu: "daihatsu.com",
+  iveco: "iveco.com",
+  scania: "scania.com",
+  man: "man.eu",
+  hino: "hino.com",
+};
+
+function getCarBrandLogo(brand: string): string | null {
+  const normalized = brand.toLowerCase().trim();
+  const domain = CAR_BRAND_DOMAINS[normalized];
+  if (domain) return `https://logo.clearbit.com/${domain}`;
+  // Try fuzzy match
+  for (const [key, val] of Object.entries(CAR_BRAND_DOMAINS)) {
+    if (normalized.includes(key) || key.includes(normalized)) {
+      return `https://logo.clearbit.com/${val}`;
+    }
+  }
+  return null;
 }
 
 // ── Types ──
@@ -172,6 +260,7 @@ interface HikEvent {
   fullImageId?: string;
   matchResult?: string;
   matchOwner?: string;
+  macAddress?: string;
 }
 
 type MatchResult = "authorized" | "visitor" | "visitor_expired" | "blocked" | "unknown";
@@ -246,16 +335,19 @@ const categoryOptions: { value: PlateRecord["category"]; label: string; color: s
 
 function GlassInput({ icon, ...props }: React.InputHTMLAttributes<HTMLInputElement> & { icon?: React.ReactNode }) {
   return (
-    <div className="relative">
-      {icon && <div className="absolute left-3 top-1/2 -translate-y-1/2 text-white/20">{icon}</div>}
+    <div className="relative group">
+      {icon && <div className="absolute left-3 top-1/2 -translate-y-1/2 text-white/25 group-focus-within:text-white/50 transition-colors">{icon}</div>}
       <input
         {...props}
-        className={`w-full ${icon ? "pl-10" : "pl-4"} pr-4 py-2.5 rounded-xl text-sm transition-all focus:outline-none ${props.className || ""}`}
+        className={`w-full ${icon ? "pl-10" : "pl-4"} pr-4 py-2.5 rounded-xl text-sm transition-all focus:outline-none focus:ring-1 ${props.className || ""}`}
         style={{
           background: "rgba(255,255,255,0.04)",
           border: "1px solid rgba(255,255,255,0.08)",
           color: palette.text,
-          backdropFilter: "blur(12px)",
+          backdropFilter: "blur(16px)",
+          boxShadow: "0 2px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.03)",
+          // @ts-ignore
+          "--tw-ring-color": `${palette.accent}40`,
           ...props.style,
         }}
       />
@@ -268,12 +360,15 @@ function GlassSelect({ children, ...props }: React.SelectHTMLAttributes<HTMLSele
     <div className="relative">
       <select
         {...props}
-        className={`appearance-none pl-3 pr-8 py-2.5 rounded-xl text-sm font-medium transition-all focus:outline-none ${props.className || ""}`}
+        className={`appearance-none cursor-pointer pl-3.5 pr-9 py-2.5 rounded-xl text-sm font-medium transition-all focus:outline-none focus:ring-1 hover:border-white/15 ${props.className || ""}`}
         style={{
           background: "rgba(255,255,255,0.04)",
           border: "1px solid rgba(255,255,255,0.08)",
           color: palette.text,
-          backdropFilter: "blur(12px)",
+          backdropFilter: "blur(16px)",
+          boxShadow: "0 2px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.03)",
+          // @ts-ignore
+          "--tw-ring-color": `${palette.accent}40`,
           ...props.style,
         }}
       >
@@ -439,7 +534,7 @@ export default function PlatesPage() {
       >
         <div className="max-w-[1600px] mx-auto flex items-center gap-5 px-8 py-4">
           <a
-            href="/"
+            href={apiUrl("/")}
             className="flex items-center justify-center w-9 h-9 rounded-xl transition-all hover:scale-105"
             style={{ background: "rgba(255,255,255,0.04)", border: `1px solid ${palette.border}` }}
           >
@@ -1019,6 +1114,11 @@ function AccessLogTab({ mapId }: { mapId: string }) {
   const [filterResult, setFilterResult] = useState("all");
   const [filterPlate, setFilterPlate] = useState("");
   const [lightbox, setLightbox] = useState<{ src: string; alt: string; extras?: { src: string; label: string }[] } | null>(null);
+  const [showExport, setShowExport] = useState(false);
+  const [exportDateFrom, setExportDateFrom] = useState("");
+  const [exportDateTo, setExportDateTo] = useState("");
+  const [exportStatus, setExportStatus] = useState("all");
+  const [exportFormat, setExportFormat] = useState<"csv" | "json">("csv");
 
   const loadLog = useCallback(() => {
     setLoading(true);
@@ -1033,9 +1133,32 @@ function AccessLogTab({ mapId }: { mapId: string }) {
 
   useEffect(() => { loadLog(); }, [loadLog]);
 
+  const handleExport = () => {
+    const params = new URLSearchParams({ mapId });
+    if (exportStatus !== "all") params.set("matchResult", exportStatus);
+    if (exportDateFrom) params.set("from", new Date(exportDateFrom).toISOString());
+    if (exportDateTo) params.set("to", new Date(exportDateTo + "T23:59:59").toISOString());
+    if (exportFormat === "json") params.set("format", "json");
+    window.open(apiUrl(`/api/plates/export?${params}`), "_blank");
+    setShowExport(false);
+  };
+
+  // Stats for current entries
+  const stats = useMemo(() => {
+    const s = { authorized: 0, visitor: 0, blocked: 0, unknown: 0, total: entries.length };
+    entries.forEach((e) => {
+      if (e.matchResult === "authorized") s.authorized++;
+      else if (e.matchResult === "visitor" || e.matchResult === "visitor_expired") s.visitor++;
+      else if (e.matchResult === "blocked") s.blocked++;
+      else s.unknown++;
+    });
+    return s;
+  }, [entries]);
+
   return (
     <div className="fade-in">
-      <div className="flex items-center gap-3 mb-5">
+      {/* Filter bar */}
+      <div className="flex items-center gap-3 mb-4 flex-wrap">
         <GlassInput
           icon={<Search className="w-4 h-4" />}
           placeholder="Filtrar por matrícula..."
@@ -1054,17 +1177,170 @@ function AccessLogTab({ mapId }: { mapId: string }) {
 
         <div className="flex-1" />
 
+        {/* Stats pills */}
+        {!loading && entries.length > 0 && (
+          <div className="flex items-center gap-1.5 mr-2">
+            {[
+              { label: "Total", count: stats.total, color: palette.accent },
+              { label: "Auth", count: stats.authorized, color: palette.authorized },
+              { label: "Visit", count: stats.visitor, color: palette.visitor },
+              { label: "Bloq", count: stats.blocked, color: palette.blocked },
+              { label: "Desc", count: stats.unknown, color: palette.unknown },
+            ].filter((p) => p.count > 0).map((pill) => (
+              <span
+                key={pill.label}
+                className="text-[10px] px-2 py-1 rounded-full font-mono font-semibold"
+                style={{ background: `${pill.color}12`, color: pill.color, border: `1px solid ${pill.color}20` }}
+              >
+                {pill.count} {pill.label.toLowerCase()}
+              </span>
+            ))}
+          </div>
+        )}
+
         <button
-          onClick={() => {
-            const params = new URLSearchParams({ mapId });
-            window.open(apiUrl(`/api/plates/export?${params}`), "_blank");
+          onClick={() => setShowExport(true)}
+          className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all hover:scale-[1.02] hover:shadow-lg"
+          style={{
+            border: `1px solid ${palette.accent}30`,
+            color: palette.accent,
+            background: `linear-gradient(135deg, ${palette.accent}10, ${palette.accent}05)`,
+            boxShadow: `0 2px 8px ${palette.accent}10`,
           }}
-          className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all hover:scale-[1.02]"
-          style={{ border: `1px solid ${palette.border}`, color: palette.accent, background: `${palette.accent}08` }}
         >
-          <Download className="w-3.5 h-3.5" /> Exportar CSV
+          <Download className="w-4 h-4" /> Exportar
         </button>
       </div>
+
+      {/* Export Modal */}
+      {showExport && (
+        <div
+          className="fixed inset-0 z-[9999] flex items-center justify-center"
+          style={{ background: "rgba(0,0,0,0.6)", backdropFilter: "blur(8px)" }}
+          onClick={() => setShowExport(false)}
+        >
+          <div
+            className="rounded-3xl overflow-hidden shadow-2xl w-full max-w-sm mx-4"
+            style={{
+              background: palette.surface,
+              border: `1px solid ${palette.accent}20`,
+              boxShadow: `0 0 60px ${palette.accent}10, 0 25px 50px rgba(0,0,0,0.5)`,
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="px-6 py-4 flex items-center justify-between" style={{ background: `${palette.accent}06`, borderBottom: `1px solid ${palette.border}` }}>
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: `${palette.accent}15`, border: `1px solid ${palette.accent}25` }}>
+                  <Download className="w-4 h-4" style={{ color: palette.accent }} />
+                </div>
+                <div>
+                  <div className="text-sm font-bold" style={{ color: palette.text }}>Exportar Registros</div>
+                  <div className="text-[10px]" style={{ color: palette.textDim }}>Configura los filtros de exportación</div>
+                </div>
+              </div>
+              <button onClick={() => setShowExport(false)} className="w-7 h-7 rounded-full flex items-center justify-center hover:bg-white/10">
+                <X className="w-4 h-4" style={{ color: palette.textMuted }} />
+              </button>
+            </div>
+
+            <div className="px-6 py-5 space-y-4">
+              {/* Date range */}
+              <div>
+                <label className="text-[10px] uppercase tracking-widest font-semibold mb-2 block" style={{ color: palette.textDim }}>Rango de fechas</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <input
+                    type="date"
+                    value={exportDateFrom}
+                    onChange={(e) => setExportDateFrom(e.target.value)}
+                    className="px-3 py-2 rounded-xl text-xs outline-none"
+                    style={{ background: "rgba(255,255,255,0.04)", border: `1px solid ${palette.border}`, color: palette.text, colorScheme: "dark" }}
+                    placeholder="Desde"
+                  />
+                  <input
+                    type="date"
+                    value={exportDateTo}
+                    onChange={(e) => setExportDateTo(e.target.value)}
+                    className="px-3 py-2 rounded-xl text-xs outline-none"
+                    style={{ background: "rgba(255,255,255,0.04)", border: `1px solid ${palette.border}`, color: palette.text, colorScheme: "dark" }}
+                    placeholder="Hasta"
+                  />
+                </div>
+              </div>
+
+              {/* Status filter */}
+              <div>
+                <label className="text-[10px] uppercase tracking-widest font-semibold mb-2 block" style={{ color: palette.textDim }}>Estado</label>
+                <div className="flex flex-wrap gap-1.5">
+                  {[
+                    { value: "all", label: "Todos", color: palette.accent },
+                    { value: "authorized", label: "Autorizados", color: palette.authorized },
+                    { value: "visitor", label: "Visitantes", color: palette.visitor },
+                    { value: "blocked", label: "Bloqueados", color: palette.blocked },
+                    { value: "unknown", label: "Desconocidos", color: palette.unknown },
+                  ].map((opt) => (
+                    <button
+                      key={opt.value}
+                      onClick={() => setExportStatus(opt.value)}
+                      className="px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-all"
+                      style={{
+                        background: exportStatus === opt.value ? `${opt.color}20` : "rgba(255,255,255,0.03)",
+                        border: `1px solid ${exportStatus === opt.value ? `${opt.color}40` : palette.border}`,
+                        color: exportStatus === opt.value ? opt.color : palette.textMuted,
+                      }}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Format */}
+              <div>
+                <label className="text-[10px] uppercase tracking-widest font-semibold mb-2 block" style={{ color: palette.textDim }}>Formato</label>
+                <div className="flex gap-2">
+                  {(["csv", "json"] as const).map((fmt) => (
+                    <button
+                      key={fmt}
+                      onClick={() => setExportFormat(fmt)}
+                      className="flex-1 px-3 py-2.5 rounded-xl text-xs font-semibold transition-all text-center"
+                      style={{
+                        background: exportFormat === fmt ? `${palette.accent}15` : "rgba(255,255,255,0.03)",
+                        border: `1px solid ${exportFormat === fmt ? `${palette.accent}30` : palette.border}`,
+                        color: exportFormat === fmt ? palette.accent : palette.textMuted,
+                      }}
+                    >
+                      {fmt.toUpperCase()}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="px-6 py-4 flex gap-3" style={{ borderTop: `1px solid ${palette.border}` }}>
+              <button
+                onClick={() => setShowExport(false)}
+                className="flex-1 py-3 rounded-xl text-sm font-semibold transition-all"
+                style={{ background: "rgba(255,255,255,0.04)", color: palette.textMuted, border: `1px solid ${palette.border}` }}
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleExport}
+                className="flex-1 py-3 rounded-xl text-sm font-bold transition-all hover:scale-[1.02] flex items-center justify-center gap-2"
+                style={{
+                  background: `linear-gradient(135deg, ${palette.accent}, ${palette.accent}cc)`,
+                  color: "#fff",
+                  boxShadow: `0 4px 12px ${palette.accent}30`,
+                }}
+              >
+                <Download className="w-4 h-4" /> Exportar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="rounded-2xl overflow-hidden" style={{ border: `1px solid ${palette.border}`, background: palette.surface }}>
         <table className="w-full text-sm">
@@ -1960,27 +2236,38 @@ function BoothTab({ mapId }: { mapId: string }) {
             </div>
             {/* Feed search */}
             <div className="px-3 pb-2">
-              <div className="relative">
-                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5" style={{ color: palette.textDim }} />
+              <div className="relative group">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 transition-colors group-focus-within:opacity-80" style={{ color: palette.textDim }} />
                 <input
                   type="text"
-                  placeholder="Buscar matrícula..."
+                  placeholder="Buscar matrícula, marca, dueño..."
                   value={feedSearch}
                   onChange={(e) => setFeedSearch(e.target.value)}
-                  className="w-full pl-8 pr-3 py-1.5 rounded-lg text-xs outline-none"
+                  className="w-full pl-8 pr-8 py-1.5 rounded-xl text-xs outline-none transition-all focus:ring-1"
                   style={{
-                    background: `${palette.bg}80`,
+                    background: "rgba(255,255,255,0.03)",
                     border: `1px solid ${palette.border}`,
                     color: palette.text,
+                    boxShadow: "inset 0 1px 3px rgba(0,0,0,0.2)",
+                    // @ts-ignore
+                    "--tw-ring-color": `${palette.accent}40`,
                   }}
                 />
+                {feedSearch && (
+                  <button
+                    onClick={() => setFeedSearch("")}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 w-4 h-4 rounded-full flex items-center justify-center hover:bg-white/10 transition-colors"
+                  >
+                    <X className="w-3 h-3" style={{ color: palette.textDim }} />
+                  </button>
+                )}
               </div>
             </div>
           </div>
 
           {/* Events list */}
           <div
-            className="flex-1 overflow-y-auto px-2 py-2 space-y-1.5"
+            className="flex-1 overflow-y-auto px-2 py-2 space-y-1"
             style={{ scrollbarWidth: "thin", scrollbarColor: `${palette.border} transparent` }}
           >
             {filteredEvents.length === 0 ? (
@@ -1996,26 +2283,41 @@ function BoothTab({ mapId }: { mapId: string }) {
             ) : (
               filteredEvents.map((ev) => {
                 const color = matchColors[ev.matchResult || "unknown"] || palette.textMuted;
+                const evTime = new Date(ev.timestamp);
+                const timeStr = evTime.toLocaleTimeString("es-UY", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
                 return (
                   <div
                     key={ev.id}
-                    className="rounded-lg px-3 py-2 transition-all cursor-pointer"
+                    className="rounded-lg px-2.5 py-2 transition-all cursor-pointer group"
                     style={{
-                      background: selectedEvent?.id === ev.id ? color + "12" : "transparent",
-                      border: `1px solid ${selectedEvent?.id === ev.id ? color + "30" : "transparent"}`,
+                      background: "transparent",
+                      border: `1px solid transparent`,
                     }}
-                    onClick={() => setSelectedEvent(selectedEvent?.id === ev.id ? null : ev)}
+                    onClick={() => setSelectedEvent(ev)}
                     onMouseEnter={(e) => {
-                      if (selectedEvent?.id !== ev.id) e.currentTarget.style.background = palette.surfaceHover;
+                      e.currentTarget.style.background = palette.surfaceHover;
+                      e.currentTarget.style.borderColor = `${color}20`;
                     }}
                     onMouseLeave={(e) => {
-                      if (selectedEvent?.id !== ev.id) e.currentTarget.style.background = "transparent";
+                      e.currentTarget.style.background = "transparent";
+                      e.currentTarget.style.borderColor = "transparent";
                     }}
                   >
                     <div className="flex items-center gap-2">
-                      <div className="flex-shrink-0" style={{ color }}>
+                      {/* Time — prominent */}
+                      <div className="flex-shrink-0 text-right" style={{ minWidth: 52 }}>
+                        <div className="font-mono font-bold text-[13px] leading-none" style={{ color: palette.text }}>
+                          {timeStr.slice(0, 5)}
+                        </div>
+                        <div className="font-mono text-[9px] mt-0.5 opacity-50" style={{ color: palette.textMuted }}>
+                          {timeStr.slice(6)}s
+                        </div>
+                      </div>
+                      {/* Status icon */}
+                      <div className="flex-shrink-0 w-5 flex justify-center" style={{ color }}>
                         {matchIcons[ev.matchResult || "unknown"]}
                       </div>
+                      {/* Plate + info */}
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-1.5">
                           <span className="font-mono font-bold text-sm tracking-wider" style={{ color }}>
@@ -2033,77 +2335,177 @@ function BoothTab({ mapId }: { mapId: string }) {
                           </div>
                         )}
                       </div>
-                      <span className="flex-shrink-0 text-[10px] font-mono" style={{ color: palette.textDim }}>
-                        {formatTime(ev.timestamp)}
-                      </span>
+                      {/* Chevron hint */}
+                      <ChevronRight className="w-3.5 h-3.5 flex-shrink-0 opacity-0 group-hover:opacity-40 transition-opacity" style={{ color: palette.textDim }} />
                     </div>
-                    {/* Expanded details */}
-                    {selectedEvent?.id === ev.id && (
-                      <div className="mt-2 pt-2 space-y-1.5" style={{ borderTop: `1px solid ${palette.border}` }}>
-                        <div className="flex items-center gap-1.5 text-xs" style={{ color }}>
-                          {matchIcons[ev.matchResult || "unknown"]}
-                          <span className="font-semibold">{matchLabels[ev.matchResult || "unknown"]}</span>
-                          {ev.matchOwner && (
-                            <span className="ml-1" style={{ color: palette.text }}>— {ev.matchOwner}</span>
-                          )}
-                        </div>
-                        {ev.vehicleBrand && (
-                          <div className="text-xs" style={{ color: palette.textMuted }}>
-                            <Car className="w-3 h-3 inline mr-1" />
-                            {[ev.vehicleColor, ev.vehicleBrand, ev.vehicleModel].filter(Boolean).join(" ")}
-                          </div>
-                        )}
-                        {ev.confidence && (
-                          <div className="text-xs" style={{ color: palette.textMuted }}>
-                            Confianza: {ev.confidence}%
-                          </div>
-                        )}
-                        {ev.direction && (
-                          <div className="text-xs" style={{ color: palette.textMuted }}>
-                            Dirección: {ev.direction}
-                          </div>
-                        )}
-                        {/* Images — click to enlarge */}
-                        {(ev.plateImageId || ev.fullImageId) && (
-                          <div className="flex gap-2 mt-1">
-                            {ev.fullImageId && (
-                              <PlateImg
-                                src={apiUrl(`/api/hik/images/${ev.fullImageId}`)}
-                                alt="Escena"
-                                className="h-14 rounded object-cover cursor-pointer hover:opacity-80 transition-opacity"
-                                style={{ border: `1px solid ${palette.border}`, maxWidth: "150px" }}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  const extras: { src: string; label: string }[] = [];
-                                  if (ev.plateImageId) extras.push({ src: apiUrl(`/api/hik/images/${ev.plateImageId}`), label: "Placa" });
-                                  setLightboxSrc({ src: apiUrl(`/api/hik/images/${ev.fullImageId!}`), alt: `${ev.licensePlate} — Escena`, extras });
-                                }}
-                              />
-                            )}
-                            {ev.plateImageId && (
-                              <PlateImg
-                                src={apiUrl(`/api/hik/images/${ev.plateImageId}`)}
-                                alt="Placa"
-                                className="h-14 rounded object-cover cursor-pointer hover:opacity-80 transition-opacity"
-                                style={{ border: `1px solid ${palette.border}`, maxWidth: "100px" }}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  const extras: { src: string; label: string }[] = [];
-                                  if (ev.fullImageId) extras.push({ src: apiUrl(`/api/hik/images/${ev.fullImageId}`), label: "Escena" });
-                                  setLightboxSrc({ src: apiUrl(`/api/hik/images/${ev.plateImageId!}`), alt: `${ev.licensePlate} — Placa`, extras });
-                                }}
-                              />
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    )}
                   </div>
                 );
               })
             )}
             <div ref={eventsEndRef} />
           </div>
+
+          {/* ── Event Detail Modal ── */}
+          {selectedEvent && (() => {
+            const ev = selectedEvent;
+            const color = matchColors[ev.matchResult || "unknown"] || palette.textMuted;
+            const evTime = new Date(ev.timestamp);
+            const brandLogo = ev.vehicleBrand ? getCarBrandLogo(ev.vehicleBrand) : null;
+            return (
+              <div
+                className="fixed inset-0 z-[9999] flex items-center justify-center"
+                style={{ background: "rgba(0,0,0,0.6)", backdropFilter: "blur(8px)" }}
+                onClick={() => setSelectedEvent(null)}
+              >
+                <div
+                  className="relative rounded-3xl overflow-hidden shadow-2xl w-full max-w-md mx-4"
+                  style={{
+                    background: palette.surface,
+                    border: `1px solid ${color}30`,
+                    boxShadow: `0 0 60px ${color}15, 0 25px 50px rgba(0,0,0,0.5)`,
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {/* Header band */}
+                  <div
+                    className="px-6 py-4 flex items-center justify-between"
+                    style={{ background: `linear-gradient(135deg, ${color}18, ${color}06)`, borderBottom: `1px solid ${color}20` }}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: `${color}20`, border: `1px solid ${color}30` }}>
+                        {matchIcons[ev.matchResult || "unknown"]}
+                      </div>
+                      <div>
+                        <div className="text-[10px] font-semibold uppercase tracking-widest" style={{ color }}>{matchLabels[ev.matchResult || "unknown"]}</div>
+                        {ev.matchOwner && <div className="text-xs mt-0.5" style={{ color: palette.text }}>{ev.matchOwner}</div>}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => setSelectedEvent(null)}
+                      className="w-8 h-8 rounded-full flex items-center justify-center transition-colors hover:bg-white/10"
+                    >
+                      <X className="w-4 h-4" style={{ color: palette.textMuted }} />
+                    </button>
+                  </div>
+
+                  {/* Plate number — big */}
+                  <div className="px-6 pt-5 pb-3 text-center">
+                    <div
+                      className="font-mono font-black text-3xl tracking-[0.25em] inline-block px-5 py-2 rounded-xl"
+                      style={{
+                        color,
+                        background: `${color}08`,
+                        border: `2px solid ${color}25`,
+                        textShadow: `0 0 30px ${color}30`,
+                      }}
+                    >
+                      {ev.licensePlate}
+                    </div>
+                  </div>
+
+                  {/* Timestamp — very prominent */}
+                  <div className="text-center pb-4">
+                    <div className="font-mono text-xl font-bold" style={{ color: palette.text }}>
+                      {evTime.toLocaleTimeString("es-UY", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+                    </div>
+                    <div className="text-xs mt-0.5" style={{ color: palette.textDim }}>
+                      {evTime.toLocaleDateString("es-UY", { weekday: "long", day: "2-digit", month: "long", year: "numeric" })}
+                    </div>
+                  </div>
+
+                  {/* Details grid */}
+                  <div className="px-6 pb-4 space-y-2">
+                    {/* Vehicle info */}
+                    {(ev.vehicleBrand || ev.vehicleColor) && (
+                      <div className="flex items-center gap-3 rounded-xl px-4 py-3" style={{ background: palette.bg, border: `1px solid ${palette.border}` }}>
+                        {brandLogo ? (
+                          <img src={brandLogo} alt={ev.vehicleBrand} className="w-8 h-8 object-contain" style={{ filter: "brightness(0) invert(0.7)" }} />
+                        ) : (
+                          <Car className="w-5 h-5 flex-shrink-0" style={{ color: palette.textMuted }} />
+                        )}
+                        <div>
+                          <div className="text-sm font-medium" style={{ color: palette.text }}>
+                            {[ev.vehicleBrand, ev.vehicleModel].filter(Boolean).join(" ") || "Vehículo"}
+                          </div>
+                          {ev.vehicleColor && (
+                            <div className="text-[11px]" style={{ color: palette.textDim }}>Color: {ev.vehicleColor}</div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Stats row */}
+                    <div className="grid grid-cols-2 gap-2">
+                      {ev.confidence && (
+                        <div className="rounded-xl px-4 py-2.5 text-center" style={{ background: palette.bg, border: `1px solid ${palette.border}` }}>
+                          <div className="text-lg font-bold font-mono" style={{ color: palette.accent }}>{ev.confidence}%</div>
+                          <div className="text-[9px] uppercase tracking-widest font-semibold mt-0.5" style={{ color: palette.textDim }}>Confianza</div>
+                        </div>
+                      )}
+                      {ev.direction && (
+                        <div className="rounded-xl px-4 py-2.5 text-center" style={{ background: palette.bg, border: `1px solid ${palette.border}` }}>
+                          <div className="text-lg font-bold" style={{ color: palette.text }}>{ev.direction === "approaching" ? "↓ Entrada" : ev.direction === "leaving" ? "↑ Salida" : ev.direction}</div>
+                          <div className="text-[9px] uppercase tracking-widest font-semibold mt-0.5" style={{ color: palette.textDim }}>Dirección</div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Images */}
+                    {(ev.plateImageId || ev.fullImageId) && (
+                      <div className="flex gap-3 pt-1">
+                        {ev.fullImageId && (
+                          <PlateImg
+                            src={apiUrl(`/api/hik/images/${ev.fullImageId}`)}
+                            alt="Escena"
+                            className="flex-1 h-28 rounded-xl object-cover cursor-pointer hover:opacity-80 transition-opacity"
+                            style={{ border: `1px solid ${palette.border}` }}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const extras: { src: string; label: string }[] = [];
+                              if (ev.plateImageId) extras.push({ src: apiUrl(`/api/hik/images/${ev.plateImageId}`), label: "Placa" });
+                              setLightboxSrc({ src: apiUrl(`/api/hik/images/${ev.fullImageId!}`), alt: `${ev.licensePlate} — Escena`, extras });
+                            }}
+                          />
+                        )}
+                        {ev.plateImageId && (
+                          <PlateImg
+                            src={apiUrl(`/api/hik/images/${ev.plateImageId}`)}
+                            alt="Placa"
+                            className="w-28 h-28 rounded-xl object-cover cursor-pointer hover:opacity-80 transition-opacity"
+                            style={{ border: `1px solid ${palette.border}` }}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const extras: { src: string; label: string }[] = [];
+                              if (ev.fullImageId) extras.push({ src: apiUrl(`/api/hik/images/${ev.fullImageId}`), label: "Escena" });
+                              setLightboxSrc({ src: apiUrl(`/api/hik/images/${ev.plateImageId!}`), alt: `${ev.licensePlate} — Placa`, extras });
+                            }}
+                          />
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Footer — Camera info */}
+                  {(() => {
+                    const cam = lprCameras.find((c) => c.ip === ev.cameraIp || c.nodeId === ev.nodeId);
+                    const camLabel = cam?.label || ev.cameraIp || "—";
+                    return (
+                      <div className="px-6 py-3 space-y-1" style={{ borderTop: `1px solid ${palette.border}` }}>
+                        <div className="flex items-center gap-2">
+                          <Camera className="w-3.5 h-3.5" style={{ color: palette.textDim }} />
+                          <span className="text-xs font-medium" style={{ color: palette.textMuted }}>{camLabel}</span>
+                        </div>
+                        <div className="flex items-center justify-between text-[10px]" style={{ color: palette.textDim }}>
+                          <span className="font-mono">IP: {ev.cameraIp || "—"}{ev.macAddress ? ` · MAC: ${ev.macAddress}` : ""}</span>
+                          <span className="font-mono">{ev.id.slice(0, 8)}</span>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
+              </div>
+            );
+          })()}
 
           {/* Feed footer with stats */}
           <div

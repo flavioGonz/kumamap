@@ -140,6 +140,79 @@ async function uploadPlatesToCamera(
 }
 
 /**
+ * GET /api/plates/sync/read?ip=x&user=x&pass=x
+ * Read the vehicle list from a single Hikvision LPR camera.
+ * Returns the plates currently stored on the camera.
+ */
+export async function GET(req: NextRequest) {
+  const ip = req.nextUrl.searchParams.get("ip");
+  const user = req.nextUrl.searchParams.get("user") || "admin";
+  const pass = req.nextUrl.searchParams.get("pass") || "";
+
+  if (!ip) {
+    return NextResponse.json({ error: "ip required" }, { status: 400 });
+  }
+
+  try {
+    const res = await isapiRequest(
+      ip,
+      "/ISAPI/Traffic/channels/1/vehicleList?format=json",
+      "GET",
+      user,
+      pass
+    );
+
+    if (res.status !== 200) {
+      return NextResponse.json(
+        { error: `Camera returned HTTP ${res.status}`, plates: [] },
+        { status: 502 }
+      );
+    }
+
+    // Parse the Hikvision response
+    let cameraPlates: { id: string; plate: string; listType: string; ownerInfo?: string }[] = [];
+    try {
+      const data = JSON.parse(res.data);
+      const vehicles = data?.VehicleList?.VehicleInfo || data?.vehicleList || [];
+      const list = Array.isArray(vehicles) ? vehicles : [vehicles];
+      cameraPlates = list
+        .filter((v: any) => v && v.plateNo)
+        .map((v: any) => ({
+          id: v.id || v.ID || "",
+          plate: (v.plateNo || "").toUpperCase().replace(/[^A-Z0-9]/g, ""),
+          listType: v.listType || "whiteList",
+          ownerInfo: v.ownerInfo || "",
+        }));
+    } catch {
+      // Try XML parsing as fallback
+      const plateMatches = res.data.matchAll(/<plateNo>([^<]+)<\/plateNo>/g);
+      const idMatches = res.data.matchAll(/<id>([^<]+)<\/id>/g);
+      const listMatches = res.data.matchAll(/<listType>([^<]+)<\/listType>/g);
+      const ownerMatches = res.data.matchAll(/<ownerInfo>([^<]*)<\/ownerInfo>/g);
+
+      const plates = [...plateMatches].map((m) => m[1]);
+      const ids = [...idMatches].map((m) => m[1]);
+      const lists = [...listMatches].map((m) => m[1]);
+      const owners = [...ownerMatches].map((m) => m[1]);
+
+      cameraPlates = plates.map((p, i) => ({
+        id: ids[i] || "",
+        plate: p.toUpperCase().replace(/[^A-Z0-9]/g, ""),
+        listType: lists[i] || "whiteList",
+        ownerInfo: owners[i] || "",
+      }));
+    }
+
+    return NextResponse.json({ ip, count: cameraPlates.length, plates: cameraPlates });
+  } catch (err: any) {
+    return NextResponse.json(
+      { error: err.message || "Connection error", plates: [] },
+      { status: 502 }
+    );
+  }
+}
+
+/**
  * POST /api/plates/sync
  * Sync plates from the registry to Hikvision LPR cameras.
  * Body: { mapId, cameras: [{ ip, user, pass, label }], mode: "full" | "add_only" }

@@ -47,6 +47,14 @@ import {
   Building2,
   ScanLine,
   FileSpreadsheet,
+  CameraIcon,
+  ArrowLeftRight,
+  ArrowDownToLine,
+  ArrowUpFromLine,
+  CheckCircle2,
+  XCircle,
+  Loader2,
+  ImageIcon,
 } from "lucide-react";
 
 // ── Plate Image with fallback ──
@@ -671,6 +679,7 @@ function RegistryTab({ mapId }: { mapId: string }) {
   const [addModal, setAddModal] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState<{ ok: boolean; msg: string } | null>(null);
+  const [syncModal, setSyncModal] = useState(false);
 
   const loadPlates = useCallback(() => {
     setLoading(true);
@@ -755,66 +764,16 @@ function RegistryTab({ mapId }: { mapId: string }) {
         <div className="flex-1" />
 
         <button
-          disabled={syncing}
-          onClick={async () => {
-            if (!confirm("¿Sincronizar matrículas autorizadas y bloqueadas a todas las cámaras LPR de este mapa?")) return;
-            setSyncing(true);
-            setSyncResult(null);
-            try {
-              // Fetch LPR cameras for this map
-              const camRes = await fetch(apiUrl("/api/cameras"), { headers: { Accept: "application/json" } });
-              const camData = await camRes.json();
-              const allCams = camData.cameras || [];
-              const lprCams = allCams.filter((c: any) => {
-                const lbl = (c.label || "").toLowerCase();
-                return c.mapId === mapId && c.ip && (
-                  lbl.includes("lpr") || lbl.includes("placa") || lbl.includes("patente") ||
-                  lbl.includes("anpr") || lbl.includes("acceso") || lbl.includes("entrada") ||
-                  lbl.includes("salida") || lbl.includes("gate") || lbl.includes("barrera")
-                );
-              });
-
-              if (lprCams.length === 0) {
-                setSyncResult({ ok: false, msg: "No se encontraron cámaras LPR en este mapa. Asegurate de que las cámaras tengan 'LPR' en el nombre." });
-                setSyncing(false);
-                return;
-              }
-
-              const cameras = lprCams.map((c: any) => ({
-                ip: c.ip,
-                user: c.mgmtUser || "admin",
-                pass: c.mgmtPassword || "",
-                label: c.label,
-              }));
-
-              const res = await fetch(apiUrl("/api/plates/sync"), {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ mapId, cameras, mode: "full" }),
-              });
-              const result = await res.json();
-
-              if (result.error) {
-                setSyncResult({ ok: false, msg: result.error });
-              } else {
-                const msg = `${result.totalPlates} matrículas → ${result.successCameras}/${result.totalCameras} cámaras sincronizadas`;
-                setSyncResult({ ok: result.successCameras > 0, msg });
-              }
-            } catch (err: any) {
-              setSyncResult({ ok: false, msg: err.message || "Error de conexión" });
-            }
-            setSyncing(false);
-          }}
+          onClick={() => setSyncModal(true)}
           className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all hover:scale-[1.02]"
           style={{
-            border: `1px solid ${palette.border}`,
+            border: `1px solid ${palette.accent}30`,
             color: palette.accent,
             background: `${palette.accent}08`,
-            opacity: syncing ? 0.6 : 1,
           }}
         >
-          {syncing ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
-          {syncing ? "Sincronizando..." : "Sync a Cámaras"}
+          <ArrowLeftRight className="w-3.5 h-3.5" />
+          Sync a Cámaras
         </button>
 
         <button
@@ -829,6 +788,15 @@ function RegistryTab({ mapId }: { mapId: string }) {
           <Plus className="w-4 h-4" /> Agregar Matrícula
         </button>
       </div>
+
+      {/* Sync Modal */}
+      {syncModal && (
+        <SyncModal
+          mapId={mapId}
+          onClose={() => setSyncModal(false)}
+          onSyncComplete={() => { loadPlates(); setSyncResult({ ok: true, msg: "Sincronización completada" }); }}
+        />
+      )}
 
       {/* Sync result notification */}
       {syncResult && (
@@ -2817,6 +2785,802 @@ function AnalyticsTab({ mapId }: { mapId: string }) {
   );
 }
 
+// ── Webcam Cédula Scanner ────────────────────────────────────────────────────
+
+function CedulaWebcamScanner({ onScanResult }: { onScanResult: (cedula: string, name?: string) => void }) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [stream, setStream] = useState<MediaStream | null>(null);
+  const [scanning, setScanning] = useState(false);
+  const [ocrProcessing, setOcrProcessing] = useState(false);
+  const [scanStatus, setScanStatus] = useState<string>("Iniciando cámara...");
+  const [scanMode, setScanMode] = useState<"barcode" | "ocr">("barcode");
+  const scannerInstanceRef = useRef<any>(null);
+  const mountedRef = useRef(true);
+
+  // Start webcam
+  useEffect(() => {
+    mountedRef.current = true;
+    let localStream: MediaStream | null = null;
+
+    navigator.mediaDevices
+      .getUserMedia({ video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } } })
+      .then((s) => {
+        if (!mountedRef.current) { s.getTracks().forEach((t) => t.stop()); return; }
+        localStream = s;
+        setStream(s);
+        if (videoRef.current) {
+          videoRef.current.srcObject = s;
+          videoRef.current.play().catch(() => {});
+        }
+        setScanStatus("Apunte la cédula a la cámara");
+        setScanning(true);
+      })
+      .catch((err) => {
+        setScanStatus(`Error: ${err.message}`);
+      });
+
+    return () => {
+      mountedRef.current = false;
+      if (localStream) localStream.getTracks().forEach((t) => t.stop());
+      if (scannerInstanceRef.current) {
+        try { scannerInstanceRef.current.stop(); } catch {}
+      }
+    };
+  }, []);
+
+  // Barcode scanning loop using html5-qrcode
+  useEffect(() => {
+    if (!scanning || scanMode !== "barcode" || !videoRef.current) return;
+    let active = true;
+
+    const startBarcodeScanner = async () => {
+      try {
+        const { Html5Qrcode } = await import("html5-qrcode");
+        // We scan frames from the video manually instead of using Html5QrcodeScanner
+        // which needs a container. Use the raw decode approach.
+        const scanner = new Html5Qrcode("cedula-scanner-hidden");
+        scannerInstanceRef.current = scanner;
+
+        const poll = async () => {
+          if (!active || !videoRef.current || !canvasRef.current) return;
+
+          const video = videoRef.current;
+          const canvas = canvasRef.current;
+          const ctx = canvas.getContext("2d");
+          if (!ctx || video.readyState < 2) {
+            if (active) setTimeout(poll, 500);
+            return;
+          }
+
+          canvas.width = video.videoWidth;
+          canvas.height = video.videoHeight;
+          ctx.drawImage(video, 0, 0);
+
+          try {
+            const imageData = canvas.toDataURL("image/jpeg", 0.9);
+            // Create a temporary image file from the data URL
+            const blob = await (await fetch(imageData)).blob();
+            const file = new File([blob], "frame.jpg", { type: "image/jpeg" });
+            const result = await scanner.scanFileV2(file, false);
+            if (result && result.decodedText) {
+              const text = result.decodedText.trim();
+              // Try to parse cédula data from barcode
+              const parsed = parseCedulaBarcode(text);
+              onScanResult(parsed.cedula, parsed.name);
+              return; // Stop polling on success
+            }
+          } catch {
+            // No barcode found in this frame — continue
+          }
+
+          if (active) setTimeout(poll, 800);
+        };
+
+        // Start after video is ready
+        setTimeout(poll, 1000);
+      } catch (err) {
+        console.error("Barcode scanner init error:", err);
+        setScanStatus("Error al iniciar scanner de barcode");
+      }
+    };
+
+    startBarcodeScanner();
+
+    return () => {
+      active = false;
+      if (scannerInstanceRef.current) {
+        try { scannerInstanceRef.current.clear(); } catch {}
+        scannerInstanceRef.current = null;
+      }
+    };
+  }, [scanning, scanMode, onScanResult]);
+
+  // OCR capture
+  const handleOcrCapture = async () => {
+    if (!videoRef.current || !canvasRef.current) return;
+
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    ctx.drawImage(video, 0, 0);
+
+    setOcrProcessing(true);
+    setScanStatus("Procesando imagen con OCR...");
+
+    try {
+      const Tesseract = await import("tesseract.js");
+      const { data } = await Tesseract.recognize(canvas, "spa", {
+        logger: (m: any) => {
+          if (m.status === "recognizing text" && typeof m.progress === "number") {
+            setScanStatus(`Reconociendo texto... ${Math.round(m.progress * 100)}%`);
+          }
+        },
+      });
+
+      const text = data.text;
+      // Try to extract cédula number (Uruguayan format: X.XXX.XXX-X)
+      const cedulaMatch = text.match(/(\d[\d.]{5,9}-?\d)/);
+      const cedula = cedulaMatch ? cedulaMatch[1].replace(/[.\-]/g, "") : "";
+
+      // Try to extract name (usually on lines above/below the cédula)
+      const lines = text.split("\n").map((l: string) => l.trim()).filter((l: string) => l.length > 3);
+      const nameCandidate = lines.find((l: string) =>
+        /^[A-ZÁÉÍÓÚÑ][a-záéíóúñ]/.test(l) && !l.match(/\d{4,}/) && l.length > 5
+      );
+
+      if (cedula) {
+        onScanResult(cedula, nameCandidate || undefined);
+      } else {
+        setScanStatus("No se pudo leer la cédula. Intente nuevamente.");
+      }
+    } catch (err) {
+      setScanStatus("Error en OCR. Intente nuevamente.");
+    }
+    setOcrProcessing(false);
+  };
+
+  return (
+    <div className="rounded-xl overflow-hidden" style={{ background: "rgba(0,0,0,0.5)", border: `1px solid ${palette.border}` }}>
+      {/* Video preview */}
+      <div className="relative aspect-video bg-black">
+        <video ref={videoRef} className="w-full h-full object-cover" autoPlay playsInline muted />
+
+        {/* Scan overlay */}
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+          <div
+            className="w-[80%] h-[60%] rounded-2xl"
+            style={{
+              border: `2px solid ${palette.gold}60`,
+              boxShadow: `0 0 30px ${palette.gold}15, inset 0 0 30px ${palette.gold}05`,
+            }}
+          >
+            {scanMode === "barcode" && scanning && (
+              <div className="absolute top-0 left-0 right-0 h-[2px] animate-scan-line" style={{ background: `linear-gradient(90deg, transparent, ${palette.gold}, transparent)` }} />
+            )}
+          </div>
+        </div>
+
+        {/* Status */}
+        <div className="absolute bottom-3 left-3 right-3 flex items-center justify-between">
+          <span className="px-3 py-1 rounded-lg text-xs font-medium" style={{ background: "rgba(0,0,0,0.7)", color: palette.gold }}>
+            {ocrProcessing ? <Loader2 className="w-3 h-3 inline animate-spin mr-1" /> : <ScanLine className="w-3 h-3 inline mr-1" />}
+            {scanStatus}
+          </span>
+        </div>
+      </div>
+
+      {/* Controls */}
+      <div className="flex items-center gap-2 p-3">
+        <button
+          type="button"
+          onClick={() => setScanMode("barcode")}
+          className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-semibold transition-all"
+          style={{
+            background: scanMode === "barcode" ? `${palette.gold}20` : "transparent",
+            border: `1px solid ${scanMode === "barcode" ? palette.gold : palette.border}`,
+            color: scanMode === "barcode" ? palette.gold : palette.textMuted,
+          }}
+        >
+          <ScanLine className="w-3.5 h-3.5" /> Barcode Auto
+        </button>
+        <button
+          type="button"
+          onClick={() => { setScanMode("ocr"); setScanStatus("Posicione la cédula y capture"); }}
+          className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-semibold transition-all"
+          style={{
+            background: scanMode === "ocr" ? `${palette.accent}20` : "transparent",
+            border: `1px solid ${scanMode === "ocr" ? palette.accent : palette.border}`,
+            color: scanMode === "ocr" ? palette.accent : palette.textMuted,
+          }}
+        >
+          <ImageIcon className="w-3.5 h-3.5" /> OCR Manual
+        </button>
+        {scanMode === "ocr" && (
+          <button
+            type="button"
+            disabled={ocrProcessing}
+            onClick={handleOcrCapture}
+            className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold transition-all hover:scale-[1.02] disabled:opacity-50"
+            style={{
+              background: `linear-gradient(135deg, ${palette.accent}, ${palette.accent}cc)`,
+              color: "#000",
+            }}
+          >
+            <CameraIcon className="w-3.5 h-3.5" /> {ocrProcessing ? "Procesando..." : "Capturar"}
+          </button>
+        )}
+      </div>
+
+      {/* Hidden elements for html5-qrcode */}
+      <div id="cedula-scanner-hidden" style={{ display: "none" }} />
+      <canvas ref={canvasRef} style={{ display: "none" }} />
+
+      <style>{`
+        @keyframes scan-line-move {
+          0% { transform: translateY(0); }
+          100% { transform: translateY(calc(100% - 2px)); }
+        }
+        .animate-scan-line {
+          animation: scan-line-move 2s ease-in-out infinite alternate;
+          position: absolute;
+        }
+      `}</style>
+    </div>
+  );
+}
+
+/** Parse Uruguayan cédula barcode data */
+function parseCedulaBarcode(raw: string): { cedula: string; name?: string } {
+  // PDF417 barcodes on Uruguayan cédulas often contain pipe-separated or fixed-width fields
+  // Common format: CEDULA|APELLIDO|NOMBRE|...
+  // Also handle raw number (just the cédula number)
+
+  // If it's just digits, it's the cédula number
+  const digitsOnly = raw.replace(/[^0-9]/g, "");
+  if (/^\d{6,8}$/.test(digitsOnly)) {
+    return { cedula: digitsOnly };
+  }
+
+  // Try pipe-separated
+  if (raw.includes("|")) {
+    const parts = raw.split("|");
+    const cedula = parts[0]?.replace(/\D/g, "") || digitsOnly;
+    const name = [parts[2], parts[1]].filter(Boolean).join(" ").trim();
+    return { cedula, name: name || undefined };
+  }
+
+  // Try to find a cédula pattern in the text
+  const match = raw.match(/(\d[\d.]{5,9}-?\d?)/);
+  if (match) {
+    return { cedula: match[1].replace(/[.\-]/g, "") };
+  }
+
+  // Fallback: return raw as cédula
+  return { cedula: raw.replace(/\D/g, "").slice(0, 8) || raw };
+}
+
+// ── Sync Comparison Modal ────────────────────────────────────────────────────
+
+interface CameraPlate {
+  id: string;
+  plate: string;
+  listType: string;
+  ownerInfo?: string;
+}
+
+interface SyncComparisonData {
+  cameraIp: string;
+  cameraLabel: string;
+  cameraPlates: CameraPlate[];
+  loading: boolean;
+  error?: string;
+}
+
+function SyncModal({
+  mapId,
+  onClose,
+  onSyncComplete,
+}: {
+  mapId: string;
+  onClose: () => void;
+  onSyncComplete: () => void;
+}) {
+  const [lprCameras, setLprCameras] = useState<any[]>([]);
+  const [cameraData, setCameraData] = useState<Map<string, SyncComparisonData>>(new Map());
+  const [systemPlates, setSystemPlates] = useState<PlateRecord[]>([]);
+  const [loadingCams, setLoadingCams] = useState(true);
+  const [selectedCamera, setSelectedCamera] = useState<string>("");
+  const [syncing, setSyncing] = useState(false);
+  const [syncProgress, setSyncProgress] = useState<{ step: string; progress: number; detail: string }>({ step: "", progress: 0, detail: "" });
+  const [syncDone, setSyncDone] = useState(false);
+  const [syncResults, setSyncResults] = useState<any>(null);
+  const [importPlates, setImportPlates] = useState<Set<string>>(new Set());
+  const [importing, setImporting] = useState(false);
+
+  // Load cameras and system plates
+  useEffect(() => {
+    const load = async () => {
+      // Fetch system plates
+      const { data: plateData } = await apiFetch<{ plates: PlateRecord[] }>(apiUrl(`/api/plates?mapId=${mapId}`));
+      setSystemPlates(plateData?.plates || []);
+
+      // Fetch LPR cameras
+      const camRes = await fetch(apiUrl("/api/cameras"), { headers: { Accept: "application/json" } });
+      const camData = await camRes.json();
+      const allCams = camData.cameras || [];
+      const lprs = allCams.filter((c: any) => {
+        const lbl = (c.label || "").toLowerCase();
+        return c.mapId === mapId && c.ip && (
+          lbl.includes("lpr") || lbl.includes("placa") || lbl.includes("patente") ||
+          lbl.includes("anpr") || lbl.includes("acceso") || lbl.includes("entrada") ||
+          lbl.includes("salida") || lbl.includes("gate") || lbl.includes("barrera")
+        );
+      });
+      setLprCameras(lprs);
+      if (lprs.length > 0) setSelectedCamera(lprs[0].ip);
+      setLoadingCams(false);
+
+      // Load plates from each camera
+      for (const cam of lprs) {
+        setCameraData((prev) => {
+          const next = new Map(prev);
+          next.set(cam.ip, { cameraIp: cam.ip, cameraLabel: cam.label, cameraPlates: [], loading: true });
+          return next;
+        });
+
+        try {
+          const params = new URLSearchParams({
+            ip: cam.ip,
+            user: cam.mgmtUser || "admin",
+            pass: cam.mgmtPassword || "",
+          });
+          const res = await fetch(apiUrl(`/api/plates/sync?${params}`));
+          const data = await res.json();
+          setCameraData((prev) => {
+            const next = new Map(prev);
+            next.set(cam.ip, {
+              cameraIp: cam.ip,
+              cameraLabel: cam.label,
+              cameraPlates: data.plates || [],
+              loading: false,
+              error: data.error,
+            });
+            return next;
+          });
+        } catch (err: any) {
+          setCameraData((prev) => {
+            const next = new Map(prev);
+            next.set(cam.ip, {
+              cameraIp: cam.ip,
+              cameraLabel: cam.label,
+              cameraPlates: [],
+              loading: false,
+              error: err.message,
+            });
+            return next;
+          });
+        }
+      }
+    };
+
+    load();
+  }, [mapId]);
+
+  const currentCam = cameraData.get(selectedCamera);
+  const systemSet = new Set(systemPlates.map((p) => p.plate));
+  const cameraSet = new Set(currentCam?.cameraPlates.map((p) => p.plate) || []);
+
+  const onlyInSystem = systemPlates.filter((p) => !cameraSet.has(p.plate) && (p.category === "authorized" || p.category === "blocked"));
+  const onlyInCamera = (currentCam?.cameraPlates || []).filter((p) => !systemSet.has(p.plate));
+  const inBoth = systemPlates.filter((p) => cameraSet.has(p.plate));
+
+  // Push to camera (sync system → camera)
+  const handlePushToCamera = async () => {
+    setSyncing(true);
+    setSyncDone(false);
+    setSyncProgress({ step: "Preparando sincronización...", progress: 5, detail: "" });
+
+    try {
+      const cam = lprCameras.find((c: any) => c.ip === selectedCamera);
+      if (!cam) return;
+
+      setSyncProgress({ step: "Limpiando matrículas de cámara...", progress: 20, detail: cam.label });
+      await new Promise((r) => setTimeout(r, 500));
+
+      setSyncProgress({ step: "Subiendo matrículas del sistema...", progress: 40, detail: `${systemPlates.filter((p) => p.category !== "visitor").length} matrículas` });
+
+      const res = await fetch(apiUrl("/api/plates/sync"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mapId,
+          cameras: [{
+            ip: cam.ip,
+            user: cam.mgmtUser || "admin",
+            pass: cam.mgmtPassword || "",
+            label: cam.label,
+          }],
+          mode: "full",
+        }),
+      });
+      const result = await res.json();
+
+      setSyncProgress({ step: "Verificando...", progress: 80, detail: "" });
+      await new Promise((r) => setTimeout(r, 500));
+
+      setSyncProgress({ step: "¡Completado!", progress: 100, detail: "" });
+      setSyncResults(result);
+      setSyncDone(true);
+
+      // Reload camera data
+      const params = new URLSearchParams({
+        ip: cam.ip,
+        user: cam.mgmtUser || "admin",
+        pass: cam.mgmtPassword || "",
+      });
+      const reloadRes = await fetch(apiUrl(`/api/plates/sync?${params}`));
+      const reloadData = await reloadRes.json();
+      setCameraData((prev) => {
+        const next = new Map(prev);
+        next.set(cam.ip, {
+          cameraIp: cam.ip,
+          cameraLabel: cam.label,
+          cameraPlates: reloadData.plates || [],
+          loading: false,
+        });
+        return next;
+      });
+
+      onSyncComplete();
+    } catch (err: any) {
+      setSyncProgress({ step: "Error", progress: 0, detail: err.message });
+    }
+    setSyncing(false);
+  };
+
+  // Import plates from camera to system
+  const handleImportFromCamera = async () => {
+    if (importPlates.size === 0) return;
+    setImporting(true);
+
+    for (const plate of importPlates) {
+      const camPlate = (currentCam?.cameraPlates || []).find((p) => p.plate === plate);
+      if (!camPlate) continue;
+
+      await apiFetch(apiUrl("/api/plates"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mapId,
+          plate: camPlate.plate,
+          category: camPlate.listType === "blackList" ? "blocked" : "authorized",
+          ownerName: camPlate.ownerInfo || "Importado de cámara",
+        }),
+      });
+    }
+
+    // Reload system plates
+    const { data: plateData } = await apiFetch<{ plates: PlateRecord[] }>(apiUrl(`/api/plates?mapId=${mapId}`));
+    setSystemPlates(plateData?.plates || []);
+    setImportPlates(new Set());
+    setImporting(false);
+    onSyncComplete();
+  };
+
+  const toggleImport = (plate: string) => {
+    setImportPlates((prev) => {
+      const next = new Set(prev);
+      if (next.has(plate)) next.delete(plate); else next.add(plate);
+      return next;
+    });
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-[100] flex items-center justify-center"
+      style={{ background: "rgba(0,0,0,0.75)", backdropFilter: "blur(12px)" }}
+      onClick={onClose}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-5xl max-h-[90vh] overflow-auto rounded-2xl"
+        style={{
+          background: "rgba(10,10,25,0.98)",
+          border: `1px solid ${palette.accent}20`,
+          boxShadow: `0 0 80px rgba(0,0,0,0.6), 0 0 40px ${palette.accent}08`,
+        }}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between p-6 pb-4" style={{ borderBottom: `1px solid ${palette.border}` }}>
+          <div className="flex items-center gap-3">
+            <div className="w-11 h-11 rounded-xl flex items-center justify-center" style={{ background: `${palette.accent}15`, border: `1px solid ${palette.accent}25` }}>
+              <ArrowLeftRight className="w-5 h-5" style={{ color: palette.accent }} />
+            </div>
+            <div>
+              <h2 className="text-lg font-bold" style={{ color: "#fff" }}>Sincronización de Matrículas</h2>
+              <p className="text-xs" style={{ color: palette.textDim }}>Compara y sincroniza matrículas entre el sistema y las cámaras LPR</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="p-2 rounded-xl hover:scale-105 transition-all" style={{ color: palette.textMuted }}>
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {loadingCams ? (
+          <div className="p-12 text-center">
+            <Loader2 className="w-8 h-8 animate-spin mx-auto mb-3" style={{ color: palette.accent }} />
+            <p className="text-sm" style={{ color: palette.textMuted }}>Cargando cámaras LPR...</p>
+          </div>
+        ) : lprCameras.length === 0 ? (
+          <div className="p-12 text-center">
+            <CameraIcon className="w-12 h-12 mx-auto mb-3" style={{ color: palette.textDim }} />
+            <p className="text-sm" style={{ color: palette.textMuted }}>No se encontraron cámaras LPR en este mapa.</p>
+            <p className="text-xs mt-1" style={{ color: palette.textDim }}>Las cámaras deben tener "LPR", "acceso" u otro keyword en su nombre.</p>
+          </div>
+        ) : (
+          <div className="p-6 space-y-5">
+            {/* Camera selector */}
+            <div className="flex items-center gap-3">
+              <span className="text-xs font-medium" style={{ color: palette.textDim }}>Cámara:</span>
+              <div className="flex gap-2 flex-wrap">
+                {lprCameras.map((cam: any) => {
+                  const data = cameraData.get(cam.ip);
+                  const isSelected = selectedCamera === cam.ip;
+                  return (
+                    <button
+                      key={cam.ip}
+                      onClick={() => setSelectedCamera(cam.ip)}
+                      className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-medium transition-all"
+                      style={{
+                        background: isSelected ? `${palette.accent}15` : "rgba(255,255,255,0.03)",
+                        border: `1px solid ${isSelected ? palette.accent + "40" : palette.border}`,
+                        color: isSelected ? palette.accent : palette.textMuted,
+                      }}
+                    >
+                      <CameraIcon className="w-3.5 h-3.5" />
+                      {cam.label}
+                      {data && !data.loading && (
+                        <span className="px-1.5 py-0.5 rounded text-[10px] font-bold" style={{ background: `${palette.accent}10`, color: palette.accent }}>
+                          {data.cameraPlates.length}
+                        </span>
+                      )}
+                      {data?.loading && <Loader2 className="w-3 h-3 animate-spin" />}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Sync progress overlay */}
+            {syncing && (
+              <div className="rounded-2xl p-6 space-y-4" style={{ background: `${palette.accent}08`, border: `1px solid ${palette.accent}20` }}>
+                <div className="flex items-center gap-3">
+                  {syncDone ? (
+                    <CheckCircle2 className="w-6 h-6" style={{ color: palette.authorized }} />
+                  ) : (
+                    <Loader2 className="w-6 h-6 animate-spin" style={{ color: palette.accent }} />
+                  )}
+                  <div>
+                    <p className="text-sm font-semibold" style={{ color: "#fff" }}>{syncProgress.step}</p>
+                    {syncProgress.detail && <p className="text-xs" style={{ color: palette.textMuted }}>{syncProgress.detail}</p>}
+                  </div>
+                </div>
+                {/* Progress bar */}
+                <div className="h-2 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.06)" }}>
+                  <div
+                    className="h-full rounded-full transition-all duration-700"
+                    style={{
+                      width: `${syncProgress.progress}%`,
+                      background: syncDone
+                        ? `linear-gradient(90deg, ${palette.authorized}, ${palette.authorized}cc)`
+                        : `linear-gradient(90deg, ${palette.accent}, ${palette.accent}cc)`,
+                      boxShadow: `0 0 10px ${syncDone ? palette.authorized : palette.accent}40`,
+                    }}
+                  />
+                </div>
+                {syncResults && syncDone && (
+                  <div className="text-xs space-y-1" style={{ color: palette.textMuted }}>
+                    {(syncResults.results || []).map((r: any, i: number) => (
+                      <div key={i} className="flex items-center gap-2">
+                        {r.success ? <CheckCircle2 className="w-3.5 h-3.5" style={{ color: palette.authorized }} /> : <XCircle className="w-3.5 h-3.5" style={{ color: palette.danger }} />}
+                        <span>{r.cameraLabel}: {r.added} subidas{r.deleted > 0 ? `, ${r.deleted} eliminadas` : ""}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Comparison */}
+            {!syncing && currentCam && !currentCam.loading && (
+              <>
+                {/* Summary */}
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="rounded-xl p-4 text-center" style={{ background: `${palette.authorized}08`, border: `1px solid ${palette.authorized}15` }}>
+                    <div className="text-2xl font-bold" style={{ color: palette.authorized }}>{inBoth.length}</div>
+                    <div className="text-[10px] uppercase tracking-wider font-medium mt-1" style={{ color: `${palette.authorized}80` }}>En ambos</div>
+                  </div>
+                  <div className="rounded-xl p-4 text-center" style={{ background: `${palette.accent}08`, border: `1px solid ${palette.accent}15` }}>
+                    <div className="text-2xl font-bold" style={{ color: palette.accent }}>{onlyInSystem.length}</div>
+                    <div className="text-[10px] uppercase tracking-wider font-medium mt-1" style={{ color: `${palette.accent}80` }}>Solo en sistema</div>
+                  </div>
+                  <div className="rounded-xl p-4 text-center" style={{ background: `${palette.gold}08`, border: `1px solid ${palette.gold}15` }}>
+                    <div className="text-2xl font-bold" style={{ color: palette.gold }}>{onlyInCamera.length}</div>
+                    <div className="text-[10px] uppercase tracking-wider font-medium mt-1" style={{ color: `${palette.gold}80` }}>Solo en cámara</div>
+                  </div>
+                </div>
+
+                {/* Action buttons */}
+                <div className="flex gap-3">
+                  <button
+                    onClick={handlePushToCamera}
+                    disabled={syncing}
+                    className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-bold transition-all hover:scale-[1.01]"
+                    style={{
+                      background: `linear-gradient(135deg, ${palette.accent}, ${palette.accent}bb)`,
+                      color: "#000",
+                      boxShadow: `0 4px 20px ${palette.accent}30`,
+                    }}
+                  >
+                    <ArrowUpFromLine className="w-4 h-4" /> Subir Sistema → Cámara (Full Sync)
+                  </button>
+                  {onlyInCamera.length > 0 && (
+                    <button
+                      onClick={() => {
+                        // Select all camera-only plates for import
+                        setImportPlates(new Set(onlyInCamera.map((p) => p.plate)));
+                      }}
+                      className="flex items-center gap-2 px-5 py-3 rounded-xl text-sm font-semibold transition-all hover:scale-[1.01]"
+                      style={{
+                        background: `${palette.gold}12`,
+                        border: `1px solid ${palette.gold}30`,
+                        color: palette.gold,
+                      }}
+                    >
+                      <ArrowDownToLine className="w-4 h-4" /> Seleccionar todas para importar
+                    </button>
+                  )}
+                </div>
+
+                {/* Plates comparison tables */}
+                <div className="grid grid-cols-2 gap-4">
+                  {/* System plates */}
+                  <div>
+                    <div className="flex items-center gap-2 mb-3">
+                      <Shield className="w-4 h-4" style={{ color: palette.accent }} />
+                      <span className="text-xs font-bold uppercase tracking-wider" style={{ color: palette.accent }}>
+                        Sistema ({systemPlates.filter((p) => p.category !== "visitor").length})
+                      </span>
+                    </div>
+                    <div className="space-y-1 max-h-[300px] overflow-auto pr-1">
+                      {systemPlates.filter((p) => p.category !== "visitor").map((p) => {
+                        const inCamera = cameraSet.has(p.plate);
+                        return (
+                          <div key={p.id} className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs" style={{ background: "rgba(255,255,255,0.02)", border: `1px solid ${palette.border}` }}>
+                            <span className="w-2 h-2 rounded-full" style={{ background: inCamera ? palette.authorized : palette.gold }} />
+                            <span className="font-mono font-bold flex-1" style={{ color: palette.text }}>{p.plate}</span>
+                            <span className="truncate max-w-[100px]" style={{ color: palette.textDim }}>{p.ownerName}</span>
+                            <span className="text-[10px] px-1.5 py-0.5 rounded" style={{
+                              background: `${p.category === "authorized" ? palette.authorized : palette.blocked}15`,
+                              color: p.category === "authorized" ? palette.authorized : palette.blocked,
+                            }}>
+                              {p.category === "authorized" ? "OK" : "BLK"}
+                            </span>
+                            {inCamera ? (
+                              <CheckCircle2 className="w-3.5 h-3.5 flex-shrink-0" style={{ color: palette.authorized }} />
+                            ) : (
+                              <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ background: `${palette.gold}15`, color: palette.gold }}>pendiente</span>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Camera plates */}
+                  <div>
+                    <div className="flex items-center gap-2 mb-3">
+                      <CameraIcon className="w-4 h-4" style={{ color: palette.gold }} />
+                      <span className="text-xs font-bold uppercase tracking-wider" style={{ color: palette.gold }}>
+                        Cámara: {currentCam.cameraLabel} ({currentCam.cameraPlates.length})
+                      </span>
+                    </div>
+                    {currentCam.error ? (
+                      <div className="rounded-xl p-4 text-center" style={{ background: `${palette.danger}08`, border: `1px solid ${palette.danger}20` }}>
+                        <XCircle className="w-6 h-6 mx-auto mb-2" style={{ color: palette.danger }} />
+                        <p className="text-xs" style={{ color: palette.danger }}>{currentCam.error}</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-1 max-h-[300px] overflow-auto pr-1">
+                        {currentCam.cameraPlates.map((p) => {
+                          const inSystem = systemSet.has(p.plate);
+                          const isSelected = importPlates.has(p.plate);
+                          return (
+                            <div
+                              key={p.id || p.plate}
+                              className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs cursor-pointer transition-all"
+                              style={{
+                                background: isSelected ? `${palette.gold}10` : "rgba(255,255,255,0.02)",
+                                border: `1px solid ${isSelected ? palette.gold + "40" : palette.border}`,
+                              }}
+                              onClick={() => { if (!inSystem) toggleImport(p.plate); }}
+                            >
+                              {!inSystem && (
+                                <input
+                                  type="checkbox"
+                                  checked={isSelected}
+                                  onChange={() => toggleImport(p.plate)}
+                                  className="accent-amber-500 w-3.5 h-3.5"
+                                />
+                              )}
+                              <span className="w-2 h-2 rounded-full" style={{ background: inSystem ? palette.authorized : palette.gold }} />
+                              <span className="font-mono font-bold flex-1" style={{ color: palette.text }}>{p.plate}</span>
+                              <span className="truncate max-w-[100px]" style={{ color: palette.textDim }}>{p.ownerInfo || "—"}</span>
+                              <span className="text-[10px] px-1.5 py-0.5 rounded" style={{
+                                background: `${p.listType === "blackList" ? palette.blocked : palette.authorized}15`,
+                                color: p.listType === "blackList" ? palette.blocked : palette.authorized,
+                              }}>
+                                {p.listType === "blackList" ? "BLK" : "OK"}
+                              </span>
+                              {inSystem ? (
+                                <CheckCircle2 className="w-3.5 h-3.5 flex-shrink-0" style={{ color: palette.authorized }} />
+                              ) : (
+                                <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ background: `${palette.gold}15`, color: palette.gold }}>nueva</span>
+                              )}
+                            </div>
+                          );
+                        })}
+                        {currentCam.cameraPlates.length === 0 && (
+                          <p className="text-xs text-center py-6" style={{ color: palette.textDim }}>Cámara vacía — sin matrículas</p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Import action */}
+                {importPlates.size > 0 && (
+                  <div className="flex items-center gap-3 p-4 rounded-xl" style={{ background: `${palette.gold}08`, border: `1px solid ${palette.gold}20` }}>
+                    <ArrowDownToLine className="w-5 h-5" style={{ color: palette.gold }} />
+                    <span className="text-sm font-medium flex-1" style={{ color: palette.gold }}>
+                      {importPlates.size} matrícula(s) seleccionada(s) para importar de cámara al sistema
+                    </span>
+                    <button
+                      onClick={handleImportFromCamera}
+                      disabled={importing}
+                      className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all hover:scale-[1.02]"
+                      style={{
+                        background: `linear-gradient(135deg, ${palette.gold}, ${palette.gold}cc)`,
+                        color: "#000",
+                      }}
+                    >
+                      {importing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                      {importing ? "Importando..." : "Importar al sistema"}
+                    </button>
+                  </div>
+                )}
+              </>
+            )}
+
+            {/* Camera loading */}
+            {currentCam?.loading && (
+              <div className="text-center py-8">
+                <Loader2 className="w-6 h-6 animate-spin mx-auto mb-2" style={{ color: palette.accent }} />
+                <p className="text-xs" style={{ color: palette.textMuted }}>Leyendo matrículas de {currentCam.cameraLabel}...</p>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── Bitácora Garita Tab ──────────────────────────────────────────────────────
 
 interface Visitor {
@@ -2862,6 +3626,7 @@ function BitacoraTab({ mapId }: { mapId: string }) {
   const [historyModal, setHistoryModal] = useState<{ cedula: string; name: string } | null>(null);
   const [history, setHistory] = useState<Visitor[]>([]);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [cameraOpen, setCameraOpen] = useState(false);
   const scannerRef = useRef<HTMLInputElement>(null);
   const LIMIT = 30;
 
@@ -3153,33 +3918,61 @@ function BitacoraTab({ mapId }: { mapId: string }) {
               </button>
             </div>
 
-            {/* Scanner input — auto-submits on Enter (barcode scanners send Enter) */}
-            <div className="relative">
-              <div className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: palette.gold }}>
-                <ScanLine className="w-5 h-5" />
+            {/* Scanner: text input + webcam toggle */}
+            <div className="space-y-2">
+              <div className="flex gap-2">
+                <div className="relative flex-1">
+                  <div className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: palette.gold }}>
+                    <ScanLine className="w-5 h-5" />
+                  </div>
+                  <input
+                    ref={scannerRef}
+                    type="text"
+                    placeholder="Escanear cédula / código..."
+                    value={form.cedula}
+                    onChange={(e) => setForm({ ...form, cedula: e.target.value })}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        handleScan(form.cedula);
+                      }
+                    }}
+                    className="w-full pl-11 pr-4 py-3.5 rounded-xl text-lg font-mono transition-all focus:outline-none focus:ring-2"
+                    style={{
+                      background: `${palette.gold}08`,
+                      border: `2px solid ${palette.gold}30`,
+                      color: palette.gold,
+                      // @ts-ignore
+                      "--tw-ring-color": `${palette.gold}50`,
+                    }}
+                    autoFocus
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setCameraOpen(!cameraOpen)}
+                  className="flex items-center gap-2 px-4 rounded-xl text-sm font-semibold transition-all hover:scale-[1.02]"
+                  style={{
+                    background: cameraOpen ? `${palette.accent}20` : `${palette.gold}10`,
+                    border: `2px solid ${cameraOpen ? palette.accent : palette.gold}30`,
+                    color: cameraOpen ? palette.accent : palette.gold,
+                  }}
+                >
+                  <CameraIcon className="w-5 h-5" />
+                  {cameraOpen ? "Cerrar" : "Cámara"}
+                </button>
               </div>
-              <input
-                ref={scannerRef}
-                type="text"
-                placeholder="Escanear cédula / código..."
-                value={form.cedula}
-                onChange={(e) => setForm({ ...form, cedula: e.target.value })}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    handleScan(form.cedula);
-                  }
-                }}
-                className="w-full pl-11 pr-4 py-3.5 rounded-xl text-lg font-mono transition-all focus:outline-none focus:ring-2"
-                style={{
-                  background: `${palette.gold}08`,
-                  border: `2px solid ${palette.gold}30`,
-                  color: palette.gold,
-                  // @ts-ignore
-                  "--tw-ring-color": `${palette.gold}50`,
-                }}
-                autoFocus
-              />
+
+              {/* Webcam scanner area */}
+              {cameraOpen && (
+                <CedulaWebcamScanner
+                  onScanResult={(cedula, name) => {
+                    setForm((f) => ({ ...f, cedula, name: name || f.name }));
+                    handleScan(cedula);
+                    setCameraOpen(false);
+                  }}
+                />
+              )}
             </div>
 
             <div className="grid grid-cols-2 gap-3">

@@ -3688,6 +3688,11 @@ function BitacoraTab({ mapId }: { mapId: string }) {
   const [showPersonDropdown, setShowPersonDropdown] = useState(false);
   const [lastCapturedPhoto, setLastCapturedPhoto] = useState<string | null>(null);
   const [photoLightbox, setPhotoLightbox] = useState<string | null>(null);
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [exportModalVisible, setExportModalVisible] = useState(false);
+  const [exportFormat, setExportFormat] = useState<"pdf" | "xlsx" | "csv">("pdf");
+  const [exporting, setExporting] = useState(false);
+  const [visitorPhotos, setVisitorPhotos] = useState<Record<string, string>>({}); // cedula -> photo URL
   const scannerRef = useRef<HTMLInputElement>(null);
   const companyInputRef = useRef<HTMLInputElement>(null);
   const personInputRef = useRef<HTMLInputElement>(null);
@@ -3737,6 +3742,35 @@ function BitacoraTab({ mapId }: { mapId: string }) {
   useEffect(() => {
     loadStats();
   }, [loadStats]);
+
+  // Load photos for visible visitors
+  useEffect(() => {
+    if (visitors.length === 0) return;
+    const uniqueCedulas = [...new Set(visitors.map((v) => v.cedula))];
+    const missing = uniqueCedulas.filter((c) => !(c in visitorPhotos));
+    if (missing.length === 0) return;
+
+    // Batch load — fetch photo info for each unique cédula
+    Promise.all(
+      missing.map(async (cedula) => {
+        try {
+          const { data } = await apiFetch<{ photos: { url: string }[] }>(
+            apiUrl(`/api/visitors/photos?mapId=${mapId}&cedula=${encodeURIComponent(cedula)}`)
+          );
+          if (data && data.photos.length > 0) {
+            return { cedula, url: data.photos[0].url };
+          }
+        } catch {}
+        return { cedula, url: "" };
+      })
+    ).then((results) => {
+      setVisitorPhotos((prev) => {
+        const next = { ...prev };
+        for (const r of results) next[r.cedula] = r.url;
+        return next;
+      });
+    });
+  }, [visitors, mapId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Load autocomplete data ──
   const loadCompanies = useCallback(async (q: string) => {
@@ -3880,11 +3914,24 @@ function BitacoraTab({ mapId }: { mapId: string }) {
   };
 
   // ── Export ──
-  const handleExport = () => {
-    const params = new URLSearchParams({ mapId, format: "csv" });
+  const handleExport = (format: "pdf" | "xlsx" | "csv") => {
+    setExporting(true);
+    const params = new URLSearchParams({ mapId });
     if (dateFrom) params.set("from", dateFrom);
     if (dateTo) params.set("to", dateTo);
-    window.open(apiUrl(`/api/visitors/export?${params}`), "_blank");
+
+    let url: string;
+    if (format === "pdf") {
+      url = apiUrl(`/api/visitors/export-pdf?${params}`);
+    } else if (format === "xlsx") {
+      url = apiUrl(`/api/visitors/export-xlsx?${params}`);
+    } else {
+      params.set("format", "csv");
+      url = apiUrl(`/api/visitors/export?${params}`);
+    }
+
+    window.open(url, "_blank");
+    setTimeout(() => { setExporting(false); setExportModalVisible(false); setTimeout(() => setShowExportModal(false), 300); }, 1000);
   };
 
   // ── Duration formatter ──
@@ -3993,11 +4040,11 @@ function BitacoraTab({ mapId }: { mapId: string }) {
         />
 
         <button
-          onClick={handleExport}
+          onClick={() => { setShowExportModal(true); setExportModalVisible(false); setTimeout(() => setExportModalVisible(true), 30); }}
           className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium transition-all hover:scale-[1.02]"
-          style={{ background: "rgba(255,255,255,0.04)", border: `1px solid ${palette.border}`, color: palette.textMuted }}
+          style={{ background: `${palette.accent}10`, border: `1px solid ${palette.accent}20`, color: palette.accent }}
         >
-          <FileSpreadsheet className="w-3.5 h-3.5" /> Exportar CSV
+          <Download className="w-3.5 h-3.5" /> Exportar
         </button>
 
         <button
@@ -4509,6 +4556,123 @@ function BitacoraTab({ mapId }: { mapId: string }) {
         </div>
       )}
 
+      {/* ── Export Modal ── */}
+      {showExportModal && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center"
+          style={{ background: "rgba(0,0,0,0.85)", backdropFilter: "blur(16px)", transition: "opacity 0.3s", opacity: exportModalVisible ? 1 : 0 }}
+          onClick={() => { setExportModalVisible(false); setTimeout(() => setShowExportModal(false), 300); }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-md rounded-2xl overflow-hidden"
+            style={{
+              background: "linear-gradient(145deg, #0e0e1a, #08080f)",
+              border: `1px solid rgba(255,255,255,0.06)`,
+              boxShadow: `0 0 80px rgba(0,0,0,0.8), 0 0 40px ${palette.accent}06`,
+              transform: exportModalVisible ? "scale(1) translateY(0)" : "scale(0.92) translateY(20px)",
+              opacity: exportModalVisible ? 1 : 0,
+              transition: "transform 0.4s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.3s ease",
+            }}
+          >
+            {/* Header */}
+            <div className="px-6 py-5 flex items-center gap-4" style={{ borderBottom: `1px solid rgba(255,255,255,0.05)` }}>
+              <div className="w-11 h-11 rounded-2xl flex items-center justify-center" style={{ background: `${palette.accent}12`, border: `1px solid ${palette.accent}20` }}>
+                <Download className="w-5 h-5" style={{ color: palette.accent }} />
+              </div>
+              <div className="flex-1">
+                <h3 className="text-base font-bold" style={{ color: "#fff" }}>Exportar Registros</h3>
+                <p className="text-[10px]" style={{ color: palette.textDim }}>
+                  {total} registros {dateFrom || dateTo ? "(filtrados)" : ""}
+                </p>
+              </div>
+              <button onClick={() => { setExportModalVisible(false); setTimeout(() => setShowExportModal(false), 300); }} className="p-2 rounded-xl hover:bg-white/5 transition-all" style={{ color: palette.textMuted }}>
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Format options */}
+            <div className="p-6 space-y-3">
+              <p className="text-[10px] uppercase tracking-wider font-bold mb-3" style={{ color: palette.textDim }}>Seleccione el formato</p>
+
+              {[
+                { key: "pdf" as const, label: "Documento PDF", desc: "Reporte visual con fotos, colores y tabla formateada. Ideal para imprimir.", icon: <FileSpreadsheet className="w-5 h-5" />, color: "#ef4444" },
+                { key: "xlsx" as const, label: "Excel (XLSX)", desc: "Hoja de cálculo con formato profesional, colores alternados y fotos.", icon: <FileSpreadsheet className="w-5 h-5" />, color: "#22c55e" },
+                { key: "csv" as const, label: "CSV", desc: "Archivo de texto plano para importar en cualquier sistema.", icon: <FileSpreadsheet className="w-5 h-5" />, color: "#94a3b8" },
+              ].map((opt) => (
+                <button
+                  key={opt.key}
+                  type="button"
+                  onClick={() => setExportFormat(opt.key)}
+                  className="w-full flex items-center gap-4 p-4 rounded-xl text-left transition-all hover:scale-[1.01]"
+                  style={{
+                    background: exportFormat === opt.key ? `${opt.color}08` : "rgba(255,255,255,0.02)",
+                    border: `1.5px solid ${exportFormat === opt.key ? `${opt.color}35` : "rgba(255,255,255,0.05)"}`,
+                  }}
+                >
+                  <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: `${opt.color}12`, color: opt.color }}>
+                    {opt.icon}
+                  </div>
+                  <div className="flex-1">
+                    <div className="text-sm font-semibold" style={{ color: exportFormat === opt.key ? "#fff" : palette.text }}>{opt.label}</div>
+                    <div className="text-[10px] mt-0.5" style={{ color: palette.textDim }}>{opt.desc}</div>
+                  </div>
+                  <div className="w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0" style={{ border: `2px solid ${exportFormat === opt.key ? opt.color : palette.border}`, background: exportFormat === opt.key ? opt.color : "transparent" }}>
+                    {exportFormat === opt.key && <div className="w-2 h-2 rounded-full bg-white" />}
+                  </div>
+                </button>
+              ))}
+
+              {/* Date range reminder */}
+              {(dateFrom || dateTo) && (
+                <div className="rounded-xl p-3 flex items-center gap-2" style={{ background: `${palette.gold}06`, border: `1px solid ${palette.gold}15` }}>
+                  <Filter className="w-3.5 h-3.5 flex-shrink-0" style={{ color: palette.gold }} />
+                  <p className="text-[10px]" style={{ color: palette.textMuted }}>
+                    Filtro de fecha activo: {dateFrom || "inicio"} → {dateTo || "hoy"}
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Actions */}
+            <div className="px-6 pb-5 flex gap-3">
+              <button
+                type="button"
+                onClick={() => { setExportModalVisible(false); setTimeout(() => setShowExportModal(false), 300); }}
+                className="px-5 py-2.5 rounded-xl text-sm font-medium transition-all hover:bg-white/5"
+                style={{ background: "rgba(255,255,255,0.03)", border: `1px solid ${palette.border}`, color: palette.textMuted }}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => handleExport(exportFormat)}
+                disabled={exporting}
+                className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-bold transition-all hover:scale-[1.01] disabled:opacity-50"
+                style={{ background: `linear-gradient(135deg, ${palette.accent}, ${palette.accent}cc)`, color: "#000", boxShadow: `0 4px 20px ${palette.accent}25` }}
+              >
+                {exporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                {exporting ? "Generando..." : "Descargar"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Photo Lightbox (from table) ── */}
+      {photoLightbox && !showForm && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center"
+          style={{ background: "rgba(0,0,0,0.9)" }}
+          onClick={() => setPhotoLightbox(null)}
+        >
+          <img src={photoLightbox} alt="Foto" className="max-w-[90vw] max-h-[90vh] rounded-2xl" style={{ boxShadow: "0 0 60px rgba(0,0,0,0.8)" }} />
+          <button className="absolute top-6 right-6 p-2 rounded-xl" style={{ background: "rgba(255,255,255,0.1)", color: "#fff" }} onClick={() => setPhotoLightbox(null)}>
+            <X className="w-6 h-6" />
+          </button>
+        </div>
+      )}
+
       {/* ── Visitor Table ── */}
       {loading ? (
         <div className="space-y-3">
@@ -4541,17 +4705,33 @@ function BitacoraTab({ mapId }: { mapId: string }) {
               >
                 {/* Main row */}
                 <div className="flex items-center gap-4 px-4 py-3">
-                  {/* Status indicator */}
-                  <div
-                    className="w-2.5 h-2.5 rounded-full flex-shrink-0"
-                    style={{
-                      background: isActive ? palette.authorized : palette.textDim,
-                      boxShadow: isActive ? `0 0 8px ${palette.authorized}60` : "none",
-                    }}
-                  />
+                  {/* Photo avatar */}
+                  <div className="flex-shrink-0 relative">
+                    {visitorPhotos[v.cedula] ? (
+                      <img
+                        src={apiUrl(visitorPhotos[v.cedula])}
+                        alt=""
+                        className="w-10 h-10 rounded-xl object-cover"
+                        style={{ border: `2px solid ${isActive ? `${palette.authorized}40` : palette.border}` }}
+                        onClick={(e) => { e.stopPropagation(); setPhotoLightbox(apiUrl(visitorPhotos[v.cedula])); }}
+                      />
+                    ) : (
+                      <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: "rgba(255,255,255,0.04)", border: `1px solid ${palette.border}` }}>
+                        <Users className="w-4 h-4" style={{ color: palette.textDim }} />
+                      </div>
+                    )}
+                    <div
+                      className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2"
+                      style={{
+                        background: isActive ? palette.authorized : palette.textDim,
+                        borderColor: isActive ? `${palette.authorized}40` : "#0a0a14",
+                        boxShadow: isActive ? `0 0 6px ${palette.authorized}60` : "none",
+                      }}
+                    />
+                  </div>
 
                   {/* Name & cédula */}
-                  <div className="min-w-[180px]">
+                  <div className="min-w-[160px]">
                     <div className="text-sm font-semibold" style={{ color: palette.text }}>{v.name}</div>
                     <div className="text-[11px] font-mono" style={{ color: palette.textMuted }}>CI: {v.cedula}</div>
                   </div>

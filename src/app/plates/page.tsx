@@ -2787,10 +2787,11 @@ function AnalyticsTab({ mapId }: { mapId: string }) {
 
 // ── Webcam Cédula Scanner ────────────────────────────────────────────────────
 
-function CedulaWebcamScanner({ onScanResult }: { onScanResult: (cedula: string, name?: string) => void }) {
+function CedulaWebcamScanner({ onScanResult, onPhotoCapture }: { onScanResult: (cedula: string, name?: string) => void; onPhotoCapture?: (dataUrl: string) => void }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [stream, setStream] = useState<MediaStream | null>(null);
+  const [cameraReady, setCameraReady] = useState(false);
+  const [cameraError, setCameraError] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
   const [ocrProcessing, setOcrProcessing] = useState(false);
   const [scanStatus, setScanStatus] = useState<string>("Iniciando cámara...");
@@ -2803,12 +2804,17 @@ function CedulaWebcamScanner({ onScanResult }: { onScanResult: (cedula: string, 
     mountedRef.current = true;
     let localStream: MediaStream | null = null;
 
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      setCameraError("El navegador no soporta acceso a cámara. Use HTTPS o un navegador compatible.");
+      return;
+    }
+
     navigator.mediaDevices
       .getUserMedia({ video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } } })
       .then((s) => {
         if (!mountedRef.current) { s.getTracks().forEach((t) => t.stop()); return; }
         localStream = s;
-        setStream(s);
+        setCameraReady(true);
         if (videoRef.current) {
           videoRef.current.srcObject = s;
           videoRef.current.play().catch(() => {});
@@ -2817,7 +2823,13 @@ function CedulaWebcamScanner({ onScanResult }: { onScanResult: (cedula: string, 
         setScanning(true);
       })
       .catch((err) => {
-        setScanStatus(`Error: ${err.message}`);
+        if (err.name === "NotAllowedError" || err.message?.includes("Permission denied")) {
+          setCameraError("Permiso de cámara denegado. Habilítelo en la configuración del navegador.");
+        } else if (err.name === "NotFoundError") {
+          setCameraError("No se detectó ninguna cámara conectada al equipo.");
+        } else {
+          setCameraError(`Error de cámara: ${err.message}`);
+        }
       });
 
     return () => {
@@ -2837,21 +2849,15 @@ function CedulaWebcamScanner({ onScanResult }: { onScanResult: (cedula: string, 
     const startBarcodeScanner = async () => {
       try {
         const { Html5Qrcode } = await import("html5-qrcode");
-        // We scan frames from the video manually instead of using Html5QrcodeScanner
-        // which needs a container. Use the raw decode approach.
         const scanner = new Html5Qrcode("cedula-scanner-hidden");
         scannerInstanceRef.current = scanner;
 
         const poll = async () => {
           if (!active || !videoRef.current || !canvasRef.current) return;
-
           const video = videoRef.current;
           const canvas = canvasRef.current;
           const ctx = canvas.getContext("2d");
-          if (!ctx || video.readyState < 2) {
-            if (active) setTimeout(poll, 500);
-            return;
-          }
+          if (!ctx || video.readyState < 2) { if (active) setTimeout(poll, 500); return; }
 
           canvas.width = video.videoWidth;
           canvas.height = video.videoHeight;
@@ -2859,25 +2865,22 @@ function CedulaWebcamScanner({ onScanResult }: { onScanResult: (cedula: string, 
 
           try {
             const imageData = canvas.toDataURL("image/jpeg", 0.9);
-            // Create a temporary image file from the data URL
             const blob = await (await fetch(imageData)).blob();
             const file = new File([blob], "frame.jpg", { type: "image/jpeg" });
             const result = await scanner.scanFileV2(file, false);
             if (result && result.decodedText) {
               const text = result.decodedText.trim();
-              // Try to parse cédula data from barcode
               const parsed = parseCedulaBarcode(text);
+              // Auto-capture photo on successful scan
+              if (onPhotoCapture) onPhotoCapture(imageData);
               onScanResult(parsed.cedula, parsed.name);
-              return; // Stop polling on success
+              return;
             }
-          } catch {
-            // No barcode found in this frame — continue
-          }
+          } catch {}
 
           if (active) setTimeout(poll, 800);
         };
 
-        // Start after video is ready
         setTimeout(poll, 1000);
       } catch (err) {
         console.error("Barcode scanner init error:", err);
@@ -2886,28 +2889,35 @@ function CedulaWebcamScanner({ onScanResult }: { onScanResult: (cedula: string, 
     };
 
     startBarcodeScanner();
+    return () => { active = false; if (scannerInstanceRef.current) { try { scannerInstanceRef.current.clear(); } catch {} scannerInstanceRef.current = null; } };
+  }, [scanning, scanMode, onScanResult, onPhotoCapture]);
 
-    return () => {
-      active = false;
-      if (scannerInstanceRef.current) {
-        try { scannerInstanceRef.current.clear(); } catch {}
-        scannerInstanceRef.current = null;
-      }
-    };
-  }, [scanning, scanMode, onScanResult]);
+  // Manual photo capture
+  const capturePhoto = useCallback(() => {
+    if (!videoRef.current || !canvasRef.current || !onPhotoCapture) return;
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext("2d");
+    if (!ctx || video.readyState < 2) return;
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    ctx.drawImage(video, 0, 0);
+    onPhotoCapture(canvas.toDataURL("image/jpeg", 0.85));
+  }, [onPhotoCapture]);
 
   // OCR capture
   const handleOcrCapture = async () => {
     if (!videoRef.current || !canvasRef.current) return;
-
     const video = videoRef.current;
     const canvas = canvasRef.current;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
     ctx.drawImage(video, 0, 0);
+
+    // Also capture photo
+    if (onPhotoCapture) onPhotoCapture(canvas.toDataURL("image/jpeg", 0.85));
 
     setOcrProcessing(true);
     setScanStatus("Procesando imagen con OCR...");
@@ -2923,97 +2933,144 @@ function CedulaWebcamScanner({ onScanResult }: { onScanResult: (cedula: string, 
       });
 
       const text = data.text;
-      // Try to extract cédula number (Uruguayan format: X.XXX.XXX-X)
       const cedulaMatch = text.match(/(\d[\d.]{5,9}-?\d)/);
       const cedula = cedulaMatch ? cedulaMatch[1].replace(/[.\-]/g, "") : "";
-
-      // Try to extract name (usually on lines above/below the cédula)
       const lines = text.split("\n").map((l: string) => l.trim()).filter((l: string) => l.length > 3);
-      const nameCandidate = lines.find((l: string) =>
-        /^[A-ZÁÉÍÓÚÑ][a-záéíóúñ]/.test(l) && !l.match(/\d{4,}/) && l.length > 5
-      );
+      const nameCandidate = lines.find((l: string) => /^[A-ZÁÉÍÓÚÑ][a-záéíóúñ]/.test(l) && !l.match(/\d{4,}/) && l.length > 5);
 
       if (cedula) {
         onScanResult(cedula, nameCandidate || undefined);
+        setScanStatus("Documento leído correctamente");
       } else {
-        setScanStatus("No se pudo leer la cédula. Intente nuevamente.");
+        setScanStatus("No se detectó número de cédula. Reintente con mejor iluminación.");
       }
-    } catch (err) {
-      setScanStatus("Error en OCR. Intente nuevamente.");
+    } catch {
+      setScanStatus("Error al procesar. Verifique la iluminación e intente de nuevo.");
     }
     setOcrProcessing(false);
   };
 
+  // Camera error state
+  if (cameraError) {
+    return (
+      <div className="rounded-2xl overflow-hidden flex flex-col items-center justify-center p-8 text-center" style={{ background: "linear-gradient(180deg, rgba(20,15,30,1), rgba(10,8,18,1))", border: `1px solid ${palette.danger}20`, minHeight: 260 }}>
+        <div className="w-16 h-16 rounded-full flex items-center justify-center mb-4" style={{ background: `${palette.danger}10`, border: `1px solid ${palette.danger}20` }}>
+          <WifiOff className="w-8 h-8" style={{ color: palette.danger }} />
+        </div>
+        <p className="text-sm font-semibold mb-1" style={{ color: palette.danger }}>Cámara no disponible</p>
+        <p className="text-[11px] leading-relaxed max-w-[280px]" style={{ color: palette.textDim }}>{cameraError}</p>
+        <p className="text-[10px] mt-3 px-3 py-1.5 rounded-lg" style={{ background: "rgba(255,255,255,0.04)", color: palette.textMuted }}>
+          Puede ingresar la cédula manualmente en el campo de la izquierda
+        </p>
+      </div>
+    );
+  }
+
   return (
-    <div className="rounded-xl overflow-hidden" style={{ background: "rgba(0,0,0,0.5)", border: `1px solid ${palette.border}` }}>
+    <div className="rounded-2xl overflow-hidden" style={{ background: "linear-gradient(180deg, rgba(20,15,30,1), rgba(10,8,18,1))", border: `1px solid rgba(255,255,255,0.06)` }}>
       {/* Video preview */}
-      <div className="relative aspect-video bg-black">
+      <div className="relative bg-black" style={{ aspectRatio: "16/10" }}>
         <video ref={videoRef} className="w-full h-full object-cover" autoPlay playsInline muted />
 
-        {/* Scan overlay */}
-        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-          <div
-            className="w-[80%] h-[60%] rounded-2xl"
-            style={{
-              border: `2px solid ${palette.gold}60`,
-              boxShadow: `0 0 30px ${palette.gold}15, inset 0 0 30px ${palette.gold}05`,
-            }}
-          >
-            {scanMode === "barcode" && scanning && (
-              <div className="absolute top-0 left-0 right-0 h-[2px] animate-scan-line" style={{ background: `linear-gradient(90deg, transparent, ${palette.gold}, transparent)` }} />
-            )}
+        {/* Scan overlay frame */}
+        {cameraReady && (
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+            <div className="w-[82%] h-[65%] relative">
+              {/* Corner markers */}
+              {[
+                "top-0 left-0 border-t-2 border-l-2 rounded-tl-xl",
+                "top-0 right-0 border-t-2 border-r-2 rounded-tr-xl",
+                "bottom-0 left-0 border-b-2 border-l-2 rounded-bl-xl",
+                "bottom-0 right-0 border-b-2 border-r-2 rounded-br-xl",
+              ].map((cls, i) => (
+                <div key={i} className={`absolute w-8 h-8 ${cls}`} style={{ borderColor: `${palette.gold}80` }} />
+              ))}
+              {/* Scanning line */}
+              {scanMode === "barcode" && scanning && (
+                <div className="absolute left-2 right-2 h-[2px] animate-scan-line" style={{ background: `linear-gradient(90deg, transparent, ${palette.gold}, transparent)` }} />
+              )}
+            </div>
           </div>
-        </div>
+        )}
 
-        {/* Status */}
-        <div className="absolute bottom-3 left-3 right-3 flex items-center justify-between">
-          <span className="px-3 py-1 rounded-lg text-xs font-medium" style={{ background: "rgba(0,0,0,0.7)", color: palette.gold }}>
-            {ocrProcessing ? <Loader2 className="w-3 h-3 inline animate-spin mr-1" /> : <ScanLine className="w-3 h-3 inline mr-1" />}
-            {scanStatus}
-          </span>
-        </div>
+        {/* Loading state */}
+        {!cameraReady && !cameraError && (
+          <div className="absolute inset-0 flex items-center justify-center">
+            <div className="text-center">
+              <Loader2 className="w-8 h-8 animate-spin mx-auto mb-2" style={{ color: palette.gold }} />
+              <p className="text-xs" style={{ color: palette.textDim }}>Conectando cámara...</p>
+            </div>
+          </div>
+        )}
+
+        {/* Status bar */}
+        {cameraReady && (
+          <div className="absolute bottom-0 left-0 right-0 p-3" style={{ background: "linear-gradient(transparent, rgba(0,0,0,0.8))" }}>
+            <div className="flex items-center gap-2">
+              <div className="w-2 h-2 rounded-full animate-pulse" style={{ background: palette.authorized }} />
+              <span className="text-[11px] font-medium" style={{ color: "rgba(255,255,255,0.8)" }}>
+                {ocrProcessing ? <Loader2 className="w-3 h-3 inline animate-spin mr-1" /> : null}
+                {scanStatus}
+              </span>
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* Controls */}
-      <div className="flex items-center gap-2 p-3">
-        <button
-          type="button"
-          onClick={() => setScanMode("barcode")}
-          className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-semibold transition-all"
-          style={{
-            background: scanMode === "barcode" ? `${palette.gold}20` : "transparent",
-            border: `1px solid ${scanMode === "barcode" ? palette.gold : palette.border}`,
-            color: scanMode === "barcode" ? palette.gold : palette.textMuted,
-          }}
-        >
-          <ScanLine className="w-3.5 h-3.5" /> Barcode Auto
-        </button>
-        <button
-          type="button"
-          onClick={() => { setScanMode("ocr"); setScanStatus("Posicione la cédula y capture"); }}
-          className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-semibold transition-all"
-          style={{
-            background: scanMode === "ocr" ? `${palette.accent}20` : "transparent",
-            border: `1px solid ${scanMode === "ocr" ? palette.accent : palette.border}`,
-            color: scanMode === "ocr" ? palette.accent : palette.textMuted,
-          }}
-        >
-          <ImageIcon className="w-3.5 h-3.5" /> OCR Manual
-        </button>
-        {scanMode === "ocr" && (
+      {/* Controls bar */}
+      <div className="p-3 space-y-2">
+        <div className="flex items-center gap-2">
           <button
             type="button"
-            disabled={ocrProcessing}
-            onClick={handleOcrCapture}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold transition-all hover:scale-[1.02] disabled:opacity-50"
+            onClick={() => setScanMode("barcode")}
+            className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-[11px] font-bold uppercase tracking-wide transition-all"
             style={{
-              background: `linear-gradient(135deg, ${palette.accent}, ${palette.accent}cc)`,
-              color: "#000",
+              background: scanMode === "barcode" ? `${palette.gold}15` : "rgba(255,255,255,0.03)",
+              border: `1px solid ${scanMode === "barcode" ? `${palette.gold}40` : "rgba(255,255,255,0.06)"}`,
+              color: scanMode === "barcode" ? palette.gold : palette.textDim,
             }}
           >
-            <CameraIcon className="w-3.5 h-3.5" /> {ocrProcessing ? "Procesando..." : "Capturar"}
+            <ScanLine className="w-3.5 h-3.5" /> Barcode
           </button>
-        )}
+          <button
+            type="button"
+            onClick={() => { setScanMode("ocr"); setScanStatus("Posicione la cédula y capture"); }}
+            className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-[11px] font-bold uppercase tracking-wide transition-all"
+            style={{
+              background: scanMode === "ocr" ? `${palette.accent}15` : "rgba(255,255,255,0.03)",
+              border: `1px solid ${scanMode === "ocr" ? `${palette.accent}40` : "rgba(255,255,255,0.06)"}`,
+              color: scanMode === "ocr" ? palette.accent : palette.textDim,
+            }}
+          >
+            <ImageIcon className="w-3.5 h-3.5" /> OCR
+          </button>
+        </div>
+
+        {/* Action buttons row */}
+        <div className="flex items-center gap-2">
+          {scanMode === "ocr" && (
+            <button
+              type="button"
+              disabled={ocrProcessing || !cameraReady}
+              onClick={handleOcrCapture}
+              className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-[11px] font-bold transition-all hover:scale-[1.02] disabled:opacity-50"
+              style={{ background: `linear-gradient(135deg, ${palette.accent}, ${palette.accent}cc)`, color: "#000" }}
+            >
+              <CameraIcon className="w-3.5 h-3.5" /> {ocrProcessing ? "Procesando..." : "Leer documento"}
+            </button>
+          )}
+          {onPhotoCapture && cameraReady && (
+            <button
+              type="button"
+              onClick={capturePhoto}
+              className="flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl text-[11px] font-bold transition-all hover:scale-[1.02]"
+              style={{ background: "rgba(255,255,255,0.06)", border: `1px solid rgba(255,255,255,0.1)`, color: palette.textMuted }}
+              title="Capturar foto del visitante"
+            >
+              <CameraIcon className="w-3.5 h-3.5" /> Foto
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Hidden elements for html5-qrcode */}
@@ -3021,14 +3078,8 @@ function CedulaWebcamScanner({ onScanResult }: { onScanResult: (cedula: string, 
       <canvas ref={canvasRef} style={{ display: "none" }} />
 
       <style>{`
-        @keyframes scan-line-move {
-          0% { transform: translateY(0); }
-          100% { transform: translateY(calc(100% - 2px)); }
-        }
-        .animate-scan-line {
-          animation: scan-line-move 2s ease-in-out infinite alternate;
-          position: absolute;
-        }
+        @keyframes scan-line-move { 0% { transform: translateY(0); } 100% { transform: translateY(calc(100% - 2px)); } }
+        .animate-scan-line { animation: scan-line-move 2s ease-in-out infinite alternate; position: absolute; }
       `}</style>
     </div>
   );
@@ -3629,8 +3680,17 @@ function BitacoraTab({ mapId }: { mapId: string }) {
   const [cameraOpen, setCameraOpen] = useState(true);
   const [scanPhase, setScanPhase] = useState<"idle" | "analyzing" | "found" | "not_found">("idle");
   const [scanHistory, setScanHistory] = useState<Visitor[]>([]);
+  const [scanPhotos, setScanPhotos] = useState<{ url: string; timestamp: string }[]>([]);
   const [modalVisible, setModalVisible] = useState(false);
+  const [companySuggestions, setCompanySuggestions] = useState<{ name: string; count: number }[]>([]);
+  const [personSuggestions, setPersonSuggestions] = useState<{ name: string; count: number }[]>([]);
+  const [showCompanyDropdown, setShowCompanyDropdown] = useState(false);
+  const [showPersonDropdown, setShowPersonDropdown] = useState(false);
+  const [lastCapturedPhoto, setLastCapturedPhoto] = useState<string | null>(null);
+  const [photoLightbox, setPhotoLightbox] = useState<string | null>(null);
   const scannerRef = useRef<HTMLInputElement>(null);
+  const companyInputRef = useRef<HTMLInputElement>(null);
+  const personInputRef = useRef<HTMLInputElement>(null);
   const LIMIT = 30;
 
   // ── Form State ──
@@ -3678,6 +3738,33 @@ function BitacoraTab({ mapId }: { mapId: string }) {
     loadStats();
   }, [loadStats]);
 
+  // ── Load autocomplete data ──
+  const loadCompanies = useCallback(async (q: string) => {
+    const { data } = await apiFetch<{ companies: { name: string; count: number }[] }>(
+      apiUrl(`/api/visitors/companies?mapId=${mapId}&q=${encodeURIComponent(q)}`)
+    );
+    if (data) setCompanySuggestions(data.companies);
+  }, [mapId]);
+
+  const loadPersons = useCallback(async (q: string) => {
+    const { data } = await apiFetch<{ persons: { name: string; count: number }[] }>(
+      apiUrl(`/api/visitors/persons?mapId=${mapId}&q=${encodeURIComponent(q)}`)
+    );
+    if (data) setPersonSuggestions(data.persons);
+  }, [mapId]);
+
+  // ── Upload captured photo ──
+  const uploadPhoto = useCallback(async (cedula: string, dataUrl: string) => {
+    if (!cedula.trim()) return;
+    try {
+      await apiFetch(apiUrl("/api/visitors/photos"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mapId, cedula: cedula.trim(), imageData: dataUrl }),
+      });
+    } catch {}
+  }, [mapId]);
+
   // ── Auto-focus scanner input ──
   useEffect(() => {
     if (showForm && scannerRef.current) {
@@ -3685,30 +3772,41 @@ function BitacoraTab({ mapId }: { mapId: string }) {
     }
   }, [showForm]);
 
-  // ── Scan handler: lookup cédula history when scanned ──
+  // ── Scan handler: lookup cédula history + photos when scanned ──
   const handleScan = useCallback(
     async (cedula: string) => {
       if (!cedula.trim()) return;
 
       setScanPhase("analyzing");
       setScanHistory([]);
+      setScanPhotos([]);
 
-      // Simulate analysis phases for UX
-      await new Promise((r) => setTimeout(r, 800));
+      // Small delay for analysis animation
+      await new Promise((r) => setTimeout(r, 600));
 
-      // Look up previous visits for auto-fill
-      const { data } = await apiFetch<{ visits: Visitor[] }>(
-        apiUrl(`/api/visitors/history?mapId=${mapId}&cedula=${encodeURIComponent(cedula.trim())}`)
-      );
+      // Fetch history + photos in parallel
+      const [histRes, photosRes] = await Promise.all([
+        apiFetch<{ visits: Visitor[] }>(
+          apiUrl(`/api/visitors/history?mapId=${mapId}&cedula=${encodeURIComponent(cedula.trim())}`)
+        ),
+        apiFetch<{ photos: { url: string; timestamp: string }[] }>(
+          apiUrl(`/api/visitors/photos?mapId=${mapId}&cedula=${encodeURIComponent(cedula.trim())}`)
+        ),
+      ]);
 
-      if (data && data.visits.length > 0) {
-        const last = data.visits[0];
-        setScanHistory(data.visits);
+      if (photosRes.data && photosRes.data.photos.length > 0) {
+        setScanPhotos(photosRes.data.photos.slice(0, 3)); // Show last 3
+      }
+
+      if (histRes.data && histRes.data.visits.length > 0) {
+        const last = histRes.data.visits[0];
+        setScanHistory(histRes.data.visits);
         setForm((f) => ({
           ...f,
           cedula: cedula.trim(),
           name: last.name || f.name,
           company: last.company || f.company,
+          personToVisit: last.personToVisit || f.personToVisit,
           vehiclePlate: last.vehiclePlate || f.vehiclePlate,
           vehicleDesc: last.vehicleDesc || f.vehicleDesc,
         }));
@@ -3717,12 +3815,14 @@ function BitacoraTab({ mapId }: { mapId: string }) {
         setForm((f) => ({ ...f, cedula: cedula.trim() }));
         setScanPhase("not_found");
       }
-
-      // Auto-reset after a few seconds
-      setTimeout(() => setScanPhase("idle"), 5000);
     },
     [mapId]
   );
+
+  // ── Handle photo capture from webcam ──
+  const handlePhotoCapture = useCallback((dataUrl: string) => {
+    setLastCapturedPhoto(dataUrl);
+  }, []);
 
   // ── Submit check-in ──
   const handleCheckIn = async (e: React.FormEvent) => {
@@ -3739,8 +3839,16 @@ function BitacoraTab({ mapId }: { mapId: string }) {
     if (error) {
       alert(error);
     } else if (data) {
+      // Upload captured photo if available
+      if (lastCapturedPhoto && form.cedula.trim()) {
+        uploadPhoto(form.cedula, lastCapturedPhoto);
+      }
       setForm({ cedula: "", name: "", company: "", personToVisit: "", vehiclePlate: "", vehicleDesc: "", reason: "", observations: "", guardName: "" });
+      setLastCapturedPhoto(null);
       setShowForm(false);
+      setScanPhase("idle");
+      setScanHistory([]);
+      setScanPhotos([]);
       loadVisitors();
       loadStats();
     }
@@ -3842,7 +3950,7 @@ function BitacoraTab({ mapId }: { mapId: string }) {
       {/* ── Toolbar ── */}
       <div className="flex flex-wrap items-center gap-3">
         <button
-          onClick={() => { setShowForm(true); setModalVisible(false); setTimeout(() => setModalVisible(true), 30); setEditingVisitor(null); setScanPhase("idle"); setScanHistory([]); setCameraOpen(true); setForm({ cedula: "", name: "", company: "", personToVisit: "", vehiclePlate: "", vehicleDesc: "", reason: "", observations: "", guardName: "" }); }}
+          onClick={() => { setShowForm(true); setModalVisible(false); setTimeout(() => setModalVisible(true), 30); setEditingVisitor(null); setScanPhase("idle"); setScanHistory([]); setScanPhotos([]); setLastCapturedPhoto(null); setCameraOpen(true); setForm({ cedula: "", name: "", company: "", personToVisit: "", vehiclePlate: "", vehicleDesc: "", reason: "", observations: "", guardName: "" }); }}
           className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all hover:scale-[1.02]"
           style={{
             background: `linear-gradient(135deg, ${palette.gold}, ${palette.gold}cc)`,
@@ -3901,68 +4009,63 @@ function BitacoraTab({ mapId }: { mapId: string }) {
         </button>
       </div>
 
-      {/* ── Check-In Form Modal — Two-Column Layout ── */}
+      {/* ── Check-In Form Modal — Embassy-Grade Two-Column Layout ── */}
       {showForm && (
         <div
-          className="fixed inset-0 z-[100] flex items-center justify-center checkin-backdrop"
-          style={{ background: "rgba(0,0,0,0.8)", backdropFilter: "blur(16px)", transition: "opacity 0.3s", opacity: modalVisible ? 1 : 0 }}
+          className="fixed inset-0 z-[100] flex items-center justify-center"
+          style={{ background: "rgba(0,0,0,0.85)", backdropFilter: "blur(20px)", transition: "opacity 0.3s", opacity: modalVisible ? 1 : 0 }}
           onClick={() => { setModalVisible(false); setTimeout(() => setShowForm(false), 300); }}
         >
           <form
             onSubmit={handleCheckIn}
             onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-[1100px] max-h-[92vh] overflow-auto rounded-3xl"
+            className="w-full max-w-[1200px] max-h-[94vh] overflow-hidden rounded-3xl flex flex-col lg:flex-row"
             style={{
-              background: "linear-gradient(145deg, rgba(12,12,30,0.98), rgba(8,8,20,0.99))",
-              border: `1px solid ${palette.gold}20`,
-              boxShadow: `0 0 80px rgba(0,0,0,0.6), 0 0 40px ${palette.gold}08, inset 0 1px 0 rgba(255,255,255,0.04)`,
+              background: "#0a0a14",
+              border: `1px solid rgba(255,255,255,0.06)`,
+              boxShadow: `0 0 100px rgba(0,0,0,0.8), 0 0 60px ${palette.gold}06`,
               transform: modalVisible ? "scale(1) translateY(0)" : "scale(0.92) translateY(30px)",
               opacity: modalVisible ? 1 : 0,
-              transition: "transform 0.4s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.3s ease",
+              transition: "transform 0.45s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.3s ease",
             }}
           >
-            {/* Header */}
-            <div className="flex items-center justify-between px-8 py-5" style={{ borderBottom: `1px solid ${palette.border}` }}>
-              <div className="flex items-center gap-4">
-                <div className="w-12 h-12 rounded-2xl flex items-center justify-center" style={{ background: `linear-gradient(135deg, ${palette.gold}20, ${palette.gold}08)`, border: `1px solid ${palette.gold}30`, boxShadow: `0 0 24px ${palette.gold}15` }}>
-                  <Fingerprint className="w-6 h-6" style={{ color: palette.gold }} />
+            {/* ─── LEFT COLUMN: Form ─── */}
+            <div className="flex-1 flex flex-col overflow-auto" style={{ background: "linear-gradient(180deg, #0e0e1a, #08080f)" }}>
+              {/* Header */}
+              <div className="px-7 pt-6 pb-4 flex items-center gap-4" style={{ borderBottom: `1px solid rgba(255,255,255,0.05)` }}>
+                <div className="w-11 h-11 rounded-2xl flex items-center justify-center flex-shrink-0" style={{ background: `linear-gradient(135deg, ${palette.gold}18, ${palette.gold}06)`, border: `1px solid ${palette.gold}25` }}>
+                  <Shield className="w-5 h-5" style={{ color: palette.gold }} />
                 </div>
-                <div>
-                  <h2 className="text-lg font-bold tracking-tight" style={{ color: "#fff" }}>Registro de Ingreso</h2>
-                  <p className="text-[11px] font-medium" style={{ color: palette.textDim }}>
-                    <ScanLine className="w-3 h-3 inline mr-1" />
-                    Escanee la cédula con la cámara o ingrese los datos manualmente
-                  </p>
+                <div className="flex-1 min-w-0">
+                  <h2 className="text-base font-bold tracking-tight" style={{ color: "#fff" }}>Control de Acceso</h2>
+                  <p className="text-[10px] font-medium" style={{ color: palette.textDim }}>Registro de ingreso — verificación de identidad</p>
                 </div>
+                <button type="button" onClick={() => { setModalVisible(false); setTimeout(() => setShowForm(false), 300); }} className="p-2 rounded-xl transition-all hover:bg-white/5" style={{ color: palette.textMuted }}>
+                  <X className="w-5 h-5" />
+                </button>
               </div>
-              <button type="button" onClick={() => { setModalVisible(false); setTimeout(() => setShowForm(false), 300); }} className="p-2 rounded-xl transition-all hover:scale-110 hover:bg-white/5" style={{ color: palette.textMuted }}>
-                <X className="w-5 h-5" />
-              </button>
-            </div>
 
-            {/* Two-column body */}
-            <div className="flex flex-col lg:flex-row">
-              {/* ─── LEFT: Form Fields ─── */}
-              <div className="flex-1 p-6 space-y-4 lg:border-r" style={{ borderColor: palette.border }}>
-                {/* Cédula input with inline scanner toggle */}
+              {/* Form content */}
+              <div className="flex-1 overflow-auto px-7 py-5 space-y-4">
+                {/* Cédula input — primary field */}
                 <div>
-                  <label className="text-[10px] uppercase tracking-[0.15em] font-bold mb-1.5 flex items-center gap-1.5 block" style={{ color: palette.gold }}>
-                    <Fingerprint className="w-3 h-3" /> Cédula / Documento *
+                  <label className="text-[10px] uppercase tracking-[0.15em] font-bold mb-2 flex items-center gap-1.5" style={{ color: palette.gold }}>
+                    <Fingerprint className="w-3.5 h-3.5" /> Documento de identidad
                   </label>
                   <div className="flex gap-2">
                     <div className="relative flex-1">
-                      <div className="absolute left-3.5 top-1/2 -translate-y-1/2" style={{ color: palette.gold }}>
+                      <div className="absolute left-3.5 top-1/2 -translate-y-1/2" style={{ color: `${palette.gold}60` }}>
                         <ScanLine className="w-4 h-4" />
                       </div>
                       <input
                         ref={scannerRef}
                         type="text"
-                        placeholder="Número de cédula..."
+                        placeholder="Escanee o ingrese número de cédula..."
                         value={form.cedula}
                         onChange={(e) => setForm({ ...form, cedula: e.target.value })}
                         onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleScan(form.cedula); } }}
-                        className="w-full pl-11 pr-4 py-3 rounded-xl text-base font-mono transition-all focus:outline-none focus:ring-2"
-                        style={{ background: `${palette.gold}06`, border: `1.5px solid ${palette.gold}25`, color: palette.gold } as React.CSSProperties}
+                        className="w-full pl-11 pr-4 py-3 rounded-xl text-sm font-mono transition-all focus:outline-none"
+                        style={{ background: `${palette.gold}05`, border: `1.5px solid ${palette.gold}20`, color: palette.gold } as React.CSSProperties}
                         autoFocus
                       />
                     </div>
@@ -3970,196 +4073,379 @@ function BitacoraTab({ mapId }: { mapId: string }) {
                       type="button"
                       onClick={() => handleScan(form.cedula)}
                       disabled={!form.cedula.trim() || scanPhase === "analyzing"}
-                      className="px-4 rounded-xl text-xs font-bold transition-all hover:scale-[1.02] disabled:opacity-40"
-                      style={{ background: `${palette.gold}15`, border: `1.5px solid ${palette.gold}30`, color: palette.gold }}
+                      className="px-5 rounded-xl text-xs font-bold transition-all hover:scale-[1.02] disabled:opacity-40 flex items-center gap-2"
+                      style={{ background: `linear-gradient(135deg, ${palette.gold}20, ${palette.gold}10)`, border: `1.5px solid ${palette.gold}30`, color: palette.gold }}
                     >
-                      {scanPhase === "analyzing" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
+                      {scanPhase === "analyzing" ? <Loader2 className="w-4 h-4 animate-spin" /> : <><Search className="w-4 h-4" /> Buscar</>}
                     </button>
                   </div>
                 </div>
 
+                {/* Name */}
+                <div>
+                  <label className="text-[10px] uppercase tracking-[0.15em] font-bold mb-1.5 flex items-center gap-1.5" style={{ color: palette.textDim }}>
+                    <Users className="w-3 h-3" /> Nombre completo *
+                  </label>
+                  <GlassInput value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Nombre y apellido del visitante" required />
+                </div>
+
+                {/* Company with autocomplete + Person to visit */}
                 <div className="grid grid-cols-2 gap-3">
-                  <div className="col-span-2">
-                    <label className="text-[10px] uppercase tracking-[0.15em] font-bold mb-1.5 flex items-center gap-1.5 block" style={{ color: palette.textDim }}>
-                      <Users className="w-3 h-3" /> Nombre completo *
+                  <div className="relative">
+                    <label className="text-[10px] uppercase tracking-[0.15em] font-bold mb-1.5 flex items-center gap-1.5" style={{ color: palette.textDim }}>
+                      <Building2 className="w-3 h-3" /> Empresa / Organización
                     </label>
-                    <GlassInput value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Nombre y apellido" required />
+                    <GlassInput
+                      value={form.company}
+                      onChange={(e) => {
+                        setForm({ ...form, company: e.target.value });
+                        loadCompanies(e.target.value);
+                        setShowCompanyDropdown(true);
+                      }}
+                      onFocus={() => { loadCompanies(form.company); setShowCompanyDropdown(true); }}
+                      onBlur={() => setTimeout(() => setShowCompanyDropdown(false), 200)}
+                      placeholder="Nombre de la empresa"
+                    />
+                    {showCompanyDropdown && companySuggestions.length > 0 && (
+                      <div className="absolute top-full left-0 right-0 z-50 mt-1 rounded-xl overflow-hidden max-h-[160px] overflow-auto" style={{ background: "rgba(18,18,35,0.98)", border: `1px solid ${palette.border}`, boxShadow: "0 8px 32px rgba(0,0,0,0.5)" }}>
+                        {companySuggestions.map((c) => (
+                          <button
+                            key={c.name}
+                            type="button"
+                            className="w-full px-3 py-2 text-left text-xs flex items-center justify-between transition-colors hover:bg-white/5"
+                            style={{ color: palette.text, borderBottom: `1px solid ${palette.border}` }}
+                            onMouseDown={(e) => { e.preventDefault(); setForm({ ...form, company: c.name }); setShowCompanyDropdown(false); }}
+                          >
+                            <span className="flex items-center gap-2"><Building2 className="w-3 h-3" style={{ color: palette.textDim }} /> {c.name}</span>
+                            <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ background: `${palette.accent}15`, color: palette.accent }}>{c.count}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
-                  <div>
-                    <label className="text-[10px] uppercase tracking-[0.15em] font-bold mb-1.5 flex items-center gap-1.5 block" style={{ color: palette.textDim }}>
-                      <Building2 className="w-3 h-3" /> Empresa
-                    </label>
-                    <GlassInput value={form.company} onChange={(e) => setForm({ ...form, company: e.target.value })} placeholder="Organización" />
-                  </div>
-                  <div>
-                    <label className="text-[10px] uppercase tracking-[0.15em] font-bold mb-1.5 flex items-center gap-1.5 block" style={{ color: palette.textDim }}>
+
+                  <div className="relative">
+                    <label className="text-[10px] uppercase tracking-[0.15em] font-bold mb-1.5 flex items-center gap-1.5" style={{ color: palette.textDim }}>
                       <UserCheck className="w-3 h-3" /> Visita a *
                     </label>
-                    <GlassInput value={form.personToVisit} onChange={(e) => setForm({ ...form, personToVisit: e.target.value })} placeholder="Persona a visitar" required />
+                    <GlassInput
+                      value={form.personToVisit}
+                      onChange={(e) => {
+                        setForm({ ...form, personToVisit: e.target.value });
+                        loadPersons(e.target.value);
+                        setShowPersonDropdown(true);
+                      }}
+                      onFocus={() => { loadPersons(form.personToVisit); setShowPersonDropdown(true); }}
+                      onBlur={() => setTimeout(() => setShowPersonDropdown(false), 200)}
+                      placeholder="Persona a visitar"
+                      required
+                    />
+                    {showPersonDropdown && personSuggestions.length > 0 && (
+                      <div className="absolute top-full left-0 right-0 z-50 mt-1 rounded-xl overflow-hidden max-h-[160px] overflow-auto" style={{ background: "rgba(18,18,35,0.98)", border: `1px solid ${palette.border}`, boxShadow: "0 8px 32px rgba(0,0,0,0.5)" }}>
+                        {personSuggestions.map((p) => (
+                          <button
+                            key={p.name}
+                            type="button"
+                            className="w-full px-3 py-2 text-left text-xs flex items-center justify-between transition-colors hover:bg-white/5"
+                            style={{ color: palette.text, borderBottom: `1px solid ${palette.border}` }}
+                            onMouseDown={(e) => { e.preventDefault(); setForm({ ...form, personToVisit: p.name }); setShowPersonDropdown(false); }}
+                          >
+                            <span className="flex items-center gap-2"><UserCheck className="w-3 h-3" style={{ color: palette.textDim }} /> {p.name}</span>
+                            <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ background: `${palette.accent}15`, color: palette.accent }}>{p.count}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
+                </div>
+
+                {/* Vehicle info */}
+                <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="text-[10px] uppercase tracking-[0.15em] font-bold mb-1.5 flex items-center gap-1.5 block" style={{ color: palette.textDim }}>
+                    <label className="text-[10px] uppercase tracking-[0.15em] font-bold mb-1.5 flex items-center gap-1.5" style={{ color: palette.textDim }}>
                       <Car className="w-3 h-3" /> Matrícula
                     </label>
                     <GlassInput value={form.vehiclePlate} onChange={(e) => setForm({ ...form, vehiclePlate: e.target.value })} placeholder="ABC 1234" />
                   </div>
                   <div>
-                    <label className="text-[10px] uppercase tracking-[0.15em] font-bold mb-1.5 flex items-center gap-1.5 block" style={{ color: palette.textDim }}>
+                    <label className="text-[10px] uppercase tracking-[0.15em] font-bold mb-1.5 flex items-center gap-1.5" style={{ color: palette.textDim }}>
                       <Car className="w-3 h-3" /> Vehículo
                     </label>
                     <GlassInput value={form.vehicleDesc} onChange={(e) => setForm({ ...form, vehicleDesc: e.target.value })} placeholder="Marca, modelo, color" />
                   </div>
-                  <div className="col-span-2">
-                    <label className="text-[10px] uppercase tracking-[0.15em] font-bold mb-1.5 flex items-center gap-1.5 block" style={{ color: palette.textDim }}>
-                      <ClipboardList className="w-3 h-3" /> Motivo de visita
+                </div>
+
+                {/* Reason */}
+                <div>
+                  <label className="text-[10px] uppercase tracking-[0.15em] font-bold mb-1.5 flex items-center gap-1.5" style={{ color: palette.textDim }}>
+                    <ClipboardList className="w-3 h-3" /> Motivo de visita
+                  </label>
+                  <GlassInput value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value })} placeholder="Motivo o asunto de la visita" />
+                </div>
+
+                {/* Observations + Guard */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[10px] uppercase tracking-[0.15em] font-bold mb-1.5 flex items-center gap-1.5" style={{ color: palette.textDim }}>
+                      <Eye className="w-3 h-3" /> Observaciones
                     </label>
-                    <GlassInput value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value })} placeholder="Motivo de la visita" />
+                    <GlassInput value={form.observations} onChange={(e) => setForm({ ...form, observations: e.target.value })} placeholder="Notas del guardia" />
                   </div>
                   <div>
-                    <label className="text-[10px] uppercase tracking-[0.15em] font-bold mb-1.5 block" style={{ color: palette.textDim }}>Observaciones</label>
-                    <GlassInput value={form.observations} onChange={(e) => setForm({ ...form, observations: e.target.value })} placeholder="Notas" />
-                  </div>
-                  <div>
-                    <label className="text-[10px] uppercase tracking-[0.15em] font-bold mb-1.5 flex items-center gap-1.5 block" style={{ color: palette.textDim }}>
-                      <Shield className="w-3 h-3" /> Guardia
+                    <label className="text-[10px] uppercase tracking-[0.15em] font-bold mb-1.5 flex items-center gap-1.5" style={{ color: palette.textDim }}>
+                      <Shield className="w-3 h-3" /> Guardia en turno
                     </label>
                     <GlassInput value={form.guardName} onChange={(e) => setForm({ ...form, guardName: e.target.value })} placeholder="Nombre del guardia" />
                   </div>
                 </div>
-
-                {/* Action buttons */}
-                <div className="flex gap-3 pt-1">
-                  <button
-                    type="button"
-                    onClick={() => { setModalVisible(false); setTimeout(() => setShowForm(false), 300); }}
-                    className="flex-1 py-3 rounded-xl text-sm font-medium transition-all hover:bg-white/5"
-                    style={{ background: "rgba(255,255,255,0.03)", border: `1px solid ${palette.border}`, color: palette.textMuted }}
-                  >
-                    Cancelar
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={saving || !form.cedula || !form.name || !form.personToVisit}
-                    className="flex-[2] flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-bold transition-all hover:scale-[1.01] disabled:opacity-40"
-                    style={{ background: `linear-gradient(135deg, ${palette.gold}, ${palette.gold}cc)`, color: "#000", boxShadow: `0 4px 24px ${palette.gold}30` }}
-                  >
-                    <LogIn className="w-4 h-4" />
-                    {saving ? "Registrando..." : "Registrar Ingreso"}
-                  </button>
-                </div>
               </div>
 
-              {/* ─── RIGHT: Camera + Analysis ─── */}
-              <div className="w-full lg:w-[460px] flex flex-col">
-                {/* Camera feed */}
-                <div className="p-4 flex-1 flex flex-col">
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="flex items-center gap-2">
-                      <CameraIcon className="w-4 h-4" style={{ color: palette.accent }} />
-                      <span className="text-xs font-bold uppercase tracking-wider" style={{ color: palette.accent }}>Cámara de escaneo</span>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setCameraOpen(!cameraOpen)}
-                      className="text-[10px] px-2.5 py-1 rounded-lg font-medium transition-all"
-                      style={{ background: cameraOpen ? `${palette.danger}15` : `${palette.accent}15`, color: cameraOpen ? palette.danger : palette.accent, border: `1px solid ${cameraOpen ? palette.danger : palette.accent}25` }}
-                    >
-                      {cameraOpen ? "Apagar" : "Encender"}
-                    </button>
-                  </div>
+              {/* Action buttons - sticky footer */}
+              <div className="px-7 py-4 flex gap-3" style={{ borderTop: `1px solid rgba(255,255,255,0.05)`, background: "rgba(8,8,15,0.95)" }}>
+                <button
+                  type="button"
+                  onClick={() => { setModalVisible(false); setTimeout(() => setShowForm(false), 300); }}
+                  className="px-6 py-3 rounded-xl text-sm font-medium transition-all hover:bg-white/5"
+                  style={{ background: "rgba(255,255,255,0.03)", border: `1px solid ${palette.border}`, color: palette.textMuted }}
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={saving || !form.cedula || !form.name || !form.personToVisit}
+                  className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-bold transition-all hover:scale-[1.01] disabled:opacity-40"
+                  style={{ background: `linear-gradient(135deg, ${palette.gold}, ${palette.gold}cc)`, color: "#000", boxShadow: `0 4px 24px ${palette.gold}25` }}
+                >
+                  <LogIn className="w-4 h-4" />
+                  {saving ? "Registrando..." : "Autorizar Ingreso"}
+                </button>
+              </div>
+            </div>
 
-                  {cameraOpen ? (
-                    <CedulaWebcamScanner
-                      onScanResult={(cedula, name) => {
-                        setForm((f) => ({ ...f, cedula, name: name || f.name }));
-                        handleScan(cedula);
-                      }}
-                    />
-                  ) : (
-                    <div className="flex-1 rounded-xl flex items-center justify-center min-h-[200px]" style={{ background: "rgba(0,0,0,0.4)", border: `1px dashed ${palette.border}` }}>
-                      <div className="text-center">
-                        <CameraIcon className="w-10 h-10 mx-auto mb-2" style={{ color: palette.textDim }} />
-                        <p className="text-xs" style={{ color: palette.textDim }}>Cámara apagada</p>
-                      </div>
-                    </div>
-                  )}
+            {/* ─── RIGHT COLUMN: Camera + Intelligence Panel ─── */}
+            <div className="w-full lg:w-[440px] flex flex-col" style={{ background: "linear-gradient(180deg, #0c0c1a, #060610)", borderLeft: `1px solid rgba(255,255,255,0.05)` }}>
+              {/* Camera section */}
+              <div className="p-4 flex flex-col">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <div className="w-2 h-2 rounded-full" style={{ background: cameraOpen ? palette.authorized : palette.textDim, boxShadow: cameraOpen ? `0 0 8px ${palette.authorized}60` : "none" }} />
+                    <span className="text-[10px] font-bold uppercase tracking-[0.15em]" style={{ color: palette.textMuted }}>Cámara de verificación</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setCameraOpen(!cameraOpen)}
+                    className="text-[10px] px-2.5 py-1 rounded-lg font-semibold transition-all"
+                    style={{ background: cameraOpen ? `${palette.danger}10` : `${palette.authorized}10`, color: cameraOpen ? palette.danger : palette.authorized }}
+                  >
+                    {cameraOpen ? "Apagar" : "Encender"}
+                  </button>
                 </div>
 
-                {/* ── Analysis overlay / results ── */}
-                <div className="px-4 pb-4">
-                  {scanPhase === "analyzing" && (
-                    <div className="rounded-xl p-4 space-y-3 scan-result-enter" style={{ background: `${palette.accent}06`, border: `1px solid ${palette.accent}20` }}>
-                      <div className="flex items-center gap-3">
-                        <div className="relative">
-                          <div className="w-10 h-10 rounded-full flex items-center justify-center" style={{ background: `${palette.accent}15` }}>
-                            <Fingerprint className="w-5 h-5 animate-pulse" style={{ color: palette.accent }} />
-                          </div>
-                          <div className="absolute inset-0 rounded-full animate-ping" style={{ background: `${palette.accent}10`, animationDuration: "1.5s" }} />
+                {cameraOpen ? (
+                  <CedulaWebcamScanner
+                    onScanResult={(cedula, name) => {
+                      setForm((f) => ({ ...f, cedula, name: name || f.name }));
+                      handleScan(cedula);
+                    }}
+                    onPhotoCapture={handlePhotoCapture}
+                  />
+                ) : (
+                  <div className="rounded-2xl flex items-center justify-center" style={{ background: "linear-gradient(180deg, rgba(20,15,30,1), rgba(10,8,18,1))", border: `1px solid rgba(255,255,255,0.04)`, minHeight: 220 }}>
+                    <div className="text-center">
+                      <CameraIcon className="w-10 h-10 mx-auto mb-2" style={{ color: palette.textDim }} />
+                      <p className="text-[11px]" style={{ color: palette.textDim }}>Cámara apagada</p>
+                      <p className="text-[10px] mt-1" style={{ color: `${palette.textDim}80` }}>Use el campo de cédula para búsqueda manual</p>
+                    </div>
+                  </div>
+                )}
+
+                {/* Last captured photo thumbnail */}
+                {lastCapturedPhoto && (
+                  <div className="mt-2 flex items-center gap-2 scan-result-enter">
+                    <img
+                      src={lastCapturedPhoto}
+                      alt="Captura"
+                      className="w-12 h-12 rounded-lg object-cover cursor-pointer transition-transform hover:scale-110"
+                      style={{ border: `1px solid ${palette.authorized}30` }}
+                      onClick={() => setPhotoLightbox(lastCapturedPhoto)}
+                    />
+                    <div className="flex-1">
+                      <p className="text-[10px] font-semibold" style={{ color: palette.authorized }}>Foto capturada</p>
+                      <p className="text-[9px]" style={{ color: palette.textDim }}>Se guardará al registrar ingreso</p>
+                    </div>
+                    <button type="button" onClick={() => setLastCapturedPhoto(null)} className="p-1 rounded" style={{ color: palette.textDim }}>
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* ── Intelligence / Analysis Panel ── */}
+              <div className="flex-1 overflow-auto px-4 pb-4 space-y-3">
+                {scanPhase === "analyzing" && (
+                  <div className="rounded-2xl p-5 space-y-4 scan-result-enter" style={{ background: `linear-gradient(135deg, ${palette.accent}06, ${palette.gold}04)`, border: `1px solid ${palette.accent}15` }}>
+                    <div className="flex items-center gap-3">
+                      <div className="relative">
+                        <div className="w-12 h-12 rounded-xl flex items-center justify-center" style={{ background: `${palette.accent}12` }}>
+                          <Fingerprint className="w-6 h-6 animate-pulse" style={{ color: palette.accent }} />
                         </div>
-                        <div>
-                          <p className="text-sm font-semibold" style={{ color: palette.accent }}>Analizando documento...</p>
-                          <p className="text-[10px]" style={{ color: palette.textDim }}>Buscando registros previos</p>
-                        </div>
+                        <div className="absolute inset-0 rounded-xl animate-ping" style={{ background: `${palette.accent}08`, animationDuration: "1.5s" }} />
                       </div>
-                      <div className="h-1.5 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.06)" }}>
-                        <div className="h-full rounded-full animate-scan-progress" style={{ background: `linear-gradient(90deg, ${palette.accent}, ${palette.gold})` }} />
+                      <div>
+                        <p className="text-sm font-bold" style={{ color: palette.accent }}>Verificando identidad...</p>
+                        <p className="text-[10px]" style={{ color: palette.textDim }}>Cruzando base de datos de visitantes</p>
                       </div>
                     </div>
-                  )}
+                    <div className="h-1.5 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.04)" }}>
+                      <div className="h-full rounded-full animate-scan-progress" style={{ background: `linear-gradient(90deg, ${palette.accent}, ${palette.gold})` }} />
+                    </div>
+                    <div className="grid grid-cols-3 gap-2 text-center text-[9px]" style={{ color: palette.textDim }}>
+                      <div className="py-1.5 rounded-lg" style={{ background: "rgba(255,255,255,0.02)" }}>Historial</div>
+                      <div className="py-1.5 rounded-lg" style={{ background: "rgba(255,255,255,0.02)" }}>Fotografías</div>
+                      <div className="py-1.5 rounded-lg" style={{ background: "rgba(255,255,255,0.02)" }}>Alertas</div>
+                    </div>
+                  </div>
+                )}
 
-                  {scanPhase === "found" && scanHistory.length > 0 && (
-                    <div className="rounded-xl overflow-hidden scan-result-enter" style={{ border: `1px solid ${palette.authorized}25` }}>
-                      <div className="px-4 py-3 flex items-center gap-3" style={{ background: `${palette.authorized}08` }}>
-                        <CheckCircle2 className="w-5 h-5" style={{ color: palette.authorized }} />
-                        <div className="flex-1">
-                          <p className="text-sm font-bold" style={{ color: palette.authorized }}>Visitante identificado</p>
-                          <p className="text-[10px]" style={{ color: palette.textMuted }}>{scanHistory.length} visita(s) anteriores — datos auto-completados</p>
+                {scanPhase === "found" && scanHistory.length > 0 && (
+                  <div className="space-y-3 scan-result-enter">
+                    {/* Summary card */}
+                    <div className="rounded-2xl overflow-hidden" style={{ border: `1px solid ${palette.authorized}20` }}>
+                      <div className="px-4 py-3 flex items-center gap-3" style={{ background: `linear-gradient(135deg, ${palette.authorized}08, ${palette.authorized}03)` }}>
+                        <CheckCircle2 className="w-5 h-5 flex-shrink-0" style={{ color: palette.authorized }} />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-bold" style={{ color: palette.authorized }}>Visitante verificado</p>
+                          <p className="text-[10px]" style={{ color: palette.textMuted }}>
+                            {scanHistory.length} visita{scanHistory.length !== 1 ? "s" : ""} registrada{scanHistory.length !== 1 ? "s" : ""} — datos auto-completados
+                          </p>
                         </div>
-                        <span className="text-2xl font-bold" style={{ color: palette.authorized }}>{scanHistory.length}</span>
+                        <div className="text-right">
+                          <span className="text-2xl font-black" style={{ color: palette.authorized }}>{scanHistory.length}</span>
+                          <p className="text-[8px] uppercase tracking-wider" style={{ color: `${palette.authorized}80` }}>visitas</p>
+                        </div>
                       </div>
-                      <div className="max-h-[180px] overflow-auto">
-                        {scanHistory.slice(0, 5).map((v, i) => (
-                          <div key={v.id} className="px-4 py-2 flex items-center gap-3 text-xs" style={{ borderTop: `1px solid ${palette.border}`, background: i === 0 ? "rgba(255,255,255,0.02)" : "transparent" }}>
-                            <div className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold" style={{ background: `${palette.authorized}15`, color: palette.authorized }}>
-                              {i + 1}
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <div className="font-medium truncate" style={{ color: palette.text }}>{v.personToVisit}{v.company ? ` · ${v.company}` : ""}</div>
-                              <div style={{ color: palette.textDim }}>{v.reason || "Sin motivo registrado"}</div>
-                            </div>
-                            <div className="text-right flex-shrink-0">
-                              <div style={{ color: palette.textMuted }}>{fmtDate(v.checkIn)}</div>
-                              <div style={{ color: palette.textDim }}>{fmtTime(v.checkIn)} {v.checkOut ? `→ ${fmtTime(v.checkOut)}` : ""}</div>
-                            </div>
-                            <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: v.checkOut ? palette.textDim : palette.authorized }} />
+
+                      {/* Quick stats */}
+                      <div className="grid grid-cols-3 gap-px" style={{ background: palette.border }}>
+                        {[
+                          { label: "Primera visita", value: scanHistory.length > 0 ? fmtDate(scanHistory[scanHistory.length - 1].checkIn) : "—" },
+                          { label: "Última visita", value: scanHistory.length > 0 ? fmtDate(scanHistory[0].checkIn) : "—" },
+                          { label: "Empresas", value: [...new Set(scanHistory.map((v) => v.company).filter(Boolean))].length || "—" },
+                        ].map((s) => (
+                          <div key={s.label} className="px-3 py-2 text-center" style={{ background: "#0a0a14" }}>
+                            <div className="text-[8px] uppercase tracking-wider" style={{ color: palette.textDim }}>{s.label}</div>
+                            <div className="text-xs font-bold mt-0.5" style={{ color: palette.text }}>{s.value}</div>
                           </div>
                         ))}
                       </div>
                     </div>
-                  )}
 
-                  {scanPhase === "not_found" && (
-                    <div className="rounded-xl p-4 flex items-center gap-3 scan-result-enter" style={{ background: `${palette.gold}06`, border: `1px solid ${palette.gold}20` }}>
-                      <div className="w-10 h-10 rounded-full flex items-center justify-center" style={{ background: `${palette.gold}15` }}>
-                        <UserCheck className="w-5 h-5" style={{ color: palette.gold }} />
+                    {/* Photos from previous visits */}
+                    {scanPhotos.length > 0 && (
+                      <div className="rounded-2xl p-3" style={{ background: "rgba(255,255,255,0.02)", border: `1px solid rgba(255,255,255,0.05)` }}>
+                        <p className="text-[10px] uppercase tracking-wider font-bold mb-2 flex items-center gap-1.5" style={{ color: palette.textMuted }}>
+                          <CameraIcon className="w-3 h-3" /> Fotografías anteriores
+                        </p>
+                        <div className="grid grid-cols-3 gap-2">
+                          {scanPhotos.map((photo, i) => (
+                            <div key={i} className="relative group cursor-pointer" onClick={() => setPhotoLightbox(apiUrl(photo.url))}>
+                              <img
+                                src={apiUrl(photo.url)}
+                                alt={`Visita ${i + 1}`}
+                                className="w-full aspect-square object-cover rounded-xl transition-transform group-hover:scale-105"
+                                style={{ border: `1px solid rgba(255,255,255,0.08)` }}
+                              />
+                              <div className="absolute bottom-1 left-1 right-1 text-center">
+                                <span className="text-[8px] px-1.5 py-0.5 rounded-md" style={{ background: "rgba(0,0,0,0.7)", color: palette.textMuted }}>
+                                  {fmtDate(photo.timestamp)}
+                                </span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Visit history list */}
+                    <div className="rounded-2xl overflow-hidden" style={{ border: `1px solid rgba(255,255,255,0.05)` }}>
+                      <div className="px-3 py-2 flex items-center gap-1.5" style={{ background: "rgba(255,255,255,0.02)" }}>
+                        <History className="w-3 h-3" style={{ color: palette.textDim }} />
+                        <span className="text-[10px] uppercase tracking-wider font-bold" style={{ color: palette.textMuted }}>Historial de acceso</span>
+                      </div>
+                      <div className="max-h-[200px] overflow-auto">
+                        {scanHistory.slice(0, 8).map((v, i) => (
+                          <div key={v.id} className="px-3 py-2 flex items-center gap-2.5 text-[11px]" style={{ borderTop: `1px solid rgba(255,255,255,0.03)`, background: i === 0 ? "rgba(255,255,255,0.015)" : "transparent" }}>
+                            <div className="w-5 h-5 rounded-md flex items-center justify-center text-[9px] font-bold flex-shrink-0" style={{ background: i === 0 ? `${palette.authorized}15` : "rgba(255,255,255,0.04)", color: i === 0 ? palette.authorized : palette.textDim }}>
+                              {i + 1}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="font-medium truncate" style={{ color: palette.text }}>
+                                {v.personToVisit}
+                                {v.company ? <span style={{ color: palette.textDim }}> · {v.company}</span> : ""}
+                              </div>
+                              <div className="truncate" style={{ color: palette.textDim }}>{v.reason || "Sin motivo"}</div>
+                            </div>
+                            <div className="text-right flex-shrink-0">
+                              <div className="font-mono" style={{ color: palette.textMuted }}>{fmtDate(v.checkIn)}</div>
+                              <div style={{ color: palette.textDim }}>
+                                {fmtTime(v.checkIn)}{v.checkOut ? ` → ${fmtTime(v.checkOut)}` : ""}
+                              </div>
+                            </div>
+                            <div className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: v.checkOut ? palette.textDim : palette.authorized }} />
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {scanPhase === "not_found" && (
+                  <div className="rounded-2xl p-5 scan-result-enter" style={{ background: `linear-gradient(135deg, ${palette.gold}05, ${palette.visitor}03)`, border: `1px solid ${palette.gold}15` }}>
+                    <div className="flex items-center gap-3 mb-3">
+                      <div className="w-12 h-12 rounded-xl flex items-center justify-center" style={{ background: `${palette.gold}10` }}>
+                        <AlertTriangle className="w-6 h-6" style={{ color: palette.gold }} />
                       </div>
                       <div>
-                        <p className="text-sm font-semibold" style={{ color: palette.gold }}>Visitante nuevo</p>
-                        <p className="text-[10px]" style={{ color: palette.textDim }}>Sin registros previos — complete los datos manualmente</p>
+                        <p className="text-sm font-bold" style={{ color: palette.gold }}>Visitante sin antecedentes</p>
+                        <p className="text-[10px]" style={{ color: palette.textDim }}>Primera visita — sin registros en el sistema</p>
                       </div>
                     </div>
-                  )}
-
-                  {scanPhase === "idle" && !cameraOpen && (
-                    <div className="rounded-xl p-4 text-center" style={{ background: "rgba(255,255,255,0.02)", border: `1px dashed ${palette.border}` }}>
-                      <Fingerprint className="w-8 h-8 mx-auto mb-2" style={{ color: palette.textDim }} />
-                      <p className="text-xs" style={{ color: palette.textDim }}>Ingrese una cédula o escanee con la cámara para ver el historial</p>
+                    <div className="rounded-xl p-3 space-y-1.5" style={{ background: "rgba(0,0,0,0.2)" }}>
+                      <p className="text-[10px] font-bold uppercase tracking-wider" style={{ color: palette.textMuted }}>Protocolo para nuevos visitantes:</p>
+                      <p className="text-[10px]" style={{ color: palette.textDim }}>1. Verificar documento de identidad físico</p>
+                      <p className="text-[10px]" style={{ color: palette.textDim }}>2. Confirmar persona y motivo de visita</p>
+                      <p className="text-[10px]" style={{ color: palette.textDim }}>3. Capturar fotografía del visitante</p>
+                      <p className="text-[10px]" style={{ color: palette.textDim }}>4. Completar todos los campos del formulario</p>
                     </div>
-                  )}
-                </div>
+                  </div>
+                )}
+
+                {scanPhase === "idle" && (
+                  <div className="rounded-2xl p-6 text-center" style={{ background: "rgba(255,255,255,0.015)", border: `1px dashed rgba(255,255,255,0.06)` }}>
+                    <Fingerprint className="w-10 h-10 mx-auto mb-3" style={{ color: `${palette.textDim}60` }} />
+                    <p className="text-xs font-medium mb-1" style={{ color: palette.textDim }}>Panel de verificación</p>
+                    <p className="text-[10px] leading-relaxed max-w-[250px] mx-auto" style={{ color: `${palette.textDim}80` }}>
+                      Ingrese un número de cédula o escanee el documento para consultar el historial de acceso y fotografías del visitante
+                    </p>
+                  </div>
+                )}
               </div>
             </div>
           </form>
+
+          {/* Photo lightbox */}
+          {photoLightbox && (
+            <div
+              className="fixed inset-0 z-[200] flex items-center justify-center"
+              style={{ background: "rgba(0,0,0,0.9)" }}
+              onClick={() => setPhotoLightbox(null)}
+            >
+              <img src={photoLightbox} alt="Foto" className="max-w-[90vw] max-h-[90vh] rounded-2xl" style={{ boxShadow: "0 0 60px rgba(0,0,0,0.8)" }} />
+              <button className="absolute top-6 right-6 p-2 rounded-xl" style={{ background: "rgba(255,255,255,0.1)", color: "#fff" }} onClick={() => setPhotoLightbox(null)}>
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+          )}
 
           <style>{`
             .scan-result-enter { animation: scanResultIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) both; }

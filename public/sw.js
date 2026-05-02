@@ -1,4 +1,4 @@
-const CACHE_NAME = "kumamap-mobile-v6";
+const CACHE_NAME = "kumamap-mobile-v7";
 // Auto-detect basePath from service worker URL:
 //   /maps/sw.js → BASE = "/maps"
 //   /sw.js       → BASE = ""

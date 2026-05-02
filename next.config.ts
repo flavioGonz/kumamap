@@ -41,8 +41,8 @@ const nextConfig: NextConfig = {
               "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
               // Styles: self + inline (Tailwind, dynamic styles) + unpkg (Leaflet CSS for mobile)
               "style-src 'self' 'unsafe-inline' https://unpkg.com",
-              // Images: self + tile servers + data URIs (base64 rack photos) + camera snapshots (any IP)
-              "img-src 'self' data: blob: https://*.tile.openstreetmap.org https://server.arcgisonline.com https://*.basemaps.cartocdn.com",
+              // Images: self + tile servers + data URIs (base64 rack photos) + camera snapshots + brand logos
+              "img-src 'self' data: blob: https://*.tile.openstreetmap.org https://server.arcgisonline.com https://*.basemaps.cartocdn.com https://logo.clearbit.com",
               // Fonts
               "font-src 'self' data:",
               // Connect: self + SSE + Uptime Kuma WS

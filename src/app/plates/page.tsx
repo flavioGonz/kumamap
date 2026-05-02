@@ -3626,7 +3626,10 @@ function BitacoraTab({ mapId }: { mapId: string }) {
   const [historyModal, setHistoryModal] = useState<{ cedula: string; name: string } | null>(null);
   const [history, setHistory] = useState<Visitor[]>([]);
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [cameraOpen, setCameraOpen] = useState(false);
+  const [cameraOpen, setCameraOpen] = useState(true);
+  const [scanPhase, setScanPhase] = useState<"idle" | "analyzing" | "found" | "not_found">("idle");
+  const [scanHistory, setScanHistory] = useState<Visitor[]>([]);
+  const [modalVisible, setModalVisible] = useState(false);
   const scannerRef = useRef<HTMLInputElement>(null);
   const LIMIT = 30;
 
@@ -3687,6 +3690,12 @@ function BitacoraTab({ mapId }: { mapId: string }) {
     async (cedula: string) => {
       if (!cedula.trim()) return;
 
+      setScanPhase("analyzing");
+      setScanHistory([]);
+
+      // Simulate analysis phases for UX
+      await new Promise((r) => setTimeout(r, 800));
+
       // Look up previous visits for auto-fill
       const { data } = await apiFetch<{ visits: Visitor[] }>(
         apiUrl(`/api/visitors/history?mapId=${mapId}&cedula=${encodeURIComponent(cedula.trim())}`)
@@ -3694,6 +3703,7 @@ function BitacoraTab({ mapId }: { mapId: string }) {
 
       if (data && data.visits.length > 0) {
         const last = data.visits[0];
+        setScanHistory(data.visits);
         setForm((f) => ({
           ...f,
           cedula: cedula.trim(),
@@ -3702,9 +3712,14 @@ function BitacoraTab({ mapId }: { mapId: string }) {
           vehiclePlate: last.vehiclePlate || f.vehiclePlate,
           vehicleDesc: last.vehicleDesc || f.vehicleDesc,
         }));
+        setScanPhase("found");
       } else {
         setForm((f) => ({ ...f, cedula: cedula.trim() }));
+        setScanPhase("not_found");
       }
+
+      // Auto-reset after a few seconds
+      setTimeout(() => setScanPhase("idle"), 5000);
     },
     [mapId]
   );
@@ -3827,7 +3842,7 @@ function BitacoraTab({ mapId }: { mapId: string }) {
       {/* ── Toolbar ── */}
       <div className="flex flex-wrap items-center gap-3">
         <button
-          onClick={() => { setShowForm(true); setEditingVisitor(null); setForm({ cedula: "", name: "", company: "", personToVisit: "", vehiclePlate: "", vehicleDesc: "", reason: "", observations: "", guardName: "" }); }}
+          onClick={() => { setShowForm(true); setModalVisible(false); setTimeout(() => setModalVisible(true), 30); setEditingVisitor(null); setScanPhase("idle"); setScanHistory([]); setCameraOpen(true); setForm({ cedula: "", name: "", company: "", personToVisit: "", vehiclePlate: "", vehicleDesc: "", reason: "", observations: "", guardName: "" }); }}
           className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all hover:scale-[1.02]"
           style={{
             background: `linear-gradient(135deg, ${palette.gold}, ${palette.gold}cc)`,
@@ -3886,154 +3901,272 @@ function BitacoraTab({ mapId }: { mapId: string }) {
         </button>
       </div>
 
-      {/* ── Check-In Form Modal ── */}
+      {/* ── Check-In Form Modal — Two-Column Layout ── */}
       {showForm && (
         <div
-          className="fixed inset-0 z-[100] flex items-center justify-center"
-          style={{ background: "rgba(0,0,0,0.7)", backdropFilter: "blur(8px)" }}
-          onClick={() => setShowForm(false)}
+          className="fixed inset-0 z-[100] flex items-center justify-center checkin-backdrop"
+          style={{ background: "rgba(0,0,0,0.8)", backdropFilter: "blur(16px)", transition: "opacity 0.3s", opacity: modalVisible ? 1 : 0 }}
+          onClick={() => { setModalVisible(false); setTimeout(() => setShowForm(false), 300); }}
         >
           <form
             onSubmit={handleCheckIn}
             onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-lg rounded-2xl p-6 space-y-4"
+            className="w-full max-w-[1100px] max-h-[92vh] overflow-auto rounded-3xl"
             style={{
-              background: "rgba(15,15,30,0.98)",
-              border: `1px solid ${palette.gold}25`,
-              boxShadow: `0 0 60px rgba(0,0,0,0.5), 0 0 30px ${palette.gold}10`,
+              background: "linear-gradient(145deg, rgba(12,12,30,0.98), rgba(8,8,20,0.99))",
+              border: `1px solid ${palette.gold}20`,
+              boxShadow: `0 0 80px rgba(0,0,0,0.6), 0 0 40px ${palette.gold}08, inset 0 1px 0 rgba(255,255,255,0.04)`,
+              transform: modalVisible ? "scale(1) translateY(0)" : "scale(0.92) translateY(30px)",
+              opacity: modalVisible ? 1 : 0,
+              transition: "transform 0.4s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.3s ease",
             }}
           >
-            <div className="flex items-center justify-between mb-2">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: `${palette.gold}15`, border: `1px solid ${palette.gold}25` }}>
-                  <ScanLine className="w-5 h-5" style={{ color: palette.gold }} />
+            {/* Header */}
+            <div className="flex items-center justify-between px-8 py-5" style={{ borderBottom: `1px solid ${palette.border}` }}>
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 rounded-2xl flex items-center justify-center" style={{ background: `linear-gradient(135deg, ${palette.gold}20, ${palette.gold}08)`, border: `1px solid ${palette.gold}30`, boxShadow: `0 0 24px ${palette.gold}15` }}>
+                  <Fingerprint className="w-6 h-6" style={{ color: palette.gold }} />
                 </div>
                 <div>
-                  <h3 className="text-base font-bold" style={{ color: "#fff" }}>Registrar Ingreso</h3>
-                  <p className="text-[10px] uppercase tracking-wider" style={{ color: palette.textDim }}>Escanee la cédula o ingrese manualmente</p>
+                  <h2 className="text-lg font-bold tracking-tight" style={{ color: "#fff" }}>Registro de Ingreso</h2>
+                  <p className="text-[11px] font-medium" style={{ color: palette.textDim }}>
+                    <ScanLine className="w-3 h-3 inline mr-1" />
+                    Escanee la cédula con la cámara o ingrese los datos manualmente
+                  </p>
                 </div>
               </div>
-              <button type="button" onClick={() => setShowForm(false)} className="p-1.5 rounded-lg" style={{ color: palette.textMuted }}>
+              <button type="button" onClick={() => { setModalVisible(false); setTimeout(() => setShowForm(false), 300); }} className="p-2 rounded-xl transition-all hover:scale-110 hover:bg-white/5" style={{ color: palette.textMuted }}>
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            {/* Scanner: text input + webcam toggle */}
-            <div className="space-y-2">
-              <div className="flex gap-2">
-                <div className="relative flex-1">
-                  <div className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: palette.gold }}>
-                    <ScanLine className="w-5 h-5" />
+            {/* Two-column body */}
+            <div className="flex flex-col lg:flex-row">
+              {/* ─── LEFT: Form Fields ─── */}
+              <div className="flex-1 p-6 space-y-4 lg:border-r" style={{ borderColor: palette.border }}>
+                {/* Cédula input with inline scanner toggle */}
+                <div>
+                  <label className="text-[10px] uppercase tracking-[0.15em] font-bold mb-1.5 flex items-center gap-1.5 block" style={{ color: palette.gold }}>
+                    <Fingerprint className="w-3 h-3" /> Cédula / Documento *
+                  </label>
+                  <div className="flex gap-2">
+                    <div className="relative flex-1">
+                      <div className="absolute left-3.5 top-1/2 -translate-y-1/2" style={{ color: palette.gold }}>
+                        <ScanLine className="w-4 h-4" />
+                      </div>
+                      <input
+                        ref={scannerRef}
+                        type="text"
+                        placeholder="Número de cédula..."
+                        value={form.cedula}
+                        onChange={(e) => setForm({ ...form, cedula: e.target.value })}
+                        onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleScan(form.cedula); } }}
+                        className="w-full pl-11 pr-4 py-3 rounded-xl text-base font-mono transition-all focus:outline-none focus:ring-2"
+                        style={{ background: `${palette.gold}06`, border: `1.5px solid ${palette.gold}25`, color: palette.gold } as React.CSSProperties}
+                        autoFocus
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleScan(form.cedula)}
+                      disabled={!form.cedula.trim() || scanPhase === "analyzing"}
+                      className="px-4 rounded-xl text-xs font-bold transition-all hover:scale-[1.02] disabled:opacity-40"
+                      style={{ background: `${palette.gold}15`, border: `1.5px solid ${palette.gold}30`, color: palette.gold }}
+                    >
+                      {scanPhase === "analyzing" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
+                    </button>
                   </div>
-                  <input
-                    ref={scannerRef}
-                    type="text"
-                    placeholder="Escanear cédula / código..."
-                    value={form.cedula}
-                    onChange={(e) => setForm({ ...form, cedula: e.target.value })}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        e.preventDefault();
-                        handleScan(form.cedula);
-                      }
-                    }}
-                    className="w-full pl-11 pr-4 py-3.5 rounded-xl text-lg font-mono transition-all focus:outline-none focus:ring-2"
-                    style={{
-                      background: `${palette.gold}08`,
-                      border: `2px solid ${palette.gold}30`,
-                      color: palette.gold,
-                      // @ts-ignore
-                      "--tw-ring-color": `${palette.gold}50`,
-                    }}
-                    autoFocus
-                  />
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setCameraOpen(!cameraOpen)}
-                  className="flex items-center gap-2 px-4 rounded-xl text-sm font-semibold transition-all hover:scale-[1.02]"
-                  style={{
-                    background: cameraOpen ? `${palette.accent}20` : `${palette.gold}10`,
-                    border: `2px solid ${cameraOpen ? palette.accent : palette.gold}30`,
-                    color: cameraOpen ? palette.accent : palette.gold,
-                  }}
-                >
-                  <CameraIcon className="w-5 h-5" />
-                  {cameraOpen ? "Cerrar" : "Cámara"}
-                </button>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="col-span-2">
+                    <label className="text-[10px] uppercase tracking-[0.15em] font-bold mb-1.5 flex items-center gap-1.5 block" style={{ color: palette.textDim }}>
+                      <Users className="w-3 h-3" /> Nombre completo *
+                    </label>
+                    <GlassInput value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Nombre y apellido" required />
+                  </div>
+                  <div>
+                    <label className="text-[10px] uppercase tracking-[0.15em] font-bold mb-1.5 flex items-center gap-1.5 block" style={{ color: palette.textDim }}>
+                      <Building2 className="w-3 h-3" /> Empresa
+                    </label>
+                    <GlassInput value={form.company} onChange={(e) => setForm({ ...form, company: e.target.value })} placeholder="Organización" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] uppercase tracking-[0.15em] font-bold mb-1.5 flex items-center gap-1.5 block" style={{ color: palette.textDim }}>
+                      <UserCheck className="w-3 h-3" /> Visita a *
+                    </label>
+                    <GlassInput value={form.personToVisit} onChange={(e) => setForm({ ...form, personToVisit: e.target.value })} placeholder="Persona a visitar" required />
+                  </div>
+                  <div>
+                    <label className="text-[10px] uppercase tracking-[0.15em] font-bold mb-1.5 flex items-center gap-1.5 block" style={{ color: palette.textDim }}>
+                      <Car className="w-3 h-3" /> Matrícula
+                    </label>
+                    <GlassInput value={form.vehiclePlate} onChange={(e) => setForm({ ...form, vehiclePlate: e.target.value })} placeholder="ABC 1234" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] uppercase tracking-[0.15em] font-bold mb-1.5 flex items-center gap-1.5 block" style={{ color: palette.textDim }}>
+                      <Car className="w-3 h-3" /> Vehículo
+                    </label>
+                    <GlassInput value={form.vehicleDesc} onChange={(e) => setForm({ ...form, vehicleDesc: e.target.value })} placeholder="Marca, modelo, color" />
+                  </div>
+                  <div className="col-span-2">
+                    <label className="text-[10px] uppercase tracking-[0.15em] font-bold mb-1.5 flex items-center gap-1.5 block" style={{ color: palette.textDim }}>
+                      <ClipboardList className="w-3 h-3" /> Motivo de visita
+                    </label>
+                    <GlassInput value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value })} placeholder="Motivo de la visita" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] uppercase tracking-[0.15em] font-bold mb-1.5 block" style={{ color: palette.textDim }}>Observaciones</label>
+                    <GlassInput value={form.observations} onChange={(e) => setForm({ ...form, observations: e.target.value })} placeholder="Notas" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] uppercase tracking-[0.15em] font-bold mb-1.5 flex items-center gap-1.5 block" style={{ color: palette.textDim }}>
+                      <Shield className="w-3 h-3" /> Guardia
+                    </label>
+                    <GlassInput value={form.guardName} onChange={(e) => setForm({ ...form, guardName: e.target.value })} placeholder="Nombre del guardia" />
+                  </div>
+                </div>
+
+                {/* Action buttons */}
+                <div className="flex gap-3 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => { setModalVisible(false); setTimeout(() => setShowForm(false), 300); }}
+                    className="flex-1 py-3 rounded-xl text-sm font-medium transition-all hover:bg-white/5"
+                    style={{ background: "rgba(255,255,255,0.03)", border: `1px solid ${palette.border}`, color: palette.textMuted }}
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={saving || !form.cedula || !form.name || !form.personToVisit}
+                    className="flex-[2] flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-bold transition-all hover:scale-[1.01] disabled:opacity-40"
+                    style={{ background: `linear-gradient(135deg, ${palette.gold}, ${palette.gold}cc)`, color: "#000", boxShadow: `0 4px 24px ${palette.gold}30` }}
+                  >
+                    <LogIn className="w-4 h-4" />
+                    {saving ? "Registrando..." : "Registrar Ingreso"}
+                  </button>
+                </div>
               </div>
 
-              {/* Webcam scanner area */}
-              {cameraOpen && (
-                <CedulaWebcamScanner
-                  onScanResult={(cedula, name) => {
-                    setForm((f) => ({ ...f, cedula, name: name || f.name }));
-                    handleScan(cedula);
-                    setCameraOpen(false);
-                  }}
-                />
-              )}
-            </div>
+              {/* ─── RIGHT: Camera + Analysis ─── */}
+              <div className="w-full lg:w-[460px] flex flex-col">
+                {/* Camera feed */}
+                <div className="p-4 flex-1 flex flex-col">
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2">
+                      <CameraIcon className="w-4 h-4" style={{ color: palette.accent }} />
+                      <span className="text-xs font-bold uppercase tracking-wider" style={{ color: palette.accent }}>Cámara de escaneo</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setCameraOpen(!cameraOpen)}
+                      className="text-[10px] px-2.5 py-1 rounded-lg font-medium transition-all"
+                      style={{ background: cameraOpen ? `${palette.danger}15` : `${palette.accent}15`, color: cameraOpen ? palette.danger : palette.accent, border: `1px solid ${cameraOpen ? palette.danger : palette.accent}25` }}
+                    >
+                      {cameraOpen ? "Apagar" : "Encender"}
+                    </button>
+                  </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <div className="col-span-2">
-                <label className="text-[10px] uppercase tracking-wider font-medium mb-1 block" style={{ color: palette.textDim }}>Nombre completo *</label>
-                <GlassInput value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Nombre y apellido" required />
-              </div>
-              <div>
-                <label className="text-[10px] uppercase tracking-wider font-medium mb-1 block" style={{ color: palette.textDim }}>Empresa</label>
-                <GlassInput icon={<Building2 className="w-3.5 h-3.5" />} value={form.company} onChange={(e) => setForm({ ...form, company: e.target.value })} placeholder="Empresa u organización" />
-              </div>
-              <div>
-                <label className="text-[10px] uppercase tracking-wider font-medium mb-1 block" style={{ color: palette.textDim }}>Visita a *</label>
-                <GlassInput icon={<UserCheck className="w-3.5 h-3.5" />} value={form.personToVisit} onChange={(e) => setForm({ ...form, personToVisit: e.target.value })} placeholder="Persona a visitar" required />
-              </div>
-              <div>
-                <label className="text-[10px] uppercase tracking-wider font-medium mb-1 block" style={{ color: palette.textDim }}>Matrícula</label>
-                <GlassInput icon={<Car className="w-3.5 h-3.5" />} value={form.vehiclePlate} onChange={(e) => setForm({ ...form, vehiclePlate: e.target.value })} placeholder="ABC 1234" />
-              </div>
-              <div>
-                <label className="text-[10px] uppercase tracking-wider font-medium mb-1 block" style={{ color: palette.textDim }}>Vehículo</label>
-                <GlassInput value={form.vehicleDesc} onChange={(e) => setForm({ ...form, vehicleDesc: e.target.value })} placeholder="Ej: Toyota Hilux gris" />
-              </div>
-              <div className="col-span-2">
-                <label className="text-[10px] uppercase tracking-wider font-medium mb-1 block" style={{ color: palette.textDim }}>Motivo de visita</label>
-                <GlassInput value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value })} placeholder="Motivo de la visita" />
-              </div>
-              <div>
-                <label className="text-[10px] uppercase tracking-wider font-medium mb-1 block" style={{ color: palette.textDim }}>Observaciones</label>
-                <GlassInput value={form.observations} onChange={(e) => setForm({ ...form, observations: e.target.value })} placeholder="Notas del guardia" />
-              </div>
-              <div>
-                <label className="text-[10px] uppercase tracking-wider font-medium mb-1 block" style={{ color: palette.textDim }}>Guardia</label>
-                <GlassInput icon={<Shield className="w-3.5 h-3.5" />} value={form.guardName} onChange={(e) => setForm({ ...form, guardName: e.target.value })} placeholder="Nombre del guardia" />
-              </div>
-            </div>
+                  {cameraOpen ? (
+                    <CedulaWebcamScanner
+                      onScanResult={(cedula, name) => {
+                        setForm((f) => ({ ...f, cedula, name: name || f.name }));
+                        handleScan(cedula);
+                      }}
+                    />
+                  ) : (
+                    <div className="flex-1 rounded-xl flex items-center justify-center min-h-[200px]" style={{ background: "rgba(0,0,0,0.4)", border: `1px dashed ${palette.border}` }}>
+                      <div className="text-center">
+                        <CameraIcon className="w-10 h-10 mx-auto mb-2" style={{ color: palette.textDim }} />
+                        <p className="text-xs" style={{ color: palette.textDim }}>Cámara apagada</p>
+                      </div>
+                    </div>
+                  )}
+                </div>
 
-            <div className="flex gap-3 pt-2">
-              <button
-                type="button"
-                onClick={() => setShowForm(false)}
-                className="flex-1 py-2.5 rounded-xl text-sm font-medium transition-all"
-                style={{ background: "rgba(255,255,255,0.04)", border: `1px solid ${palette.border}`, color: palette.textMuted }}
-              >
-                Cancelar
-              </button>
-              <button
-                type="submit"
-                disabled={saving || !form.cedula || !form.name || !form.personToVisit}
-                className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-bold transition-all hover:scale-[1.01] disabled:opacity-40"
-                style={{
-                  background: `linear-gradient(135deg, ${palette.gold}, ${palette.gold}cc)`,
-                  color: "#000",
-                  boxShadow: `0 4px 20px ${palette.gold}30`,
-                }}
-              >
-                <LogIn className="w-4 h-4" />
-                {saving ? "Registrando..." : "Registrar Ingreso"}
-              </button>
+                {/* ── Analysis overlay / results ── */}
+                <div className="px-4 pb-4">
+                  {scanPhase === "analyzing" && (
+                    <div className="rounded-xl p-4 space-y-3 scan-result-enter" style={{ background: `${palette.accent}06`, border: `1px solid ${palette.accent}20` }}>
+                      <div className="flex items-center gap-3">
+                        <div className="relative">
+                          <div className="w-10 h-10 rounded-full flex items-center justify-center" style={{ background: `${palette.accent}15` }}>
+                            <Fingerprint className="w-5 h-5 animate-pulse" style={{ color: palette.accent }} />
+                          </div>
+                          <div className="absolute inset-0 rounded-full animate-ping" style={{ background: `${palette.accent}10`, animationDuration: "1.5s" }} />
+                        </div>
+                        <div>
+                          <p className="text-sm font-semibold" style={{ color: palette.accent }}>Analizando documento...</p>
+                          <p className="text-[10px]" style={{ color: palette.textDim }}>Buscando registros previos</p>
+                        </div>
+                      </div>
+                      <div className="h-1.5 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.06)" }}>
+                        <div className="h-full rounded-full animate-scan-progress" style={{ background: `linear-gradient(90deg, ${palette.accent}, ${palette.gold})` }} />
+                      </div>
+                    </div>
+                  )}
+
+                  {scanPhase === "found" && scanHistory.length > 0 && (
+                    <div className="rounded-xl overflow-hidden scan-result-enter" style={{ border: `1px solid ${palette.authorized}25` }}>
+                      <div className="px-4 py-3 flex items-center gap-3" style={{ background: `${palette.authorized}08` }}>
+                        <CheckCircle2 className="w-5 h-5" style={{ color: palette.authorized }} />
+                        <div className="flex-1">
+                          <p className="text-sm font-bold" style={{ color: palette.authorized }}>Visitante identificado</p>
+                          <p className="text-[10px]" style={{ color: palette.textMuted }}>{scanHistory.length} visita(s) anteriores — datos auto-completados</p>
+                        </div>
+                        <span className="text-2xl font-bold" style={{ color: palette.authorized }}>{scanHistory.length}</span>
+                      </div>
+                      <div className="max-h-[180px] overflow-auto">
+                        {scanHistory.slice(0, 5).map((v, i) => (
+                          <div key={v.id} className="px-4 py-2 flex items-center gap-3 text-xs" style={{ borderTop: `1px solid ${palette.border}`, background: i === 0 ? "rgba(255,255,255,0.02)" : "transparent" }}>
+                            <div className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold" style={{ background: `${palette.authorized}15`, color: palette.authorized }}>
+                              {i + 1}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="font-medium truncate" style={{ color: palette.text }}>{v.personToVisit}{v.company ? ` · ${v.company}` : ""}</div>
+                              <div style={{ color: palette.textDim }}>{v.reason || "Sin motivo registrado"}</div>
+                            </div>
+                            <div className="text-right flex-shrink-0">
+                              <div style={{ color: palette.textMuted }}>{fmtDate(v.checkIn)}</div>
+                              <div style={{ color: palette.textDim }}>{fmtTime(v.checkIn)} {v.checkOut ? `→ ${fmtTime(v.checkOut)}` : ""}</div>
+                            </div>
+                            <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: v.checkOut ? palette.textDim : palette.authorized }} />
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {scanPhase === "not_found" && (
+                    <div className="rounded-xl p-4 flex items-center gap-3 scan-result-enter" style={{ background: `${palette.gold}06`, border: `1px solid ${palette.gold}20` }}>
+                      <div className="w-10 h-10 rounded-full flex items-center justify-center" style={{ background: `${palette.gold}15` }}>
+                        <UserCheck className="w-5 h-5" style={{ color: palette.gold }} />
+                      </div>
+                      <div>
+                        <p className="text-sm font-semibold" style={{ color: palette.gold }}>Visitante nuevo</p>
+                        <p className="text-[10px]" style={{ color: palette.textDim }}>Sin registros previos — complete los datos manualmente</p>
+                      </div>
+                    </div>
+                  )}
+
+                  {scanPhase === "idle" && !cameraOpen && (
+                    <div className="rounded-xl p-4 text-center" style={{ background: "rgba(255,255,255,0.02)", border: `1px dashed ${palette.border}` }}>
+                      <Fingerprint className="w-8 h-8 mx-auto mb-2" style={{ color: palette.textDim }} />
+                      <p className="text-xs" style={{ color: palette.textDim }}>Ingrese una cédula o escanee con la cámara para ver el historial</p>
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
           </form>
+
+          <style>{`
+            .scan-result-enter { animation: scanResultIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) both; }
+            @keyframes scanResultIn { from { opacity: 0; transform: translateY(10px) scale(0.97); } to { opacity: 1; transform: translateY(0) scale(1); } }
+            @keyframes scanProgress { 0% { width: 0; } 50% { width: 70%; } 100% { width: 100%; } }
+            .animate-scan-progress { animation: scanProgress 1.2s ease-in-out forwards; }
+          `}</style>
         </div>
       )}
 

@@ -39,6 +39,14 @@ import {
   Shield,
   Zap,
   Upload,
+  ClipboardList,
+  LogIn,
+  LogOut,
+  UserCheck,
+  Users,
+  Building2,
+  ScanLine,
+  FileSpreadsheet,
 } from "lucide-react";
 
 // ── Plate Image with fallback ──
@@ -264,7 +272,7 @@ interface HikEvent {
 }
 
 type MatchResult = "authorized" | "visitor" | "visitor_expired" | "blocked" | "unknown";
-type TabId = "booth" | "registry" | "log" | "stats" | "analytics";
+type TabId = "booth" | "registry" | "log" | "stats" | "analytics" | "bitacora";
 
 // ── Helpers ──
 
@@ -518,6 +526,7 @@ export default function PlatesPage() {
     { id: "log", label: "Accesos", icon: <History className="w-4 h-4" />, accent: palette.accent },
     { id: "stats", label: "Estadísticas", icon: <BarChart3 className="w-4 h-4" />, accent: palette.visitor },
     { id: "analytics", label: "Analíticas", icon: <Radar className="w-4 h-4" />, accent: palette.danger },
+    { id: "bitacora", label: "Bitácora Garita", icon: <ClipboardList className="w-4 h-4" />, accent: palette.gold },
   ];
 
   return (
@@ -613,6 +622,7 @@ export default function PlatesPage() {
         {selectedMap && tab === "log" && <AccessLogTab mapId={selectedMap} />}
         {selectedMap && tab === "stats" && <StatsTab mapId={selectedMap} />}
         {selectedMap && tab === "analytics" && <AnalyticsTab mapId={selectedMap} />}
+        {selectedMap && tab === "bitacora" && <BitacoraTab mapId={selectedMap} />}
       </div>
 
       <style>{`
@@ -2801,6 +2811,693 @@ function AnalyticsTab({ mapId }: { mapId: string }) {
               </div>
             );
           })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Bitácora Garita Tab ──────────────────────────────────────────────────────
+
+interface Visitor {
+  id: string;
+  cedula: string;
+  name: string;
+  company?: string;
+  personToVisit: string;
+  vehiclePlate?: string;
+  vehicleDesc?: string;
+  reason?: string;
+  observations?: string;
+  checkIn: string;
+  checkOut?: string;
+  durationMinutes?: number;
+  mapId: string;
+  guardName?: string;
+}
+
+interface VisitorStatsData {
+  totalToday: number;
+  activeNow: number;
+  totalThisWeek: number;
+  totalThisMonth: number;
+  avgDurationMinutes: number;
+}
+
+function BitacoraTab({ mapId }: { mapId: string }) {
+  // ── State ──
+  const [visitors, setVisitors] = useState<Visitor[]>([]);
+  const [stats, setStats] = useState<VisitorStatsData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
+  const [activeOnly, setActiveOnly] = useState(false);
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [showForm, setShowForm] = useState(false);
+  const [editingVisitor, setEditingVisitor] = useState<Visitor | null>(null);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(0);
+  const [saving, setSaving] = useState(false);
+  const [checkingOut, setCheckingOut] = useState<string | null>(null);
+  const [historyModal, setHistoryModal] = useState<{ cedula: string; name: string } | null>(null);
+  const [history, setHistory] = useState<Visitor[]>([]);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const scannerRef = useRef<HTMLInputElement>(null);
+  const LIMIT = 30;
+
+  // ── Form State ──
+  const [form, setForm] = useState({
+    cedula: "",
+    name: "",
+    company: "",
+    personToVisit: "",
+    vehiclePlate: "",
+    vehicleDesc: "",
+    reason: "",
+    observations: "",
+    guardName: "",
+  });
+
+  // ── Load visitors ──
+  const loadVisitors = useCallback(async () => {
+    const params = new URLSearchParams({ mapId, limit: String(LIMIT), offset: String(page * LIMIT) });
+    if (search) params.set("q", search);
+    if (activeOnly) params.set("activeOnly", "true");
+    if (dateFrom) params.set("from", dateFrom);
+    if (dateTo) params.set("to", dateTo);
+
+    const { data } = await apiFetch<{ visitors: Visitor[]; total: number }>(
+      apiUrl(`/api/visitors?${params}`)
+    );
+    if (data) {
+      setVisitors(data.visitors);
+      setTotal(data.total);
+    }
+    setLoading(false);
+  }, [mapId, search, activeOnly, dateFrom, dateTo, page]);
+
+  const loadStats = useCallback(async () => {
+    const { data } = await apiFetch<VisitorStatsData>(apiUrl(`/api/visitors/stats?mapId=${mapId}`));
+    if (data) setStats(data);
+  }, [mapId]);
+
+  useEffect(() => {
+    setLoading(true);
+    loadVisitors();
+  }, [loadVisitors]);
+
+  useEffect(() => {
+    loadStats();
+  }, [loadStats]);
+
+  // ── Auto-focus scanner input ──
+  useEffect(() => {
+    if (showForm && scannerRef.current) {
+      scannerRef.current.focus();
+    }
+  }, [showForm]);
+
+  // ── Scan handler: lookup cédula history when scanned ──
+  const handleScan = useCallback(
+    async (cedula: string) => {
+      if (!cedula.trim()) return;
+
+      // Look up previous visits for auto-fill
+      const { data } = await apiFetch<{ visits: Visitor[] }>(
+        apiUrl(`/api/visitors/history?mapId=${mapId}&cedula=${encodeURIComponent(cedula.trim())}`)
+      );
+
+      if (data && data.visits.length > 0) {
+        const last = data.visits[0];
+        setForm((f) => ({
+          ...f,
+          cedula: cedula.trim(),
+          name: last.name || f.name,
+          company: last.company || f.company,
+          vehiclePlate: last.vehiclePlate || f.vehiclePlate,
+          vehicleDesc: last.vehicleDesc || f.vehicleDesc,
+        }));
+      } else {
+        setForm((f) => ({ ...f, cedula: cedula.trim() }));
+      }
+    },
+    [mapId]
+  );
+
+  // ── Submit check-in ──
+  const handleCheckIn = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!form.cedula || !form.name || !form.personToVisit) return;
+
+    setSaving(true);
+    const { data, error } = await apiFetch<Visitor>(apiUrl("/api/visitors"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mapId, ...form }),
+    });
+
+    if (error) {
+      alert(error);
+    } else if (data) {
+      setForm({ cedula: "", name: "", company: "", personToVisit: "", vehiclePlate: "", vehicleDesc: "", reason: "", observations: "", guardName: "" });
+      setShowForm(false);
+      loadVisitors();
+      loadStats();
+    }
+    setSaving(false);
+  };
+
+  // ── Check-out ──
+  const handleCheckOut = async (id: string) => {
+    setCheckingOut(id);
+    const { data } = await apiFetch<Visitor>(apiUrl(`/api/visitors/${id}/checkout?mapId=${mapId}`), {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    if (data) {
+      loadVisitors();
+      loadStats();
+    }
+    setCheckingOut(null);
+  };
+
+  // ── Load cédula history ──
+  const openHistory = async (cedula: string, name: string) => {
+    setHistoryModal({ cedula, name });
+    const { data } = await apiFetch<{ visits: Visitor[] }>(
+      apiUrl(`/api/visitors/history?mapId=${mapId}&cedula=${encodeURIComponent(cedula)}`)
+    );
+    if (data) setHistory(data.visits);
+  };
+
+  // ── Export ──
+  const handleExport = () => {
+    const params = new URLSearchParams({ mapId, format: "csv" });
+    if (dateFrom) params.set("from", dateFrom);
+    if (dateTo) params.set("to", dateTo);
+    window.open(apiUrl(`/api/visitors/export?${params}`), "_blank");
+  };
+
+  // ── Duration formatter ──
+  const fmtDuration = (minutes?: number) => {
+    if (minutes == null) return "—";
+    if (minutes < 60) return `${minutes} min`;
+    const h = Math.floor(minutes / 60);
+    const m = minutes % 60;
+    return `${h}h ${m}m`;
+  };
+
+  const fmtTime = (iso: string) => {
+    const d = new Date(iso);
+    return d.toLocaleTimeString("es-UY", { hour: "2-digit", minute: "2-digit" });
+  };
+
+  const fmtDate = (iso: string) => {
+    const d = new Date(iso);
+    return d.toLocaleDateString("es-UY", { day: "2-digit", month: "2-digit", year: "2-digit" });
+  };
+
+  const fmtElapsed = (checkIn: string) => {
+    const elapsed = Math.round((Date.now() - new Date(checkIn).getTime()) / 60000);
+    if (elapsed < 60) return `${elapsed} min`;
+    const h = Math.floor(elapsed / 60);
+    const m = elapsed % 60;
+    return `${h}h ${m}m`;
+  };
+
+  const totalPages = Math.ceil(total / LIMIT);
+
+  return (
+    <div className="space-y-6">
+      {/* ── Stats Cards ── */}
+      {stats && (
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+          {[
+            { label: "En sitio", value: stats.activeNow, color: palette.authorized, icon: <Users className="w-4 h-4" /> },
+            { label: "Hoy", value: stats.totalToday, color: palette.accent, icon: <LogIn className="w-4 h-4" /> },
+            { label: "Semana", value: stats.totalThisWeek, color: palette.visitor, icon: <ClipboardList className="w-4 h-4" /> },
+            { label: "Mes", value: stats.totalThisMonth, color: palette.gold, icon: <BarChart3 className="w-4 h-4" /> },
+            { label: "Duración prom.", value: fmtDuration(stats.avgDurationMinutes), color: palette.textMuted, icon: <Clock className="w-4 h-4" /> },
+          ].map((s) => (
+            <div
+              key={s.label}
+              className="rounded-2xl p-4 flex flex-col gap-1"
+              style={{
+                background: `${s.color}08`,
+                border: `1px solid ${s.color}18`,
+              }}
+            >
+              <div className="flex items-center gap-2 text-xs font-medium" style={{ color: `${s.color}90` }}>
+                {s.icon} {s.label}
+              </div>
+              <div className="text-2xl font-bold" style={{ color: s.color }}>
+                {s.value}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* ── Toolbar ── */}
+      <div className="flex flex-wrap items-center gap-3">
+        <button
+          onClick={() => { setShowForm(true); setEditingVisitor(null); setForm({ cedula: "", name: "", company: "", personToVisit: "", vehiclePlate: "", vehicleDesc: "", reason: "", observations: "", guardName: "" }); }}
+          className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all hover:scale-[1.02]"
+          style={{
+            background: `linear-gradient(135deg, ${palette.gold}, ${palette.gold}cc)`,
+            color: "#000",
+            boxShadow: `0 4px 20px ${palette.gold}30`,
+          }}
+        >
+          <ScanLine className="w-4 h-4" /> Registrar Ingreso
+        </button>
+
+        <div className="flex-1 min-w-[200px]">
+          <GlassInput
+            icon={<Search className="w-4 h-4" />}
+            placeholder="Buscar por cédula, nombre, empresa..."
+            value={search}
+            onChange={(e) => { setSearch(e.target.value); setPage(0); }}
+          />
+        </div>
+
+        <label className="flex items-center gap-2 cursor-pointer px-3 py-2 rounded-xl text-xs font-medium transition-all" style={{ background: activeOnly ? `${palette.authorized}15` : "rgba(255,255,255,0.04)", border: `1px solid ${activeOnly ? `${palette.authorized}30` : palette.border}`, color: activeOnly ? palette.authorized : palette.textMuted }}>
+          <input type="checkbox" className="hidden" checked={activeOnly} onChange={(e) => { setActiveOnly(e.target.checked); setPage(0); }} />
+          <UserCheck className="w-3.5 h-3.5" />
+          En sitio
+        </label>
+
+        <input
+          type="date"
+          value={dateFrom}
+          onChange={(e) => { setDateFrom(e.target.value); setPage(0); }}
+          className="px-3 py-2 rounded-xl text-xs transition-all focus:outline-none"
+          style={{ background: "rgba(255,255,255,0.04)", border: `1px solid ${palette.border}`, color: palette.text }}
+        />
+        <span className="text-xs" style={{ color: palette.textDim }}>→</span>
+        <input
+          type="date"
+          value={dateTo}
+          onChange={(e) => { setDateTo(e.target.value); setPage(0); }}
+          className="px-3 py-2 rounded-xl text-xs transition-all focus:outline-none"
+          style={{ background: "rgba(255,255,255,0.04)", border: `1px solid ${palette.border}`, color: palette.text }}
+        />
+
+        <button
+          onClick={handleExport}
+          className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium transition-all hover:scale-[1.02]"
+          style={{ background: "rgba(255,255,255,0.04)", border: `1px solid ${palette.border}`, color: palette.textMuted }}
+        >
+          <FileSpreadsheet className="w-3.5 h-3.5" /> Exportar CSV
+        </button>
+
+        <button
+          onClick={() => { loadVisitors(); loadStats(); }}
+          className="p-2 rounded-xl transition-all hover:scale-[1.05]"
+          style={{ background: "rgba(255,255,255,0.04)", border: `1px solid ${palette.border}`, color: palette.textMuted }}
+        >
+          <RefreshCw className="w-4 h-4" />
+        </button>
+      </div>
+
+      {/* ── Check-In Form Modal ── */}
+      {showForm && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center"
+          style={{ background: "rgba(0,0,0,0.7)", backdropFilter: "blur(8px)" }}
+          onClick={() => setShowForm(false)}
+        >
+          <form
+            onSubmit={handleCheckIn}
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-lg rounded-2xl p-6 space-y-4"
+            style={{
+              background: "rgba(15,15,30,0.98)",
+              border: `1px solid ${palette.gold}25`,
+              boxShadow: `0 0 60px rgba(0,0,0,0.5), 0 0 30px ${palette.gold}10`,
+            }}
+          >
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: `${palette.gold}15`, border: `1px solid ${palette.gold}25` }}>
+                  <ScanLine className="w-5 h-5" style={{ color: palette.gold }} />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold" style={{ color: "#fff" }}>Registrar Ingreso</h3>
+                  <p className="text-[10px] uppercase tracking-wider" style={{ color: palette.textDim }}>Escanee la cédula o ingrese manualmente</p>
+                </div>
+              </div>
+              <button type="button" onClick={() => setShowForm(false)} className="p-1.5 rounded-lg" style={{ color: palette.textMuted }}>
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Scanner input — auto-submits on Enter (barcode scanners send Enter) */}
+            <div className="relative">
+              <div className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: palette.gold }}>
+                <ScanLine className="w-5 h-5" />
+              </div>
+              <input
+                ref={scannerRef}
+                type="text"
+                placeholder="Escanear cédula / código..."
+                value={form.cedula}
+                onChange={(e) => setForm({ ...form, cedula: e.target.value })}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    handleScan(form.cedula);
+                  }
+                }}
+                className="w-full pl-11 pr-4 py-3.5 rounded-xl text-lg font-mono transition-all focus:outline-none focus:ring-2"
+                style={{
+                  background: `${palette.gold}08`,
+                  border: `2px solid ${palette.gold}30`,
+                  color: palette.gold,
+                  // @ts-ignore
+                  "--tw-ring-color": `${palette.gold}50`,
+                }}
+                autoFocus
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="col-span-2">
+                <label className="text-[10px] uppercase tracking-wider font-medium mb-1 block" style={{ color: palette.textDim }}>Nombre completo *</label>
+                <GlassInput value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Nombre y apellido" required />
+              </div>
+              <div>
+                <label className="text-[10px] uppercase tracking-wider font-medium mb-1 block" style={{ color: palette.textDim }}>Empresa</label>
+                <GlassInput icon={<Building2 className="w-3.5 h-3.5" />} value={form.company} onChange={(e) => setForm({ ...form, company: e.target.value })} placeholder="Empresa u organización" />
+              </div>
+              <div>
+                <label className="text-[10px] uppercase tracking-wider font-medium mb-1 block" style={{ color: palette.textDim }}>Visita a *</label>
+                <GlassInput icon={<UserCheck className="w-3.5 h-3.5" />} value={form.personToVisit} onChange={(e) => setForm({ ...form, personToVisit: e.target.value })} placeholder="Persona a visitar" required />
+              </div>
+              <div>
+                <label className="text-[10px] uppercase tracking-wider font-medium mb-1 block" style={{ color: palette.textDim }}>Matrícula</label>
+                <GlassInput icon={<Car className="w-3.5 h-3.5" />} value={form.vehiclePlate} onChange={(e) => setForm({ ...form, vehiclePlate: e.target.value })} placeholder="ABC 1234" />
+              </div>
+              <div>
+                <label className="text-[10px] uppercase tracking-wider font-medium mb-1 block" style={{ color: palette.textDim }}>Vehículo</label>
+                <GlassInput value={form.vehicleDesc} onChange={(e) => setForm({ ...form, vehicleDesc: e.target.value })} placeholder="Ej: Toyota Hilux gris" />
+              </div>
+              <div className="col-span-2">
+                <label className="text-[10px] uppercase tracking-wider font-medium mb-1 block" style={{ color: palette.textDim }}>Motivo de visita</label>
+                <GlassInput value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value })} placeholder="Motivo de la visita" />
+              </div>
+              <div>
+                <label className="text-[10px] uppercase tracking-wider font-medium mb-1 block" style={{ color: palette.textDim }}>Observaciones</label>
+                <GlassInput value={form.observations} onChange={(e) => setForm({ ...form, observations: e.target.value })} placeholder="Notas del guardia" />
+              </div>
+              <div>
+                <label className="text-[10px] uppercase tracking-wider font-medium mb-1 block" style={{ color: palette.textDim }}>Guardia</label>
+                <GlassInput icon={<Shield className="w-3.5 h-3.5" />} value={form.guardName} onChange={(e) => setForm({ ...form, guardName: e.target.value })} placeholder="Nombre del guardia" />
+              </div>
+            </div>
+
+            <div className="flex gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowForm(false)}
+                className="flex-1 py-2.5 rounded-xl text-sm font-medium transition-all"
+                style={{ background: "rgba(255,255,255,0.04)", border: `1px solid ${palette.border}`, color: palette.textMuted }}
+              >
+                Cancelar
+              </button>
+              <button
+                type="submit"
+                disabled={saving || !form.cedula || !form.name || !form.personToVisit}
+                className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-bold transition-all hover:scale-[1.01] disabled:opacity-40"
+                style={{
+                  background: `linear-gradient(135deg, ${palette.gold}, ${palette.gold}cc)`,
+                  color: "#000",
+                  boxShadow: `0 4px 20px ${palette.gold}30`,
+                }}
+              >
+                <LogIn className="w-4 h-4" />
+                {saving ? "Registrando..." : "Registrar Ingreso"}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* ── History Modal ── */}
+      {historyModal && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center"
+          style={{ background: "rgba(0,0,0,0.7)", backdropFilter: "blur(8px)" }}
+          onClick={() => { setHistoryModal(null); setHistory([]); }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-lg max-h-[80vh] overflow-auto rounded-2xl p-6"
+            style={{
+              background: "rgba(15,15,30,0.98)",
+              border: `1px solid ${palette.accent}25`,
+            }}
+          >
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h3 className="text-base font-bold" style={{ color: "#fff" }}>Historial de visitas</h3>
+                <p className="text-xs" style={{ color: palette.textMuted }}>{historyModal.name} — CI: {historyModal.cedula}</p>
+              </div>
+              <button onClick={() => { setHistoryModal(null); setHistory([]); }} className="p-1.5 rounded-lg" style={{ color: palette.textMuted }}>
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {history.length === 0 ? (
+              <p className="text-sm text-center py-8" style={{ color: palette.textDim }}>Sin registros anteriores</p>
+            ) : (
+              <div className="space-y-2">
+                {history.map((v) => (
+                  <div key={v.id} className="rounded-xl p-3" style={{ background: "rgba(255,255,255,0.03)", border: `1px solid ${palette.border}` }}>
+                    <div className="flex items-center justify-between">
+                      <div className="text-xs font-medium" style={{ color: palette.text }}>
+                        {fmtDate(v.checkIn)} — {fmtTime(v.checkIn)}
+                        {v.checkOut && <> → {fmtTime(v.checkOut)}</>}
+                      </div>
+                      <div className="text-xs" style={{ color: v.checkOut ? palette.textMuted : palette.authorized }}>
+                        {v.checkOut ? fmtDuration(v.durationMinutes) : "En sitio"}
+                      </div>
+                    </div>
+                    <div className="text-[11px] mt-1" style={{ color: palette.textMuted }}>
+                      Visita a: {v.personToVisit}
+                      {v.company && <> · {v.company}</>}
+                      {v.reason && <> · {v.reason}</>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Visitor Table ── */}
+      {loading ? (
+        <div className="space-y-3">
+          {[...Array(6)].map((_, i) => (
+            <SkeletonPulse key={i} className="h-16 rounded-xl" />
+          ))}
+        </div>
+      ) : visitors.length === 0 ? (
+        <div className="text-center py-16">
+          <ClipboardList className="w-12 h-12 mx-auto mb-3" style={{ color: palette.textDim }} />
+          <p className="text-sm" style={{ color: palette.textMuted }}>
+            {search || activeOnly || dateFrom ? "Sin resultados con los filtros actuales" : "No hay registros de visitas"}
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {visitors.map((v) => {
+            const isActive = !v.checkOut;
+            const isExpanded = expandedId === v.id;
+
+            return (
+              <div
+                key={v.id}
+                className="rounded-xl transition-all cursor-pointer"
+                style={{
+                  background: isActive ? `${palette.authorized}06` : "rgba(255,255,255,0.02)",
+                  border: `1px solid ${isActive ? `${palette.authorized}20` : palette.border}`,
+                }}
+                onClick={() => setExpandedId(isExpanded ? null : v.id)}
+              >
+                {/* Main row */}
+                <div className="flex items-center gap-4 px-4 py-3">
+                  {/* Status indicator */}
+                  <div
+                    className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                    style={{
+                      background: isActive ? palette.authorized : palette.textDim,
+                      boxShadow: isActive ? `0 0 8px ${palette.authorized}60` : "none",
+                    }}
+                  />
+
+                  {/* Name & cédula */}
+                  <div className="min-w-[180px]">
+                    <div className="text-sm font-semibold" style={{ color: palette.text }}>{v.name}</div>
+                    <div className="text-[11px] font-mono" style={{ color: palette.textMuted }}>CI: {v.cedula}</div>
+                  </div>
+
+                  {/* Company */}
+                  <div className="min-w-[120px] hidden md:block">
+                    {v.company ? (
+                      <div className="flex items-center gap-1.5 text-xs" style={{ color: palette.textMuted }}>
+                        <Building2 className="w-3 h-3" /> {v.company}
+                      </div>
+                    ) : (
+                      <span className="text-xs" style={{ color: palette.textDim }}>—</span>
+                    )}
+                  </div>
+
+                  {/* Person to visit */}
+                  <div className="min-w-[120px] hidden lg:block">
+                    <div className="text-xs" style={{ color: palette.textMuted }}>
+                      <span style={{ color: palette.textDim }}>Visita:</span> {v.personToVisit}
+                    </div>
+                  </div>
+
+                  {/* Vehicle */}
+                  {v.vehiclePlate && (
+                    <div className="hidden xl:flex items-center gap-1.5 px-2 py-0.5 rounded-lg text-[11px] font-mono font-bold" style={{ background: "rgba(255,255,255,0.05)", border: `1px solid ${palette.border}`, color: palette.text }}>
+                      <Car className="w-3 h-3" style={{ color: palette.textDim }} />
+                      {v.vehiclePlate}
+                    </div>
+                  )}
+
+                  <div className="flex-1" />
+
+                  {/* Time */}
+                  <div className="text-right min-w-[80px]">
+                    <div className="text-xs font-medium" style={{ color: palette.text }}>
+                      {fmtTime(v.checkIn)}
+                    </div>
+                    <div className="text-[10px]" style={{ color: isActive ? palette.authorized : palette.textDim }}>
+                      {isActive ? `↻ ${fmtElapsed(v.checkIn)}` : v.checkOut ? `→ ${fmtTime(v.checkOut)}` : ""}
+                    </div>
+                  </div>
+
+                  {/* Duration / Status */}
+                  <div className="min-w-[70px] text-right">
+                    {isActive ? (
+                      <span
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-bold uppercase"
+                        style={{ background: `${palette.authorized}15`, color: palette.authorized, border: `1px solid ${palette.authorized}25` }}
+                      >
+                        <Activity className="w-3 h-3" /> En sitio
+                      </span>
+                    ) : (
+                      <span className="text-xs" style={{ color: palette.textMuted }}>
+                        {fmtDuration(v.durationMinutes)}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Checkout button */}
+                  {isActive && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleCheckOut(v.id); }}
+                      disabled={checkingOut === v.id}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-all hover:scale-[1.03]"
+                      style={{
+                        background: `${palette.visitor}15`,
+                        border: `1px solid ${palette.visitor}30`,
+                        color: palette.visitor,
+                      }}
+                    >
+                      <LogOut className="w-3.5 h-3.5" />
+                      {checkingOut === v.id ? "..." : "Salida"}
+                    </button>
+                  )}
+
+                  {/* History */}
+                  <button
+                    onClick={(e) => { e.stopPropagation(); openHistory(v.cedula, v.name); }}
+                    className="p-1.5 rounded-lg transition-all hover:scale-105"
+                    style={{ color: palette.textDim }}
+                    title="Ver historial"
+                  >
+                    <History className="w-4 h-4" />
+                  </button>
+
+                  <ChevronRight
+                    className="w-4 h-4 transition-transform"
+                    style={{ color: palette.textDim, transform: isExpanded ? "rotate(90deg)" : "none" }}
+                  />
+                </div>
+
+                {/* Expanded details */}
+                {isExpanded && (
+                  <div className="px-4 pb-4 pt-1 grid grid-cols-2 md:grid-cols-4 gap-3 text-xs" style={{ borderTop: `1px solid ${palette.border}` }}>
+                    <div>
+                      <span className="block text-[10px] uppercase tracking-wider mb-0.5" style={{ color: palette.textDim }}>Empresa</span>
+                      <span style={{ color: palette.textMuted }}>{v.company || "—"}</span>
+                    </div>
+                    <div>
+                      <span className="block text-[10px] uppercase tracking-wider mb-0.5" style={{ color: palette.textDim }}>Visita a</span>
+                      <span style={{ color: palette.textMuted }}>{v.personToVisit}</span>
+                    </div>
+                    <div>
+                      <span className="block text-[10px] uppercase tracking-wider mb-0.5" style={{ color: palette.textDim }}>Vehículo</span>
+                      <span style={{ color: palette.textMuted }}>{v.vehiclePlate || "—"} {v.vehicleDesc && `(${v.vehicleDesc})`}</span>
+                    </div>
+                    <div>
+                      <span className="block text-[10px] uppercase tracking-wider mb-0.5" style={{ color: palette.textDim }}>Motivo</span>
+                      <span style={{ color: palette.textMuted }}>{v.reason || "—"}</span>
+                    </div>
+                    <div>
+                      <span className="block text-[10px] uppercase tracking-wider mb-0.5" style={{ color: palette.textDim }}>Entrada</span>
+                      <span style={{ color: palette.textMuted }}>{fmtDate(v.checkIn)} {fmtTime(v.checkIn)}</span>
+                    </div>
+                    <div>
+                      <span className="block text-[10px] uppercase tracking-wider mb-0.5" style={{ color: palette.textDim }}>Salida</span>
+                      <span style={{ color: v.checkOut ? palette.textMuted : palette.authorized }}>
+                        {v.checkOut ? `${fmtDate(v.checkOut)} ${fmtTime(v.checkOut)}` : "En sitio"}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="block text-[10px] uppercase tracking-wider mb-0.5" style={{ color: palette.textDim }}>Guardia</span>
+                      <span style={{ color: palette.textMuted }}>{v.guardName || "—"}</span>
+                    </div>
+                    <div>
+                      <span className="block text-[10px] uppercase tracking-wider mb-0.5" style={{ color: palette.textDim }}>Observaciones</span>
+                      <span style={{ color: palette.textMuted }}>{v.observations || "—"}</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* ── Pagination ── */}
+      {totalPages > 1 && (
+        <div className="flex items-center justify-center gap-2 pt-2">
+          <button
+            onClick={() => setPage(Math.max(0, page - 1))}
+            disabled={page === 0}
+            className="px-3 py-1.5 rounded-lg text-xs font-medium transition-all disabled:opacity-30"
+            style={{ background: "rgba(255,255,255,0.04)", border: `1px solid ${palette.border}`, color: palette.textMuted }}
+          >
+            ← Anterior
+          </button>
+          <span className="text-xs" style={{ color: palette.textDim }}>
+            {page + 1} / {totalPages} ({total} registros)
+          </span>
+          <button
+            onClick={() => setPage(Math.min(totalPages - 1, page + 1))}
+            disabled={page >= totalPages - 1}
+            className="px-3 py-1.5 rounded-lg text-xs font-medium transition-all disabled:opacity-30"
+            style={{ background: "rgba(255,255,255,0.04)", border: `1px solid ${palette.border}`, color: palette.textMuted }}
+          >
+            Siguiente →
+          </button>
         </div>
       )}
     </div>

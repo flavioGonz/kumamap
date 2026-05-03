@@ -4270,7 +4270,7 @@ function BitacoraTab({ mapId }: { mapId: string }) {
             </div>
 
             {/* ─── RIGHT COLUMN: Camera + Intelligence Panel ─── */}
-            <div className="w-full lg:w-[440px] flex flex-col" style={{ background: "linear-gradient(180deg, #0c0c1a, #060610)", borderLeft: `1px solid rgba(255,255,255,0.05)` }}>
+            <div className="w-full lg:flex-1 flex flex-col" style={{ background: "linear-gradient(180deg, #0c0c1a, #060610)", borderLeft: `1px solid rgba(255,255,255,0.05)` }}>
               {/* Camera section */}
               <div className="p-4 flex flex-col">
                 <div className="flex items-center justify-between mb-3">

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { apiUrl } from "@/lib/api";
+import AiChatPanel from "@/components/AiChatPanel";
 import {
   ShieldCheck,
   ShieldAlert,
@@ -1097,6 +1098,7 @@ function AccessLogTab({ mapId }: { mapId: string }) {
   const [exportDateTo, setExportDateTo] = useState("");
   const [exportStatus, setExportStatus] = useState("all");
   const [exportFormat, setExportFormat] = useState<"csv" | "json">("csv");
+  const [showAiChat, setShowAiChat] = useState(false);
 
   const loadLog = useCallback(() => {
     setLoading(true);
@@ -1187,6 +1189,13 @@ function AccessLogTab({ mapId }: { mapId: string }) {
           }}
         >
           <Download className="w-4 h-4" /> Exportar
+        </button>
+        <button
+          onClick={() => setShowAiChat(true)}
+          className="flex items-center gap-1.5 px-3 py-2.5 rounded-xl text-sm font-bold transition-all hover:scale-[1.02]"
+          style={{ background: "linear-gradient(135deg, #a855f720, #3b82f615)", border: "1px solid #a855f730", color: "#a855f7" }}
+        >
+          <Zap className="w-3.5 h-3.5" /> AI
         </button>
       </div>
 
@@ -1413,6 +1422,9 @@ function AccessLogTab({ mapId }: { mapId: string }) {
           extraImages={lightbox.extras}
         />
       )}
+
+      {/* ── AI Chat Panel ── */}
+      <AiChatPanel mapId={mapId} module="lpr" visible={showAiChat} onClose={() => setShowAiChat(false)} />
     </div>
   );
 }
@@ -3693,6 +3705,7 @@ function BitacoraTab({ mapId }: { mapId: string }) {
   const [exportFormat, setExportFormat] = useState<"pdf" | "xlsx" | "csv">("pdf");
   const [exporting, setExporting] = useState(false);
   const [visitorPhotos, setVisitorPhotos] = useState<Record<string, string>>({}); // cedula -> photo URL
+  const [showAiChat, setShowAiChat] = useState(false);
   const scannerRef = useRef<HTMLInputElement>(null);
   const companyInputRef = useRef<HTMLInputElement>(null);
   const personInputRef = useRef<HTMLInputElement>(null);
@@ -4045,6 +4058,14 @@ function BitacoraTab({ mapId }: { mapId: string }) {
           style={{ background: `${palette.accent}10`, border: `1px solid ${palette.accent}20`, color: palette.accent }}
         >
           <Download className="w-3.5 h-3.5" /> Exportar
+        </button>
+
+        <button
+          onClick={() => setShowAiChat(true)}
+          className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all hover:scale-[1.02]"
+          style={{ background: "linear-gradient(135deg, #a855f720, #3b82f615)", border: "1px solid #a855f730", color: "#a855f7" }}
+        >
+          <Zap className="w-3.5 h-3.5" /> AI
         </button>
 
         <button
@@ -4892,6 +4913,9 @@ function BitacoraTab({ mapId }: { mapId: string }) {
           </button>
         </div>
       )}
+
+      {/* ── AI Chat Panel ── */}
+      <AiChatPanel mapId={mapId} module="bitacora" visible={showAiChat} onClose={() => setShowAiChat(false)} />
     </div>
   );
 }

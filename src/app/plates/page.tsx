@@ -41,6 +41,9 @@ import {
   Zap,
   Upload,
   ClipboardList,
+  Bot,
+  Settings,
+  CheckCircle,
   LogIn,
   LogOut,
   UserCheck,
@@ -211,6 +214,14 @@ interface AccessLogEntry {
   fullImageId?: string;
   plateImageId?: string;
   eventId?: string;
+  // AI verification fields
+  aiVerification?: "COINCIDE" | "NO_COINCIDE" | "NO_VISIBLE" | "pending" | "error";
+  aiPlateRead?: string;
+  aiVehicleType?: string;
+  aiVehicleColor?: string;
+  aiVehicleBrand?: string;
+  aiConfidence?: string;
+  aiNotes?: string;
 }
 
 interface StatsData {
@@ -281,7 +292,7 @@ interface HikEvent {
 }
 
 type MatchResult = "authorized" | "visitor" | "visitor_expired" | "blocked" | "unknown";
-type TabId = "booth" | "registry" | "log" | "stats" | "analytics" | "bitacora";
+type TabId = "booth" | "registry" | "log" | "stats" | "analytics" | "bitacora" | "ai_settings";
 
 // ── Helpers ──
 
@@ -536,6 +547,7 @@ export default function PlatesPage() {
     { id: "stats", label: "Estadísticas", icon: <BarChart3 className="w-4 h-4" />, accent: palette.visitor },
     { id: "analytics", label: "Analíticas", icon: <Radar className="w-4 h-4" />, accent: palette.danger },
     { id: "bitacora", label: "Bitácora Garita", icon: <ClipboardList className="w-4 h-4" />, accent: palette.gold },
+    { id: "ai_settings", label: "IA Config", icon: <Bot className="w-4 h-4" />, accent: "#a855f7" },
   ];
 
   return (
@@ -632,6 +644,7 @@ export default function PlatesPage() {
         {selectedMap && tab === "stats" && <StatsTab mapId={selectedMap} />}
         {selectedMap && tab === "analytics" && <AnalyticsTab mapId={selectedMap} />}
         {selectedMap && tab === "bitacora" && <BitacoraTab mapId={selectedMap} />}
+        {selectedMap && tab === "ai_settings" && <AiSettingsTab />}
       </div>
 
       <style>{`
@@ -1333,23 +1346,23 @@ function AccessLogTab({ mapId }: { mapId: string }) {
         <table className="w-full text-sm">
           <thead>
             <tr style={{ background: "rgba(255,255,255,0.02)" }}>
-              {["Fecha/Hora", "Matrícula", "Estado", "Propietario", "Cámara", "Vehículo", "Dir.", "Captura"].map((h, i) => (
+              {["Fecha/Hora", "Matrícula", "Estado", "Propietario", "Cámara", "Vehículo", "Dir.", "IA", "Captura"].map((h, i) => (
                 <th key={i} className="text-left px-5 py-3.5 text-[11px] font-semibold uppercase tracking-wider" style={{ color: palette.textDim }}>{h}</th>
               ))}
             </tr>
           </thead>
           <tbody>
             {loading ? (
-              Array.from({ length: 8 }).map((_, i) => (
+              Array.from({ length: 9 }).map((_, i) => (
                 <tr key={i} style={{ borderTop: `1px solid ${palette.border}` }}>
-                  {Array.from({ length: 8 }).map((_, j) => (
+                  {Array.from({ length: 9 }).map((_, j) => (
                     <td key={j} className="px-5 py-3"><SkeletonPulse className="h-5 w-16" /></td>
                   ))}
                 </tr>
               ))
             ) : entries.length === 0 ? (
               <tr>
-                <td colSpan={8} className="px-5 py-16 text-center">
+                <td colSpan={9} className="px-5 py-16 text-center">
                   <History className="w-8 h-8 mx-auto mb-3" style={{ color: palette.textDim }} />
                   <p style={{ color: palette.textMuted }}>Sin registros de acceso</p>
                 </td>
@@ -1383,6 +1396,79 @@ function AccessLogTab({ mapId }: { mapId: string }) {
                     </td>
                     <td className="px-5 py-3 text-xs" style={{ color: palette.textDim }}>
                       {e.direction === "forward" ? "→" : e.direction === "reverse" ? "←" : "—"}
+                    </td>
+                    <td className="px-5 py-3">
+                      {e.aiVerification ? (
+                        <div className="flex flex-col gap-0.5">
+                          <span
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold w-fit"
+                            style={{
+                              background: e.aiVerification === "COINCIDE" ? "rgba(34,197,94,0.15)" :
+                                e.aiVerification === "NO_COINCIDE" ? "rgba(239,68,68,0.15)" :
+                                e.aiVerification === "pending" ? "rgba(234,179,8,0.15)" :
+                                e.aiVerification === "error" ? "rgba(239,68,68,0.10)" :
+                                "rgba(148,163,184,0.15)",
+                              color: e.aiVerification === "COINCIDE" ? "#22c55e" :
+                                e.aiVerification === "NO_COINCIDE" ? "#ef4444" :
+                                e.aiVerification === "pending" ? "#eab308" :
+                                e.aiVerification === "error" ? "#ef4444" :
+                                palette.textDim,
+                            }}
+                            title={e.aiNotes || ""}
+                          >
+                            {e.aiVerification === "COINCIDE" ? "✓" :
+                              e.aiVerification === "NO_COINCIDE" ? "✗" :
+                              e.aiVerification === "pending" ? "⏳" :
+                              e.aiVerification === "error" ? "!" :
+                              "?"}
+                            {e.aiPlateRead && e.aiPlateRead !== e.plate ? ` ${e.aiPlateRead}` : ""}
+                          </span>
+                          {(e.aiVehicleType || e.aiVehicleColor || e.aiVehicleBrand) && (
+                            <span className="text-[10px]" style={{ color: palette.textDim }}>
+                              {[e.aiVehicleColor, e.aiVehicleType, e.aiVehicleBrand].filter(Boolean).join(" ")}
+                            </span>
+                          )}
+                        </div>
+                      ) : (e.fullImageId || e.plateImageId) ? (
+                        <button
+                          onClick={async () => {
+                            const imgId = e.fullImageId || e.plateImageId;
+                            if (!imgId) return;
+                            try {
+                              const res = await fetch(apiUrl("/api/ai/vision"), {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({ imageId: imgId, type: "plate_verify", cameraPlate: e.plate }),
+                              });
+                              if (res.ok) {
+                                const data = await res.json();
+                                if (data.analysis) {
+                                  // Refresh entries to show result
+                                  setEntries(prev => prev.map(entry =>
+                                    entry.id === e.id ? {
+                                      ...entry,
+                                      aiVerification: data.analysis.verification || "NO_VISIBLE",
+                                      aiPlateRead: data.analysis.plateRead,
+                                      aiVehicleType: data.analysis.vehicleType,
+                                      aiVehicleColor: data.analysis.vehicleColor,
+                                      aiVehicleBrand: data.analysis.vehicleBrand,
+                                      aiConfidence: data.analysis.confidence,
+                                      aiNotes: data.analysis.notes,
+                                    } : entry
+                                  ));
+                                }
+                              }
+                            } catch { /* silently fail */ }
+                          }}
+                          className="text-[10px] px-2 py-1 rounded-lg transition-all hover:scale-105"
+                          style={{ background: "rgba(168,85,247,0.12)", color: "#a855f7", border: "1px solid rgba(168,85,247,0.2)" }}
+                          title="Analizar con IA"
+                        >
+                          🔍 IA
+                        </button>
+                      ) : (
+                        <span style={{ color: palette.textDim }}>—</span>
+                      )}
                     </td>
                     <td className="px-5 py-3">
                       {(e.plateImageId || e.fullImageId) ? (
@@ -4916,6 +5002,357 @@ function BitacoraTab({ mapId }: { mapId: string }) {
 
       {/* ── AI Chat Panel ── */}
       <AiChatPanel mapId={mapId} module="bitacora" visible={showAiChat} onClose={() => setShowAiChat(false)} />
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════
+// ── AI Settings Tab ──
+// ═══════════════════════════════════════════════════════
+
+interface AiConfigData {
+  enabled: boolean;
+  ollamaUrl: string;
+  textModel: string;
+  visionModel: string;
+  autoVerifyLpr: boolean;
+  chatEnabled: boolean;
+  temperature: number;
+}
+
+interface OllamaModel {
+  name: string;
+  size: number;
+  modified: string;
+}
+
+function AiSettingsTab() {
+  const [config, setConfig] = useState<AiConfigData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<{ online: boolean; models: OllamaModel[]; error?: string } | null>(null);
+  const [saved, setSaved] = useState(false);
+
+  // Form state
+  const [form, setForm] = useState<AiConfigData>({
+    enabled: true,
+    ollamaUrl: "",
+    textModel: "",
+    visionModel: "",
+    autoVerifyLpr: true,
+    chatEnabled: true,
+    temperature: 0.3,
+  });
+
+  useEffect(() => {
+    fetch(apiUrl("/api/ai/config"))
+      .then((r) => r.json())
+      .then((data) => {
+        setConfig(data);
+        setForm(data);
+      })
+      .catch(console.error)
+      .finally(() => setLoading(false));
+  }, []);
+
+  const handleTest = async () => {
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const res = await fetch(apiUrl("/api/ai/config"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: form.ollamaUrl }),
+      });
+      const data = await res.json();
+      setTestResult(data);
+    } catch (err: any) {
+      setTestResult({ online: false, models: [], error: err.message });
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    setSaved(false);
+    try {
+      const res = await fetch(apiUrl("/api/ai/config"), {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(form),
+      });
+      const data = await res.json();
+      setConfig(data);
+      setForm(data);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 3000);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const formatBytes = (bytes: number) => {
+    if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(0)} MB`;
+    return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+  };
+
+  if (loading) {
+    return (
+      <div className="max-w-2xl mx-auto space-y-6">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <div key={i} className="rounded-2xl p-6" style={{ background: palette.surface, border: `1px solid ${palette.border}` }}>
+            <SkeletonPulse className="h-6 w-48 mb-4" />
+            <SkeletonPulse className="h-10 w-full mb-3" />
+            <SkeletonPulse className="h-10 w-full" />
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <div className="max-w-2xl mx-auto space-y-6">
+      {/* Header */}
+      <div className="flex items-center gap-3 mb-2">
+        <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: "rgba(168,85,247,0.15)" }}>
+          <Bot className="w-5 h-5" style={{ color: "#a855f7" }} />
+        </div>
+        <div>
+          <h2 className="text-lg font-bold" style={{ color: "#fff" }}>Configuraci&oacute;n de IA</h2>
+          <p className="text-xs" style={{ color: palette.textDim }}>Conexi&oacute;n a Ollama para an&aacute;lisis local</p>
+        </div>
+      </div>
+
+      {/* ── Connection ── */}
+      <div className="rounded-2xl p-6" style={{ background: palette.surface, border: `1px solid ${palette.border}` }}>
+        <h3 className="text-sm font-bold mb-4 flex items-center gap-2" style={{ color: "#fff" }}>
+          <Wifi className="w-4 h-4" style={{ color: palette.accent }} />
+          Conexi&oacute;n Ollama
+        </h3>
+
+        <div className="space-y-4">
+          <div>
+            <label className="block text-xs font-medium mb-1.5" style={{ color: palette.textMuted }}>URL del servidor</label>
+            <input
+              type="text"
+              value={form.ollamaUrl}
+              onChange={(e) => setForm({ ...form, ollamaUrl: e.target.value })}
+              placeholder="http://192.168.1.100:11434"
+              className="w-full px-4 py-2.5 rounded-xl text-sm outline-none transition-all"
+              style={{
+                background: "rgba(255,255,255,0.04)",
+                border: `1px solid ${palette.border}`,
+                color: "#fff",
+              }}
+            />
+            <p className="text-[10px] mt-1" style={{ color: palette.textDim }}>
+              Ejemplo: http://192.168.99.253:11434 — sin barra al final
+            </p>
+          </div>
+
+          <div className="flex gap-3">
+            <button
+              onClick={handleTest}
+              disabled={testing || !form.ollamaUrl}
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all hover:scale-[1.02] disabled:opacity-40"
+              style={{
+                background: "rgba(168,85,247,0.15)",
+                color: "#a855f7",
+                border: "1px solid rgba(168,85,247,0.3)",
+              }}
+            >
+              {testing ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
+              {testing ? "Probando..." : "Probar conexión"}
+            </button>
+          </div>
+
+          {testResult && (
+            <div
+              className="rounded-xl p-4 text-sm"
+              style={{
+                background: testResult.online ? "rgba(34,197,94,0.08)" : "rgba(239,68,68,0.08)",
+                border: `1px solid ${testResult.online ? "rgba(34,197,94,0.2)" : "rgba(239,68,68,0.2)"}`,
+              }}
+            >
+              <div className="flex items-center gap-2 mb-2">
+                <div
+                  className="w-2.5 h-2.5 rounded-full"
+                  style={{ background: testResult.online ? "#22c55e" : "#ef4444" }}
+                />
+                <span className="font-bold" style={{ color: testResult.online ? "#22c55e" : "#ef4444" }}>
+                  {testResult.online ? "Conectado" : "Sin conexión"}
+                </span>
+              </div>
+              {testResult.error && (
+                <p className="text-xs" style={{ color: "#ef4444" }}>{testResult.error}</p>
+              )}
+              {testResult.online && testResult.models.length > 0 && (
+                <div className="mt-2">
+                  <p className="text-xs font-semibold mb-1.5" style={{ color: palette.textMuted }}>Modelos disponibles:</p>
+                  <div className="space-y-1">
+                    {testResult.models.map((m) => (
+                      <div key={m.name} className="flex items-center justify-between text-xs px-3 py-1.5 rounded-lg" style={{ background: "rgba(255,255,255,0.04)" }}>
+                        <span className="font-mono" style={{ color: "#fff" }}>{m.name}</span>
+                        <span style={{ color: palette.textDim }}>{formatBytes(m.size)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ── Models ── */}
+      <div className="rounded-2xl p-6" style={{ background: palette.surface, border: `1px solid ${palette.border}` }}>
+        <h3 className="text-sm font-bold mb-4 flex items-center gap-2" style={{ color: "#fff" }}>
+          <Settings className="w-4 h-4" style={{ color: palette.accent }} />
+          Modelos
+        </h3>
+
+        <div className="space-y-4">
+          <div>
+            <label className="block text-xs font-medium mb-1.5" style={{ color: palette.textMuted }}>Modelo de texto (chat, an&aacute;lisis)</label>
+            <input
+              type="text"
+              value={form.textModel}
+              onChange={(e) => setForm({ ...form, textModel: e.target.value })}
+              placeholder="gemma3:4b"
+              className="w-full px-4 py-2.5 rounded-xl text-sm outline-none transition-all"
+              style={{ background: "rgba(255,255,255,0.04)", border: `1px solid ${palette.border}`, color: "#fff" }}
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium mb-1.5" style={{ color: palette.textMuted }}>Modelo de visi&oacute;n (verificaci&oacute;n LPR, an&aacute;lisis de imagen)</label>
+            <input
+              type="text"
+              value={form.visionModel}
+              onChange={(e) => setForm({ ...form, visionModel: e.target.value })}
+              placeholder="qwen3-vl:4b"
+              className="w-full px-4 py-2.5 rounded-xl text-sm outline-none transition-all"
+              style={{ background: "rgba(255,255,255,0.04)", border: `1px solid ${palette.border}`, color: "#fff" }}
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium mb-1.5" style={{ color: palette.textMuted }}>
+              Temperatura: {form.temperature.toFixed(1)}
+            </label>
+            <input
+              type="range"
+              min={0}
+              max={1}
+              step={0.1}
+              value={form.temperature}
+              onChange={(e) => setForm({ ...form, temperature: parseFloat(e.target.value) })}
+              className="w-full accent-purple-500"
+            />
+            <div className="flex justify-between text-[10px]" style={{ color: palette.textDim }}>
+              <span>Preciso (0.0)</span>
+              <span>Creativo (1.0)</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Features ── */}
+      <div className="rounded-2xl p-6" style={{ background: palette.surface, border: `1px solid ${palette.border}` }}>
+        <h3 className="text-sm font-bold mb-4 flex items-center gap-2" style={{ color: "#fff" }}>
+          <Zap className="w-4 h-4" style={{ color: "#eab308" }} />
+          Funciones
+        </h3>
+
+        <div className="space-y-3">
+          <ToggleRow
+            label="IA habilitada"
+            description="Activar todas las funciones de inteligencia artificial"
+            checked={form.enabled}
+            onChange={(v) => setForm({ ...form, enabled: v })}
+          />
+          <ToggleRow
+            label="Chat IA"
+            description="Mostrar paneles de chat con IA en las pestañas"
+            checked={form.chatEnabled}
+            onChange={(v) => setForm({ ...form, chatEnabled: v })}
+          />
+          <ToggleRow
+            label="Verificación LPR automática"
+            description="Verificar automáticamente cada lectura de matrícula con visión IA"
+            checked={form.autoVerifyLpr}
+            onChange={(v) => setForm({ ...form, autoVerifyLpr: v })}
+          />
+        </div>
+      </div>
+
+      {/* ── Save Button ── */}
+      <div className="flex items-center gap-3">
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          className="flex items-center gap-2 px-6 py-3 rounded-xl text-sm font-bold transition-all hover:scale-[1.02] disabled:opacity-50"
+          style={{
+            background: saved
+              ? "linear-gradient(135deg, #22c55e, #16a34a)"
+              : `linear-gradient(135deg, #a855f7, #7c3aed)`,
+            color: "#fff",
+            boxShadow: saved ? "0 4px 12px rgba(34,197,94,0.3)" : "0 4px 12px rgba(168,85,247,0.3)",
+          }}
+        >
+          {saving ? (
+            <RefreshCw className="w-4 h-4 animate-spin" />
+          ) : saved ? (
+            <CheckCircle className="w-4 h-4" />
+          ) : (
+            <Settings className="w-4 h-4" />
+          )}
+          {saving ? "Guardando..." : saved ? "Guardado" : "Guardar configuración"}
+        </button>
+
+        {config && JSON.stringify(form) !== JSON.stringify(config) && (
+          <span className="text-xs" style={{ color: "#eab308" }}>Cambios sin guardar</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ToggleRow({ label, description, checked, onChange }: {
+  label: string;
+  description: string;
+  checked: boolean;
+  onChange: (v: boolean) => void;
+}) {
+  return (
+    <div
+      className="flex items-center justify-between p-3 rounded-xl transition-all cursor-pointer"
+      style={{ background: "rgba(255,255,255,0.02)" }}
+      onClick={() => onChange(!checked)}
+    >
+      <div className="flex-1">
+        <p className="text-sm font-medium" style={{ color: "#fff" }}>{label}</p>
+        <p className="text-[11px]" style={{ color: palette.textDim }}>{description}</p>
+      </div>
+      <div
+        className="w-11 h-6 rounded-full relative transition-all cursor-pointer flex-shrink-0 ml-3"
+        style={{
+          background: checked ? "rgba(168,85,247,0.5)" : "rgba(255,255,255,0.1)",
+          border: `1px solid ${checked ? "rgba(168,85,247,0.6)" : "rgba(255,255,255,0.15)"}`,
+        }}
+      >
+        <div
+          className="absolute top-0.5 w-4.5 h-4.5 rounded-full transition-all"
+          style={{
+            width: 18,
+            height: 18,
+            left: checked ? 22 : 2,
+            background: checked ? "#a855f7" : "rgba(255,255,255,0.4)",
+          }}
+        />
+      </div>
     </div>
   );
 }

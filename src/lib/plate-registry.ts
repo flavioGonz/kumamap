@@ -55,6 +55,14 @@ export interface AccessLogEntry {
   fullImageId?: string;
   plateImageId?: string;
   eventId: string;          // Reference to the HikEvent id
+  // AI verification fields
+  aiVerification?: "COINCIDE" | "NO_COINCIDE" | "NO_VISIBLE" | "pending" | "error";
+  aiPlateRead?: string;     // What AI read from the image
+  aiVehicleType?: string;   // AI-detected vehicle type
+  aiVehicleColor?: string;  // AI-detected color
+  aiVehicleBrand?: string;  // AI-detected brand
+  aiConfidence?: string;    // AI confidence level
+  aiNotes?: string;         // AI observations
 }
 
 // ── Configuration ──
@@ -281,6 +289,17 @@ class PlateRegistryManager {
     this.logDirty.add(entry.mapId);
     this.scheduleSave();
     return full;
+  }
+
+  /** Update an access log entry (for AI verification results) */
+  updateAccessLog(mapId: string, entryId: string, updates: Partial<AccessLogEntry>): AccessLogEntry | null {
+    const log = this.loadAccessLog(mapId);
+    const entry = log.find(e => e.id === entryId);
+    if (!entry) return null;
+    Object.assign(entry, updates);
+    this.logDirty.add(mapId);
+    this.scheduleSave();
+    return entry;
   }
 
   /** Get access log entries with optional filters */

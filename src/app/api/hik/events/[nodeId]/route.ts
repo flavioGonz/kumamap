@@ -11,6 +11,8 @@ import {
   isapiResponse,
 } from "@/lib/hik-events";
 import { getPlateRegistry } from "@/lib/plate-registry";
+import { ollamaVision } from "@/lib/ollama-client";
+import { getAiConfig } from "@/lib/ai-config";
 import type { HikEvent } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -347,6 +349,54 @@ async function handleEvent(
           (event.faceName ? ` | Face: ${event.faceName}` : "") +
           (event.listType ? ` | List: ${event.listType}` : "")
       );
+
+      // ── AI Vision Verification (async, non-blocking) ──
+      const aiCfg = getAiConfig();
+      if (aiCfg.enabled && aiCfg.autoVerifyLpr && eventType === "anpr" && event.mapId && (event.fullImageId || event.plateImageId)) {
+        const imageIdForAi = event.fullImageId || event.plateImageId!;
+        const plateForAi = event.licensePlate || "";
+        const mapIdForAi = event.mapId;
+
+        // Fire and forget — don't delay webhook response
+        (async () => {
+          try {
+            const img = store.getImage(imageIdForAi);
+            if (!img) return;
+
+            const b64 = Buffer.from(img.data).toString("base64");
+            const prompt = `Analiza esta imagen de tráfico. Necesito:
+1. Leer la matrícula/placa visible. Transcribila exactamente.
+2. La cámara leyó: "${plateForAi}". ¿Coincide? COINCIDE o NO_COINCIDE.
+3. Describí el vehículo: tipo, color, marca.
+Responde SOLO JSON sin markdown:
+{"plateRead":"PLACA","verification":"COINCIDE|NO_COINCIDE|NO_VISIBLE","vehicleType":"tipo","vehicleColor":"color","vehicleBrand":"marca","confidence":"alta|media|baja","notes":"obs"}`;
+
+            const result = await ollamaVision(prompt, [b64]);
+            const jsonMatch = result.match(/\{[\s\S]*\}/);
+            if (!jsonMatch) return;
+
+            const parsed = JSON.parse(jsonMatch[0]);
+            const plateRegistry = getPlateRegistry();
+
+            // Find the most recent log entry for this plate
+            const recentLogs = plateRegistry.getAccessLog(mapIdForAi, { plate: plateForAi, limit: 1 });
+            if (recentLogs.length > 0) {
+              plateRegistry.updateAccessLog(mapIdForAi, recentLogs[0].id, {
+                aiVerification: parsed.verification || "error",
+                aiPlateRead: parsed.plateRead,
+                aiVehicleType: parsed.vehicleType,
+                aiVehicleColor: parsed.vehicleColor,
+                aiVehicleBrand: parsed.vehicleBrand,
+                aiConfidence: parsed.confidence,
+                aiNotes: parsed.notes,
+              });
+              console.log(`[AI] Verified ${plateForAi}: ${parsed.verification} | ${parsed.vehicleType} ${parsed.vehicleColor} ${parsed.vehicleBrand}`);
+            }
+          } catch (err: any) {
+            console.error("[AI] Vision verification error:", err.message);
+          }
+        })();
+      }
 
       return isapiResponse("OK");
     }

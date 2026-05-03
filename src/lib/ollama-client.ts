@@ -5,8 +5,17 @@
  * No data leaves the local network.
  */
 
+import { getAiConfig } from "./ai-config";
+
+// Dynamic getters that read from persisted config
+function getOllamaBase() { return getAiConfig().ollamaUrl; }
+function getDefaultModel() { return getAiConfig().textModel; }
+function getVisionModel() { return getAiConfig().visionModel; }
+
+// Legacy env-based fallbacks (kept for backward compat)
 const OLLAMA_BASE = process.env.OLLAMA_URL || "http://192.168.99.253:11434";
 const DEFAULT_MODEL = process.env.OLLAMA_MODEL || "gemma3:4b";
+const VISION_MODEL = process.env.OLLAMA_VISION_MODEL || "qwen3-vl:4b";
 
 export interface OllamaChatMessage {
   role: "system" | "user" | "assistant";
@@ -28,15 +37,19 @@ export async function ollamaChat(
   messages: OllamaChatMessage[],
   opts?: { model?: string; temperature?: number }
 ): Promise<string> {
-  const res = await fetch(`${OLLAMA_BASE}/api/chat`, {
+  const base = getOllamaBase();
+  const model = opts?.model || getDefaultModel();
+  const cfg = getAiConfig();
+
+  const res = await fetch(`${base}/api/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      model: opts?.model || DEFAULT_MODEL,
+      model,
       messages,
       stream: false,
       options: {
-        temperature: opts?.temperature ?? 0.3,
+        temperature: opts?.temperature ?? cfg.temperature,
         num_predict: 1024,
       },
     }),
@@ -63,15 +76,18 @@ export function ollamaChatStream(
   return new ReadableStream({
     async start(controller) {
       try {
-        const res = await fetch(`${OLLAMA_BASE}/api/chat`, {
+        const base = getOllamaBase();
+        const model = opts?.model || getDefaultModel();
+        const cfg = getAiConfig();
+        const res = await fetch(`${base}/api/chat`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            model: opts?.model || DEFAULT_MODEL,
+            model,
             messages,
             stream: true,
             options: {
-              temperature: opts?.temperature ?? 0.3,
+              temperature: opts?.temperature ?? cfg.temperature,
               num_predict: 1024,
             },
           }),
@@ -136,6 +152,49 @@ export function ollamaChatStream(
 }
 
 /**
+ * Send an image to a vision model for analysis.
+ * Images are passed as base64-encoded strings.
+ */
+export async function ollamaVision(
+  prompt: string,
+  images: string[], // base64 encoded (no data: prefix)
+  opts?: { model?: string; temperature?: number }
+): Promise<string> {
+  const base = getOllamaBase();
+  const model = opts?.model || getVisionModel();
+
+  const res = await fetch(`${base}/api/chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model,
+      messages: [
+        {
+          role: "user",
+          content: prompt,
+          images,
+        },
+      ],
+      stream: false,
+      options: {
+        temperature: opts?.temperature ?? 0.2,
+        num_predict: 512,
+      },
+    }),
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Ollama vision error ${res.status}: ${text}`);
+  }
+
+  const data = await res.json();
+  // qwen3-vl may use thinking field; extract the content
+  const content = data.message?.content || "";
+  return content;
+}
+
+/**
  * Check Ollama connectivity and list available models.
  */
 export async function ollamaStatus(): Promise<{
@@ -143,16 +202,17 @@ export async function ollamaStatus(): Promise<{
   models: string[];
   url: string;
 }> {
+  const base = getOllamaBase();
   try {
-    const res = await fetch(`${OLLAMA_BASE}/api/tags`, {
+    const res = await fetch(`${base}/api/tags`, {
       signal: AbortSignal.timeout(5000),
     });
-    if (!res.ok) return { online: false, models: [], url: OLLAMA_BASE };
+    if (!res.ok) return { online: false, models: [], url: base };
 
     const data = await res.json();
     const models = (data.models || []).map((m: any) => m.name);
-    return { online: true, models, url: OLLAMA_BASE };
+    return { online: true, models, url: base };
   } catch {
-    return { online: false, models: [], url: OLLAMA_BASE };
+    return { online: false, models: [], url: base };
   }
 }

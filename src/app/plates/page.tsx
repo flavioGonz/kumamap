@@ -2190,27 +2190,13 @@ function BoothTab({ mapId }: { mapId: string }) {
           </div>
         ) : (
           <div className="relative">
-            {/* Main camera feed */}
-            {mainCam && renderCameraFeed(mainCam, true)}
-
-            {/* PiP cameras overlaid bottom-right */}
-            {pipCams.length > 0 && (
-              <div className="absolute bottom-3 right-3 flex gap-2 z-10">
-                {pipCams.slice(0, 3).map((cam, idx) => (
-                  <div
-                    key={cam.nodeId}
-                    className="transition-all hover:scale-105"
-                    style={{
-                      width: pipCams.length === 1 ? "200px" : pipCams.length === 2 ? "170px" : "140px",
-                      boxShadow: "0 4px 20px rgba(0,0,0,0.6)",
-                      borderRadius: "0.75rem",
-                    }}
-                  >
-                    {renderCameraFeed(cam, false, idx)}
-                  </div>
-                ))}
-              </div>
-            )}
+            {/* Camera grid — 2 columns (entrada / salida) */}
+            <div
+              className="grid gap-2"
+              style={{ gridTemplateColumns: lprCameras.length <= 1 ? "1fr" : "1fr 1fr" }}
+            >
+              {lprCameras.map((cam) => renderCameraFeed(cam, true))}
+            </div>
 
             {/* Add camera button */}
             {availableCams.length > 0 && (

@@ -1696,6 +1696,11 @@ function BoothTab({ mapId }: { mapId: string }) {
   const [clock, setClock] = useState(new Date());
   const [feedSearch, setFeedSearch] = useState("");
 
+  // Detection overlay system — persistent until closed, with history + AI animations
+  const [detectionHistory, setDetectionHistory] = useState<Map<string, HikEvent[]>>(new Map());
+  const [liveToasts, setLiveToasts] = useState<{ id: string; event: HikEvent; cameraIp: string; ts: number }[]>([]);
+  const [aiAnimations, setAiAnimations] = useState<Map<string, { status: "analyzing" | "complete"; event: HikEvent; logEntry?: AccessLogEntry }>>(new Map());
+
   // Camera PiP system
   const [mainCamIndex, setMainCamIndex] = useState(0);
   const [activeCamIds, setActiveCamIds] = useState<string[]>([]);
@@ -1801,23 +1806,66 @@ function BoothTab({ mapId }: { mapId: string }) {
             if (updated.length > 100) return updated.slice(0, 100);
             return updated;
           });
-          // Track detection on camera feed for overlay animation
+          // Track detection on camera feed — persists until manually closed (X)
           if (event.cameraIp) {
             setCameraDetections((prev) => {
               const next = new Map(prev);
               next.set(event.cameraIp, event);
               return next;
             });
-            // Clear overlay after 5 seconds
+            // Add to detection history (keep last 5 per camera, transparent layers)
+            setDetectionHistory((prev) => {
+              const next = new Map(prev);
+              const existing = next.get(event.cameraIp) || [];
+              next.set(event.cameraIp, [event, ...existing].slice(0, 5));
+              return next;
+            });
+            // Add animated toast on camera feed (auto-fades after 8s)
+            const toastId = `toast-${event.id}-${Date.now()}`;
+            setLiveToasts((prev) => [{ id: toastId, event, cameraIp: event.cameraIp, ts: Date.now() }, ...prev].slice(0, 8));
             setTimeout(() => {
-              setCameraDetections((prev) => {
-                const next = new Map(prev);
-                if (next.get(event.cameraIp)?.id === event.id) {
-                  next.delete(event.cameraIp);
+              setLiveToasts((prev) => prev.filter((t) => t.id !== toastId));
+            }, 8000);
+            // Trigger AI analysis animation (second phase) if AI is enabled for this camera
+            const camNode = lprCameras.find((c) => c.ip === event.cameraIp);
+            if (camNode && aiEnabledCams.has(camNode.nodeId)) {
+              setTimeout(() => {
+                setAiAnimations((prev) => {
+                  const next = new Map(prev);
+                  next.set(event.cameraIp, { status: "analyzing", event });
+                  return next;
+                });
+              }, 1500);
+              // Poll access log for AI results
+              const pollAi = (attempt: number) => {
+                if (attempt > 8) {
+                  setAiAnimations((prev) => { const next = new Map(prev); next.delete(event.cameraIp); return next; });
+                  return;
                 }
-                return next;
-              });
-            }, 5000);
+                setTimeout(() => {
+                  fetch(apiUrl(`/api/plates/log?mapId=${mapId}&limit=5`), { headers: { Accept: "application/json" } })
+                    .then((r) => r.json())
+                    .then((data) => {
+                      const entry = (data.entries || []).find((e: AccessLogEntry) => e.plate === event.licensePlate && e.aiVerification);
+                      if (entry) {
+                        setAiAnimations((prev) => {
+                          const next = new Map(prev);
+                          next.set(event.cameraIp, { status: "complete", event, logEntry: entry });
+                          return next;
+                        });
+                        // Auto-clear AI animation after 10s
+                        setTimeout(() => {
+                          setAiAnimations((prev) => { const next = new Map(prev); if (next.get(event.cameraIp)?.event.id === event.id) next.delete(event.cameraIp); return next; });
+                        }, 10000);
+                      } else {
+                        pollAi(attempt + 1);
+                      }
+                    })
+                    .catch(() => pollAi(attempt + 1));
+                }, 2000);
+              };
+              pollAi(0);
+            }
           }
         }
       } catch {}
@@ -1914,15 +1962,6 @@ function BoothTab({ mapId }: { mapId: string }) {
     return vehicleColorMap[colorName.toLowerCase().trim()] || null;
   };
 
-  // PiP camera helpers
-  const mainCam = lprCameras[mainCamIndex] || null;
-  const pipCams = lprCameras.filter((_, i) => i !== mainCamIndex);
-
-  const swapToMain = (pipIndex: number) => {
-    const actualIndex = lprCameras.findIndex((c) => c.nodeId === pipCams[pipIndex]?.nodeId);
-    if (actualIndex >= 0) setMainCamIndex(actualIndex);
-  };
-
   const addCamera = (cam: LprCamera) => {
     if (activeCamIds.includes(cam.nodeId)) return;
     setLprCameras((prev) => [...prev, cam]);
@@ -1939,24 +1978,46 @@ function BoothTab({ mapId }: { mapId: string }) {
     });
   };
 
-  // Camera feed cell renderer
-  const renderCameraFeed = (cam: LprCamera, isMain: boolean, pipIdx?: number) => {
+  // Close detection overlay manually
+  const closeDetection = (cameraIp: string) => {
+    setCameraDetections((prev) => {
+      const next = new Map(prev);
+      next.delete(cameraIp);
+      return next;
+    });
+    setAiAnimations((prev) => {
+      const next = new Map(prev);
+      next.delete(cameraIp);
+      return next;
+    });
+  };
+
+  // Compute extra cameras for each main channel (entrada=0, salida=1)
+  const extraCamsLeft = lprCameras.filter((_, i) => i >= 2 && i % 2 === 0);
+  const extraCamsRight = lprCameras.filter((_, i) => i >= 2 && i % 2 === 1);
+
+  // Camera feed cell renderer — main channels only
+  const renderCameraFeed = (cam: LprCamera, channelLabel: string, channelIdx: number) => {
     const streamSrc = getStreamUrl(cam);
     const det = cameraDetections.get(cam.ip);
     const detColor = det ? (matchColors[det.matchResult || "unknown"] || palette.unknown) : "";
     const aiOn = aiEnabledCams.has(cam.nodeId);
+    const history = (detectionHistory.get(cam.ip) || []).slice(1, 4); // skip current, show 3 old
+    const camToasts = liveToasts.filter((t) => t.cameraIp === cam.ip);
+    const aiAnim = aiAnimations.get(cam.ip);
+    // Extra cameras assigned to this channel (thumbnails overlaid as PiP)
+    const extraCams = channelIdx === 0 ? extraCamsLeft : extraCamsRight;
 
     return (
       <div
         key={cam.nodeId}
-        className={`relative overflow-hidden group ${isMain ? "rounded-2xl" : "rounded-xl cursor-pointer"}`}
+        className="relative overflow-hidden group rounded-2xl"
         style={{
           background: "#000",
           border: `1px solid ${det ? detColor + "60" : palette.border}`,
           aspectRatio: "16/9",
           transition: "border-color 0.3s ease",
         }}
-        onClick={!isMain && pipIdx !== undefined ? () => swapToMain(pipIdx) : undefined}
       >
         {streamSrc ? (
           <img
@@ -1973,23 +2034,26 @@ function BoothTab({ mapId }: { mapId: string }) {
 
         {/* Camera label overlay */}
         <div
-          className="absolute bottom-0 left-0 right-0 px-3 py-1.5 flex items-center justify-between"
+          className="absolute bottom-0 left-0 right-0 px-3 py-1.5 flex items-center justify-between z-[2]"
           style={{ background: "linear-gradient(transparent, rgba(0,0,0,0.85))" }}
         >
           <div className="flex items-center gap-2">
-            <span className={`font-medium text-white truncate ${isMain ? "text-sm" : "text-[10px]"}`}>{cam.label}</span>
+            <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded" style={{ background: `${palette.accent}15`, color: palette.accent }}>
+              {channelLabel}
+            </span>
+            <span className="font-medium text-white truncate text-sm">{cam.label}</span>
           </div>
-          <span className={`text-white/40 ${isMain ? "text-xs" : "text-[9px]"}`}>{cam.ip}</span>
+          <span className="text-white/40 text-xs">{cam.ip}</span>
         </div>
 
         {/* Top-left: REC indicator */}
-        <div className="absolute top-2 left-2 flex items-center gap-1.5">
+        <div className="absolute top-2 left-2 flex items-center gap-1.5 z-[3]">
           <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
           <span className="text-[10px] font-semibold text-white/80 uppercase tracking-wider">REC</span>
         </div>
 
         {/* Top-right: AI toggle */}
-        <div className="absolute top-2 right-2 flex items-center gap-1.5">
+        <div className="absolute top-2 right-2 flex items-center gap-1.5 z-[3]">
           <button
             onClick={(e) => { e.stopPropagation(); toggleAi(cam.nodeId); }}
             className="flex items-center gap-1 px-1.5 py-0.5 rounded-md transition-all"
@@ -2000,27 +2064,162 @@ function BoothTab({ mapId }: { mapId: string }) {
             title={aiOn ? "IA activa" : "IA inactiva"}
           >
             <Bot className="w-3 h-3" style={{ color: aiOn ? palette.accent : "rgba(255,255,255,0.3)" }} />
-            {isMain && (
-              <span className="text-[9px] font-medium" style={{ color: aiOn ? palette.accent : "rgba(255,255,255,0.3)" }}>
-                {aiOn ? "IA" : "OFF"}
-              </span>
-            )}
+            <span className="text-[9px] font-medium" style={{ color: aiOn ? palette.accent : "rgba(255,255,255,0.3)" }}>
+              {aiOn ? "IA" : "OFF"}
+            </span>
           </button>
         </div>
 
-        {/* ── Detection Overlay Animation ── */}
+        {/* ── Extra cameras as PiP thumbnails overlaid on this channel ── */}
+        {extraCams.length > 0 && (
+          <div className="absolute top-10 right-2 flex flex-col gap-1.5 z-[4]">
+            {extraCams.map((ec) => {
+              const ecStream = getStreamUrl(ec);
+              const ecDet = cameraDetections.get(ec.ip);
+              const ecDetColor = ecDet ? (matchColors[ecDet.matchResult || "unknown"] || palette.unknown) : "";
+              return (
+                <div
+                  key={ec.nodeId}
+                  className="relative rounded-lg overflow-hidden cursor-pointer hover:scale-105 transition-transform"
+                  style={{
+                    width: "130px",
+                    aspectRatio: "16/9",
+                    border: `1.5px solid ${ecDet ? ecDetColor + "80" : "rgba(255,255,255,0.15)"}`,
+                    boxShadow: `0 2px 12px rgba(0,0,0,0.6)${ecDet ? `, 0 0 8px ${ecDetColor}30` : ""}`,
+                  }}
+                  onClick={() => {
+                    // Swap: move this extra cam to the main channel position
+                    const mainIdx = channelIdx;
+                    const extraIdx = lprCameras.indexOf(ec);
+                    if (extraIdx >= 0) {
+                      setLprCameras((prev) => {
+                        const next = [...prev];
+                        [next[mainIdx], next[extraIdx]] = [next[extraIdx], next[mainIdx]];
+                        return next;
+                      });
+                    }
+                  }}
+                  title={`Click para cambiar a ${ec.label}`}
+                >
+                  {ecStream ? (
+                    <img src={ecStream} alt={ec.label} className="w-full h-full object-cover" />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center" style={{ background: "#111" }}>
+                      <Video className="w-4 h-4" style={{ color: palette.textDim }} />
+                    </div>
+                  )}
+                  {/* PiP label */}
+                  <div
+                    className="absolute bottom-0 left-0 right-0 px-1.5 py-0.5 text-[8px] text-white/80 truncate font-medium"
+                    style={{ background: "linear-gradient(transparent, rgba(0,0,0,0.85))" }}
+                  >
+                    {ec.label}
+                  </div>
+                  {/* PiP detection badge */}
+                  {ecDet && (
+                    <div className="absolute top-0.5 left-0.5 px-1 py-0.5 rounded text-[7px] font-mono font-bold" style={{ background: "rgba(0,0,0,0.8)", color: ecDetColor, border: `1px solid ${ecDetColor}50` }}>
+                      {ecDet.licensePlate}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* ── Detection history — transparent layers ── */}
+        {history.map((hEv, hIdx) => {
+          const hColor = matchColors[hEv.matchResult || "unknown"] || palette.unknown;
+          const opacity = 0.15 - hIdx * 0.04;
+          return (
+            <div
+              key={hEv.id}
+              className="absolute inset-0 pointer-events-none z-[1]"
+              style={{
+                background: `linear-gradient(135deg, ${hColor}${Math.round(opacity * 255).toString(16).padStart(2, "0")}, transparent 50%)`,
+                borderRadius: "1rem",
+              }}
+            >
+              <div
+                className="absolute bottom-8 left-3"
+                style={{ transform: `translateY(-${(hIdx + 1) * 28}px)` }}
+              >
+                <div
+                  className="px-2 py-0.5 rounded font-mono text-[10px] font-bold tracking-wider"
+                  style={{
+                    background: "rgba(0,0,0,0.5)",
+                    color: hColor,
+                    opacity: 0.5 - hIdx * 0.12,
+                    border: `1px solid ${hColor}30`,
+                  }}
+                >
+                  {hEv.licensePlate}
+                  <span className="ml-1.5 text-[8px] font-normal text-white/40">{formatTime(hEv.timestamp)}</span>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+
+        {/* ── Live toast messages on camera feed ── */}
+        {camToasts.length > 0 && (
+          <div className="absolute top-10 left-2 flex flex-col gap-1 z-[5] pointer-events-none">
+            {camToasts.slice(0, 3).map((toast, tIdx) => {
+              const tc = matchColors[toast.event.matchResult || "unknown"] || palette.unknown;
+              const age = (Date.now() - toast.ts) / 1000;
+              const fadeOpacity = age > 6 ? Math.max(0, 1 - (age - 6) / 2) : 1;
+              return (
+                <div
+                  key={toast.id}
+                  className="flex items-center gap-1.5 px-2 py-1 rounded-lg"
+                  style={{
+                    background: "rgba(0,0,0,0.75)",
+                    border: `1px solid ${tc}40`,
+                    backdropFilter: "blur(4px)",
+                    animation: "boothToastSlideIn 0.4s ease-out",
+                    opacity: fadeOpacity * (1 - tIdx * 0.2),
+                  }}
+                >
+                  <div className="w-1.5 h-1.5 rounded-full" style={{ background: tc, boxShadow: `0 0 4px ${tc}` }} />
+                  <span className="font-mono text-[11px] font-bold tracking-wider" style={{ color: tc }}>
+                    {toast.event.licensePlate}
+                  </span>
+                  <span className="text-[8px] text-white/50">{matchLabels[toast.event.matchResult || "unknown"]}</span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* ── Detection Overlay Animation (persists until manually closed) ── */}
         {det && (() => {
           const vehicleInfo = [det.vehicleColor, det.vehicleBrand, det.vehicleModel].filter(Boolean).join(" ");
           return (
             <div
-              className="absolute inset-0 pointer-events-none"
+              className="absolute inset-0 z-[6]"
               style={{
                 animation: "boothDetectionIn 0.3s ease-out",
                 background: `linear-gradient(135deg, ${detColor}20, transparent 60%)`,
                 border: `2px solid ${detColor}80`,
-                borderRadius: isMain ? "1rem" : "0.75rem",
+                borderRadius: "1rem",
+                pointerEvents: "none",
               }}
             >
+              {/* Close button (X) — pointer-events enabled */}
+              <button
+                className="absolute top-2 left-10 z-10 w-6 h-6 rounded-full flex items-center justify-center transition-all hover:scale-110"
+                style={{
+                  background: "rgba(0,0,0,0.7)",
+                  border: `1px solid ${detColor}50`,
+                  pointerEvents: "auto",
+                  cursor: "pointer",
+                }}
+                onClick={(e) => { e.stopPropagation(); closeDetection(cam.ip); }}
+                title="Cerrar deteccion"
+              >
+                <X className="w-3.5 h-3.5" style={{ color: detColor }} />
+              </button>
+
               {/* Scanning line animation */}
               <div
                 className="absolute left-0 right-0 h-0.5"
@@ -2037,63 +2236,49 @@ function BoothTab({ mapId }: { mapId: string }) {
               <div className="absolute bottom-3 right-3 w-6 h-6" style={{ borderRight: `2px solid ${detColor}`, borderBottom: `2px solid ${detColor}` }} />
 
               {/* Left side: plate + status + vehicle info */}
-              {isMain && (
-                <div className="absolute bottom-8 left-3 flex flex-col gap-1.5" style={{ maxWidth: "60%" }}>
-                  <div
-                    className="px-4 py-1.5 rounded-lg font-mono text-lg font-black tracking-[0.2em] inline-block w-fit"
-                    style={{
-                      background: "rgba(0,0,0,0.85)",
-                      color: detColor,
-                      border: `2px solid ${detColor}`,
-                      boxShadow: `0 0 24px ${detColor}40`,
-                      animation: "boothPlatePulse 1s ease-in-out infinite",
-                    }}
-                  >
-                    {det.licensePlate}
-                  </div>
-                  <div
-                    className="px-3 py-1 rounded-lg text-[11px] font-bold uppercase tracking-widest flex items-center gap-1.5 w-fit"
-                    style={{ background: "rgba(0,0,0,0.8)", color: detColor }}
-                  >
-                    {matchIcons[det.matchResult || "unknown"]}
-                    {matchLabels[det.matchResult || "unknown"]}
-                    {det.matchOwner && <span className="font-normal ml-1 text-white/70">-- {det.matchOwner}</span>}
-                  </div>
-                  {vehicleInfo && (
-                    <div
-                      className="px-3 py-1 rounded-lg text-[10px] flex items-center gap-1.5 w-fit"
-                      style={{ background: "rgba(0,0,0,0.75)", color: "rgba(255,255,255,0.8)" }}
-                    >
-                      <Car className="w-3 h-3" style={{ color: detColor }} />
-                      <span>{vehicleInfo}</span>
-                    </div>
-                  )}
-                  {det.confidence && (
-                    <div
-                      className="px-3 py-1 rounded-lg text-[10px] flex items-center gap-1.5 w-fit"
-                      style={{ background: "rgba(0,0,0,0.75)", color: "rgba(255,255,255,0.7)" }}
-                    >
-                      <Fingerprint className="w-3 h-3" style={{ color: detColor }} />
-                      <span>Precision: <strong style={{ color: detColor }}>{det.confidence}%</strong></span>
-                    </div>
-                  )}
+              <div className="absolute bottom-8 left-3 flex flex-col gap-1.5" style={{ maxWidth: "60%" }}>
+                <div
+                  className="px-4 py-1.5 rounded-lg font-mono text-lg font-black tracking-[0.2em] inline-block w-fit"
+                  style={{
+                    background: "rgba(0,0,0,0.85)",
+                    color: detColor,
+                    border: `2px solid ${detColor}`,
+                    boxShadow: `0 0 24px ${detColor}40`,
+                    animation: "boothPlatePulse 1s ease-in-out infinite",
+                  }}
+                >
+                  {det.licensePlate}
                 </div>
-              )}
-
-              {/* PiP compact overlay */}
-              {!isMain && (
-                <div className="absolute bottom-6 left-2">
-                  <div
-                    className="px-2 py-0.5 rounded font-mono text-xs font-black tracking-wider"
-                    style={{ background: "rgba(0,0,0,0.85)", color: detColor, border: `1px solid ${detColor}` }}
-                  >
-                    {det.licensePlate}
-                  </div>
+                <div
+                  className="px-3 py-1 rounded-lg text-[11px] font-bold uppercase tracking-widest flex items-center gap-1.5 w-fit"
+                  style={{ background: "rgba(0,0,0,0.8)", color: detColor }}
+                >
+                  {matchIcons[det.matchResult || "unknown"]}
+                  {matchLabels[det.matchResult || "unknown"]}
+                  {det.matchOwner && <span className="font-normal ml-1 text-white/70">— {det.matchOwner}</span>}
                 </div>
-              )}
+                {vehicleInfo && (
+                  <div
+                    className="px-3 py-1 rounded-lg text-[10px] flex items-center gap-1.5 w-fit"
+                    style={{ background: "rgba(0,0,0,0.75)", color: "rgba(255,255,255,0.8)" }}
+                  >
+                    <Car className="w-3 h-3" style={{ color: detColor }} />
+                    <span>{vehicleInfo}</span>
+                  </div>
+                )}
+                {det.confidence && (
+                  <div
+                    className="px-3 py-1 rounded-lg text-[10px] flex items-center gap-1.5 w-fit"
+                    style={{ background: "rgba(0,0,0,0.75)", color: "rgba(255,255,255,0.7)" }}
+                  >
+                    <Fingerprint className="w-3 h-3" style={{ color: detColor }} />
+                    <span>Precision: <strong style={{ color: detColor }}>{det.confidence}%</strong></span>
+                  </div>
+                )}
+              </div>
 
-              {/* Right side: plate image (main only) */}
-              {isMain && det.plateImageId && (
+              {/* Right side: plate image */}
+              {det.plateImageId && (
                 <div className="absolute bottom-8 right-3 flex flex-col items-end gap-1">
                   <PlateImg
                     src={apiUrl(`/api/hik/images/${det.plateImageId}`)}
@@ -2113,8 +2298,8 @@ function BoothTab({ mapId }: { mapId: string }) {
                 </div>
               )}
 
-              {/* Top-right confidence meter (main only) */}
-              {isMain && det.confidence && (
+              {/* Top confidence meter */}
+              {det.confidence && (
                 <div className="absolute top-2 right-16 flex items-center gap-1.5 px-2 py-1 rounded-lg" style={{ background: "rgba(0,0,0,0.7)" }}>
                   <div className="w-12 h-1.5 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.1)" }}>
                     <div
@@ -2131,6 +2316,82 @@ function BoothTab({ mapId }: { mapId: string }) {
             </div>
           );
         })()}
+
+        {/* ── AI Analysis Animation (second phase after detection) ── */}
+        {aiAnim && (
+          <div
+            className="absolute inset-x-0 top-0 z-[7] pointer-events-none"
+            style={{ animation: "boothAiSlideDown 0.5s ease-out" }}
+          >
+            {aiAnim.status === "analyzing" ? (
+              <div
+                className="mx-auto mt-12 px-4 py-2 rounded-xl flex items-center gap-2 w-fit"
+                style={{
+                  background: "rgba(0,0,0,0.85)",
+                  border: `1px solid ${palette.accent}50`,
+                  boxShadow: `0 0 20px ${palette.accent}20`,
+                  backdropFilter: "blur(8px)",
+                }}
+              >
+                <Bot className="w-4 h-4" style={{ color: palette.accent, animation: "spin 2s linear infinite" }} />
+                <span className="text-xs font-semibold" style={{ color: palette.accent }}>IA Analizando...</span>
+                <div className="flex gap-0.5">
+                  <div className="w-1 h-1 rounded-full" style={{ background: palette.accent, animation: "boothDotPulse 1.2s ease-in-out infinite" }} />
+                  <div className="w-1 h-1 rounded-full" style={{ background: palette.accent, animation: "boothDotPulse 1.2s ease-in-out 0.2s infinite" }} />
+                  <div className="w-1 h-1 rounded-full" style={{ background: palette.accent, animation: "boothDotPulse 1.2s ease-in-out 0.4s infinite" }} />
+                </div>
+              </div>
+            ) : aiAnim.status === "complete" && aiAnim.logEntry ? (() => {
+              const le = aiAnim.logEntry;
+              const aiColor = le.aiVerification === "COINCIDE" ? palette.authorized : le.aiVerification === "NO_COINCIDE" ? palette.blocked : palette.gold;
+              return (
+                <div
+                  className="mx-auto mt-12 px-4 py-2.5 rounded-xl flex flex-col gap-1.5 w-fit max-w-[80%]"
+                  style={{
+                    background: "rgba(0,0,0,0.9)",
+                    border: `1px solid ${aiColor}50`,
+                    boxShadow: `0 0 24px ${aiColor}15`,
+                    backdropFilter: "blur(8px)",
+                    animation: "boothDetectionIn 0.4s ease-out",
+                  }}
+                >
+                  <div className="flex items-center gap-2">
+                    <Bot className="w-4 h-4" style={{ color: palette.accent }} />
+                    <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: palette.accent }}>Resultado IA</span>
+                    <span
+                      className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full"
+                      style={{ background: `${aiColor}20`, color: aiColor }}
+                    >
+                      {le.aiVerification}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    {le.aiPlateRead && (
+                      <div className="flex items-center gap-1">
+                        <span className="text-[9px] text-white/50">Lectura IA:</span>
+                        <span className="font-mono text-xs font-bold" style={{ color: le.aiPlateRead === aiAnim.event.licensePlate ? palette.authorized : palette.blocked }}>
+                          {le.aiPlateRead}
+                        </span>
+                      </div>
+                    )}
+                    {le.aiVehicleType && (
+                      <div className="flex items-center gap-1">
+                        <Car className="w-3 h-3" style={{ color: palette.textMuted }} />
+                        <span className="text-[10px] text-white/70">{le.aiVehicleType}</span>
+                      </div>
+                    )}
+                    {le.aiVehicleColor && (
+                      <div className="flex items-center gap-1">
+                        <div className="w-2.5 h-2.5 rounded-full" style={{ background: getVehicleColorHex(le.aiVehicleColor) || palette.textDim, border: "1px solid rgba(255,255,255,0.2)" }} />
+                        <span className="text-[10px] text-white/70 capitalize">{le.aiVehicleColor}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })() : null}
+          </div>
+        )}
       </div>
     );
   };
@@ -2190,12 +2451,15 @@ function BoothTab({ mapId }: { mapId: string }) {
           </div>
         ) : (
           <div className="relative">
-            {/* Camera grid — 2 columns (entrada / salida) */}
+            {/* Camera grid — always 2 main channels (entrada / salida) */}
             <div
               className="grid gap-2"
               style={{ gridTemplateColumns: lprCameras.length <= 1 ? "1fr" : "1fr 1fr" }}
             >
-              {lprCameras.map((cam) => renderCameraFeed(cam, true))}
+              {/* Only render first 2 cameras as main channels; extras are PiP thumbnails inside */}
+              {lprCameras.slice(0, 2).map((cam, idx) =>
+                renderCameraFeed(cam, idx === 0 ? "ENTRADA" : "SALIDA", idx)
+              )}
             </div>
 
             {/* Add camera button */}
@@ -2388,21 +2652,21 @@ function BoothTab({ mapId }: { mapId: string }) {
             </div>
           )}
 
-          {/* Live event feed with enriched info */}
+          {/* Compact event history — live readings now appear as animated toasts on camera feeds */}
           <div
             className="rounded-2xl overflow-hidden flex flex-col"
             style={{
               background: palette.surface,
               border: `1px solid ${palette.border}`,
-              maxHeight: "calc(100vh - 520px)",
+              maxHeight: "280px",
             }}
           >
-            <div className="flex-shrink-0 px-4 py-2.5 flex items-center justify-between" style={{ borderBottom: `1px solid ${palette.border}` }}>
+            <div className="flex-shrink-0 px-4 py-2 flex items-center justify-between" style={{ borderBottom: `1px solid ${palette.border}` }}>
               <div className="flex items-center gap-2">
-                <Activity className="w-4 h-4" style={{ color: palette.accent }} />
-                <span className="text-sm font-semibold" style={{ color: palette.text }}>Lecturas en Vivo</span>
+                <Activity className="w-3.5 h-3.5" style={{ color: palette.accent }} />
+                <span className="text-xs font-semibold" style={{ color: palette.text }}>Historial</span>
                 {events.length > 0 && (
-                  <span className="text-[10px] px-1.5 py-0.5 rounded-full font-mono" style={{ background: `${palette.accent}12`, color: palette.accent }}>
+                  <span className="text-[9px] px-1.5 py-0.5 rounded-full font-mono" style={{ background: `${palette.accent}12`, color: palette.accent }}>
                     {events.length}
                   </span>
                 )}
@@ -2415,7 +2679,7 @@ function BoothTab({ mapId }: { mapId: string }) {
                     placeholder="Buscar..."
                     value={feedSearch}
                     onChange={(e) => setFeedSearch(e.target.value)}
-                    className="pl-7 pr-6 py-1 rounded-lg text-[11px] outline-none w-36"
+                    className="pl-7 pr-6 py-1 rounded-lg text-[11px] outline-none w-32"
                     style={{ background: "rgba(255,255,255,0.03)", border: `1px solid ${palette.border}`, color: palette.text }}
                   />
                   {feedSearch && (
@@ -2424,112 +2688,51 @@ function BoothTab({ mapId }: { mapId: string }) {
                     </button>
                   )}
                 </div>
-                <div className="flex items-center gap-1">
-                  <div
-                    className="w-1.5 h-1.5 rounded-full"
-                    style={{ background: connected ? palette.authorized : palette.blocked, boxShadow: connected ? `0 0 4px ${palette.authorized}` : "none" }}
-                  />
-                  <span className="text-[9px] uppercase tracking-wider" style={{ color: palette.textDim }}>SSE</span>
-                </div>
               </div>
             </div>
 
             <div
-              className="flex-1 overflow-y-auto px-2 py-1.5 space-y-0.5"
+              className="flex-1 overflow-y-auto px-2 py-1 space-y-0.5"
               style={{ scrollbarWidth: "thin", scrollbarColor: `${palette.border} transparent` }}
             >
               {filteredEvents.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-12 text-center">
-                  <Radar className="w-7 h-7 mb-2" style={{ color: palette.textDim, animation: "spin 3s linear infinite" }} />
-                  <p className="text-xs" style={{ color: palette.textMuted }}>
+                <div className="flex flex-col items-center justify-center py-8 text-center">
+                  <Radar className="w-6 h-6 mb-1.5" style={{ color: palette.textDim, animation: "spin 3s linear infinite" }} />
+                  <p className="text-[11px]" style={{ color: palette.textMuted }}>
                     {feedSearch ? "Sin resultados" : "Esperando detecciones..."}
                   </p>
                 </div>
               ) : (
-                filteredEvents.map((ev) => {
+                filteredEvents.slice(0, 20).map((ev) => {
                   const color = matchColors[ev.matchResult || "unknown"] || palette.textMuted;
                   const evTime = new Date(ev.timestamp);
                   const timeStr = evTime.toLocaleTimeString("es-UY", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-                  const brandLogo = ev.vehicleBrand ? getCarBrandLogo(ev.vehicleBrand) : null;
-                  const vColorHex = getVehicleColorHex(ev.vehicleColor);
-                  const vType = getVehicleTypeLabel(ev.vehicleModel, ev.vehicleBrand);
-                  const hasAiData = ev.matchResult && ev.matchResult !== "unknown";
 
                   return (
                     <div
                       key={ev.id}
-                      className="rounded-lg px-2.5 py-2 transition-all cursor-pointer group"
-                      style={{ background: "transparent", border: "1px solid transparent" }}
+                      className="rounded-md px-2 py-1.5 transition-all cursor-pointer group flex items-center gap-2"
+                      style={{ background: "transparent" }}
                       onClick={() => setSelectedEvent(ev)}
-                      onMouseEnter={(e) => {
-                        e.currentTarget.style.background = palette.surfaceHover;
-                        e.currentTarget.style.borderColor = `${color}15`;
-                      }}
-                      onMouseLeave={(e) => {
-                        e.currentTarget.style.background = "transparent";
-                        e.currentTarget.style.borderColor = "transparent";
-                      }}
+                      onMouseEnter={(e) => (e.currentTarget.style.background = palette.surfaceHover)}
+                      onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
                     >
-                      <div className="flex items-center gap-2">
-                        {/* Time */}
-                        <div className="flex-shrink-0 text-right" style={{ minWidth: 46 }}>
-                          <div className="font-mono font-bold text-[12px] leading-none" style={{ color: palette.text }}>
-                            {timeStr.slice(0, 5)}
-                          </div>
-                          <div className="font-mono text-[8px] mt-0.5 opacity-50" style={{ color: palette.textMuted }}>
-                            :{timeStr.slice(6, 8)}
-                          </div>
-                        </div>
-
-                        {/* Status icon */}
-                        <div className="flex-shrink-0 w-5 flex justify-center" style={{ color }}>
-                          {matchIcons[ev.matchResult || "unknown"]}
-                        </div>
-
-                        {/* Plate + enriched info */}
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-1.5">
-                            <span className="font-mono font-bold text-sm tracking-wider" style={{ color }}>
-                              {ev.licensePlate}
-                            </span>
-                            {ev.confidence && (
-                              <span className="text-[8px] px-1 py-0.5 rounded font-mono" style={{ background: `${palette.accent}12`, color: palette.accent }}>
-                                {ev.confidence}%
-                              </span>
-                            )}
-                            {hasAiData && (
-                              <CheckCircle className="w-3 h-3 flex-shrink-0" style={{ color: palette.authorized + "80" }} />
-                            )}
-                          </div>
-                          <div className="flex items-center gap-2 mt-0.5">
-                            {/* Vehicle color dot */}
-                            {vColorHex && (
-                              <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: vColorHex, border: "1px solid rgba(255,255,255,0.15)" }} />
-                            )}
-                            {/* Brand logo */}
-                            {brandLogo && (
-                              <img src={brandLogo} alt="" className="h-3 w-3 object-contain flex-shrink-0" style={{ filter: "brightness(0) invert(0.5)" }} />
-                            )}
-                            <span className="text-[9px] truncate" style={{ color: palette.textDim }}>
-                              {ev.matchOwner
-                                ? ev.matchOwner
-                                : [ev.vehicleColor, ev.vehicleBrand, ev.vehicleModel].filter(Boolean).join(" ") || vType}
-                            </span>
-                          </div>
-                        </div>
-
-                        {/* Plate thumbnail */}
-                        {ev.plateImageId && (
-                          <PlateImg
-                            src={apiUrl(`/api/hik/images/${ev.plateImageId}`)}
-                            alt=""
-                            className="w-12 h-7 object-cover rounded flex-shrink-0"
-                            style={{ border: `1px solid ${palette.border}`, opacity: 0.8 }}
-                          />
-                        )}
-
-                        <ChevronRight className="w-3 h-3 flex-shrink-0 opacity-0 group-hover:opacity-30 transition-opacity" style={{ color: palette.textDim }} />
+                      <span className="font-mono text-[10px] text-white/40 flex-shrink-0" style={{ minWidth: 42 }}>{timeStr.slice(0, 5)}</span>
+                      <div className="flex-shrink-0 w-4 flex justify-center" style={{ color }}>
+                        {matchIcons[ev.matchResult || "unknown"]}
                       </div>
+                      <span className="font-mono font-bold text-[12px] tracking-wider flex-shrink-0" style={{ color }}>{ev.licensePlate}</span>
+                      <span className="text-[9px] truncate flex-1 min-w-0" style={{ color: palette.textDim }}>
+                        {ev.matchOwner || [ev.vehicleBrand, ev.vehicleModel].filter(Boolean).join(" ") || ""}
+                      </span>
+                      {ev.plateImageId && (
+                        <PlateImg
+                          src={apiUrl(`/api/hik/images/${ev.plateImageId}`)}
+                          alt=""
+                          className="w-10 h-6 object-cover rounded flex-shrink-0"
+                          style={{ border: `1px solid ${palette.border}`, opacity: 0.7 }}
+                        />
+                      )}
                     </div>
                   );
                 })
@@ -2537,15 +2740,12 @@ function BoothTab({ mapId }: { mapId: string }) {
               <div ref={eventsEndRef} />
             </div>
 
-            {/* Feed footer */}
             <div
-              className="px-3 py-1.5 flex items-center justify-between flex-shrink-0 text-[9px]"
+              className="px-3 py-1 flex items-center justify-between flex-shrink-0 text-[9px]"
               style={{ borderTop: `1px solid ${palette.border}`, color: palette.textDim }}
             >
               <span>
-                {events.filter((e) => e.matchResult === "authorized").length} autorizados ·{" "}
-                {events.filter((e) => e.matchResult === "unknown").length} desconocidos ·{" "}
-                {events.filter((e) => e.matchResult === "blocked").length} bloqueados
+                {events.filter((e) => e.matchResult === "authorized").length} aut · {events.filter((e) => e.matchResult === "unknown").length} desc · {events.filter((e) => e.matchResult === "blocked").length} bloq
               </span>
               <span className="font-mono">{events.length} total</span>
             </div>
@@ -2988,6 +3188,18 @@ function BoothTab({ mapId }: { mapId: string }) {
         @keyframes boothPlatePulse {
           0%, 100% { box-shadow: 0 0 20px currentColor; }
           50% { box-shadow: 0 0 35px currentColor; }
+        }
+        @keyframes boothToastSlideIn {
+          from { opacity: 0; transform: translateX(-20px); }
+          to { opacity: 1; transform: translateX(0); }
+        }
+        @keyframes boothAiSlideDown {
+          from { opacity: 0; transform: translateY(-15px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes boothDotPulse {
+          0%, 100% { opacity: 0.3; transform: scale(0.8); }
+          50% { opacity: 1; transform: scale(1.2); }
         }
         @keyframes pulse {
           0%, 100% { opacity: 1; }

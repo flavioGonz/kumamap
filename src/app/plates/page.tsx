@@ -1701,10 +1701,12 @@ function BoothTab({ mapId }: { mapId: string }) {
   const [liveToasts, setLiveToasts] = useState<{ id: string; event: HikEvent; cameraIp: string; ts: number }[]>([]);
   const [aiAnimations, setAiAnimations] = useState<Map<string, { status: "analyzing" | "complete"; event: HikEvent; logEntry?: AccessLogEntry }>>(new Map());
 
-  // Camera PiP system
+  // Camera PiP system — each channel manages its own PiP cameras
   const [mainCamIndex, setMainCamIndex] = useState(0);
   const [activeCamIds, setActiveCamIds] = useState<string[]>([]);
-  const [showCamSelector, setShowCamSelector] = useState(false);
+  const [showCamSelector, setShowCamSelector] = useState<false | 0 | 1>(false); // false=closed, 0=left channel, 1=right channel
+  // Per-channel PiP assignments: channelPips[0] = nodeIds for left channel, channelPips[1] = nodeIds for right channel
+  const [channelPips, setChannelPips] = useState<[string[], string[]]>([[], []]);
 
   // Per-camera AI toggle (React state only)
   const [aiEnabledCams, setAiEnabledCams] = useState<Set<string>>(new Set());
@@ -1962,10 +1964,18 @@ function BoothTab({ mapId }: { mapId: string }) {
     return vehicleColorMap[colorName.toLowerCase().trim()] || null;
   };
 
-  const addCamera = (cam: LprCamera) => {
+  const addCamera = (cam: LprCamera, channelIdx?: 0 | 1) => {
     if (activeCamIds.includes(cam.nodeId)) return;
     setLprCameras((prev) => [...prev, cam]);
     setActiveCamIds((prev) => [...prev, cam.nodeId]);
+    // Assign PiP to the specific channel
+    if (channelIdx !== undefined) {
+      setChannelPips((prev) => {
+        const next: [string[], string[]] = [[...prev[0]], [...prev[1]]];
+        next[channelIdx].push(cam.nodeId);
+        return next;
+      });
+    }
     setShowCamSelector(false);
   };
 
@@ -1992,9 +2002,9 @@ function BoothTab({ mapId }: { mapId: string }) {
     });
   };
 
-  // Compute extra cameras for each main channel (entrada=0, salida=1)
-  const extraCamsLeft = lprCameras.filter((_, i) => i >= 2 && i % 2 === 0);
-  const extraCamsRight = lprCameras.filter((_, i) => i >= 2 && i % 2 === 1);
+  // Compute extra cameras for each main channel based on explicit assignments
+  const extraCamsLeft = lprCameras.filter((c) => channelPips[0].includes(c.nodeId));
+  const extraCamsRight = lprCameras.filter((c) => channelPips[1].includes(c.nodeId));
 
   // Camera feed cell renderer — main channels only
   const renderCameraFeed = (cam: LprCamera, channelLabel: string, channelIdx: number) => {
@@ -2070,62 +2080,107 @@ function BoothTab({ mapId }: { mapId: string }) {
           </button>
         </div>
 
-        {/* ── Extra cameras as PiP thumbnails overlaid on this channel ── */}
-        {extraCams.length > 0 && (
-          <div className="absolute top-10 right-2 flex flex-col gap-1.5 z-[4]">
-            {extraCams.map((ec) => {
-              const ecStream = getStreamUrl(ec);
-              const ecDet = cameraDetections.get(ec.ip);
-              const ecDetColor = ecDet ? (matchColors[ecDet.matchResult || "unknown"] || palette.unknown) : "";
-              return (
-                <div
-                  key={ec.nodeId}
-                  className="relative rounded-lg overflow-hidden cursor-pointer hover:scale-105 transition-transform"
-                  style={{
-                    width: "130px",
-                    aspectRatio: "16/9",
-                    border: `1.5px solid ${ecDet ? ecDetColor + "80" : "rgba(255,255,255,0.15)"}`,
-                    boxShadow: `0 2px 12px rgba(0,0,0,0.6)${ecDet ? `, 0 0 8px ${ecDetColor}30` : ""}`,
-                  }}
-                  onClick={() => {
-                    // Swap: move this extra cam to the main channel position
-                    const mainIdx = channelIdx;
-                    const extraIdx = lprCameras.indexOf(ec);
+        {/* ── Extra cameras as PiP thumbnails + per-channel add button ── */}
+        <div className="absolute top-10 right-2 flex flex-col gap-1.5 z-[4]">
+          {extraCams.map((ec) => {
+            const ecStream = getStreamUrl(ec);
+            const ecDet = cameraDetections.get(ec.ip);
+            const ecDetColor = ecDet ? (matchColors[ecDet.matchResult || "unknown"] || palette.unknown) : "";
+            return (
+              <div
+                key={ec.nodeId}
+                className="relative rounded-lg overflow-hidden cursor-pointer hover:scale-105 transition-transform"
+                style={{
+                  width: "130px",
+                  aspectRatio: "16/9",
+                  border: `1.5px solid ${ecDet ? ecDetColor + "80" : "rgba(255,255,255,0.15)"}`,
+                  boxShadow: `0 2px 12px rgba(0,0,0,0.6)${ecDet ? `, 0 0 8px ${ecDetColor}30` : ""}`,
+                }}
+                onClick={() => {
+                  // Swap: move this PiP cam to the main channel, old main becomes PiP
+                  const mainCam = lprCameras[channelIdx];
+                  if (!mainCam) return;
+                  setLprCameras((prev) => {
+                    const next = [...prev];
+                    const extraIdx = next.findIndex((c) => c.nodeId === ec.nodeId);
                     if (extraIdx >= 0) {
-                      setLprCameras((prev) => {
-                        const next = [...prev];
-                        [next[mainIdx], next[extraIdx]] = [next[extraIdx], next[mainIdx]];
-                        return next;
-                      });
+                      [next[channelIdx], next[extraIdx]] = [next[extraIdx], next[channelIdx]];
                     }
-                  }}
-                  title={`Click para cambiar a ${ec.label}`}
-                >
-                  {ecStream ? (
-                    <img src={ecStream} alt={ec.label} className="w-full h-full object-cover" />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center" style={{ background: "#111" }}>
-                      <Video className="w-4 h-4" style={{ color: palette.textDim }} />
-                    </div>
-                  )}
-                  {/* PiP label */}
-                  <div
-                    className="absolute bottom-0 left-0 right-0 px-1.5 py-0.5 text-[8px] text-white/80 truncate font-medium"
-                    style={{ background: "linear-gradient(transparent, rgba(0,0,0,0.85))" }}
-                  >
-                    {ec.label}
+                    return next;
+                  });
+                  // Update PiP assignment: swap nodeIds
+                  setChannelPips((prev) => {
+                    const next: [string[], string[]] = [[...prev[0]], [...prev[1]]];
+                    const list = next[channelIdx as 0 | 1];
+                    const pipIdx = list.indexOf(ec.nodeId);
+                    if (pipIdx >= 0) {
+                      list[pipIdx] = mainCam.nodeId;
+                    }
+                    return next;
+                  });
+                }}
+                title={`Click para cambiar a ${ec.label}`}
+              >
+                {ecStream ? (
+                  <img src={ecStream} alt={ec.label} className="w-full h-full object-cover" />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center" style={{ background: "#111" }}>
+                    <Video className="w-4 h-4" style={{ color: palette.textDim }} />
                   </div>
-                  {/* PiP detection badge */}
-                  {ecDet && (
-                    <div className="absolute top-0.5 left-0.5 px-1 py-0.5 rounded text-[7px] font-mono font-bold" style={{ background: "rgba(0,0,0,0.8)", color: ecDetColor, border: `1px solid ${ecDetColor}50` }}>
-                      {ecDet.licensePlate}
-                    </div>
-                  )}
+                )}
+                {/* PiP label */}
+                <div
+                  className="absolute bottom-0 left-0 right-0 px-1.5 py-0.5 text-[8px] text-white/80 truncate font-medium"
+                  style={{ background: "linear-gradient(transparent, rgba(0,0,0,0.85))" }}
+                >
+                  {ec.label}
                 </div>
-              );
-            })}
-          </div>
-        )}
+                {/* Remove PiP button */}
+                <button
+                  className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                  style={{ background: "rgba(0,0,0,0.7)", border: "1px solid rgba(255,255,255,0.2)" }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setChannelPips((prev) => {
+                      const next: [string[], string[]] = [[...prev[0]], [...prev[1]]];
+                      next[channelIdx as 0 | 1] = next[channelIdx as 0 | 1].filter((id) => id !== ec.nodeId);
+                      return next;
+                    });
+                    setLprCameras((prev) => prev.filter((c) => c.nodeId !== ec.nodeId));
+                    setActiveCamIds((prev) => prev.filter((id) => id !== ec.nodeId));
+                  }}
+                  title="Quitar camara"
+                >
+                  <X className="w-2.5 h-2.5 text-white/70" />
+                </button>
+                {/* PiP detection badge */}
+                {ecDet && (
+                  <div className="absolute top-0.5 left-0.5 px-1 py-0.5 rounded text-[7px] font-mono font-bold" style={{ background: "rgba(0,0,0,0.8)", color: ecDetColor, border: `1px solid ${ecDetColor}50` }}>
+                    {ecDet.licensePlate}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+          {/* Per-channel add PiP button */}
+          {availableCams.length > 0 && (
+            <button
+              onClick={(e) => { e.stopPropagation(); setShowCamSelector(channelIdx as 0 | 1); }}
+              className="flex items-center justify-center rounded-lg transition-all hover:scale-105"
+              style={{
+                width: "130px",
+                height: "32px",
+                background: "rgba(0,0,0,0.5)",
+                border: `1px dashed ${palette.accent}40`,
+                backdropFilter: "blur(4px)",
+              }}
+              title="Agregar camara PiP"
+            >
+              <Plus className="w-3.5 h-3.5" style={{ color: palette.accent }} />
+              <span className="text-[9px] ml-1 font-medium" style={{ color: palette.accent }}>PiP</span>
+            </button>
+          )}
+        </div>
 
         {/* ── Detection history — transparent layers ── */}
         {history.map((hEv, hIdx) => {
@@ -2441,7 +2496,7 @@ function BoothTab({ mapId }: { mapId: string }) {
             <p className="text-sm" style={{ color: palette.textMuted }}>No hay camaras con stream configurado</p>
             {availableCams.length > 0 && (
               <button
-                onClick={() => setShowCamSelector(true)}
+                onClick={() => setShowCamSelector(0)}
                 className="mt-3 flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-medium transition-all hover:scale-105"
                 style={{ background: `${palette.accent}15`, color: palette.accent, border: `1px solid ${palette.accent}30` }}
               >
@@ -2462,40 +2517,35 @@ function BoothTab({ mapId }: { mapId: string }) {
               )}
             </div>
 
-            {/* Add camera button */}
-            {availableCams.length > 0 && (
-              <button
-                onClick={() => setShowCamSelector(true)}
-                className="absolute bottom-3 left-3 z-10 flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium transition-all hover:scale-105"
-                style={{
-                  background: "rgba(0,0,0,0.6)",
-                  backdropFilter: "blur(8px)",
-                  color: palette.accent,
-                  border: `1px solid ${palette.accent}30`,
-                }}
-              >
-                <Plus className="w-3.5 h-3.5" />
-                Camara
-              </button>
-            )}
+            {/* Global add camera button removed — each channel has its own PiP "+" */}
           </div>
         )}
 
-        {/* Camera selector dropdown */}
-        {showCamSelector && (
+        {/* Camera selector dropdown — per channel */}
+        {showCamSelector !== false && (
           <div
-            className="absolute bottom-14 left-3 z-20 rounded-xl shadow-2xl overflow-hidden"
+            className="absolute z-20 rounded-xl shadow-2xl overflow-hidden"
             style={{
               background: palette.surface,
               border: `1px solid ${palette.border}`,
               backdropFilter: "blur(16px)",
               minWidth: "260px",
-              maxHeight: "240px",
+              maxHeight: "260px",
               overflowY: "auto",
+              // Position relative to the channel
+              top: "50px",
+              ...(showCamSelector === 0
+                ? { left: "12px" }
+                : { right: "12px" }),
             }}
           >
             <div className="px-3 py-2 flex items-center justify-between" style={{ borderBottom: `1px solid ${palette.border}` }}>
-              <span className="text-xs font-semibold" style={{ color: palette.text }}>Seleccionar camara</span>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-semibold" style={{ color: palette.text }}>Agregar PiP</span>
+                <span className="text-[9px] px-1.5 py-0.5 rounded font-bold" style={{ background: `${palette.accent}15`, color: palette.accent }}>
+                  {showCamSelector === 0 ? "ENTRADA" : "SALIDA"}
+                </span>
+              </div>
               <button onClick={() => setShowCamSelector(false)} className="p-1 rounded hover:bg-white/10 transition-colors">
                 <X className="w-3.5 h-3.5" style={{ color: palette.textMuted }} />
               </button>
@@ -2506,7 +2556,7 @@ function BoothTab({ mapId }: { mapId: string }) {
               availableCams.map((cam) => (
                 <button
                   key={cam.nodeId}
-                  onClick={() => addCamera(cam)}
+                  onClick={() => addCamera(cam, showCamSelector as 0 | 1)}
                   className="w-full px-3 py-2.5 flex items-center gap-3 text-left transition-colors"
                   style={{ borderBottom: `1px solid ${palette.border}` }}
                   onMouseEnter={(e) => (e.currentTarget.style.background = palette.surfaceHover)}

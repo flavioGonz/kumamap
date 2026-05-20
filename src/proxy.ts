@@ -30,6 +30,7 @@ const PUBLIC_GET_PREFIXES = [
   "/api/plates",           // plate registry + access log (needed by mobile PWA)
   "/api/hik/images",       // Hikvision event images (used by LPR feed)
   "/api/hik/events/stream", // SSE event stream (used by LPR feed)
+  "/api/uploads",           // uploaded files (map background images, etc.)
 ];
 
 // API routes accessible via ANY method without auth (needed by mobile PWA)

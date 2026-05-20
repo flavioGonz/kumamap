@@ -66,6 +66,27 @@ db.exec(`
 // Migrations
 try { db.exec(`ALTER TABLE network_maps ADD COLUMN view_state TEXT`); } catch { /* already exists */ }
 try { db.exec(`ALTER TABLE network_maps ADD COLUMN parent_id TEXT REFERENCES network_maps(id) ON DELETE SET NULL`); } catch { /* already exists */ }
+try { db.exec(`ALTER TABLE network_maps ADD COLUMN background_blob BLOB`); } catch { /* already exists */ }
+try { db.exec(`ALTER TABLE network_maps ADD COLUMN background_mime TEXT`); } catch { /* already exists */ }
+
+// Auto-migrate: import existing file-based backgrounds into DB blobs
+(() => {
+  const UPLOADS_DIR = path.join(process.cwd(), "data", "uploads", "network-maps");
+  const mapsWithFiles = db.prepare(
+    `SELECT id, background_image FROM network_maps WHERE background_type = 'image' AND background_image IS NOT NULL AND background_image != '' AND background_blob IS NULL`
+  ).all() as { id: string; background_image: string }[];
+  for (const m of mapsWithFiles) {
+    const filePath = path.join(UPLOADS_DIR, path.basename(m.background_image));
+    if (fs.existsSync(filePath)) {
+      const ext = path.extname(m.background_image).toLowerCase();
+      const mimeMap: Record<string, string> = { ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".gif": "image/gif", ".webp": "image/webp", ".svg": "image/svg+xml" };
+      const blob = fs.readFileSync(filePath);
+      db.prepare(`UPDATE network_maps SET background_blob = ?, background_mime = ? WHERE id = ?`)
+        .run(blob, mimeMap[ext] || "image/jpeg", m.id);
+      console.log(`[DB] Migrated background image for map ${m.id} into DB blob (${blob.length} bytes)`);
+    }
+  }
+})();
 
 function genId() {
   return crypto.randomUUID();
@@ -76,6 +97,8 @@ export interface NetworkMap {
   name: string;
   background_type: "grid" | "image" | "livemap";
   background_image: string | null;
+  background_blob: Buffer | null;
+  background_mime: string | null;
   background_scale: number;
   background_offset_x: number;
   background_offset_y: number;
@@ -112,16 +135,19 @@ export interface MapEdge {
   animated: number;
 }
 
+// Columns to select in normal queries (excludes heavy background_blob)
+const MAP_COLS = `id, name, background_type, background_image, background_mime, background_scale, background_offset_x, background_offset_y, kuma_group_id, parent_id, view_state, width, height, created_at, updated_at`;
+
 export const mapsDb = {
   getAll(): NetworkMap[] {
     return db
-      .prepare("SELECT * FROM network_maps ORDER BY updated_at DESC")
+      .prepare(`SELECT ${MAP_COLS} FROM network_maps ORDER BY updated_at DESC`)
       .all() as NetworkMap[];
   },
 
   getById(id: string): NetworkMap | undefined {
     return db
-      .prepare("SELECT * FROM network_maps WHERE id = ?")
+      .prepare(`SELECT ${MAP_COLS} FROM network_maps WHERE id = ?`)
       .get(id) as NetworkMap | undefined;
   },
 
@@ -150,13 +176,13 @@ export const mapsDb = {
 
   getChildren(parentId: string): NetworkMap[] {
     return db
-      .prepare("SELECT * FROM network_maps WHERE parent_id = ? ORDER BY name ASC")
+      .prepare(`SELECT ${MAP_COLS} FROM network_maps WHERE parent_id = ? ORDER BY name ASC`)
       .all(parentId) as NetworkMap[];
   },
 
   getRoots(): NetworkMap[] {
     return db
-      .prepare("SELECT * FROM network_maps WHERE parent_id IS NULL ORDER BY updated_at DESC")
+      .prepare(`SELECT ${MAP_COLS} FROM network_maps WHERE parent_id IS NULL ORDER BY updated_at DESC`)
       .all() as NetworkMap[];
   },
 
@@ -259,10 +285,23 @@ export const mapsDb = {
     tx();
   },
 
-  setBackground(id: string, filename: string) {
-    db.prepare(
-      `UPDATE network_maps SET background_type = 'image', background_image = ?, updated_at = datetime('now') WHERE id = ?`
-    ).run(filename, id);
+  setBackground(id: string, filename: string, blob?: Buffer, mime?: string) {
+    if (blob && mime) {
+      db.prepare(
+        `UPDATE network_maps SET background_type = 'image', background_image = ?, background_blob = ?, background_mime = ?, updated_at = datetime('now') WHERE id = ?`
+      ).run(filename, blob, mime, id);
+    } else {
+      db.prepare(
+        `UPDATE network_maps SET background_type = 'image', background_image = ?, updated_at = datetime('now') WHERE id = ?`
+      ).run(filename, id);
+    }
+  },
+
+  getBackgroundBlob(id: string): { blob: Buffer; mime: string } | null {
+    const row = db.prepare(
+      `SELECT background_blob, background_mime FROM network_maps WHERE id = ? AND background_blob IS NOT NULL`
+    ).get(id) as { background_blob: Buffer; background_mime: string } | undefined;
+    return row ? { blob: row.background_blob, mime: row.background_mime } : null;
   },
 };
 

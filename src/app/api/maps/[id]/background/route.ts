@@ -9,6 +9,10 @@ const UPLOADS_DIR = path.join(process.cwd(), "data", "uploads", "network-maps");
 const ALLOWED_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg"]);
 const ALLOWED_MIME_PREFIXES = ["image/"];
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
+const MIME_MAP: Record<string, string> = {
+  ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
+  ".gif": "image/gif", ".webp": "image/webp", ".svg": "image/svg+xml",
+};
 
 export async function POST(
   req: NextRequest,
@@ -50,23 +54,27 @@ export async function POST(
       );
     }
 
-    // Ensure dir exists
-    if (!fs.existsSync(UPLOADS_DIR)) {
-      fs.mkdirSync(UPLOADS_DIR, { recursive: true });
-    }
-
-    // Delete old background
-    if (map.background_image) {
-      const oldPath = path.join(UPLOADS_DIR, path.basename(map.background_image));
-      if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
-    }
-
-    // Save new file with sanitized name (timestamp + safe extension only)
     const filename = `bg-${Date.now()}${ext}`;
     const buffer = Buffer.from(await file.arrayBuffer());
-    fs.writeFileSync(path.join(UPLOADS_DIR, filename), buffer);
+    const mime = MIME_MAP[ext] || "image/jpeg";
 
-    mapsDb.setBackground(id, filename);
+    // Save blob into DB (primary, survives builds/deploys)
+    mapsDb.setBackground(id, filename, buffer, mime);
+
+    // Also save to disk as cache (faster serving)
+    try {
+      if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+      // Delete old file from disk (cleanup only, DB blob is the source of truth)
+      if (map.background_image) {
+        const oldPath = path.join(UPLOADS_DIR, path.basename(map.background_image));
+        if (fs.existsSync(oldPath)) try { fs.unlinkSync(oldPath); } catch { /* ignore */ }
+      }
+      fs.writeFileSync(path.join(UPLOADS_DIR, filename), buffer);
+    } catch (diskErr) {
+      // Disk save failed but DB blob is saved — image won't be lost
+      console.warn("Background disk cache save failed (DB blob is safe):", diskErr);
+    }
+
     return NextResponse.json({ filename });
   } catch (err) {
     console.error("Background upload error:", err);

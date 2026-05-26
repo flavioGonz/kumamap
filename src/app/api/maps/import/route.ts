@@ -1,18 +1,49 @@
 import { NextRequest, NextResponse } from "next/server";
 import { mapsDb } from "@/lib/db";
-import { importMapSchema } from "@/lib/validation";
 
 export async function POST(req: NextRequest) {
   try {
-    const raw = await req.json();
-    const parsed = importMapSchema.safeParse(raw);
-    if (!parsed.success) {
+    let raw: any;
+    try {
+      raw = await req.json();
+    } catch {
       return NextResponse.json(
-        { error: "Datos inválidos", details: parsed.error.flatten() },
+        { error: "JSON inválido — el archivo no contiene JSON válido" },
         { status: 400 }
       );
     }
-    const data = parsed.data;
+
+    // Accept both kumamap-v1 format and plain map objects
+    // Detect format: kumamap-v1 has _format field, plain has nodes/edges at top level
+    let data: { map?: any; nodes?: any[]; edges?: any[] };
+
+    if (raw._format === "kumamap-v1") {
+      // Standard export format
+      data = raw;
+    } else if (raw.map && (raw.nodes || raw.edges)) {
+      // Looks like kumamap format but missing _format tag — accept it
+      data = raw;
+    } else if (raw.name && typeof raw.name === "string") {
+      // Plain map object (e.g. from older export or manual creation)
+      data = {
+        map: raw,
+        nodes: raw.nodes || [],
+        edges: raw.edges || [],
+      };
+    } else {
+      return NextResponse.json(
+        { error: "Formato no reconocido — el archivo debe ser un JSON exportado de KumaMap (con _format: \"kumamap-v1\")" },
+        { status: 400 }
+      );
+    }
+
+    // Validate minimum required data
+    if (!data.map && (!data.nodes || data.nodes.length === 0)) {
+      return NextResponse.json(
+        { error: "El archivo no contiene datos de mapa ni nodos para importar" },
+        { status: 400 }
+      );
+    }
 
     // Create the map
     const map = mapsDb.create({
@@ -25,11 +56,10 @@ export async function POST(req: NextRequest) {
 
     // Save view_state if present
     if (data.map?.view_state) {
-      mapsDb.update(map.id, {
-        view_state: typeof data.map.view_state === "string"
-          ? data.map.view_state
-          : JSON.stringify(data.map.view_state),
-      } as any);
+      const viewStateStr = typeof data.map.view_state === "string"
+        ? data.map.view_state
+        : JSON.stringify(data.map.view_state);
+      mapsDb.update(map.id, { view_state: viewStateStr } as any);
     }
 
     // Build ID mapping (old → new) to preserve links
@@ -39,15 +69,16 @@ export async function POST(req: NextRequest) {
       nodeIdMap.set(n.id, newId);
       return {
         id: newId,
-        kuma_monitor_id: n.kuma_monitor_id,
-        label: n.label,
-        x: n.x,
-        y: n.y,
+        kuma_monitor_id: n.kuma_monitor_id ?? null,
+        label: n.label ?? null,
+        x: n.x ?? 0,
+        y: n.y ?? 0,
         width: n.width || 120,
         height: n.height || 80,
         icon: n.icon || "server",
         color: n.color || null,
-        custom_data: n.custom_data || null,
+        custom_data: typeof n.custom_data === "string" ? n.custom_data
+          : n.custom_data ? JSON.stringify(n.custom_data) : null,
       };
     });
 
@@ -62,7 +93,8 @@ export async function POST(req: NextRequest) {
         style: e.style || "solid",
         color: e.color || "#6b7280",
         animated: e.animated || 0,
-        custom_data: e.custom_data || null,
+        custom_data: typeof e.custom_data === "string" ? e.custom_data
+          : e.custom_data ? JSON.stringify(e.custom_data) : null,
       };
     });
 
@@ -76,9 +108,10 @@ export async function POST(req: NextRequest) {
       edgesCount: edges.length,
     }, { status: 201 });
   } catch (err: any) {
+    console.error("Import error:", err);
     return NextResponse.json(
-      { error: "Error al importar: " + (err?.message || "formato invalido") },
-      { status: 400 }
+      { error: "Error al importar: " + (err?.message || "formato inválido") },
+      { status: 500 }
     );
   }
 }

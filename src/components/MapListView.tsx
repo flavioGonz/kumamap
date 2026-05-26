@@ -247,24 +247,40 @@ export default function MapListView({
     if (!importPreview) return;
     setImporting(true);
     let ok = 0, failed = 0;
+    let lastError = "";
     for (const mapData of importPreview.maps) {
       try {
-        const result = await safeFetch(apiUrl("/api/maps/import"), {
+        const res = await fetch(apiUrl("/api/maps/import"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(mapData),
-        }, "Import");
-        if (result) ok++;
-        else failed++;
-      } catch {
+        });
+        if (res.ok) {
+          ok++;
+        } else {
+          failed++;
+          try {
+            const errBody = await res.json();
+            lastError = errBody.error || `HTTP ${res.status}`;
+          } catch {
+            lastError = `HTTP ${res.status} ${res.statusText}`;
+          }
+        }
+      } catch (err: any) {
         failed++;
+        lastError = err?.message || "Error de red";
       }
     }
     setImporting(false);
     setImportPreview(null);
     fetchMaps();
-    if (failed === 0) toast.success("Importación completa", { description: `${ok} mapa${ok !== 1 ? "s" : ""} importado${ok !== 1 ? "s" : ""}` });
-    else toast.warning(`${ok} importados, ${failed} fallaron`);
+    if (failed === 0) {
+      toast.success("Importación completa", { description: `${ok} mapa${ok !== 1 ? "s" : ""} importado${ok !== 1 ? "s" : ""}` });
+    } else if (ok === 0) {
+      toast.error("Error al importar", { description: lastError, duration: 8000 });
+    } else {
+      toast.warning(`${ok} importados, ${failed} fallaron`, { description: lastError, duration: 8000 });
+    }
   };
 
   const getGroupName = (groupId: number | null) => {

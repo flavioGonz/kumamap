@@ -31,6 +31,7 @@ import TimeMachine from "./TimeMachine";
 import OnvifDiscoveryModal from "./OnvifDiscoveryModal";
 import EventReportModal from "./EventReportModal";
 import CameraStreamConfigModal, { type CameraStreamConfig } from "./CameraStreamConfigModal";
+import AntennaConfigModal, { type AntennaConfig } from "./AntennaConfigModal";
 import CameraStreamViewer from "./CameraStreamViewer";
 import CameraTooltipViewer from "./CameraTooltipViewer";
 import IconPickerModal from "./IconPickerModal";
@@ -647,6 +648,8 @@ export default function LeafletMapView({
 
   // Camera stream modals
   const [streamConfigNodeId, setStreamConfigNodeId] = useState<string | null>(null);
+  // Antenna config modal
+  const [antennaConfigNodeId, setAntennaConfigNodeId] = useState<string | null>(null);
   const [streamViewers, setStreamViewers] = useState<{ nodeId: string; mode: "tooltip" | "pip" }[]>([]);
   const [focusedViewer, setFocusedViewer] = useState<string | null>(null);
   const [tooltipAnchor, setTooltipAnchor] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
@@ -2016,6 +2019,9 @@ export default function LeafletMapView({
             if (isCamera) {
               // Camera: open stream config modal
               setStreamConfigNodeId(node.id);
+            } else if (isAntenna) {
+              // Antenna: open antenna config modal
+              setAntennaConfigNodeId(node.id);
             } else {
               // Normal edit modal
               setInputModalConfig({ nodeId: node.id, initial: node.label, mac: cd.mac || "", ip: cd.ip || "", credUser: cd.credUser || "", credPass: cd.credPass || "", credPort: cd.credPort as number | undefined, labelHidden: cd.labelHidden ?? false, labelSize: cd.labelSize ?? 12, nodeColor: cd.nodeColor || "" });
@@ -2126,38 +2132,66 @@ export default function LeafletMapView({
           nodesRef.current[idx] = { ...nodesRef.current[idx], x: pos.lat, y: pos.lng };
         }
 
-        if (isCamera) {
+        if (isCamera || isAntenna) {
           const cd2 = safeJsonParse<NodeCustomData>(nodesRef.current[idx]?.custom_data);
           const rot = cd2.rotation ?? 0;
-          const rawRange2 = cd2.fovRange ?? (isImageMode ? 200 : 0.003);
-          const range = isImageMode && rawRange2 < 1 ? rawRange2 * 100000 : rawRange2;
-          const fovAngle = cd2.fov ?? 60;
           const radConst = Math.PI / 180;
 
-          // Live update FOV polygon
-          const fovPoly = fovLayersRef.current.get(node.id);
-          if (fovPoly) {
-            const pts: [number, number][] = [[pos.lat, pos.lng]];
-            const s = rot - fovAngle / 2;
-            const e = rot + fovAngle / 2;
-            for (let a = s; a <= e; a += 2) pts.push([pos.lat + range * Math.cos(a * radConst), pos.lng + range * Math.sin(a * radConst)]);
-            pts.push([pos.lat, pos.lng]);
-            fovPoly.setLatLngs(pts);
+          if (isCamera) {
+            const rawRange2 = cd2.fovRange ?? (isImageMode ? 200 : 0.003);
+            const range = isImageMode && rawRange2 < 1 ? rawRange2 * 100000 : rawRange2;
+            const fovAngle = cd2.fov ?? 60;
+
+            // Live update FOV polygon
+            const fovPoly = fovLayersRef.current.get(node.id);
+            if (fovPoly) {
+              const pts: [number, number][] = [[pos.lat, pos.lng]];
+              const s = rot - fovAngle / 2;
+              const e = rot + fovAngle / 2;
+              for (let a = s; a <= e; a += 2) pts.push([pos.lat + range * Math.cos(a * radConst), pos.lng + range * Math.sin(a * radConst)]);
+              pts.push([pos.lat, pos.lng]);
+              fovPoly.setLatLngs(pts);
+            }
+
+            // Live update FOV angle handle
+            const fovH = camHandlesRef.current.get(node.id + "-fov");
+            if (fovH) {
+              const fovEdge = rot + fovAngle / 2;
+              fovH.setLatLng([pos.lat + range * 0.6 * Math.cos(fovEdge * radConst), pos.lng + range * 0.6 * Math.sin(fovEdge * radConst)]);
+            }
+
+            // Live update rotation handle
+            const rh = camHandlesRef.current.get(node.id + "-rot");
+            if (rh) rh.setLatLng([pos.lat + range * 0.7 * Math.cos(rot * radConst), pos.lng + range * 0.7 * Math.sin(rot * radConst)]);
+
+            // Live update range handle
+            const rng = camHandlesRef.current.get(node.id + "-range");
+            if (rng) rng.setLatLng([pos.lat + range * Math.cos(rot * radConst), pos.lng + range * Math.sin(rot * radConst)]);
           }
 
-          // Live update rotation handle
-          const rh = camHandlesRef.current.get(node.id + "-rot");
-          if (rh) rh.setLatLng([pos.lat + range * 0.7 * Math.cos(rot * radConst), pos.lng + range * 0.7 * Math.sin(rot * radConst)]);
+          if (isAntenna) {
+            const rawBeamRange = cd2.beamRange ?? (isImageMode ? 300 : 0.003);
+            const beamRange = isImageMode && rawBeamRange < 1 ? rawBeamRange * 100000 : rawBeamRange;
+            const beamWidth = cd2.beamWidth ?? 30;
 
-          // Live update range handle
-          const rng = camHandlesRef.current.get(node.id + "-range");
-          if (rng) rng.setLatLng([pos.lat + range * Math.cos(rot * radConst), pos.lng + range * Math.sin(rot * radConst)]);
+            // Live update beam polygon
+            const beamPoly = fovLayersRef.current.get(node.id);
+            if (beamPoly) {
+              const pts: [number, number][] = [[pos.lat, pos.lng]];
+              const s = rot - beamWidth / 2;
+              const e = rot + beamWidth / 2;
+              for (let a = s; a <= e; a += 2) pts.push([pos.lat + beamRange * Math.cos(a * radConst), pos.lng + beamRange * Math.sin(a * radConst)]);
+              pts.push([pos.lat, pos.lng]);
+              beamPoly.setLatLngs(pts);
+            }
 
-          // Live update FOV angle handle
-          const fovH = camHandlesRef.current.get(node.id + "-fov");
-          if (fovH) {
-            const fovEdge = rot + fovAngle / 2;
-            fovH.setLatLng([pos.lat + range * 0.6 * Math.cos(fovEdge * radConst), pos.lng + range * 0.6 * Math.sin(fovEdge * radConst)]);
+            // Live update rotation handle
+            const rh = camHandlesRef.current.get(node.id + "-rot");
+            if (rh) rh.setLatLng([pos.lat + beamRange * 0.7 * Math.cos(rot * radConst), pos.lng + beamRange * 0.7 * Math.sin(rot * radConst)]);
+
+            // Live update range handle
+            const rng = camHandlesRef.current.get(node.id + "-range");
+            if (rng) rng.setLatLng([pos.lat + beamRange * Math.cos(rot * radConst), pos.lng + beamRange * Math.sin(rot * radConst)]);
           }
         }
 
@@ -3539,6 +3573,20 @@ export default function LeafletMapView({
           },
         ],
       }] : []),
+      // ── Antenna-specific ──
+      ...(node?.icon === "_antenna" ? [{
+        label: "Antena",
+        icon: menuIcons.Signal,
+        divider: true,
+        onClick: () => {},
+        children: [
+          {
+            label: "Configurar antena",
+            icon: menuIcons.Signal,
+            onClick: () => setAntennaConfigNodeId(nodeId),
+          },
+        ],
+      }] : []),
       // ── Copiar / Duplicar ──
       {
         label: "Copiar nodo",
@@ -4885,6 +4933,59 @@ export default function LeafletMapView({
               toast.success(config.streamUrl ? "Stream configurado" : "Stream eliminado");
             }}
             onClose={() => setStreamConfigNodeId(null)}
+          />
+        );
+      })()}
+
+      {/* ── Antenna Config Modal ── */}
+      {antennaConfigNodeId && (() => {
+        const antNode = nodesRef.current.find((n) => n.id === antennaConfigNodeId);
+        const antCd = safeJsonParse<NodeCustomData>(antNode?.custom_data);
+        const currentCfg: AntennaConfig = {
+          antennaType: (antCd.antennaType || "ptp") as AntennaConfig["antennaType"],
+          frequency: antCd.frequency || "5.8 GHz",
+          antennaGain: antCd.antennaGain ?? 23,
+          txPower: antCd.txPower ?? 20,
+          beamWidth: antCd.beamWidth ?? 30,
+          beamRange: antCd.beamRange ?? (isImageMode ? 300 : 0.003),
+          beamColor: antCd.beamColor || "#f59e0b",
+          ssid: antCd.ssid || "",
+          bandwidth: antCd.bandwidth || "40 MHz",
+          protocol: antCd.protocol || "",
+          peerNodeId: antCd.peerNodeId || "",
+        };
+        // Get other antenna nodes for peer selection
+        const antennaNodes = nodesRef.current
+          .filter((n) => n.icon === "_antenna" && n.id !== antennaConfigNodeId)
+          .map((n) => ({ id: n.id, label: n.label || "Antena" }));
+        return (
+          <AntennaConfigModal
+            currentConfig={currentCfg}
+            antennaName={antNode?.label || "Antena"}
+            availableNodes={antennaNodes}
+            onSave={(config) => {
+              const idx = nodesRef.current.findIndex((n) => n.id === antennaConfigNodeId);
+              if (idx >= 0) {
+                const ncd = safeJsonParse<NodeCustomData>(nodesRef.current[idx].custom_data);
+                ncd.antennaType = config.antennaType;
+                ncd.frequency = config.frequency;
+                ncd.antennaGain = config.antennaGain;
+                ncd.txPower = config.txPower;
+                ncd.beamWidth = config.beamWidth;
+                ncd.beamRange = config.beamRange;
+                ncd.beamColor = config.beamColor;
+                ncd.ssid = config.ssid || undefined;
+                ncd.bandwidth = config.bandwidth;
+                ncd.protocol = config.protocol || undefined;
+                ncd.peerNodeId = config.peerNodeId || undefined;
+                nodesRef.current[idx] = { ...nodesRef.current[idx], custom_data: JSON.stringify(ncd) };
+                // Re-render to update beam
+                if (LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current);
+              }
+              setAntennaConfigNodeId(null);
+              toast.success("Antena configurada");
+            }}
+            onClose={() => setAntennaConfigNodeId(null)}
           />
         );
       })()}

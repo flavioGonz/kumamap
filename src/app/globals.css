@@ -45,15 +45,15 @@
   --border: #d1d1d6;
   --ring: #3b82f6;
   --destructive: #ef4444;
-  --glass-bg: rgba(255, 255, 255, 0.72);
-  --glass-border: rgba(255, 255, 255, 0.5);
+  --glass-bg: rgba(240, 240, 242, 0.85);
+  --glass-border: rgba(0, 0, 0, 0.08);
   --glass-blur: 20px;
   --text-primary: #1d1d1f;
   --text-secondary: #6b7280;
   --text-tertiary: #8e8e93;
-  --surface-hover: rgba(0, 0, 0, 0.04);
-  --surface-card: rgba(255, 255, 255, 0.8);
-  --surface-elevated: rgba(255, 255, 255, 0.9);
+  --surface-hover: rgba(0, 0, 0, 0.06);
+  --surface-card: rgba(255, 255, 255, 0.95);
+  --surface-elevated: rgba(255, 255, 255, 1.0);
   --status-bar-bg: rgba(245, 245, 247, 0.85);
   --tab-inactive: #8e8e93;
 }
@@ -75,15 +75,15 @@
     --border: #d1d1d6;
     --ring: #3b82f6;
     --destructive: #ef4444;
-    --glass-bg: rgba(255, 255, 255, 0.72);
-    --glass-border: rgba(255, 255, 255, 0.5);
+    --glass-bg: rgba(240, 240, 242, 0.85);
+    --glass-border: rgba(0, 0, 0, 0.08);
     --glass-blur: 20px;
     --text-primary: #1d1d1f;
     --text-secondary: #6b7280;
     --text-tertiary: #8e8e93;
-    --surface-hover: rgba(0, 0, 0, 0.04);
-    --surface-card: rgba(255, 255, 255, 0.8);
-    --surface-elevated: rgba(255, 255, 255, 0.9);
+    --surface-hover: rgba(0, 0, 0, 0.06);
+    --surface-card: rgba(255, 255, 255, 0.95);
+    --surface-elevated: rgba(255, 255, 255, 1.0);
     --status-bar-bg: rgba(245, 245, 247, 0.85);
     --tab-inactive: #8e8e93;
   }

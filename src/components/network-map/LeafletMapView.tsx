@@ -372,6 +372,97 @@ function RackDevicePickerModal({
   );
 }
 
+/* ── Reusable Toolbar Dropdown ── */
+function ToolbarDropdown({
+  icon,
+  label,
+  open,
+  onToggle,
+  children,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  open: boolean;
+  onToggle: () => void;
+  children: React.ReactNode;
+}) {
+  const ref = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) onToggle();
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open, onToggle]);
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        onClick={onToggle}
+        className="flex items-center gap-1 rounded-xl px-2 py-1.5 text-[10px] font-semibold transition-all"
+        style={{
+          color: open ? "#ededed" : "#888",
+          background: open ? "rgba(255,255,255,0.08)" : "transparent",
+        }}
+        onMouseEnter={(e) => { if (!open) { (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.06)"; (e.currentTarget as HTMLElement).style.color = "#ededed"; }}}
+        onMouseLeave={(e) => { if (!open) { (e.currentTarget as HTMLElement).style.background = "transparent"; (e.currentTarget as HTMLElement).style.color = "#888"; }}}
+      >
+        {icon}
+        <span className="hidden xl:inline">{label}</span>
+        <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.5 }}><path d="m6 9 6 6 6-6"/></svg>
+      </button>
+      {open && (
+        <div
+          className="absolute top-full left-0 mt-1.5 rounded-xl shadow-2xl py-1 z-[99999] min-w-[170px]"
+          style={{
+            background: "rgba(12,12,12,0.96)",
+            border: "1px solid rgba(255,255,255,0.08)",
+            backdropFilter: "blur(20px)",
+            boxShadow: "0 12px 40px rgba(0,0,0,0.5)",
+          }}
+        >
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DropdownItem({
+  icon,
+  label,
+  active,
+  onClick,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  active?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className="flex w-full items-center gap-2 px-3 py-1.5 text-[11px] transition-all"
+      style={{
+        color: active ? "#60a5fa" : "#a0a0a0",
+        background: active ? "rgba(59,130,246,0.1)" : "transparent",
+      }}
+      onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = active ? "rgba(59,130,246,0.15)" : "rgba(255,255,255,0.06)"; (e.currentTarget as HTMLElement).style.color = "#ededed"; }}
+      onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = active ? "rgba(59,130,246,0.1)" : "transparent"; (e.currentTarget as HTMLElement).style.color = active ? "#60a5fa" : "#a0a0a0"; }}
+    >
+      {icon}
+      <span className="font-medium">{label}</span>
+      {active && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#60a5fa" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="ml-auto"><polyline points="20 6 9 17 4 12"/></svg>}
+    </button>
+  );
+}
+
+function DropdownSeparator() {
+  return <div className="my-1 h-px" style={{ background: "rgba(255,255,255,0.06)" }} />;
+}
+
 export default function LeafletMapView({
   mapId,
   mapName,
@@ -611,6 +702,16 @@ export default function LeafletMapView({
   }, [initialNodes, mapMonitorIdsVersion]);
   const [timeBlurPulse, setTimeBlurPulse] = useState(0);
   const [colorPickerNodeId, setColorPickerNodeId] = useState<string>("");
+
+  // ── Toolbar dropdown states ──
+  const [ddNodos, setDdNodos] = useState(false);
+  const [ddDibujar, setDdDibujar] = useState(false);
+  const [ddMapa, setDdMapa] = useState(false);
+  const [ddBrillo, setDdBrillo] = useState(false);
+  const [tbSearch, setTbSearch] = useState("");
+  const [tbSearchResults, setTbSearchResults] = useState<Array<{ id: string; label: string; x: number; y: number }>>([]);
+  const [tbSearchFocused, setTbSearchFocused] = useState(false);
+  const closeAllDropdowns = useCallback(() => { setDdNodos(false); setDdDibujar(false); setDdMapa(false); setDdBrillo(false); }, []);
   const [lensPickerOpen, setLensPickerOpen] = useState(false);
   const [lensPickerNodeId, setLensPickerNodeId] = useState<string>("");
 
@@ -3705,416 +3806,497 @@ export default function LeafletMapView({
 
       {/* ── Floating Top Bar ── */}
       {!readonly && !rackDrawerNodeId && <div
-        className="absolute top-3 left-1/2 -translate-x-1/2 flex items-center gap-1.5 rounded-2xl px-2.5 py-1.5 kumamap-no-print"
+        className="absolute top-3 left-1/2 -translate-x-1/2 flex flex-col items-center gap-0 kumamap-no-print"
         id="leaflet-toolbar"
-        style={{
-          zIndex: 10000,
-          background: "rgba(10,10,10,0.82)",
-          border: "1px solid rgba(255,255,255,0.06)",
-          backdropFilter: "blur(24px)",
-          boxShadow: "0 8px 32px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.03)",
-          pointerEvents: "auto",
-        }}
+        style={{ zIndex: 10000, pointerEvents: "auto" }}
       >
-        {/* Back */}
-        <button
-          onClick={onBack}
-          className="flex items-center gap-1 rounded-xl px-2 py-1.5 text-[11px] font-medium transition-all"
-          style={{ color: "#888" }}
-          onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.06)"; (e.currentTarget as HTMLElement).style.color = "#ededed"; }}
-          onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; (e.currentTarget as HTMLElement).style.color = "#888"; }}
+        {/* ── Main toolbar row ── */}
+        <div
+          className="flex items-center gap-1.5 rounded-2xl px-2.5 py-1.5"
+          style={{
+            background: "rgba(10,10,10,0.82)",
+            border: "1px solid rgba(255,255,255,0.06)",
+            backdropFilter: "blur(24px)",
+            boxShadow: "0 8px 32px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.03)",
+          }}
         >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6"/></svg>
-          Mapas
-        </button>
-
-        <div className="h-5 w-px mx-0.5" style={{ background: "rgba(255,255,255,0.06)" }} />
-
-        {/* Map name + live status */}
-        <div className="flex items-center gap-2 px-1">
-          {mapName && (
-            <span className="text-[12px] font-bold text-[#ededed] truncate max-w-[160px]">
-              {mapName}
-            </span>
-          )}
-          <div className="flex items-center gap-1">
-            <span
-              className="h-1.5 w-1.5 rounded-full"
-              style={{
-                backgroundColor: kumaConnected ? "#22c55e" : "#ef4444",
-                boxShadow: kumaConnected ? "0 0 6px #22c55e" : "0 0 6px #ef4444",
-              }}
-            />
-            <span className="text-[9px] font-semibold" style={{ color: kumaConnected ? "#22c55e" : "#ef4444" }}>
-              {kumaConnected ? "LIVE" : "OFF"}
-            </span>
-          </div>
-        </div>
-
-        <div className="h-5 w-px mx-0.5" style={{ background: "rgba(255,255,255,0.06)" }} />
-
-        {/* ═══ EDIT MODE TOOLS ═══ */}
-        {editMode && <>
-        <div className="h-5 w-px mx-0.5" style={{ background: "rgba(255,255,255,0.06)" }} />
-
-        {/* Node/Edge controls */}
-        <div className="flex items-center gap-0.5">
-          <Tooltip content="Agregar nodo" placement="bottom">
-          <button onClick={() => {
-            if (!mapRef.current) return;
-            const center = mapRef.current.getCenter();
-            const id = `node-${Date.now()}`;
-            nodesRef.current = [...nodesRef.current, { id, kuma_monitor_id: null, label: "Nuevo equipo", x: center.lat, y: center.lng, icon: "server" }];
-            if (LRef.current) renderNodes(LRef.current, mapRef.current);
-          }}
-            className="group flex items-center gap-1 rounded-xl px-2 py-1.5 text-[#888] hover:text-[#ededed] hover:bg-white/[0.06] transition-all">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
-            <span className="text-[10px] font-semibold hidden xl:inline">Nodo</span>
-          </button>
-          </Tooltip>
-          <Tooltip content="Auto-descubrir dispositivos en subnet" placement="bottom">
-          <button onClick={() => setDiscoveryModalOpen(true)}
-            className="group flex items-center gap-1 rounded-xl px-2 py-1.5 text-[#888] hover:text-[#ededed] hover:bg-white/[0.06] transition-all">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>
-            <span className="text-[10px] font-semibold hidden xl:inline">Descubrir</span>
-          </button>
-          </Tooltip>
-          <Tooltip content="Agregar etiqueta" placement="bottom">
-          <button onClick={() => {
-            if (!mapRef.current) return;
-            const center = mapRef.current.getCenter();
-            const id = `label-${Date.now()}`;
-            nodesRef.current = [...nodesRef.current, { id, kuma_monitor_id: null, label: "Etiqueta", x: center.lat, y: center.lng, icon: "_textLabel" }];
-            if (LRef.current) renderNodes(LRef.current, mapRef.current);
-          }}
-            className="group flex items-center justify-center rounded-xl p-2 text-[#888] hover:text-[#ededed] hover:bg-white/[0.06] transition-all">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" x2="15" y1="20" y2="20"/><line x1="12" x2="12" y1="4" y2="20"/></svg>
-          </button>
-          </Tooltip>
-          <Tooltip content="Agregar cámara con campo de visión" placement="bottom">
-          <button onClick={() => {
-            if (!mapRef.current) return;
-            const center = mapRef.current.getCenter();
-            const id = `cam-${Date.now()}`;
-            nodesRef.current = [...nodesRef.current, { id, kuma_monitor_id: null, label: "Camara", x: center.lat, y: center.lng, icon: "_camera", custom_data: JSON.stringify({ type: "camera", rotation: 0, fov: 60, fovRange: isImageMode ? 200 : 0.002 }) }];
-            if (LRef.current) renderNodes(LRef.current, mapRef.current);
-            toast.success("Camara agregada — clic derecho para rotar");
-          }}
-            className="group flex items-center justify-center rounded-xl p-2 text-[#888] hover:text-[#ededed] hover:bg-white/[0.06] transition-all">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m16.24 7.76-1.804 5.412a2 2 0 0 1-1.265 1.265L7.76 16.24l1.804-5.412a2 2 0 0 1 1.265-1.265z"/><circle cx="12" cy="12" r="10"/></svg>
-          </button>
-          </Tooltip>
-          <Tooltip content="Insertar Rack / Armario" placement="bottom">
-          <button onClick={() => {
-            if (!mapRef.current) return;
-            const center = mapRef.current.getCenter();
-            const id = `rack-${Date.now()}`;
-            nodesRef.current = [...nodesRef.current, { id, kuma_monitor_id: null, label: "Rack", x: center.lat, y: center.lng, icon: "_rack", custom_data: JSON.stringify({ type: "rack", totalUnits: 42, devices: [] }) }];
-            if (LRef.current) renderNodes(LRef.current, mapRef.current);
-            toast.success("Rack creado — doble clic para editar");
-          }}
-            className="group flex items-center justify-center rounded-xl p-2 text-[#888] hover:text-[#ededed] hover:bg-white/[0.06] transition-all">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="16" height="20" x="4" y="2" rx="2" ry="2"/><line x1="8" x2="16" y1="6" y2="6"/><line x1="8" x2="16" y1="10" y2="10"/><line x1="8" x2="16" y1="14" y2="14"/><line x1="8" x2="16" y1="18" y2="18"/></svg>
-          </button>
-          </Tooltip>
-        </div>
-
-        {/* ─── Drawing tools separator ─── */}
-        <div className="h-5 w-px mx-0.5" style={{ background: "rgba(255,255,255,0.06)" }} />
-        <div className="flex items-center gap-0.5" style={{ background: "rgba(255,255,255,0.02)", borderRadius: "12px", padding: "2px" }}>
-          <Tooltip content="Waypoint para curvar links" placement="bottom">
-          <button onClick={() => {
-            if (!mapRef.current) return;
-            const center = mapRef.current.getCenter();
-            const id = `wp-${Date.now()}`;
-            nodesRef.current = [...nodesRef.current, { id, kuma_monitor_id: null, label: "", x: center.lat, y: center.lng, icon: "_waypoint" }];
-            if (LRef.current) renderNodes(LRef.current, mapRef.current);
-            toast.success("Punto de ruta agregado");
-          }}
-            className="group flex items-center gap-1 rounded-xl px-2 py-1.5 text-[#888] hover:text-[#ededed] hover:bg-white/[0.06] transition-all">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/></svg>
-            <span className="text-[10px] font-semibold hidden xl:inline">Punto</span>
-          </button>
-          </Tooltip>
-          <Tooltip content={linkSource ? "Cancelar link" : "Crear link entre nodos"} placement="bottom">
-          <button onClick={() => {
-            if (linkSource) { cancelLinkCreation(); return; }
-            if (nodesRef.current.length === 0) { toast.error("Agrega nodos primero"); return; }
-            toast.info("Clic derecho en un nodo → Nuevo link", { duration: 4000 });
-          }}
-            className={`group flex items-center gap-1 rounded-xl px-2 py-1.5 transition-all ${linkSource ? "text-[#60a5fa]" : "text-[#888] hover:text-[#ededed] hover:bg-white/[0.06]"}`}
-            style={linkSource ? { background: "rgba(59,130,246,0.15)", border: "1px solid rgba(59,130,246,0.35)" } : {}}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
-            <span className="text-[10px] font-semibold hidden xl:inline">Link</span>
-          </button>
-          </Tooltip>
-          <Tooltip content={polygonMode ? "Terminar polígono (doble clic)" : "Dibujar zona/polígono"} placement="bottom">
+          {/* ═══ LEFT SIDE ═══ */}
+          {/* Back */}
           <button
-            data-polygon-active={polygonMode || undefined}
-            onClick={() => {
-              if (polygonMode) {
-                if (polygonPointsRef.current.length >= 3) finishPolygon();
-                else { cancelPolygon(); setPolygonMode(false); }
-              } else {
-                setPolygonMode(true);
-                toast.info("Clic en el mapa para agregar puntos. Doble clic para terminar.", { duration: 5000 });
-              }
-            }}
-            className={`group flex items-center gap-1 rounded-xl px-2 py-1.5 transition-all ${polygonMode ? "text-[#4ade80]" : "text-[#888] hover:text-[#ededed] hover:bg-white/[0.06]"}`}
-            style={polygonMode ? { background: "rgba(34,197,94,0.15)", border: "1px solid rgba(34,197,94,0.35)" } : {}}
+            onClick={onBack}
+            className="flex items-center gap-1 rounded-xl px-2 py-1.5 text-[11px] font-medium transition-all"
+            style={{ color: "#888" }}
+            onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.06)"; (e.currentTarget as HTMLElement).style.color = "#ededed"; }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; (e.currentTarget as HTMLElement).style.color = "#888"; }}
           >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3h18v18H3z"/></svg>
-            <span className="text-[10px] font-semibold hidden xl:inline">{polygonMode ? "Listo" : "Zona"}</span>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+            Mapas
           </button>
-          </Tooltip>
-        </div>
-
-        {/* Link mode indicator */}
-        {linkSource && (
-          <div className="flex items-center gap-1.5 rounded-xl px-2.5 py-1 text-[10px] font-bold"
-            style={{ background: "rgba(59,130,246,0.12)", border: "1px solid rgba(59,130,246,0.3)", color: "#60a5fa" }}>
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
-            Enlazando...
-            <button onClick={cancelLinkCreation} className="ml-0.5 text-[#888] hover:text-white">✕</button>
-          </div>
-        )}
-        </>}
-
-        {/* ═══ RIGHT SIDE ═══ */}
-
-        {isImageMode ? (
-          /* ── Image-mode right controls ── */
-          <>
-          {/* Brightness + Rotation (only in edit mode) */}
-          {editMode && <>
-          <div className="h-5 w-px mx-0.5" style={{ background: "rgba(255,255,255,0.06)" }} />
-          {/* Brightness slider */}
-          <Tooltip content="Oscurecer imagen de fondo" placement="bottom">
-          <div className="flex items-center gap-1.5 rounded-xl px-2 py-1" style={{ background: "rgba(255,255,255,0.02)" }}>
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={overlayOpacity > 0 ? "#60a5fa" : "#555"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>
-            <input type="range" min="0" max="0.85" step="0.05" value={overlayOpacity}
-              onChange={(e) => setOverlayOpacity(parseFloat(e.target.value))}
-              className="w-14 h-1 rounded-full appearance-none cursor-pointer"
-              style={{ background: `linear-gradient(to right, #3b82f6 ${(overlayOpacity / 0.85) * 100}%, #333 0%)` }}
-            />
-          </div>
-          </Tooltip>
-
-          </>}
 
           <div className="h-5 w-px mx-0.5" style={{ background: "rgba(255,255,255,0.06)" }} />
-          {/* Upload + switch to livemap */}
-          <div className="flex items-center gap-0.5 rounded-xl p-0.5" style={{ background: "rgba(255,255,255,0.02)" }}>
-            <Tooltip content="Cambiar imagen de fondo" placement="bottom">
-            <button onClick={onUploadBackground}
-              className="rounded-xl p-1.5 text-[#888] hover:text-[#ededed] hover:bg-white/[0.06] transition-all">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>
-            </button>
-            </Tooltip>
-            <Tooltip content="Cambiar a mapa real" placement="bottom">
-            <button onClick={onSetLiveMap}
-              className="rounded-xl p-1.5 text-[#888] hover:text-[#ededed] hover:bg-white/[0.06] transition-all">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>
-            </button>
-            </Tooltip>
-          </div>
-          </>
-        ) : null}
 
-        {/* ═══ EDIT MODE: Map controls (livemap only) ═══ */}
-        {editMode && !isImageMode && <>
-        <div className="h-5 w-px mx-0.5" style={{ background: "rgba(255,255,255,0.06)" }} />
-
-        {/* Map style pills */}
-        <div className="flex items-center gap-0.5 rounded-xl p-0.5"
-          style={{ background: "rgba(255,255,255,0.02)" }}>
-          {([
-            { key: "dark", label: "Oscuro" },
-            { key: "satellite", label: "Satelite" },
-            { key: "streets", label: "Calles" },
-          ] as const).map(({ key, label }) => (
-            <button
-              key={key}
-              onClick={() => setMapStyle(key)}
-              className="rounded-lg px-2.5 py-1 text-[10px] font-semibold transition-all"
-              style={{
-                background: mapStyle === key ? "rgba(59,130,246,0.15)" : "transparent",
-                color: mapStyle === key ? "#60a5fa" : "#555",
-                border: mapStyle === key ? "1px solid rgba(59,130,246,0.3)" : "1px solid transparent",
-              }}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-
-        {/* Dark overlay slider */}
-        <div className="flex items-center gap-1.5 rounded-xl px-2 py-1" style={{ background: "rgba(255,255,255,0.02)" }}>
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={overlayOpacity > 0 ? "#60a5fa" : "#555"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>
-          <input
-            type="range" min="0" max="0.7" step="0.05" value={overlayOpacity}
-            onChange={(e) => setOverlayOpacity(parseFloat(e.target.value))}
-            className="w-14 h-1 rounded-full appearance-none cursor-pointer"
-            style={{ background: `linear-gradient(to right, #3b82f6 ${(overlayOpacity / 0.7) * 100}%, #333 0%)` }}
-          />
-        </div>
-
-
-
-        </>}
-
-        <div className="h-5 w-px mx-0.5" style={{ background: "rgba(255,255,255,0.06)" }} />
-
-        {/* Straight/Curved edges toggle */}
-        <Tooltip content={straightEdges ? "Links rectos (clic para curvas)" : "Links curvos (clic para rectas)"} placement="bottom">
-        <button onClick={() => {
-          setStraightEdges(v => !v);
-          // Re-render edges immediately
-          setTimeout(() => { if (LRef.current && mapRef.current) renderEdges(LRef.current, mapRef.current); }, 0);
-        }}
-          className="rounded-lg p-1.5 transition-all"
-          style={{ color: straightEdges ? "#f59e0b" : "#555" }}>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            {straightEdges
-              ? <line x1="4" y1="20" x2="20" y2="4" />
-              : <path d="M4 20 C 10 20, 14 4, 20 4" />}
-          </svg>
-        </button>
-        </Tooltip>
-
-        {/* Auto-save toggle */}
-        <Tooltip content={autoSaveEnabled ? "Auto-save ON (clic para desactivar)" : "Auto-save OFF (clic para activar)"} placement="bottom">
-        <button onClick={() => setAutoSaveEnabled(v => !v)}
-          className="rounded-lg p-1.5 transition-all"
-          style={{ color: autoSaveEnabled ? "#4ade80" : "#555" }}>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            {autoSaveEnabled ? <><path d="M12 2v4"/><path d="m16.2 7.8 2.9-2.9"/><path d="M18 12h4"/><path d="m16.2 16.2 2.9 2.9"/><path d="M12 18v4"/><path d="m4.9 19.1 2.9-2.9"/><path d="M2 12h4"/><path d="m4.9 4.9 2.9 2.9"/></> : <><circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/></>}
-          </svg>
-        </button>
-        </Tooltip>
-
-        {/* ─── Import (icon only) – only in edit mode, near Save ─── */}
-        {editMode && availableMaps.length > 0 && (
-          <div className="relative">
-            <Tooltip content="Importar nodos de otro mapa" placement="bottom">
-            <button onClick={() => setImportMapPickerOpen(v => !v)}
-              disabled={importingMapId !== null}
-              className="rounded-xl p-2 transition-all"
-              style={{ color: importMapPickerOpen ? "#34d399" : "#888", background: importMapPickerOpen ? "rgba(52,211,153,0.1)" : "transparent" }}
-              onMouseEnter={(e) => { if (!importMapPickerOpen) { (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.06)"; (e.currentTarget as HTMLElement).style.color = "#ededed"; }}}
-              onMouseLeave={(e) => { if (!importMapPickerOpen) { (e.currentTarget as HTMLElement).style.background = "transparent"; (e.currentTarget as HTMLElement).style.color = "#888"; }}}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/>
-              </svg>
-            </button>
-            </Tooltip>
-            {importMapPickerOpen && (
-              <div className="fixed inset-0 z-[99998]" onClick={() => setImportMapPickerOpen(false)} />
+          {/* Map name + live status */}
+          <div className="flex items-center gap-2 px-1">
+            {mapName && (
+              <span className="text-[12px] font-bold text-[#ededed] truncate max-w-[140px]">
+                {mapName}
+              </span>
             )}
-            {importMapPickerOpen && (
-              <div className="absolute top-full right-0 mt-1 rounded-xl shadow-2xl py-1 z-[99999] min-w-[200px]"
-                style={{ background: "rgba(12,12,12,0.98)", border: "1px solid rgba(52,211,153,0.25)", backdropFilter: "blur(20px)" }}>
-                <div className="px-3 py-1 pb-2">
-                  <input type="text" autoFocus placeholder="Buscar mapa..." value={importMapSearch} onChange={(e) => setImportMapSearch(e.target.value)} className="w-full rounded bg-white/5 border border-white/10 px-2 py-1 text-xs text-[#ededed] focus:outline-none focus:border-[#34d399]" />
-                </div>
-                <div className="px-3 py-1 text-[9px] font-bold uppercase tracking-wider text-[#555]">Importar nodos de (hasta 5)</div>
-                {availableMaps.filter(m => m.id !== mapId && m.name.toLowerCase().includes(importMapSearch.toLowerCase())).slice(0, 5).map(m => (
-                  <button key={m.id} onClick={async () => {
-                    setImportMapPickerOpen(false);
-                    setImportingMapId(m.id);
-                    try {
-                      const data = await safeFetch<Record<string, any>>(apiUrl(`/api/maps/${m.id}/export`), undefined, "ImportNodes");
-                      if (!data) throw new Error("Export failed");
-                      const ts = Date.now();
-                      const idMap: Record<string, string> = {};
-                      const importedNodes = (data.nodes || []).map((n: any) => {
-                        const newId = `imp-${ts}-${n.id}`;
-                        idMap[n.id] = newId;
-                        return { ...n, id: newId };
-                      });
-                      const importedEdges = (data.edges || []).map((e: any) => ({
-                        ...e,
-                        id: `imp-${ts}-${e.id}`,
-                        source_node_id: idMap[e.source_node_id] || e.source_node_id,
-                        target_node_id: idMap[e.target_node_id] || e.target_node_id,
-                      }));
-                      nodesRef.current = [...nodesRef.current, ...importedNodes];
-                      edgesRef.current = [...edgesRef.current, ...importedEdges];
-                      if (LRef.current && mapRef.current) {
-                        renderNodes(LRef.current, mapRef.current);
-                        renderEdges(LRef.current, mapRef.current);
-                      }
-                      toast.success(`Mapa "${m.name}" importado`, { description: `${importedNodes.length} nodos, ${importedEdges.length} links` });
-                    } catch {
-                      toast.error("Error al importar el mapa");
-                    } finally {
-                      setImportingMapId(null);
+            <div className="flex items-center gap-1">
+              <span
+                className="h-1.5 w-1.5 rounded-full"
+                style={{
+                  backgroundColor: kumaConnected ? "#22c55e" : "#ef4444",
+                  boxShadow: kumaConnected ? "0 0 6px #22c55e" : "0 0 6px #ef4444",
+                }}
+              />
+              <span className="text-[9px] font-semibold" style={{ color: kumaConnected ? "#22c55e" : "#ef4444" }}>
+                {kumaConnected ? "LIVE" : "OFF"}
+              </span>
+            </div>
+          </div>
+
+          <div className="h-5 w-px mx-0.5" style={{ background: "rgba(255,255,255,0.06)" }} />
+
+          {/* ── Compact inline search ── */}
+          <div className="relative">
+            <div className="flex items-center rounded-lg px-2 py-1" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)", width: 150 }}>
+              <Search className="h-3 w-3 shrink-0" style={{ color: "#555" }} />
+              <input
+                type="text"
+                placeholder="Buscar..."
+                value={tbSearch}
+                onChange={(e) => {
+                  const q = e.target.value;
+                  setTbSearch(q);
+                  if (!q.trim()) { setTbSearchResults([]); return; }
+                  const lower = q.toLowerCase();
+                  const matches = nodesRef.current
+                    .filter(n => n.icon !== "_waypoint" && n.icon !== "_polygon" && n.label?.toLowerCase().includes(lower))
+                    .slice(0, 6)
+                    .map(n => ({ id: n.id, label: n.label, x: n.x, y: n.y }));
+                  setTbSearchResults(matches);
+                }}
+                onFocus={() => setTbSearchFocused(true)}
+                onBlur={() => setTimeout(() => setTbSearchFocused(false), 200)}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") { setTbSearch(""); setTbSearchResults([]); (e.target as HTMLInputElement).blur(); }
+                  if (e.key === "Enter" && tbSearchResults.length > 0) {
+                    const r = tbSearchResults[0];
+                    if (mapRef.current) {
+                      mapRef.current.setView([r.x, r.y], Math.max(mapRef.current.getZoom(), isImageMode ? mapRef.current.getZoom() : 16), { animate: true });
+                      toast.success("Encontrado", { description: r.label.substring(0, 60) });
                     }
-                  }}
-                    className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-[#a0a0a0] transition-all"
-                    onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "rgba(52,211,153,0.08)"; (e.currentTarget as HTMLElement).style.color = "#ededed"; }}
-                    onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; (e.currentTarget as HTMLElement).style.color = "#a0a0a0"; }}>
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#34d399" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>
-                    <span className="truncate">{m.name}</span>
+                    setTbSearch(""); setTbSearchResults([]);
+                  }
+                }}
+                className="ml-1.5 w-full bg-transparent text-[10px] text-[#ededed] placeholder-[#555] outline-none"
+              />
+              {tbSearch && (
+                <button onClick={() => { setTbSearch(""); setTbSearchResults([]); }} className="text-[#555] hover:text-[#888]">
+                  <XIcon className="h-3 w-3" />
+                </button>
+              )}
+            </div>
+            {/* Search results dropdown */}
+            {tbSearchFocused && tbSearchResults.length > 0 && (
+              <div className="absolute top-full left-0 mt-1 rounded-xl shadow-2xl py-1 z-[99999] min-w-[200px]"
+                style={{ background: "rgba(12,12,12,0.96)", border: "1px solid rgba(255,255,255,0.08)", backdropFilter: "blur(20px)" }}>
+                {tbSearchResults.map(r => (
+                  <button key={r.id}
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      if (mapRef.current) {
+                        mapRef.current.setView([r.x, r.y], Math.max(mapRef.current.getZoom(), isImageMode ? mapRef.current.getZoom() : 16), { animate: true });
+                        // Flash marker
+                        const marker = markersRef.current.get(r.id);
+                        if (marker?.getElement()) {
+                          const el = marker.getElement();
+                          el.style.filter = "drop-shadow(0 0 20px #3b82f6) drop-shadow(0 0 40px #3b82f6) brightness(1.8)";
+                          el.style.transition = "filter 0.2s";
+                          setTimeout(() => { el.style.filter = "drop-shadow(0 0 8px #3b82f688) brightness(1.1)"; el.style.transition = "filter 1.5s"; }, 1500);
+                        }
+                        toast.success("Encontrado", { description: r.label.substring(0, 60) });
+                      }
+                      setTbSearch(""); setTbSearchResults([]);
+                    }}
+                    className="flex w-full items-center gap-2 px-3 py-1.5 text-[11px] text-[#a0a0a0] transition-all"
+                    onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "rgba(59,130,246,0.08)"; (e.currentTarget as HTMLElement).style.color = "#ededed"; }}
+                    onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; (e.currentTarget as HTMLElement).style.color = "#a0a0a0"; }}
+                  >
+                    <Search className="h-3 w-3 shrink-0" style={{ color: "#3b82f6" }} />
+                    <span className="truncate">{r.label}</span>
                   </button>
                 ))}
-                {availableMaps.filter(m => m.id !== mapId).length === 0 && (
-                  <div className="px-3 py-2 text-[10px] text-[#555]">No hay otros mapas disponibles</div>
-                )}
               </div>
             )}
           </div>
-        )}
 
-        {/* ─── Grouped Global Actions (Export, Edit, Save) ─── */}
-        <div className="flex items-center gap-0.5 rounded-xl px-1.5 py-1 ml-0.5"
-          style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
-          
-          {/* Export — single ZIP button (no dropdown) */}
-          <Tooltip content="Exportar Mapa (ZIP)" placement="bottom">
+          {/* ═══ CENTER: EDIT MODE DROPDOWN MENUS ═══ */}
+          {editMode && <>
+          <div className="h-5 w-px mx-0.5" style={{ background: "rgba(255,255,255,0.06)" }} />
+
+          {/* ── "Nodos" dropdown ── */}
+          <ToolbarDropdown
+            icon={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>}
+            label="Nodos"
+            open={ddNodos}
+            onToggle={() => { setDdNodos(v => !v); setDdDibujar(false); setDdMapa(false); setDdBrillo(false); }}
+          >
+            <DropdownItem
+              icon={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="16" height="20" x="4" y="2" rx="2" ry="2"/><line x1="8" x2="16" y1="6" y2="6"/><line x1="8" x2="16" y1="10" y2="10"/><line x1="8" x2="16" y1="14" y2="14"/><line x1="8" x2="16" y1="18" y2="18"/></svg>}
+              label="Rack"
+              onClick={() => {
+                setDdNodos(false);
+                if (!mapRef.current) return;
+                const center = mapRef.current.getCenter();
+                const id = `rack-${Date.now()}`;
+                nodesRef.current = [...nodesRef.current, { id, kuma_monitor_id: null, label: "Rack", x: center.lat, y: center.lng, icon: "_rack", custom_data: JSON.stringify({ type: "rack", totalUnits: 42, devices: [] }) }];
+                if (LRef.current) renderNodes(LRef.current, mapRef.current);
+                toast.success("Rack creado — doble clic para editar");
+              }}
+            />
+            <DropdownItem
+              icon={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="20" height="8" x="2" y="2" rx="2" ry="2"/><rect width="20" height="8" x="2" y="14" rx="2" ry="2"/><line x1="6" x2="6.01" y1="6" y2="6"/><line x1="6" x2="6.01" y1="18" y2="18"/></svg>}
+              label="Dispositivo"
+              onClick={() => {
+                setDdNodos(false);
+                if (!mapRef.current) return;
+                const center = mapRef.current.getCenter();
+                const id = `node-${Date.now()}`;
+                nodesRef.current = [...nodesRef.current, { id, kuma_monitor_id: null, label: "Nuevo equipo", x: center.lat, y: center.lng, icon: "server" }];
+                if (LRef.current) renderNodes(LRef.current, mapRef.current);
+              }}
+            />
+            <DropdownItem
+              icon={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m16.24 7.76-1.804 5.412a2 2 0 0 1-1.265 1.265L7.76 16.24l1.804-5.412a2 2 0 0 1 1.265-1.265z"/><circle cx="12" cy="12" r="10"/></svg>}
+              label="Cámara"
+              onClick={() => {
+                setDdNodos(false);
+                if (!mapRef.current) return;
+                const center = mapRef.current.getCenter();
+                const id = `cam-${Date.now()}`;
+                nodesRef.current = [...nodesRef.current, { id, kuma_monitor_id: null, label: "Camara", x: center.lat, y: center.lng, icon: "_camera", custom_data: JSON.stringify({ type: "camera", rotation: 0, fov: 60, fovRange: isImageMode ? 200 : 0.002 }) }];
+                if (LRef.current) renderNodes(LRef.current, mapRef.current);
+                toast.success("Camara agregada — clic derecho para rotar");
+              }}
+            />
+            <DropdownItem
+              icon={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="2" x2="12" y2="22"/><circle cx="12" cy="4" r="2"/></svg>}
+              label="Columna"
+              onClick={() => {
+                setDdNodos(false);
+                if (!mapRef.current) return;
+                const center = mapRef.current.getCenter();
+                const id = `node-${Date.now()}`;
+                nodesRef.current = [...nodesRef.current, { id, kuma_monitor_id: null, label: "Poste", x: center.lat, y: center.lng, icon: "_pole" }];
+                if (LRef.current) renderNodes(LRef.current, mapRef.current);
+              }}
+            />
+          </ToolbarDropdown>
+
+          {/* ── "Dibujar" dropdown ── */}
+          <ToolbarDropdown
+            icon={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>}
+            label="Dibujar"
+            open={ddDibujar}
+            onToggle={() => { setDdDibujar(v => !v); setDdNodos(false); setDdMapa(false); setDdBrillo(false); }}
+          >
+            <DropdownItem
+              icon={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/></svg>}
+              label="Punto"
+              onClick={() => {
+                setDdDibujar(false);
+                if (!mapRef.current) return;
+                const center = mapRef.current.getCenter();
+                const id = `wp-${Date.now()}`;
+                nodesRef.current = [...nodesRef.current, { id, kuma_monitor_id: null, label: "", x: center.lat, y: center.lng, icon: "_waypoint" }];
+                if (LRef.current) renderNodes(LRef.current, mapRef.current);
+                toast.success("Punto de ruta agregado");
+              }}
+            />
+            <DropdownItem
+              icon={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>}
+              label={linkSource ? "Cancelar link" : "Link"}
+              active={!!linkSource}
+              onClick={() => {
+                setDdDibujar(false);
+                if (linkSource) { cancelLinkCreation(); return; }
+                if (nodesRef.current.length === 0) { toast.error("Agrega nodos primero"); return; }
+                toast.info("Clic derecho en un nodo → Nuevo link", { duration: 4000 });
+              }}
+            />
+            <DropdownItem
+              icon={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3h18v18H3z"/></svg>}
+              label={polygonMode ? "Terminar zona" : "Zona"}
+              active={polygonMode}
+              onClick={() => {
+                setDdDibujar(false);
+                if (polygonMode) {
+                  if (polygonPointsRef.current.length >= 3) finishPolygon();
+                  else { cancelPolygon(); setPolygonMode(false); }
+                } else {
+                  setPolygonMode(true);
+                  toast.info("Clic en el mapa para agregar puntos. Doble clic para terminar.", { duration: 5000 });
+                }
+              }}
+            />
+          </ToolbarDropdown>
+
+          {/* ── "Mapa" dropdown ── */}
+          <ToolbarDropdown
+            icon={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>}
+            label="Mapa"
+            open={ddMapa}
+            onToggle={() => { setDdMapa(v => !v); setDdNodos(false); setDdDibujar(false); setDdBrillo(false); }}
+          >
+            {!isImageMode && <>
+              <DropdownItem
+                icon={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg>}
+                label="Satélite"
+                active={mapStyle === "satellite"}
+                onClick={() => { setMapStyle("satellite"); setDdMapa(false); }}
+              />
+              <DropdownItem
+                icon={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6l6-3 6 3 6-3v15l-6 3-6-3-6 3z"/><path d="M9 3v15"/><path d="M15 6v15"/></svg>}
+                label="Calles"
+                active={mapStyle === "streets"}
+                onClick={() => { setMapStyle("streets"); setDdMapa(false); }}
+              />
+              <DropdownItem
+                icon={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>}
+                label="Oscuro"
+                active={mapStyle === "dark"}
+                onClick={() => { setMapStyle("dark"); setDdMapa(false); }}
+              />
+              <DropdownSeparator />
+            </>}
+            {isImageMode && (
+              <DropdownItem
+                icon={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>}
+                label="Imagen de fondo"
+                onClick={() => { setDdMapa(false); onUploadBackground?.(); }}
+              />
+            )}
+            {!isImageMode && (
+              <DropdownItem
+                icon={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>}
+                label="Imagen de fondo"
+                onClick={() => { setDdMapa(false); onUploadBackground?.(); }}
+              />
+            )}
+            {isImageMode && (
+              <DropdownItem
+                icon={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>}
+                label="Mapa real"
+                onClick={() => { setDdMapa(false); onSetLiveMap?.(); }}
+              />
+            )}
+          </ToolbarDropdown>
+
+          {/* ── Brillo button (toggle slider panel below) ── */}
+          <Tooltip content="Ajustar brillo" placement="bottom">
+          <button
+            onClick={() => { setDdBrillo(v => !v); setDdNodos(false); setDdDibujar(false); setDdMapa(false); }}
+            className="flex items-center justify-center rounded-xl p-1.5 transition-all"
+            style={{
+              color: ddBrillo || overlayOpacity > 0 ? "#60a5fa" : "#888",
+              background: ddBrillo ? "rgba(255,255,255,0.08)" : "transparent",
+            }}
+            onMouseEnter={(e) => { if (!ddBrillo) { (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.06)"; }}}
+            onMouseLeave={(e) => { if (!ddBrillo) { (e.currentTarget as HTMLElement).style.background = "transparent"; }}}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>
+          </button>
+          </Tooltip>
+
+          {/* Link mode indicator */}
+          {linkSource && (
+            <div className="flex items-center gap-1.5 rounded-xl px-2.5 py-1 text-[10px] font-bold"
+              style={{ background: "rgba(59,130,246,0.12)", border: "1px solid rgba(59,130,246,0.3)", color: "#60a5fa" }}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+              Enlazando...
+              <button onClick={cancelLinkCreation} className="ml-0.5 text-[#888] hover:text-white">✕</button>
+            </div>
+          )}
+          </>}
+
+          {/* ═══ RIGHT SIDE ═══ */}
+          <div className="h-5 w-px mx-0.5" style={{ background: "rgba(255,255,255,0.06)" }} />
+
+          {/* Straight/Curved edges toggle */}
+          <Tooltip content={straightEdges ? "Links rectos (clic para curvas)" : "Links curvos (clic para rectas)"} placement="bottom">
+          <button onClick={() => {
+            setStraightEdges(v => !v);
+            setTimeout(() => { if (LRef.current && mapRef.current) renderEdges(LRef.current, mapRef.current); }, 0);
+          }}
+            className="rounded-lg p-1.5 transition-all"
+            style={{ color: straightEdges ? "#f59e0b" : "#555" }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              {straightEdges
+                ? <line x1="4" y1="20" x2="20" y2="4" />
+                : <path d="M4 20 C 10 20, 14 4, 20 4" />}
+            </svg>
+          </button>
+          </Tooltip>
+
+          {/* Auto-save toggle */}
+          <Tooltip content={autoSaveEnabled ? "Auto-save ON (clic para desactivar)" : "Auto-save OFF (clic para activar)"} placement="bottom">
+          <button onClick={() => setAutoSaveEnabled(v => !v)}
+            className="rounded-lg p-1.5 transition-all"
+            style={{ color: autoSaveEnabled ? "#4ade80" : "#555" }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              {autoSaveEnabled ? <><path d="M12 2v4"/><path d="m16.2 7.8 2.9-2.9"/><path d="M18 12h4"/><path d="m16.2 16.2 2.9 2.9"/><path d="M12 18v4"/><path d="m4.9 19.1 2.9-2.9"/><path d="M2 12h4"/><path d="m4.9 4.9 2.9 2.9"/></> : <><circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/></>}
+            </svg>
+          </button>
+          </Tooltip>
+
+          {/* ─── Import (icon only) – only in edit mode, near Save ─── */}
+          {editMode && availableMaps.length > 0 && (
+            <div className="relative">
+              <Tooltip content="Importar nodos de otro mapa" placement="bottom">
+              <button onClick={() => setImportMapPickerOpen(v => !v)}
+                disabled={importingMapId !== null}
+                className="rounded-xl p-2 transition-all"
+                style={{ color: importMapPickerOpen ? "#34d399" : "#888", background: importMapPickerOpen ? "rgba(52,211,153,0.1)" : "transparent" }}
+                onMouseEnter={(e) => { if (!importMapPickerOpen) { (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.06)"; (e.currentTarget as HTMLElement).style.color = "#ededed"; }}}
+                onMouseLeave={(e) => { if (!importMapPickerOpen) { (e.currentTarget as HTMLElement).style.background = "transparent"; (e.currentTarget as HTMLElement).style.color = "#888"; }}}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/>
+                </svg>
+              </button>
+              </Tooltip>
+              {importMapPickerOpen && (
+                <div className="fixed inset-0 z-[99998]" onClick={() => setImportMapPickerOpen(false)} />
+              )}
+              {importMapPickerOpen && (
+                <div className="absolute top-full right-0 mt-1 rounded-xl shadow-2xl py-1 z-[99999] min-w-[200px]"
+                  style={{ background: "rgba(12,12,12,0.98)", border: "1px solid rgba(52,211,153,0.25)", backdropFilter: "blur(20px)" }}>
+                  <div className="px-3 py-1 pb-2">
+                    <input type="text" autoFocus placeholder="Buscar mapa..." value={importMapSearch} onChange={(e) => setImportMapSearch(e.target.value)} className="w-full rounded bg-white/5 border border-white/10 px-2 py-1 text-xs text-[#ededed] focus:outline-none focus:border-[#34d399]" />
+                  </div>
+                  <div className="px-3 py-1 text-[9px] font-bold uppercase tracking-wider text-[#555]">Importar nodos de (hasta 5)</div>
+                  {availableMaps.filter(m => m.id !== mapId && m.name.toLowerCase().includes(importMapSearch.toLowerCase())).slice(0, 5).map(m => (
+                    <button key={m.id} onClick={async () => {
+                      setImportMapPickerOpen(false);
+                      setImportingMapId(m.id);
+                      try {
+                        const data = await safeFetch<Record<string, any>>(apiUrl(`/api/maps/${m.id}/export`), undefined, "ImportNodes");
+                        if (!data) throw new Error("Export failed");
+                        const ts = Date.now();
+                        const idMap: Record<string, string> = {};
+                        const importedNodes = (data.nodes || []).map((n: any) => {
+                          const newId = `imp-${ts}-${n.id}`;
+                          idMap[n.id] = newId;
+                          return { ...n, id: newId };
+                        });
+                        const importedEdges = (data.edges || []).map((e: any) => ({
+                          ...e,
+                          id: `imp-${ts}-${e.id}`,
+                          source_node_id: idMap[e.source_node_id] || e.source_node_id,
+                          target_node_id: idMap[e.target_node_id] || e.target_node_id,
+                        }));
+                        nodesRef.current = [...nodesRef.current, ...importedNodes];
+                        edgesRef.current = [...edgesRef.current, ...importedEdges];
+                        if (LRef.current && mapRef.current) {
+                          renderNodes(LRef.current, mapRef.current);
+                          renderEdges(LRef.current, mapRef.current);
+                        }
+                        toast.success(`Mapa "${m.name}" importado`, { description: `${importedNodes.length} nodos, ${importedEdges.length} links` });
+                      } catch {
+                        toast.error("Error al importar el mapa");
+                      } finally {
+                        setImportingMapId(null);
+                      }
+                    }}
+                      className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-[#a0a0a0] transition-all"
+                      onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "rgba(52,211,153,0.08)"; (e.currentTarget as HTMLElement).style.color = "#ededed"; }}
+                      onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; (e.currentTarget as HTMLElement).style.color = "#a0a0a0"; }}>
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#34d399" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>
+                      <span className="truncate">{m.name}</span>
+                    </button>
+                  ))}
+                  {availableMaps.filter(m => m.id !== mapId).length === 0 && (
+                    <div className="px-3 py-2 text-[10px] text-[#555]">No hay otros mapas disponibles</div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ─── Grouped Global Actions (Export, Edit, Save) ─── */}
+          <div className="flex items-center gap-0.5 rounded-xl px-1.5 py-1 ml-0.5"
+            style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
+
+            {/* Export — single ZIP button (no dropdown) */}
+            <Tooltip content="Exportar Mapa (ZIP)" placement="bottom">
+              <button
+                onClick={handleExportZip}
+                disabled={zipExporting}
+                className="flex items-center justify-center rounded-lg p-1.5 transition-all outline-none disabled:opacity-50"
+                style={{ color: zipExporting ? "#f97316" : "#888", background: zipExporting ? "rgba(249,115,22,0.1)" : "transparent" }}
+              >
+                {zipExporting
+                  ? <div className="h-4 w-4 border-2 border-t-transparent border-orange-400 rounded-full animate-spin" />
+                  : <Download className="h-4 w-4" />}
+              </button>
+            </Tooltip>
+
+            <div className="h-4 w-px mx-0.5" style={{ background: "rgba(255,255,255,0.08)" }} />
+
+            {/* Edit mode toggle (Pencil for edit, Lock for lock/view) */}
+            <Tooltip content={editMode ? "Bloquear Mapa (Vista)" : "Modo Edición"} placement="bottom">
             <button
-              onClick={handleExportZip}
-              disabled={zipExporting}
-              className="flex items-center justify-center rounded-lg p-1.5 transition-all outline-none disabled:opacity-50"
-              style={{ color: zipExporting ? "#f97316" : "#888", background: zipExporting ? "rgba(249,115,22,0.1)" : "transparent" }}
+              onClick={() => { setEditMode(v => !v); closeAllDropdowns(); }}
+              className="flex items-center justify-center rounded-lg p-1.5 transition-all hover:bg-white/5 active:scale-95"
+              style={{
+                color: editMode ? "#f59e0b" : "#666",
+                background: editMode ? "rgba(245,158,11,0.1)" : "transparent",
+              }}
             >
-              {zipExporting
-                ? <div className="h-4 w-4 border-2 border-t-transparent border-orange-400 rounded-full animate-spin" />
-                : <Download className="h-4 w-4" />}
+              {editMode ? <Lock className="h-4 w-4" /> : <Pencil className="h-4 w-4 opacity-50" />}
             </button>
-          </Tooltip>
+            </Tooltip>
 
-          <div className="h-4 w-px mx-0.5" style={{ background: "rgba(255,255,255,0.08)" }} />
-
-          {/* Edit mode toggle (Pencil for edit, Lock for lock/view) */}
-          <Tooltip content={editMode ? "Bloquear Mapa (Vista)" : "Modo Edición"} placement="bottom">
-          <button
-            onClick={() => setEditMode(v => !v)}
-            className="flex items-center justify-center rounded-lg p-1.5 transition-all hover:bg-white/5 active:scale-95"
-            style={{
-              color: editMode ? "#f59e0b" : "#666",
-              background: editMode ? "rgba(245,158,11,0.1)" : "transparent",
-            }}
-          >
-            {editMode ? <Lock className="h-4 w-4" /> : <Pencil className="h-4 w-4 opacity-50" />}
-          </button>
-          </Tooltip>
-
-          {/* Save */}
-          <Tooltip content="Guardar Cambios" placement="bottom">
-          <button
-            onClick={handleSave}
-            disabled={saving}
-            className="flex items-center justify-center rounded-lg p-1.5 transition-all disabled:opacity-30 active:scale-95"
-            style={{
-              color: saving ? "#60a5fa" : "#60a5fa",
-              background: saving ? "rgba(59,130,246,0.1)" : "transparent",
-            }}
-          >
-            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-          </button>
-          </Tooltip>
+            {/* Save */}
+            <Tooltip content="Guardar Cambios" placement="bottom">
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              className="flex items-center justify-center rounded-lg p-1.5 transition-all disabled:opacity-30 active:scale-95"
+              style={{
+                color: saving ? "#60a5fa" : "#60a5fa",
+                background: saving ? "rgba(59,130,246,0.1)" : "transparent",
+              }}
+            >
+              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+            </button>
+            </Tooltip>
+          </div>
         </div>
+
+        {/* ── Brightness slider panel (below toolbar) ── */}
+        {editMode && ddBrillo && (
+          <div
+            className="mt-1.5 rounded-xl px-3 py-2 flex items-center gap-2"
+            style={{
+              background: "rgba(10,10,10,0.82)",
+              border: "1px solid rgba(255,255,255,0.06)",
+              backdropFilter: "blur(24px)",
+              boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
+            }}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={overlayOpacity > 0 ? "#60a5fa" : "#555"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>
+            <span className="text-[10px] text-[#888] font-medium">Brillo</span>
+            <input
+              type="range" min="0" max={isImageMode ? "0.85" : "0.7"} step="0.05" value={overlayOpacity}
+              onChange={(e) => setOverlayOpacity(parseFloat(e.target.value))}
+              className="w-28 h-1 rounded-full appearance-none cursor-pointer"
+              style={{ background: `linear-gradient(to right, #3b82f6 ${(overlayOpacity / (isImageMode ? 0.85 : 0.7)) * 100}%, #333 0%)` }}
+            />
+            <span className="text-[9px] text-[#555] font-mono w-6 text-right">{Math.round(overlayOpacity * 100)}%</span>
+          </div>
+        )}
       </div>}
 
       {/* Context Menu */}

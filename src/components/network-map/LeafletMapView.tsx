@@ -403,11 +403,11 @@ function ToolbarDropdown({
         onClick={onToggle}
         className="flex items-center gap-1 rounded-xl px-2 py-1.5 text-[10px] font-semibold transition-all"
         style={{
-          color: open ? "#ededed" : "#888",
-          background: open ? "rgba(255,255,255,0.08)" : "transparent",
+          color: open ? "var(--text-primary)" : "var(--text-secondary)",
+          background: open ? "var(--surface-elevated)" : "transparent",
         }}
-        onMouseEnter={(e) => { if (!open) { (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.06)"; (e.currentTarget as HTMLElement).style.color = "#ededed"; }}}
-        onMouseLeave={(e) => { if (!open) { (e.currentTarget as HTMLElement).style.background = "transparent"; (e.currentTarget as HTMLElement).style.color = "#888"; }}}
+        onMouseEnter={(e) => { if (!open) { (e.currentTarget as HTMLElement).style.background = "var(--surface-elevated)"; (e.currentTarget as HTMLElement).style.color = "var(--text-primary)"; }}}
+        onMouseLeave={(e) => { if (!open) { (e.currentTarget as HTMLElement).style.background = "transparent"; (e.currentTarget as HTMLElement).style.color = "var(--text-secondary)"; }}}
       >
         {icon}
         <span className="hidden xl:inline">{label}</span>
@@ -417,8 +417,8 @@ function ToolbarDropdown({
         <div
           className="absolute top-full left-0 mt-1.5 rounded-xl shadow-2xl py-1 z-[99999] min-w-[170px]"
           style={{
-            background: "rgba(12,12,12,0.96)",
-            border: "1px solid rgba(255,255,255,0.08)",
+            background: "var(--glass-bg)",
+            border: "1px solid var(--glass-border)",
             backdropFilter: "blur(20px)",
             boxShadow: "0 12px 40px rgba(0,0,0,0.5)",
           }}
@@ -446,11 +446,11 @@ function DropdownItem({
       onClick={onClick}
       className="flex w-full items-center gap-2 px-3 py-1.5 text-[11px] transition-all"
       style={{
-        color: active ? "#60a5fa" : "#a0a0a0",
+        color: active ? "#60a5fa" : "var(--text-secondary)",
         background: active ? "rgba(59,130,246,0.1)" : "transparent",
       }}
-      onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = active ? "rgba(59,130,246,0.15)" : "rgba(255,255,255,0.06)"; (e.currentTarget as HTMLElement).style.color = "#ededed"; }}
-      onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = active ? "rgba(59,130,246,0.1)" : "transparent"; (e.currentTarget as HTMLElement).style.color = active ? "#60a5fa" : "#a0a0a0"; }}
+      onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = active ? "rgba(59,130,246,0.15)" : "var(--surface-elevated)"; (e.currentTarget as HTMLElement).style.color = "var(--text-primary)"; }}
+      onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = active ? "rgba(59,130,246,0.1)" : "transparent"; (e.currentTarget as HTMLElement).style.color = active ? "#60a5fa" : "var(--text-secondary)"; }}
     >
       {icon}
       <span className="font-medium">{label}</span>
@@ -460,7 +460,7 @@ function DropdownItem({
 }
 
 function DropdownSeparator() {
-  return <div className="my-1 h-px" style={{ background: "rgba(255,255,255,0.06)" }} />;
+  return <div className="my-1 h-px" style={{ background: "var(--glass-border)" }} />;
 }
 
 export default function LeafletMapView({
@@ -3814,8 +3814,8 @@ export default function LeafletMapView({
         <div
           className="flex items-center gap-1.5 rounded-2xl px-2.5 py-1.5"
           style={{
-            background: "rgba(10,10,10,0.82)",
-            border: "1px solid rgba(255,255,255,0.06)",
+            background: "var(--glass-bg)",
+            border: "1px solid var(--glass-border)",
             backdropFilter: "blur(24px)",
             boxShadow: "0 8px 32px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.03)",
           }}
@@ -3825,20 +3825,20 @@ export default function LeafletMapView({
           <button
             onClick={onBack}
             className="flex items-center gap-1 rounded-xl px-2 py-1.5 text-[11px] font-medium transition-all"
-            style={{ color: "#888" }}
-            onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.06)"; (e.currentTarget as HTMLElement).style.color = "#ededed"; }}
-            onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; (e.currentTarget as HTMLElement).style.color = "#888"; }}
+            style={{ color: "var(--text-secondary)" }}
+            onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "var(--surface-elevated)"; (e.currentTarget as HTMLElement).style.color = "var(--text-primary)"; }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; (e.currentTarget as HTMLElement).style.color = "var(--text-secondary)"; }}
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6"/></svg>
             Mapas
           </button>
 
-          <div className="h-5 w-px mx-0.5" style={{ background: "rgba(255,255,255,0.06)" }} />
+          <div className="h-5 w-px mx-0.5" style={{ background: "var(--glass-border)" }} />
 
           {/* Map name + live status */}
           <div className="flex items-center gap-2 px-1">
             {mapName && (
-              <span className="text-[12px] font-bold text-[#ededed] truncate max-w-[140px]">
+              <span className="text-[12px] font-bold truncate max-w-[140px]" style={{ color: "var(--text-primary)" }}>
                 {mapName}
               </span>
             )}
@@ -3856,12 +3856,12 @@ export default function LeafletMapView({
             </div>
           </div>
 
-          <div className="h-5 w-px mx-0.5" style={{ background: "rgba(255,255,255,0.06)" }} />
+          <div className="h-5 w-px mx-0.5" style={{ background: "var(--glass-border)" }} />
 
           {/* ── Compact inline search ── */}
           <div className="relative">
-            <div className="flex items-center rounded-lg px-2 py-1" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)", width: 150 }}>
-              <Search className="h-3 w-3 shrink-0" style={{ color: "#555" }} />
+            <div className="flex items-center rounded-lg px-2 py-1" style={{ background: "var(--surface-card)", border: "1px solid var(--glass-border)", width: 150 }}>
+              <Search className="h-3 w-3 shrink-0" style={{ color: "var(--text-tertiary)" }} />
               <input
                 type="text"
                 placeholder="Buscar..."
@@ -3890,10 +3890,11 @@ export default function LeafletMapView({
                     setTbSearch(""); setTbSearchResults([]);
                   }
                 }}
-                className="ml-1.5 w-full bg-transparent text-[10px] text-[#ededed] placeholder-[#555] outline-none"
+                className="ml-1.5 w-full bg-transparent text-[10px] outline-none"
+                style={{ color: "var(--text-primary)" }}
               />
               {tbSearch && (
-                <button onClick={() => { setTbSearch(""); setTbSearchResults([]); }} className="text-[#555] hover:text-[#888]">
+                <button onClick={() => { setTbSearch(""); setTbSearchResults([]); }} style={{ color: "var(--text-tertiary)" }}>
                   <XIcon className="h-3 w-3" />
                 </button>
               )}
@@ -3901,7 +3902,7 @@ export default function LeafletMapView({
             {/* Search results dropdown */}
             {tbSearchFocused && tbSearchResults.length > 0 && (
               <div className="absolute top-full left-0 mt-1 rounded-xl shadow-2xl py-1 z-[99999] min-w-[200px]"
-                style={{ background: "rgba(12,12,12,0.96)", border: "1px solid rgba(255,255,255,0.08)", backdropFilter: "blur(20px)" }}>
+                style={{ background: "var(--glass-bg)", border: "1px solid var(--glass-border)", backdropFilter: "blur(20px)" }}>
                 {tbSearchResults.map(r => (
                   <button key={r.id}
                     onMouseDown={(e) => {
@@ -3920,9 +3921,10 @@ export default function LeafletMapView({
                       }
                       setTbSearch(""); setTbSearchResults([]);
                     }}
-                    className="flex w-full items-center gap-2 px-3 py-1.5 text-[11px] text-[#a0a0a0] transition-all"
-                    onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "rgba(59,130,246,0.08)"; (e.currentTarget as HTMLElement).style.color = "#ededed"; }}
-                    onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; (e.currentTarget as HTMLElement).style.color = "#a0a0a0"; }}
+                    className="flex w-full items-center gap-2 px-3 py-1.5 text-[11px] transition-all"
+                    style={{ color: "var(--text-secondary)" }}
+                    onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "rgba(59,130,246,0.08)"; (e.currentTarget as HTMLElement).style.color = "var(--text-primary)"; }}
+                    onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; (e.currentTarget as HTMLElement).style.color = "var(--text-secondary)"; }}
                   >
                     <Search className="h-3 w-3 shrink-0" style={{ color: "#3b82f6" }} />
                     <span className="truncate">{r.label}</span>
@@ -3934,7 +3936,7 @@ export default function LeafletMapView({
 
           {/* ═══ CENTER: EDIT MODE DROPDOWN MENUS ═══ */}
           {editMode && <>
-          <div className="h-5 w-px mx-0.5" style={{ background: "rgba(255,255,255,0.06)" }} />
+          <div className="h-5 w-px mx-0.5" style={{ background: "var(--glass-border)" }} />
 
           {/* ── "Nodos" dropdown ── */}
           <ToolbarDropdown
@@ -4100,10 +4102,10 @@ export default function LeafletMapView({
             onClick={() => { setDdBrillo(v => !v); setDdNodos(false); setDdDibujar(false); setDdMapa(false); }}
             className="flex items-center justify-center rounded-xl p-1.5 transition-all"
             style={{
-              color: ddBrillo || overlayOpacity > 0 ? "#60a5fa" : "#888",
-              background: ddBrillo ? "rgba(255,255,255,0.08)" : "transparent",
+              color: ddBrillo || overlayOpacity > 0 ? "#60a5fa" : "var(--text-secondary)",
+              background: ddBrillo ? "var(--surface-elevated)" : "transparent",
             }}
-            onMouseEnter={(e) => { if (!ddBrillo) { (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.06)"; }}}
+            onMouseEnter={(e) => { if (!ddBrillo) { (e.currentTarget as HTMLElement).style.background = "var(--surface-elevated)"; }}}
             onMouseLeave={(e) => { if (!ddBrillo) { (e.currentTarget as HTMLElement).style.background = "transparent"; }}}
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>
@@ -4122,7 +4124,7 @@ export default function LeafletMapView({
           </>}
 
           {/* ═══ RIGHT SIDE ═══ */}
-          <div className="h-5 w-px mx-0.5" style={{ background: "rgba(255,255,255,0.06)" }} />
+          <div className="h-5 w-px mx-0.5" style={{ background: "var(--glass-border)" }} />
 
           {/* Straight/Curved edges toggle */}
           <Tooltip content={straightEdges ? "Links rectos (clic para curvas)" : "Links curvos (clic para rectas)"} placement="bottom">
@@ -4131,7 +4133,7 @@ export default function LeafletMapView({
             setTimeout(() => { if (LRef.current && mapRef.current) renderEdges(LRef.current, mapRef.current); }, 0);
           }}
             className="rounded-lg p-1.5 transition-all"
-            style={{ color: straightEdges ? "#f59e0b" : "#555" }}>
+            style={{ color: straightEdges ? "#f59e0b" : "var(--text-tertiary)" }}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               {straightEdges
                 ? <line x1="4" y1="20" x2="20" y2="4" />
@@ -4144,7 +4146,7 @@ export default function LeafletMapView({
           <Tooltip content={autoSaveEnabled ? "Auto-save ON (clic para desactivar)" : "Auto-save OFF (clic para activar)"} placement="bottom">
           <button onClick={() => setAutoSaveEnabled(v => !v)}
             className="rounded-lg p-1.5 transition-all"
-            style={{ color: autoSaveEnabled ? "#4ade80" : "#555" }}>
+            style={{ color: autoSaveEnabled ? "#4ade80" : "var(--text-tertiary)" }}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               {autoSaveEnabled ? <><path d="M12 2v4"/><path d="m16.2 7.8 2.9-2.9"/><path d="M18 12h4"/><path d="m16.2 16.2 2.9 2.9"/><path d="M12 18v4"/><path d="m4.9 19.1 2.9-2.9"/><path d="M2 12h4"/><path d="m4.9 4.9 2.9 2.9"/></> : <><circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/></>}
             </svg>
@@ -4158,9 +4160,9 @@ export default function LeafletMapView({
               <button onClick={() => setImportMapPickerOpen(v => !v)}
                 disabled={importingMapId !== null}
                 className="rounded-xl p-2 transition-all"
-                style={{ color: importMapPickerOpen ? "#34d399" : "#888", background: importMapPickerOpen ? "rgba(52,211,153,0.1)" : "transparent" }}
-                onMouseEnter={(e) => { if (!importMapPickerOpen) { (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.06)"; (e.currentTarget as HTMLElement).style.color = "#ededed"; }}}
-                onMouseLeave={(e) => { if (!importMapPickerOpen) { (e.currentTarget as HTMLElement).style.background = "transparent"; (e.currentTarget as HTMLElement).style.color = "#888"; }}}>
+                style={{ color: importMapPickerOpen ? "#34d399" : "var(--text-secondary)", background: importMapPickerOpen ? "rgba(52,211,153,0.1)" : "transparent" }}
+                onMouseEnter={(e) => { if (!importMapPickerOpen) { (e.currentTarget as HTMLElement).style.background = "var(--surface-elevated)"; (e.currentTarget as HTMLElement).style.color = "var(--text-primary)"; }}}
+                onMouseLeave={(e) => { if (!importMapPickerOpen) { (e.currentTarget as HTMLElement).style.background = "transparent"; (e.currentTarget as HTMLElement).style.color = "var(--text-secondary)"; }}}>
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/>
                 </svg>
@@ -4171,11 +4173,11 @@ export default function LeafletMapView({
               )}
               {importMapPickerOpen && (
                 <div className="absolute top-full right-0 mt-1 rounded-xl shadow-2xl py-1 z-[99999] min-w-[200px]"
-                  style={{ background: "rgba(12,12,12,0.98)", border: "1px solid rgba(52,211,153,0.25)", backdropFilter: "blur(20px)" }}>
+                  style={{ background: "var(--glass-bg)", border: "1px solid rgba(52,211,153,0.25)", backdropFilter: "blur(20px)" }}>
                   <div className="px-3 py-1 pb-2">
-                    <input type="text" autoFocus placeholder="Buscar mapa..." value={importMapSearch} onChange={(e) => setImportMapSearch(e.target.value)} className="w-full rounded bg-white/5 border border-white/10 px-2 py-1 text-xs text-[#ededed] focus:outline-none focus:border-[#34d399]" />
+                    <input type="text" autoFocus placeholder="Buscar mapa..." value={importMapSearch} onChange={(e) => setImportMapSearch(e.target.value)} className="w-full rounded px-2 py-1 text-xs focus:outline-none focus:border-[#34d399]" style={{ background: "var(--surface-card)", border: "1px solid var(--glass-border)", color: "var(--text-primary)" }} />
                   </div>
-                  <div className="px-3 py-1 text-[9px] font-bold uppercase tracking-wider text-[#555]">Importar nodos de (hasta 5)</div>
+                  <div className="px-3 py-1 text-[9px] font-bold uppercase tracking-wider" style={{ color: "var(--text-tertiary)" }}>Importar nodos de (hasta 5)</div>
                   {availableMaps.filter(m => m.id !== mapId && m.name.toLowerCase().includes(importMapSearch.toLowerCase())).slice(0, 5).map(m => (
                     <button key={m.id} onClick={async () => {
                       setImportMapPickerOpen(false);
@@ -4209,15 +4211,16 @@ export default function LeafletMapView({
                         setImportingMapId(null);
                       }
                     }}
-                      className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-[#a0a0a0] transition-all"
-                      onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "rgba(52,211,153,0.08)"; (e.currentTarget as HTMLElement).style.color = "#ededed"; }}
-                      onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; (e.currentTarget as HTMLElement).style.color = "#a0a0a0"; }}>
+                      className="flex w-full items-center gap-2 px-3 py-1.5 text-xs transition-all"
+                      style={{ color: "var(--text-secondary)" }}
+                      onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "rgba(52,211,153,0.08)"; (e.currentTarget as HTMLElement).style.color = "var(--text-primary)"; }}
+                      onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; (e.currentTarget as HTMLElement).style.color = "var(--text-secondary)"; }}>
                       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#34d399" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>
                       <span className="truncate">{m.name}</span>
                     </button>
                   ))}
                   {availableMaps.filter(m => m.id !== mapId).length === 0 && (
-                    <div className="px-3 py-2 text-[10px] text-[#555]">No hay otros mapas disponibles</div>
+                    <div className="px-3 py-2 text-[10px]" style={{ color: "var(--text-tertiary)" }}>No hay otros mapas disponibles</div>
                   )}
                 </div>
               )}
@@ -4226,7 +4229,7 @@ export default function LeafletMapView({
 
           {/* ─── Grouped Global Actions (Export, Edit, Save) ─── */}
           <div className="flex items-center gap-0.5 rounded-xl px-1.5 py-1 ml-0.5"
-            style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
+            style={{ background: "var(--surface-card)", border: "1px solid var(--glass-border)" }}>
 
             {/* Export — single ZIP button (no dropdown) */}
             <Tooltip content="Exportar Mapa (ZIP)" placement="bottom">
@@ -4234,7 +4237,7 @@ export default function LeafletMapView({
                 onClick={handleExportZip}
                 disabled={zipExporting}
                 className="flex items-center justify-center rounded-lg p-1.5 transition-all outline-none disabled:opacity-50"
-                style={{ color: zipExporting ? "#f97316" : "#888", background: zipExporting ? "rgba(249,115,22,0.1)" : "transparent" }}
+                style={{ color: zipExporting ? "#f97316" : "var(--text-secondary)", background: zipExporting ? "rgba(249,115,22,0.1)" : "transparent" }}
               >
                 {zipExporting
                   ? <div className="h-4 w-4 border-2 border-t-transparent border-orange-400 rounded-full animate-spin" />
@@ -4242,7 +4245,7 @@ export default function LeafletMapView({
               </button>
             </Tooltip>
 
-            <div className="h-4 w-px mx-0.5" style={{ background: "rgba(255,255,255,0.08)" }} />
+            <div className="h-4 w-px mx-0.5" style={{ background: "var(--glass-border)" }} />
 
             {/* Edit mode toggle (Pencil for edit, Lock for lock/view) */}
             <Tooltip content={editMode ? "Bloquear Mapa (Vista)" : "Modo Edición"} placement="bottom">
@@ -4250,7 +4253,7 @@ export default function LeafletMapView({
               onClick={() => { setEditMode(v => !v); closeAllDropdowns(); }}
               className="flex items-center justify-center rounded-lg p-1.5 transition-all hover:bg-white/5 active:scale-95"
               style={{
-                color: editMode ? "#f59e0b" : "#666",
+                color: editMode ? "#f59e0b" : "var(--muted-foreground)",
                 background: editMode ? "rgba(245,158,11,0.1)" : "transparent",
               }}
             >
@@ -4280,21 +4283,21 @@ export default function LeafletMapView({
           <div
             className="mt-1.5 rounded-xl px-3 py-2 flex items-center gap-2"
             style={{
-              background: "rgba(10,10,10,0.82)",
-              border: "1px solid rgba(255,255,255,0.06)",
+              background: "var(--glass-bg)",
+              border: "1px solid var(--glass-border)",
               backdropFilter: "blur(24px)",
               boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
             }}
           >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={overlayOpacity > 0 ? "#60a5fa" : "#555"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>
-            <span className="text-[10px] text-[#888] font-medium">Brillo</span>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={overlayOpacity > 0 ? "#60a5fa" : "var(--text-tertiary)"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>
+            <span className="text-[10px] font-medium" style={{ color: "var(--text-secondary)" }}>Brillo</span>
             <input
               type="range" min="0" max={isImageMode ? "0.85" : "0.7"} step="0.05" value={overlayOpacity}
               onChange={(e) => setOverlayOpacity(parseFloat(e.target.value))}
               className="w-28 h-1 rounded-full appearance-none cursor-pointer"
               style={{ background: `linear-gradient(to right, #3b82f6 ${(overlayOpacity / (isImageMode ? 0.85 : 0.7)) * 100}%, #333 0%)` }}
             />
-            <span className="text-[9px] text-[#555] font-mono w-6 text-right">{Math.round(overlayOpacity * 100)}%</span>
+            <span className="text-[9px] font-mono w-6 text-right" style={{ color: "var(--text-tertiary)" }}>{Math.round(overlayOpacity * 100)}%</span>
           </div>
         )}
       </div>}

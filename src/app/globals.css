@@ -95,6 +95,26 @@ body {
   font-family: system-ui, -apple-system, sans-serif;
 }
 
+/* ── Theme transition animation ── */
+body.theme-transitioning,
+body.theme-transitioning *,
+body.theme-transitioning *::before,
+body.theme-transitioning *::after {
+  transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease !important;
+}
+
+/* ── Skeleton loader shimmer ── */
+@keyframes skeleton-shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.skeleton-pulse {
+  background: linear-gradient(90deg, var(--muted) 25%, var(--surface-elevated) 50%, var(--muted) 75%);
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.8s ease-in-out infinite;
+  border-radius: 8px;
+}
+
 /* React Flow overrides */
 .react-flow__node {
   cursor: grab;

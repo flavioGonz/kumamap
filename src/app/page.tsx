@@ -48,7 +48,7 @@ export default function Page() {
 
   // Loading
   if (isAuthenticated === null) {
-    return <div className="min-h-screen flex items-center justify-center" style={{ background: "#0a0a0a" }}>
+    return <div className="min-h-screen flex items-center justify-center" style={{ background: "var(--background)" }}>
       <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500" />
     </div>;
   }
@@ -73,16 +73,15 @@ export default function Page() {
     <>
       <Toaster
         position="bottom-left"
-        theme="dark"
         expand={true}
         closeButton={true}
         richColors
         toastOptions={{
           style: {
-            background: "rgba(20,20,20,0.95)",
-            border: "1px solid rgba(255,255,255,0.08)",
+            background: "var(--glass-bg)",
+            border: "1px solid var(--glass-border)",
             backdropFilter: "blur(12px)",
-            color: "#ededed",
+            color: "var(--text-primary)",
           },
         }}
       />

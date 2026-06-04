@@ -21,6 +21,9 @@ import {
   Download,
   Upload,
   Copy,
+  Sun,
+  Moon,
+  Monitor,
 } from "lucide-react";
 import type { KumaMonitor } from "@/components/network-map/MonitorPanel";
 import { apiUrl } from "@/lib/api";
@@ -28,6 +31,8 @@ import { safeFetch } from "@/lib/error-handler";
 import Tooltip from "@/components/network-map/Tooltip";
 import { ChangelogBadge, ChangelogModal } from "@/components/ChangelogModal";
 import DeployModal from "@/components/deploy/DeployModal";
+import { useTheme } from "@/components/ThemeContext";
+import { MapListSkeleton } from "@/components/network-map/MapSkeleton";
 
 interface MapSummary {
   id: string;
@@ -54,6 +59,8 @@ export default function MapListView({
   onLogout: () => void;
 }) {
   const [maps, setMaps] = useState<MapSummary[]>([]);
+  const [loading, setLoading] = useState(true);
+  const { theme, setTheme, resolvedTheme } = useTheme();
   const [search, setSearch] = useState("");
   const [filterType, setFilterType] = useState<string>("all");
   const [sortBy, setSortBy] = useState<"name" | "updated" | "type">("updated");
@@ -86,6 +93,7 @@ export default function MapListView({
   const fetchMaps = useCallback(async () => {
     const data = await safeFetch<MapSummary[]>(apiUrl("/api/maps"));
     if (data) setMaps(data);
+    setLoading(false);
   }, []);
 
   useEffect(() => { fetchMaps(); }, [fetchMaps]);
@@ -291,7 +299,7 @@ export default function MapListView({
   const bgTypeIcon = (t: string) => {
     if (t === "livemap") return <Globe className="h-3.5 w-3.5 text-emerald-400" />;
     if (t === "image") return <Image className="h-3.5 w-3.5 text-purple-400" />;
-    return <Globe className="h-3.5 w-3.5 text-[#888]" />;
+    return <Globe className="h-3.5 w-3.5" style={{ color: "var(--text-secondary)" }} />;
   };
 
   const bgTypeLabel = (t: string) => t === "livemap" ? "Mapa real" : t === "image" ? "Imagen" : "Mapa";
@@ -348,9 +356,22 @@ export default function MapListView({
   };
 
   const SortIcon = ({ col }: { col: "name" | "updated" | "type" }) => (
-    <ArrowUpDown className={`h-3 w-3 ml-0.5 transition-all ${sortBy === col ? "text-blue-400" : "text-[#555]"}`}
-      style={{ transform: sortBy === col && sortDir === "desc" ? "scaleY(-1)" : undefined }} />
+    <ArrowUpDown className={`h-3 w-3 ml-0.5 transition-all ${sortBy === col ? "text-blue-400" : ""}`}
+      style={{ color: sortBy === col ? undefined : "var(--text-tertiary)", transform: sortBy === col && sortDir === "desc" ? "scaleY(-1)" : undefined }} />
   );
+
+  // Theme cycle: dark -> light -> system
+  const cycleTheme = () => {
+    const order: Array<"dark" | "light" | "system"> = ["dark", "light", "system"];
+    const idx = order.indexOf(theme);
+    setTheme(order[(idx + 1) % order.length]);
+  };
+
+  const ThemeIcon = theme === "light" ? Sun : theme === "system" ? Monitor : Moon;
+  const themeLabel = theme === "light" ? "Claro" : theme === "system" ? "Sistema" : "Oscuro";
+
+  // Show skeleton while loading
+  if (loading) return <MapListSkeleton />;
 
   return (
     <div className="min-h-screen p-6 max-w-6xl mx-auto">
@@ -362,11 +383,11 @@ export default function MapListView({
             <Network className="h-5 w-5 text-blue-400" />
           </div>
           <div>
-            <h1 className="text-xl font-black text-[#ededed] tracking-tight">KumaMap</h1>
-            <div className="flex items-center gap-2 text-[10px] text-[#737373]">
+            <h1 className="text-xl font-black tracking-tight" style={{ color: "var(--text-primary)" }}>KumaMap</h1>
+            <div className="flex items-center gap-2 text-[10px]" style={{ color: "var(--muted-foreground)" }}>
               <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: kumaConnected ? "#22c55e" : "#ef4444", boxShadow: kumaConnected ? "0 0 6px #22c55e" : "0 0 6px #ef4444" }} />
               {kumaConnected ? "Kuma conectado" : "Kuma desconectado"}
-              <span className="text-[#555]">&middot;</span>
+              <span style={{ color: "var(--text-tertiary)" }}>&middot;</span>
               <span>{maps.length} mapa{maps.length !== 1 ? "s" : ""}</span>
             </div>
           </div>
@@ -405,9 +426,9 @@ export default function MapListView({
           <a
             href={`${process.env.NEXT_PUBLIC_BASE_PATH || ""}/monitors`}
             className="flex h-8 w-8 items-center justify-center rounded-lg transition-all"
-            style={{ color: "#555", border: "1px solid transparent" }}
+            style={{ color: "var(--text-tertiary)", border: "1px solid transparent" }}
             onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = "#22c55e"; (e.currentTarget as HTMLElement).style.borderColor = "rgba(34,197,94,0.25)"; (e.currentTarget as HTMLElement).style.background = "rgba(34,197,94,0.08)"; }}
-            onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = "#555"; (e.currentTarget as HTMLElement).style.borderColor = "transparent"; (e.currentTarget as HTMLElement).style.background = "transparent"; }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = "var(--text-tertiary)"; (e.currentTarget as HTMLElement).style.borderColor = "transparent"; (e.currentTarget as HTMLElement).style.background = "transparent"; }}
           >
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
           </a>
@@ -432,9 +453,9 @@ export default function MapListView({
             <button
               onClick={() => setCameraMenuOpen((v) => !v)}
               className="flex h-8 w-8 items-center justify-center rounded-lg transition-all"
-              style={{ color: cameraMenuOpen ? "#06b6d4" : "#555", border: `1px solid ${cameraMenuOpen ? "rgba(6,182,212,0.25)" : "transparent"}`, background: cameraMenuOpen ? "rgba(6,182,212,0.08)" : "transparent", cursor: "pointer" }}
+              style={{ color: cameraMenuOpen ? "#06b6d4" : "var(--text-tertiary)", border: `1px solid ${cameraMenuOpen ? "rgba(6,182,212,0.25)" : "transparent"}`, background: cameraMenuOpen ? "rgba(6,182,212,0.08)" : "transparent", cursor: "pointer" }}
               onMouseEnter={(e) => { if (!cameraMenuOpen) { (e.currentTarget as HTMLElement).style.color = "#06b6d4"; (e.currentTarget as HTMLElement).style.borderColor = "rgba(6,182,212,0.25)"; (e.currentTarget as HTMLElement).style.background = "rgba(6,182,212,0.08)"; } }}
-              onMouseLeave={(e) => { if (!cameraMenuOpen) { (e.currentTarget as HTMLElement).style.color = "#555"; (e.currentTarget as HTMLElement).style.borderColor = "transparent"; (e.currentTarget as HTMLElement).style.background = "transparent"; } }}
+              onMouseLeave={(e) => { if (!cameraMenuOpen) { (e.currentTarget as HTMLElement).style.color = "var(--text-tertiary)"; (e.currentTarget as HTMLElement).style.borderColor = "transparent"; (e.currentTarget as HTMLElement).style.background = "transparent"; } }}
             >
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2" ry="2"/></svg>
             </button>
@@ -446,8 +467,8 @@ export default function MapListView({
                   top: "calc(100% + 6px)",
                   right: 0,
                   minWidth: 180,
-                  background: "#1e1e1e",
-                  border: "1px solid rgba(255,255,255,0.1)",
+                  background: "var(--secondary)",
+                  border: "1px solid var(--glass-border)",
                   borderRadius: 10,
                   boxShadow: "0 8px 32px rgba(0,0,0,0.5)",
                   padding: "4px 0",
@@ -469,7 +490,7 @@ export default function MapListView({
                       alignItems: "center",
                       gap: 10,
                       padding: "8px 14px",
-                      color: item.disabled ? "#555" : "#ccc",
+                      color: item.disabled ? "var(--text-tertiary)" : "var(--text-secondary)",
                       textDecoration: "none",
                       fontSize: 13,
                       fontWeight: 500,
@@ -477,12 +498,12 @@ export default function MapListView({
                       transition: "background 0.15s",
                       opacity: item.disabled ? 0.5 : 1,
                     }}
-                    onMouseEnter={(e) => { if (!item.disabled) { (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.06)"; (e.currentTarget as HTMLElement).style.color = item.color; } }}
-                    onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; (e.currentTarget as HTMLElement).style.color = item.disabled ? "#555" : "#ccc"; }}
+                    onMouseEnter={(e) => { if (!item.disabled) { (e.currentTarget as HTMLElement).style.background = "var(--surface-elevated)"; (e.currentTarget as HTMLElement).style.color = item.color; } }}
+                    onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; (e.currentTarget as HTMLElement).style.color = item.disabled ? "var(--text-tertiary)" : "var(--text-secondary)"; }}
                   >
                     <span style={{ display: "flex", alignItems: "center" }}>{item.icon}</span>
                     <span>{item.label}</span>
-                    {item.disabled && <span style={{ marginLeft: "auto", fontSize: 10, color: "#666", fontStyle: "italic" }}>pronto</span>}
+                    {item.disabled && <span style={{ marginLeft: "auto", fontSize: 10, color: "var(--muted-foreground)", fontStyle: "italic" }}>pronto</span>}
                   </a>
                 ))}
               </div>
@@ -494,9 +515,9 @@ export default function MapListView({
           <a
             href={`${process.env.NEXT_PUBLIC_BASE_PATH || ""}/metrics`}
             className="flex h-8 w-8 items-center justify-center rounded-lg transition-all"
-            style={{ color: "#555", border: "1px solid transparent" }}
+            style={{ color: "var(--text-tertiary)", border: "1px solid transparent" }}
             onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = "#a78bfa"; (e.currentTarget as HTMLElement).style.borderColor = "rgba(167,139,250,0.25)"; (e.currentTarget as HTMLElement).style.background = "rgba(167,139,250,0.08)"; }}
-            onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = "#555"; (e.currentTarget as HTMLElement).style.borderColor = "transparent"; (e.currentTarget as HTMLElement).style.background = "transparent"; }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = "var(--text-tertiary)"; (e.currentTarget as HTMLElement).style.borderColor = "transparent"; (e.currentTarget as HTMLElement).style.background = "transparent"; }}
           >
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 20V10M12 20V4M6 20v-6"/></svg>
           </a>
@@ -507,11 +528,24 @@ export default function MapListView({
           <button
             onClick={() => setDeployOpen(true)}
             className="flex h-8 w-8 items-center justify-center rounded-lg transition-all"
-            style={{ color: "#555", border: "1px solid transparent" }}
+            style={{ color: "var(--text-tertiary)", border: "1px solid transparent" }}
             onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = "#fb923c"; (e.currentTarget as HTMLElement).style.borderColor = "rgba(251,146,60,0.25)"; (e.currentTarget as HTMLElement).style.background = "rgba(251,146,60,0.08)"; }}
-            onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = "#555"; (e.currentTarget as HTMLElement).style.borderColor = "transparent"; (e.currentTarget as HTMLElement).style.background = "transparent"; }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = "var(--text-tertiary)"; (e.currentTarget as HTMLElement).style.borderColor = "transparent"; (e.currentTarget as HTMLElement).style.background = "transparent"; }}
           >
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/></svg>
+          </button>
+          </Tooltip>
+
+          {/* ── Theme toggle ── */}
+          <Tooltip content={`Tema: ${themeLabel}`} placement="bottom">
+          <button
+            onClick={cycleTheme}
+            className="flex h-8 w-8 items-center justify-center rounded-lg transition-all"
+            style={{ color: "var(--text-tertiary)", border: "1px solid transparent" }}
+            onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = "var(--text-primary)"; (e.currentTarget as HTMLElement).style.borderColor = "var(--glass-border)"; (e.currentTarget as HTMLElement).style.background = "var(--surface-hover)"; }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = "var(--text-tertiary)"; (e.currentTarget as HTMLElement).style.borderColor = "transparent"; (e.currentTarget as HTMLElement).style.background = "transparent"; }}
+          >
+            <ThemeIcon className="h-3.5 w-3.5" />
           </button>
           </Tooltip>
 
@@ -521,7 +555,7 @@ export default function MapListView({
           </Tooltip>
 
           {/* divider */}
-          <div className="h-5 w-px mx-0.5" style={{ background: "rgba(255,255,255,0.08)" }} />
+          <div className="h-5 w-px mx-0.5" style={{ background: "var(--glass-border)" }} />
 
           {/* ── New map (primary action — slightly more visible) ── */}
           <Tooltip content="Nuevo mapa" placement="bottom">
@@ -538,7 +572,7 @@ export default function MapListView({
           </Tooltip>
 
           {/* divider */}
-          <div className="h-5 w-px mx-0.5" style={{ background: "rgba(255,255,255,0.08)" }} />
+          <div className="h-5 w-px mx-0.5" style={{ background: "var(--glass-border)" }} />
 
           {/* ── Logout ── */}
           <Tooltip content="Cerrar sesión" placement="bottom">
@@ -549,9 +583,9 @@ export default function MapListView({
               onLogout();
             }}
             className="flex h-8 w-8 items-center justify-center rounded-lg transition-all"
-            style={{ color: "#555", border: "1px solid transparent" }}
-            onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = "#888"; (e.currentTarget as HTMLElement).style.borderColor = "rgba(255,255,255,0.1)"; (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.04)"; }}
-            onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = "#555"; (e.currentTarget as HTMLElement).style.borderColor = "transparent"; (e.currentTarget as HTMLElement).style.background = "transparent"; }}
+            style={{ color: "var(--text-tertiary)", border: "1px solid transparent" }}
+            onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = "var(--text-secondary)"; (e.currentTarget as HTMLElement).style.borderColor = "var(--glass-border)"; (e.currentTarget as HTMLElement).style.background = "var(--surface-hover)"; }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = "var(--text-tertiary)"; (e.currentTarget as HTMLElement).style.borderColor = "transparent"; (e.currentTarget as HTMLElement).style.background = "transparent"; }}
           >
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></svg>
           </button>
@@ -562,12 +596,12 @@ export default function MapListView({
       {/* Search + Filters bar */}
       <div className="flex items-center gap-3 mb-4">
         <div className="relative flex-1 max-w-sm">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#555]" />
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4" style={{ color: "var(--text-tertiary)" }} />
           <input type="text" placeholder="Buscar mapa..." value={search} onChange={(e) => setSearch(e.target.value)}
-            className="w-full rounded-xl pl-9 pr-3 py-2 text-sm text-[#ededed] placeholder:text-[#555] focus:outline-none focus:ring-2 focus:ring-blue-500/30"
-            style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)" }} />
+            className="w-full rounded-xl pl-9 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/30"
+            style={{ background: "var(--surface-card)", border: "1px solid var(--glass-border)", color: "var(--text-primary)" }} />
         </div>
-        <div className="flex items-center gap-1 rounded-xl p-0.5" style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.04)" }}>
+        <div className="flex items-center gap-1 rounded-xl p-0.5" style={{ background: "var(--surface-card)", border: "1px solid var(--glass-border)" }}>
           {[
             { key: "all", label: "Todos", icon: <Filter className="h-3 w-3" /> },
               { key: "image", label: "Imagen", icon: <Image className="h-3 w-3" /> },
@@ -577,7 +611,7 @@ export default function MapListView({
               className="flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-[10px] font-semibold transition-all"
               style={{
                 background: filterType === key ? "rgba(59,130,246,0.12)" : "transparent",
-                color: filterType === key ? "#60a5fa" : "#666",
+                color: filterType === key ? "#60a5fa" : "var(--muted-foreground)",
                 border: filterType === key ? "1px solid rgba(59,130,246,0.25)" : "1px solid transparent",
               }}>
               {icon} {label}
@@ -587,20 +621,20 @@ export default function MapListView({
       </div>
 
       {/* Table */}
-      <div className="rounded-2xl overflow-hidden" style={{ background: "rgba(255,255,255,0.015)", border: "1px solid rgba(255,255,255,0.06)" }}>
+      <div className="rounded-2xl overflow-hidden" style={{ background: "var(--surface-card)", border: "1px solid var(--glass-border)" }}>
         {/* Table header */}
-        <div className="grid grid-cols-[1fr_90px_90px_100px_120px_130px_70px_165px] gap-2 px-5 py-3 text-[10px] font-bold uppercase tracking-wider text-[#555]"
-          style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
-          <button className="flex items-center gap-1 text-left hover:text-[#ededed] transition-colors" onClick={() => toggleSort("name")}>
+        <div className="grid grid-cols-[1fr_90px_90px_100px_120px_130px_70px_165px] gap-2 px-5 py-3 text-[10px] font-bold uppercase tracking-wider"
+          style={{ borderBottom: "1px solid var(--glass-border)", color: "var(--text-tertiary)" }}>
+          <button className="flex items-center gap-1 text-left transition-colors" style={{ color: "var(--text-tertiary)" }} onClick={() => toggleSort("name")}>
             Nombre <SortIcon col="name" />
           </button>
-          <button className="flex items-center gap-1 hover:text-[#ededed] transition-colors" onClick={() => toggleSort("type")}>
+          <button className="flex items-center gap-1 transition-colors" style={{ color: "var(--text-tertiary)" }} onClick={() => toggleSort("type")}>
             Tipo <SortIcon col="type" />
           </button>
           <span>Nodos</span>
           <span className="text-emerald-500">Estado</span>
           <span>Grupo</span>
-          <button className="flex items-center gap-1 hover:text-[#ededed] transition-colors" onClick={() => toggleSort("updated")}>
+          <button className="flex items-center gap-1 transition-colors" style={{ color: "var(--text-tertiary)" }} onClick={() => toggleSort("updated")}>
             Actualizado <SortIcon col="updated" />
           </button>
           <span>Vista</span>
@@ -623,12 +657,12 @@ export default function MapListView({
               draggable
               className="grid grid-cols-[1fr_90px_90px_100px_120px_130px_70px_165px] gap-2 items-center px-5 py-3 transition-all cursor-pointer group/row"
               style={{
-                borderBottom: "1px solid rgba(255,255,255,0.03)",
+                borderBottom: "1px solid var(--glass-border)",
                 background: dragOverMapId === map.id && draggingMapId !== map.id ? "rgba(99,102,241,0.12)" : "transparent",
                 outline: dragOverMapId === map.id && draggingMapId !== map.id ? "1px solid rgba(99,102,241,0.4)" : "none",
                 opacity: draggingMapId === map.id ? 0.5 : 1,
               }}
-              onMouseEnter={(e) => { if (dragOverMapId !== map.id) (e.currentTarget as HTMLElement).style.background = "rgba(59,130,246,0.04)"; }}
+              onMouseEnter={(e) => { if (dragOverMapId !== map.id) (e.currentTarget as HTMLElement).style.background = "var(--surface-hover)"; }}
               onMouseLeave={(e) => { if (dragOverMapId !== map.id) (e.currentTarget as HTMLElement).style.background = "transparent"; }}
               onDragStart={(e) => {
                 setDraggingMapId(map.id);
@@ -683,30 +717,31 @@ export default function MapListView({
                   <input autoFocus value={editValue} onChange={(e) => setEditValue(e.target.value)}
                     onBlur={() => editValue.trim() ? renameMap(map.id, editValue.trim()) : setEditingId(null)}
                     onKeyDown={(e) => { if (e.key === "Enter" && editValue.trim()) renameMap(map.id, editValue.trim()); if (e.key === "Escape") setEditingId(null); }}
-                    className="text-sm font-bold bg-transparent border-b border-blue-500 focus:outline-none text-[#ededed] w-full"
+                    className="text-sm font-bold bg-transparent border-b border-blue-500 focus:outline-none w-full"
+                    style={{ color: "var(--text-primary)" }}
                     onClick={(e) => e.stopPropagation()} />
                 ) : (
-                  <span className="text-sm font-bold text-[#ededed] truncate">{map.name}</span>
+                  <span className="text-sm font-bold truncate" style={{ color: "var(--text-primary)" }}>{map.name}</span>
                 )}
               </div>
 
               {/* Type */}
               <div className="flex items-center gap-1.5">
                 {bgTypeIcon(map.background_type)}
-                <span className="text-[11px] text-[#999]">{bgTypeLabel(map.background_type)}</span>
+                <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>{bgTypeLabel(map.background_type)}</span>
               </div>
 
               {/* Nodes count */}
               <div className="flex items-center gap-1.5 text-[11px]">
-                <span className="font-bold text-[#bbb]">{map.node_count}</span>
-                <span className="text-[#555]">/</span>
-                <span className="text-[10px] text-[#666]">{map.edge_count}L</span>
+                <span className="font-bold" style={{ color: "var(--text-secondary)" }}>{map.node_count}</span>
+                <span style={{ color: "var(--text-tertiary)" }}>/</span>
+                <span className="text-[10px]" style={{ color: "var(--muted-foreground)" }}>{map.edge_count}L</span>
               </div>
 
               {/* Status UP/DOWN */}
               <div className="flex items-center gap-1.5">
                 {total === 0 ? (
-                  <span className="text-[10px] text-[#444]">—</span>
+                  <span className="text-[10px]" style={{ color: "var(--text-tertiary)" }}>—</span>
                 ) : (
                   <>
                     {up > 0 && (
@@ -739,13 +774,13 @@ export default function MapListView({
                     <Tag className="h-2.5 w-2.5" /> {groupName}
                   </span>
                 ) : (
-                  <span className="text-[10px] text-[#444]">—</span>
+                  <span className="text-[10px]" style={{ color: "var(--text-tertiary)" }}>—</span>
                 )}
               </div>
 
               {/* Updated */}
-              <div className="flex items-center gap-1.5 text-[11px] text-[#777]">
-                <Clock className="h-3 w-3 text-[#555]" />
+              <div className="flex items-center gap-1.5 text-[11px]" style={{ color: "var(--text-secondary)" }}>
+                <Clock className="h-3 w-3" style={{ color: "var(--text-tertiary)" }} />
                 {new Date(map.updated_at).toLocaleDateString()} {new Date(map.updated_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
               </div>
 
@@ -771,25 +806,25 @@ export default function MapListView({
                 </Tooltip>
                 <Tooltip content="Renombrar">
                 <button onClick={(e) => { e.stopPropagation(); setEditingId(map.id); setEditValue(map.name); }}
-                  className="rounded-lg p-1.5 text-[#888] hover:text-[#ededed] hover:bg-white/5 transition-all opacity-0 group-hover/row:opacity-100">
+                  className="rounded-lg p-1.5 hover:bg-white/5 transition-all opacity-0 group-hover/row:opacity-100" style={{ color: "var(--text-secondary)" }}>
                   <Pencil className="h-3.5 w-3.5" />
                 </button>
                 </Tooltip>
                 <Tooltip content="Exportar JSON">
                 <button onClick={(e) => { e.stopPropagation(); window.open(apiUrl(`/api/maps/${map.id}/export`), "_blank"); }}
-                  className="rounded-lg p-1.5 text-[#888] hover:text-emerald-400 hover:bg-emerald-500/10 transition-all opacity-0 group-hover/row:opacity-100">
+                  className="rounded-lg p-1.5 hover:text-emerald-400 hover:bg-emerald-500/10 transition-all opacity-0 group-hover/row:opacity-100" style={{ color: "var(--text-secondary)" }}>
                   <Download className="h-3.5 w-3.5" />
                 </button>
                 </Tooltip>
                 <Tooltip content="Clonar mapa">
                 <button onClick={(e) => { e.stopPropagation(); cloneMap(map); }}
-                  className="rounded-lg p-1.5 text-[#888] hover:text-amber-400 hover:bg-amber-500/10 transition-all opacity-0 group-hover/row:opacity-100">
+                  className="rounded-lg p-1.5 hover:text-amber-400 hover:bg-amber-500/10 transition-all opacity-0 group-hover/row:opacity-100" style={{ color: "var(--text-secondary)" }}>
                   <Copy className="h-3.5 w-3.5" />
                 </button>
                 </Tooltip>
                 <Tooltip content="Eliminar">
                 <button onClick={(e) => { e.stopPropagation(); confirm(`Eliminar "${map.name}"?`) && deleteMap(map.id, map.name); }}
-                  className="rounded-lg p-1.5 text-[#888] hover:text-red-400 hover:bg-red-500/10 transition-all opacity-0 group-hover/row:opacity-100">
+                  className="rounded-lg p-1.5 hover:text-red-400 hover:bg-red-500/10 transition-all opacity-0 group-hover/row:opacity-100" style={{ color: "var(--text-secondary)" }}>
                   <Trash2 className="h-3.5 w-3.5" />
                 </button>
                 </Tooltip>
@@ -804,7 +839,7 @@ export default function MapListView({
                   draggable
                   className="grid grid-cols-[1fr_90px_90px_100px_120px_130px_70px_165px] gap-2 items-center py-2 cursor-pointer group/child"
                   style={{
-                    borderBottom: "1px solid rgba(255,255,255,0.02)",
+                    borderBottom: "1px solid var(--glass-border)",
                     paddingLeft: "72px", paddingRight: "20px",
                     background: "rgba(99,102,241,0.025)",
                     opacity: draggingMapId === child.id ? 0.5 : 1,
@@ -841,13 +876,13 @@ export default function MapListView({
                   {/* Type */}
                   <div className="flex items-center gap-1.5">
                     {bgTypeIcon(child.background_type)}
-                    <span className="text-[10px] text-[#888]">{bgTypeLabel(child.background_type)}</span>
+                    <span className="text-[10px]" style={{ color: "var(--text-secondary)" }}>{bgTypeLabel(child.background_type)}</span>
                   </div>
                   {/* Nodes */}
-                  <div className="text-[10px] text-[#777]">{child.node_count} <span className="text-[#555]">/ {child.edge_count}L</span></div>
+                  <div className="text-[10px]" style={{ color: "var(--text-secondary)" }}>{child.node_count} <span style={{ color: "var(--text-tertiary)" }}>/ {child.edge_count}L</span></div>
                   {/* Status */}
                   <div className="flex items-center gap-1">
-                    {childStatus.total === 0 ? <span className="text-[10px] text-[#444]">—</span> : (
+                    {childStatus.total === 0 ? <span className="text-[10px]" style={{ color: "var(--text-tertiary)" }}>—</span> : (
                       <>
                         {childStatus.up > 0 && <span className="flex items-center gap-0.5 text-[9px] font-bold text-emerald-400"><span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />{childStatus.up}</span>}
                         {childStatus.down > 0 && <span className="flex items-center gap-0.5 text-[9px] font-bold text-red-400"><span className="h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse" />{childStatus.down}</span>}
@@ -858,7 +893,7 @@ export default function MapListView({
                   {/* Group (empty for submaps) */}
                   <div />
                   {/* Updated */}
-                  <div className="text-[10px] text-[#666]">{new Date(child.updated_at).toLocaleDateString()}</div>
+                  <div className="text-[10px]" style={{ color: "var(--muted-foreground)" }}>{new Date(child.updated_at).toLocaleDateString()}</div>
                   {/* View */}
                   <div className="flex items-center gap-1">
                     <a href={apiUrl(`/view/${child.id}`)} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}
@@ -871,25 +906,25 @@ export default function MapListView({
                   <div className="flex items-center justify-end gap-1">
                     <Tooltip content="Renombrar">
                     <button onClick={(e) => { e.stopPropagation(); setEditingId(child.id); setEditValue(child.name); }}
-                      className="rounded-lg p-1.5 text-[#888] hover:text-[#ededed] hover:bg-white/5 transition-all opacity-0 group-hover/child:opacity-100">
+                      className="rounded-lg p-1.5 hover:bg-white/5 transition-all opacity-0 group-hover/child:opacity-100" style={{ color: "var(--text-secondary)" }}>
                       <Pencil className="h-3.5 w-3.5" />
                     </button>
                     </Tooltip>
                     <Tooltip content="Exportar JSON">
                     <button onClick={(e) => { e.stopPropagation(); window.open(apiUrl(`/api/maps/${child.id}/export`), "_blank"); }}
-                      className="rounded-lg p-1.5 text-[#888] hover:text-emerald-400 hover:bg-emerald-500/10 transition-all opacity-0 group-hover/child:opacity-100">
+                      className="rounded-lg p-1.5 hover:text-emerald-400 hover:bg-emerald-500/10 transition-all opacity-0 group-hover/child:opacity-100" style={{ color: "var(--text-secondary)" }}>
                       <Download className="h-3.5 w-3.5" />
                     </button>
                     </Tooltip>
                     <Tooltip content="Clonar submap">
                     <button onClick={(e) => { e.stopPropagation(); cloneMap(child); }}
-                      className="rounded-lg p-1.5 text-[#888] hover:text-amber-400 hover:bg-amber-500/10 transition-all opacity-0 group-hover/child:opacity-100">
+                      className="rounded-lg p-1.5 hover:text-amber-400 hover:bg-amber-500/10 transition-all opacity-0 group-hover/child:opacity-100" style={{ color: "var(--text-secondary)" }}>
                       <Copy className="h-3.5 w-3.5" />
                     </button>
                     </Tooltip>
                     <Tooltip content="Eliminar submap">
                     <button onClick={(e) => { e.stopPropagation(); confirm(`Eliminar "${child.name}"?`) && deleteMap(child.id, child.name); }}
-                      className="rounded-lg p-1.5 text-[#888] hover:text-red-400 hover:bg-red-500/10 transition-all opacity-0 group-hover/child:opacity-100">
+                      className="rounded-lg p-1.5 hover:text-red-400 hover:bg-red-500/10 transition-all opacity-0 group-hover/child:opacity-100" style={{ color: "var(--text-secondary)" }}>
                       <Trash2 className="h-3.5 w-3.5" />
                     </button>
                     </Tooltip>
@@ -907,9 +942,9 @@ export default function MapListView({
           <div
             className="flex items-center justify-center gap-2 py-3 transition-all"
             style={{
-              borderBottom: "1px solid rgba(255,255,255,0.04)",
-              background: dragOverMapId === "__root__" ? "rgba(59,130,246,0.12)" : "rgba(255,255,255,0.01)",
-              outline: dragOverMapId === "__root__" ? "1px dashed rgba(59,130,246,0.4)" : "1px dashed rgba(255,255,255,0.08)",
+              borderBottom: "1px solid var(--glass-border)",
+              background: dragOverMapId === "__root__" ? "rgba(59,130,246,0.12)" : "var(--surface-card)",
+              outline: dragOverMapId === "__root__" ? "1px dashed rgba(59,130,246,0.4)" : "1px dashed var(--glass-border)",
             }}
             onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; setDragOverMapId("__root__"); }}
             onDragLeave={() => setDragOverMapId(null)}
@@ -921,7 +956,7 @@ export default function MapListView({
               setDragOverMapId(null);
             }}
           >
-            <span className="text-[10px] text-[#555]" style={{ color: dragOverMapId === "__root__" ? "#60a5fa" : "#555" }}>
+            <span className="text-[10px]" style={{ color: dragOverMapId === "__root__" ? "#60a5fa" : "var(--text-tertiary)" }}>
               Soltar aquí para mover a raíz
             </span>
           </div>
@@ -929,7 +964,7 @@ export default function MapListView({
 
         {/* Empty state */}
         {filtered.length === 0 && (
-          <div className="flex flex-col items-center py-16 text-[#555]">
+          <div className="flex flex-col items-center py-16" style={{ color: "var(--text-tertiary)" }}>
             {maps.length === 0 ? (
               <>
                 <Sparkles className="h-10 w-10 mb-3 opacity-20" />
@@ -946,7 +981,7 @@ export default function MapListView({
       </div>
 
       {/* Footer stats */}
-      <div className="mt-3 flex items-center justify-between text-[10px] text-[#555]">
+      <div className="mt-3 flex items-center justify-between text-[10px]" style={{ color: "var(--text-tertiary)" }}>
         <span>{filtered.length} de {maps.length} mapa{maps.length !== 1 ? "s" : ""}</span>
         <span>Click para abrir · Hover para acciones · Arrastrar para reubicar</span>
       </div>
@@ -960,28 +995,28 @@ export default function MapListView({
             style={{ background: "rgba(0,0,0,0.75)", backdropFilter: "blur(10px)" }}
             onClick={(e) => { if (e.target === e.currentTarget) setCreateModal({ open: false, parentId: null }); }}
           >
-            <div className="w-full max-w-md rounded-2xl shadow-2xl" style={{ background: "rgba(12,12,12,0.99)", border: "1px solid rgba(255,255,255,0.1)" }}>
+            <div className="w-full max-w-md rounded-2xl shadow-2xl" style={{ background: "var(--card)", border: "1px solid var(--glass-border)" }}>
               {/* Header */}
-              <div className="flex items-center gap-3 px-6 py-4" style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+              <div className="flex items-center gap-3 px-6 py-4" style={{ borderBottom: "1px solid var(--glass-border)" }}>
                 <div className="flex h-9 w-9 items-center justify-center rounded-xl"
                   style={{ background: "rgba(59,130,246,0.12)", border: "1px solid rgba(59,130,246,0.25)" }}>
                   <Plus className="h-4 w-4 text-blue-400" />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <h3 className="text-sm font-bold text-[#ededed]">
+                  <h3 className="text-sm font-bold" style={{ color: "var(--text-primary)" }}>
                     {parentMap ? `Nuevo submap de "${parentMap.name}"` : "Nuevo mapa"}
                   </h3>
-                  <p className="text-[10px] text-[#555] mt-0.5">Elige el tipo de mapa y asígnale un nombre</p>
+                  <p className="text-[10px] mt-0.5" style={{ color: "var(--text-tertiary)" }}>Elige el tipo de mapa y asígnale un nombre</p>
                 </div>
                 <button onClick={() => setCreateModal({ open: false, parentId: null })}
-                  className="text-[#555] hover:text-[#ededed] transition-colors text-xl leading-none">&times;</button>
+                  className="transition-colors text-xl leading-none" style={{ color: "var(--text-tertiary)" }}>&times;</button>
               </div>
 
               {/* Body */}
               <div className="px-6 py-5 space-y-5">
                 {/* Map name */}
                 <div className="space-y-1.5">
-                  <label className="text-[10px] font-bold uppercase tracking-wider text-[#555]">Nombre</label>
+                  <label className="text-[10px] font-bold uppercase tracking-wider" style={{ color: "var(--text-tertiary)" }}>Nombre</label>
                   <input
                     autoFocus
                     type="text"
@@ -989,22 +1024,22 @@ export default function MapListView({
                     value={newMapName}
                     onChange={(e) => setNewMapName(e.target.value)}
                     onKeyDown={(e) => e.key === "Enter" && newMapName.trim() && handleModalCreate()}
-                    className="w-full rounded-xl px-4 py-3 text-sm text-[#ededed] placeholder:text-[#444] focus:outline-none focus:ring-2 focus:ring-blue-500/40 transition-all"
-                    style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}
+                    className="w-full rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/40 transition-all"
+                    style={{ background: "var(--surface-card)", border: "1px solid var(--glass-border)", color: "var(--text-primary)" }}
                   />
                 </div>
 
                 {/* Map type cards */}
                 <div className="space-y-1.5">
-                  <label className="text-[10px] font-bold uppercase tracking-wider text-[#555]">Tipo de mapa</label>
+                  <label className="text-[10px] font-bold uppercase tracking-wider" style={{ color: "var(--text-tertiary)" }}>Tipo de mapa</label>
                   <div className="grid grid-cols-2 gap-3">
                     {/* Livemap card */}
                     <button
                       onClick={() => setNewMapBgType("livemap")}
                       className="relative flex flex-col items-start gap-2.5 rounded-xl p-4 text-left transition-all"
                       style={{
-                        background: newMapBgType === "livemap" ? "rgba(16,185,129,0.08)" : "rgba(255,255,255,0.02)",
-                        border: newMapBgType === "livemap" ? "1.5px solid rgba(16,185,129,0.4)" : "1.5px solid rgba(255,255,255,0.06)",
+                        background: newMapBgType === "livemap" ? "rgba(16,185,129,0.08)" : "var(--surface-card)",
+                        border: newMapBgType === "livemap" ? "1.5px solid rgba(16,185,129,0.4)" : "1.5px solid var(--glass-border)",
                       }}
                     >
                       {newMapBgType === "livemap" && (
@@ -1017,8 +1052,8 @@ export default function MapListView({
                         </svg>
                       </div>
                       <div>
-                        <div className="text-xs font-bold" style={{ color: newMapBgType === "livemap" ? "#34d399" : "#888" }}>Mapa real</div>
-                        <div className="text-[10px] text-[#555] mt-0.5 leading-snug">OpenStreetMap con ubicaciones geográficas</div>
+                        <div className="text-xs font-bold" style={{ color: newMapBgType === "livemap" ? "#34d399" : "var(--text-secondary)" }}>Mapa real</div>
+                        <div className="text-[10px] mt-0.5 leading-snug" style={{ color: "var(--text-tertiary)" }}>OpenStreetMap con ubicaciones geográficas</div>
                       </div>
                     </button>
 
@@ -1027,8 +1062,8 @@ export default function MapListView({
                       onClick={() => setNewMapBgType("image")}
                       className="relative flex flex-col items-start gap-2.5 rounded-xl p-4 text-left transition-all"
                       style={{
-                        background: newMapBgType === "image" ? "rgba(168,85,247,0.08)" : "rgba(255,255,255,0.02)",
-                        border: newMapBgType === "image" ? "1.5px solid rgba(168,85,247,0.4)" : "1.5px solid rgba(255,255,255,0.06)",
+                        background: newMapBgType === "image" ? "rgba(168,85,247,0.08)" : "var(--surface-card)",
+                        border: newMapBgType === "image" ? "1.5px solid rgba(168,85,247,0.4)" : "1.5px solid var(--glass-border)",
                       }}
                     >
                       {newMapBgType === "image" && (
@@ -1041,8 +1076,8 @@ export default function MapListView({
                         </svg>
                       </div>
                       <div>
-                        <div className="text-xs font-bold" style={{ color: newMapBgType === "image" ? "#c084fc" : "#888" }}>Foto / plano</div>
-                        <div className="text-[10px] text-[#555] mt-0.5 leading-snug">Imagen o plano como fondo del mapa</div>
+                        <div className="text-xs font-bold" style={{ color: newMapBgType === "image" ? "#c084fc" : "var(--text-secondary)" }}>Foto / plano</div>
+                        <div className="text-[10px] mt-0.5 leading-snug" style={{ color: "var(--text-tertiary)" }}>Imagen o plano como fondo del mapa</div>
                       </div>
                     </button>
                   </div>
@@ -1051,21 +1086,21 @@ export default function MapListView({
                 {/* Kuma group — only for root maps — custom dark dropdown */}
                 {!createModal.parentId && kumaGroups.length > 0 && (
                   <div className="space-y-1.5">
-                    <label className="text-[10px] font-bold uppercase tracking-wider text-[#555]">Grupo Kuma <span className="normal-case font-normal text-[#444]">(opcional)</span></label>
+                    <label className="text-[10px] font-bold uppercase tracking-wider" style={{ color: "var(--text-tertiary)" }}>Grupo Kuma <span className="normal-case font-normal" style={{ color: "var(--muted-foreground)" }}>(opcional)</span></label>
                     <div className="relative">
                       <button
                         type="button"
                         onClick={() => setGroupDropdownOpen(v => !v)}
                         className="w-full flex items-center justify-between rounded-xl px-4 py-2.5 text-sm transition-all"
                         style={{
-                          background: "rgba(255,255,255,0.04)",
-                          border: groupDropdownOpen ? "1px solid rgba(99,102,241,0.4)" : "1px solid rgba(255,255,255,0.08)",
-                          color: newMapGroup ? "#ededed" : "#555",
+                          background: "var(--surface-card)",
+                          border: groupDropdownOpen ? "1px solid rgba(99,102,241,0.4)" : "1px solid var(--glass-border)",
+                          color: newMapGroup ? "var(--text-primary)" : "var(--text-tertiary)",
                         }}
                       >
                         <span>{newMapGroup ? kumaGroups.find(g => g.id === newMapGroup)?.name || "Sin grupo" : "Sin grupo"}</span>
                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
-                          style={{ color: "#555", transform: groupDropdownOpen ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.15s" }}>
+                          style={{ color: "var(--text-tertiary)", transform: groupDropdownOpen ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.15s" }}>
                           <polyline points="6 9 12 15 18 9" />
                         </svg>
                       </button>
@@ -1074,8 +1109,8 @@ export default function MapListView({
                           className="absolute left-0 right-0 rounded-xl overflow-hidden shadow-2xl z-50"
                           style={{
                             top: "calc(100% + 6px)",
-                            background: "#1a1a1f",
-                            border: "1px solid rgba(255,255,255,0.09)",
+                            background: "var(--card)",
+                            border: "1px solid var(--glass-border)",
                             maxHeight: "220px",
                             overflowY: "auto",
                           }}
@@ -1086,16 +1121,16 @@ export default function MapListView({
                             onClick={() => { setNewMapGroup(""); setGroupDropdownOpen(false); }}
                             className="w-full text-left px-4 py-2 text-sm transition-all"
                             style={{
-                              color: !newMapGroup ? "#ededed" : "#888",
+                              color: !newMapGroup ? "var(--text-primary)" : "var(--text-secondary)",
                               background: !newMapGroup ? "rgba(99,102,241,0.12)" : "transparent",
                             }}
-                            onMouseEnter={e => { if (newMapGroup) (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.05)"; }}
+                            onMouseEnter={e => { if (newMapGroup) (e.currentTarget as HTMLElement).style.background = "var(--surface-hover)"; }}
                             onMouseLeave={e => { if (newMapGroup) (e.currentTarget as HTMLElement).style.background = "transparent"; }}
                           >
                             Sin grupo
                           </button>
                           {/* Divider */}
-                          <div style={{ height: "1px", background: "rgba(255,255,255,0.05)", margin: "0 12px" }} />
+                          <div style={{ height: "1px", background: "var(--glass-border)", margin: "0 12px" }} />
                           {kumaGroups.map((g) => (
                             <button
                               key={g.id}
@@ -1103,10 +1138,10 @@ export default function MapListView({
                               onClick={() => { setNewMapGroup(g.id); setGroupDropdownOpen(false); }}
                               className="w-full text-left px-4 py-2 text-sm transition-all"
                               style={{
-                                color: newMapGroup === g.id ? "#ededed" : "#aaa",
+                                color: newMapGroup === g.id ? "var(--text-primary)" : "var(--text-secondary)",
                                 background: newMapGroup === g.id ? "rgba(99,102,241,0.12)" : "transparent",
                               }}
-                              onMouseEnter={e => { if (newMapGroup !== g.id) (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.05)"; }}
+                              onMouseEnter={e => { if (newMapGroup !== g.id) (e.currentTarget as HTMLElement).style.background = "var(--surface-hover)"; }}
                               onMouseLeave={e => { if (newMapGroup !== g.id) (e.currentTarget as HTMLElement).style.background = "transparent"; }}
                             >
                               {g.name}
@@ -1120,11 +1155,11 @@ export default function MapListView({
               </div>
 
               {/* Footer */}
-              <div className="flex gap-2.5 px-6 py-4" style={{ borderTop: "1px solid rgba(255,255,255,0.06)" }}>
+              <div className="flex gap-2.5 px-6 py-4" style={{ borderTop: "1px solid var(--glass-border)" }}>
                 <button
                   onClick={() => setCreateModal({ open: false, parentId: null })}
                   className="flex-1 rounded-xl py-2.5 text-sm font-semibold transition-all"
-                  style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)", color: "#666" }}
+                  style={{ background: "var(--surface-card)", border: "1px solid var(--glass-border)", color: "var(--muted-foreground)" }}
                 >
                   Cancelar
                 </button>
@@ -1150,32 +1185,32 @@ export default function MapListView({
       {/* ═══ Import Preview Modal ═══ */}
       {importPreview && (
         <div className="fixed inset-0 z-[9999] flex items-center justify-center" style={{ background: "rgba(0,0,0,0.7)", backdropFilter: "blur(8px)" }}>
-          <div className="w-full max-w-lg rounded-2xl shadow-2xl" style={{ background: "rgba(14,14,14,0.99)", border: "1px solid rgba(255,255,255,0.1)" }}>
+          <div className="w-full max-w-lg rounded-2xl shadow-2xl" style={{ background: "var(--card)", border: "1px solid var(--glass-border)" }}>
             {/* Header */}
-            <div className="flex items-center gap-3 px-5 py-4" style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+            <div className="flex items-center gap-3 px-5 py-4" style={{ borderBottom: "1px solid var(--glass-border)" }}>
               <div className="flex h-9 w-9 items-center justify-center rounded-xl" style={{ background: "rgba(34,197,94,0.12)", border: "1px solid rgba(34,197,94,0.3)" }}>
                 <Upload className="h-4 w-4 text-emerald-400" />
               </div>
               <div>
-                <h3 className="text-sm font-bold text-[#ededed]">
+                <h3 className="text-sm font-bold" style={{ color: "var(--text-primary)" }}>
                   {importPreview.isBulk ? `Importación masiva — ${importPreview.maps.length} mapas` : "Importar mapa"}
                 </h3>
-                <p className="text-[10px] text-[#666] mt-0.5">
+                <p className="text-[10px] mt-0.5" style={{ color: "var(--muted-foreground)" }}>
                   {importPreview.isBulk ? "Se importarán los siguientes mapas:" : "Se importará el siguiente mapa:"}
                 </p>
               </div>
-              <button onClick={() => setImportPreview(null)} className="ml-auto text-[#555] hover:text-[#ededed] text-lg">&times;</button>
+              <button onClick={() => setImportPreview(null)} className="ml-auto text-lg" style={{ color: "var(--text-tertiary)" }}>&times;</button>
             </div>
 
             {/* Preview list */}
             <div className="px-5 py-3 max-h-[50vh] overflow-y-auto space-y-1.5">
               {importPreview.maps.map((m, i) => (
                 <div key={i} className="flex items-center gap-3 rounded-xl px-3 py-2.5"
-                  style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.05)" }}>
+                  style={{ background: "var(--surface-card)", border: "1px solid var(--glass-border)" }}>
                   <MapIcon className="h-4 w-4 text-blue-400 shrink-0" />
                   <div className="flex-1 min-w-0">
-                    <div className="text-sm font-semibold text-[#ededed] truncate">{m.name || `Mapa #${i + 1}`}</div>
-                    <div className="text-[10px] text-[#666]">
+                    <div className="text-sm font-semibold truncate" style={{ color: "var(--text-primary)" }}>{m.name || `Mapa #${i + 1}`}</div>
+                    <div className="text-[10px]" style={{ color: "var(--muted-foreground)" }}>
                       {m.nodes?.length ?? 0} nodos · {m.edges?.length ?? 0} links
                       {m.background_type && ` · ${m.background_type}`}
                     </div>
@@ -1186,10 +1221,10 @@ export default function MapListView({
             </div>
 
             {/* Actions */}
-            <div className="flex gap-2 px-5 py-4" style={{ borderTop: "1px solid rgba(255,255,255,0.06)" }}>
+            <div className="flex gap-2 px-5 py-4" style={{ borderTop: "1px solid var(--glass-border)" }}>
               <button onClick={() => setImportPreview(null)}
                 className="flex-1 rounded-xl py-2.5 text-sm font-semibold"
-                style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", color: "#888" }}>
+                style={{ background: "var(--surface-card)", border: "1px solid var(--glass-border)", color: "var(--text-secondary)" }}>
                 Cancelar
               </button>
               <button onClick={confirmImport} disabled={importing}

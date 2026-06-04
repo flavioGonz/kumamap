@@ -46,7 +46,7 @@ import { iconSvgPaths, getIconSvg, createMarkerIcon } from "@/utils/map-icons";
 // map-export utils no longer used — export is now ZIP only
 import MapClock from "./MapClock";
 import VisualizationPanel from "./VisualizationPanel";
-import MapSearchPanel from "./MapSearchPanel";
+// MapSearchPanel removed — search is now inline in the toolbar
 import AlertManagerPanel, { useAlertCount, type TimelineEvent } from "./AlertManagerPanel";
 import FOVColorPickerModal from "./FOVColorPickerModal";
 import LensPickerModal from "./LensPickerModal";
@@ -4585,67 +4585,7 @@ export default function LeafletMapView({
         } : undefined}
       />}
 
-      {/* ── Map Search Panel (top-left) ── */}
-      {!readonly && !rackDrawerNodeId && (
-        <MapSearchPanel
-          nodes={nodesRef.current}
-          isImageMode={isImageMode}
-          onFlyTo={(lat, lng, label) => {
-            if (!mapRef.current) return;
-            mapRef.current.setView([lat, lng], Math.max(mapRef.current.getZoom(), isImageMode ? mapRef.current.getZoom() : 16), { animate: true });
-            // Flash the matching marker
-            const matchNode = nodesRef.current.find(n => n.x === lat && n.y === lng);
-            if (matchNode) {
-              const marker = markersRef.current.get(matchNode.id);
-              if (marker?.getElement()) {
-                const el = marker.getElement();
-                el.style.filter = "drop-shadow(0 0 20px #3b82f6) drop-shadow(0 0 40px #3b82f6) brightness(1.8)";
-                el.style.transition = "filter 0.2s";
-                el.classList.add("node-vibrate");
-                setTimeout(() => {
-                  el.style.filter = "drop-shadow(0 0 8px #3b82f688) brightness(1.1)";
-                  el.style.transition = "filter 1.5s";
-                  el.classList.remove("node-vibrate");
-                }, 1500);
-              }
-            }
-            toast.success("Encontrado", { description: label.substring(0, 60) });
-          }}
-          onTempMarker={(lat, lng, label) => {
-            if (!mapRef.current || !LRef.current) return;
-            const L = LRef.current;
-            // Remove previous temp marker
-            if ((window as any).__kumamap_tempMarker) {
-              try { mapRef.current.removeLayer((window as any).__kumamap_tempMarker); } catch {}
-            }
-            // Create pulsing pin icon
-            const pinIcon = L.divIcon({
-              className: "",
-              html: `<div style="position:relative;width:28px;height:40px;">
-                <svg width="28" height="40" viewBox="0 0 28 40" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M14 0C6.268 0 0 6.268 0 14c0 10.5 14 26 14 26s14-15.5 14-26C28 6.268 21.732 0 14 0z" fill="#3b82f6"/>
-                  <circle cx="14" cy="14" r="6" fill="white"/>
-                </svg>
-                <div style="position:absolute;top:-4px;left:-4px;width:36px;height:36px;border-radius:50%;background:rgba(59,130,246,0.25);animation:ping-badge 1.5s ease-out infinite;"></div>
-              </div>`,
-              iconSize: [28, 40],
-              iconAnchor: [14, 40],
-              popupAnchor: [0, -40],
-            });
-            const marker = L.marker([lat, lng], { icon: pinIcon }).addTo(mapRef.current);
-            marker.bindPopup(`<div style="background:#0f0f0f;color:#eee;padding:8px 12px;border-radius:10px;font-family:system-ui;border:1px solid rgba(59,130,246,0.3);min-width:160px;">
-              <div style="font-size:11px;font-weight:600;margin-bottom:4px;">${label}</div>
-              <div style="font-size:9px;color:#888;font-family:monospace;">${lat.toFixed(6)}, ${lng.toFixed(6)}</div>
-              <div style="font-size:8px;color:#555;margin-top:4px;">Marcador temporal · clic para cerrar</div>
-            </div>`, { className: "leaflet-popup-dark" }).openPopup();
-            marker.on("click", () => {
-              try { mapRef.current?.removeLayer(marker); } catch {}
-              (window as any).__kumamap_tempMarker = null;
-            });
-            (window as any).__kumamap_tempMarker = marker;
-          }}
-        />
-      )}
+      {/* MapSearchPanel removed — search is now inline in the toolbar */}
 
       {/* Alert Manager Panel */}
       <AlertManagerPanel

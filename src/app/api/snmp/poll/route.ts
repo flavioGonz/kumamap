@@ -71,6 +71,39 @@ const OID = {
   entPhysicalDescr: "1.3.6.1.2.1.47.1.1.1.1.2", // table
 };
 
+// ── Wireless OID definitions ──────────────────────────────────────────────────
+
+// Ubiquiti airMAX MIB
+const UBNT_WIRELESS = {
+  ubntWlStatTxRate:    "1.3.6.1.4.1.41112.1.4.1.1.2",   // TX Rate Mbps
+  ubntWlStatSsid:      "1.3.6.1.4.1.41112.1.4.1.1.3",   // SSID
+  ubntWlStatRssi:      "1.3.6.1.4.1.41112.1.4.1.1.5",   // RSSI
+  ubntWlStatSignal:    "1.3.6.1.4.1.41112.1.4.1.1.6",   // Signal dBm
+  ubntWlStatNoise:     "1.3.6.1.4.1.41112.1.4.1.1.7",   // Noise dBm
+  ubntWlStatCcq:       "1.3.6.1.4.1.41112.1.4.1.1.8",   // CCQ %
+  ubntWlStatFreq:      "1.3.6.1.4.1.41112.1.4.5.1.2",   // Frequency MHz
+  ubntWlStatChannel:   "1.3.6.1.4.1.41112.1.4.5.1.14",  // Channel width
+  ubntStaConnTime:     "1.3.6.1.4.1.41112.1.4.7.1.1.8", // Connection time
+};
+
+// MikroTik wireless MIB
+const MIKROTIK_WIRELESS = {
+  mtxrWlStatTxRate:      "1.3.6.1.4.1.14988.1.1.1.1.1.2",
+  mtxrWlStatRxRate:      "1.3.6.1.4.1.14988.1.1.1.1.1.3",
+  mtxrWlStatStrength:    "1.3.6.1.4.1.14988.1.1.1.1.1.4",
+  mtxrWlStatSsid:        "1.3.6.1.4.1.14988.1.1.1.1.1.5",
+  mtxrWlStatFreq:        "1.3.6.1.4.1.14988.1.1.1.1.1.7",
+  mtxrWlStatBand:        "1.3.6.1.4.1.14988.1.1.1.1.1.8",
+  mtxrWlStatNoiseFloor:  "1.3.6.1.4.1.14988.1.1.1.1.1.9",
+};
+
+// Standard IEEE 802.11 MIB
+const DOT11_WIRELESS = {
+  dot11StationID:           "1.2.840.10036.1.1.1.1",
+  dot11CurrentChannel:      "1.2.840.10036.1.1.1.14",
+  dot11CurrentTxPowerLevel: "1.2.840.10036.1.4.1.7",
+};
+
 // ── SNMP result types ────────────────────────────────────────────────────────
 
 interface SnmpSystem {
@@ -109,6 +142,21 @@ interface SnmpCpu {
   perCore: number[];
 }
 
+interface SnmpWireless {
+  ssid?: string;
+  signal?: number;        // dBm
+  noise?: number;         // dBm
+  snr?: number;           // signal - noise
+  ccq?: number;           // % client connection quality
+  txRate?: number;        // Mbps
+  rxRate?: number;        // Mbps
+  frequency?: number;     // MHz
+  channelWidth?: number;  // MHz
+  connectedTime?: number; // seconds
+  vendor?: "ubiquiti" | "mikrotik" | "standard" | "unknown";
+  quality: "excellent" | "good" | "fair" | "poor" | "critical";
+}
+
 interface SnmpResult {
   ip: string;
   timestamp: number;
@@ -118,6 +166,7 @@ interface SnmpResult {
   interfaces?: SnmpInterface[];
   storage?: SnmpStorage[];
   cpu?: SnmpCpu;
+  wireless?: SnmpWireless | null;
 }
 
 // ── SNMP helpers ─────────────────────────────────────────────────────────────
@@ -198,9 +247,120 @@ function toString(val: any): string {
   return String(val);
 }
 
+// ── Signal quality classification ─────────────────────────────────────────────
+
+function classifySignal(signal: number | undefined): SnmpWireless["quality"] {
+  if (signal == null) return "critical";
+  if (signal >= -50) return "excellent";
+  if (signal >= -65) return "good";
+  if (signal >= -75) return "fair";
+  if (signal >= -85) return "poor";
+  return "critical";
+}
+
+// ── Wireless polling (Ubiquiti → MikroTik → 802.11 fallback) ────────────────
+
+async function pollWireless(session: any): Promise<SnmpWireless | null> {
+  // Try Ubiquiti first (most common in PTP deployments)
+  try {
+    const ubntBase = "1.3.6.1.4.1.41112.1.4";
+    const ubntResults = await snmpSubtree(session, ubntBase);
+    if (ubntResults.length > 0) {
+      const byOid: Record<string, any> = {};
+      for (const r of ubntResults) {
+        byOid[r.oid] = r.value;
+      }
+      // Find first matching values by walking subtree results
+      const findVal = (baseOid: string): any => {
+        for (const r of ubntResults) {
+          if (r.oid.startsWith(baseOid)) return r.value;
+        }
+        return undefined;
+      };
+      const signal = findVal(UBNT_WIRELESS.ubntWlStatSignal);
+      const noise = findVal(UBNT_WIRELESS.ubntWlStatNoise);
+      const signalNum = signal != null ? toNumber(signal) : undefined;
+      const noiseNum = noise != null ? toNumber(noise) : undefined;
+      const result: SnmpWireless = {
+        ssid: findVal(UBNT_WIRELESS.ubntWlStatSsid) != null ? toString(findVal(UBNT_WIRELESS.ubntWlStatSsid)) : undefined,
+        signal: signalNum,
+        noise: noiseNum,
+        snr: signalNum != null && noiseNum != null ? signalNum - noiseNum : undefined,
+        ccq: findVal(UBNT_WIRELESS.ubntWlStatCcq) != null ? toNumber(findVal(UBNT_WIRELESS.ubntWlStatCcq)) : undefined,
+        txRate: findVal(UBNT_WIRELESS.ubntWlStatTxRate) != null ? toNumber(findVal(UBNT_WIRELESS.ubntWlStatTxRate)) : undefined,
+        frequency: findVal(UBNT_WIRELESS.ubntWlStatFreq) != null ? toNumber(findVal(UBNT_WIRELESS.ubntWlStatFreq)) : undefined,
+        channelWidth: findVal(UBNT_WIRELESS.ubntWlStatChannel) != null ? toNumber(findVal(UBNT_WIRELESS.ubntWlStatChannel)) : undefined,
+        connectedTime: findVal(UBNT_WIRELESS.ubntStaConnTime) != null ? toNumber(findVal(UBNT_WIRELESS.ubntStaConnTime)) : undefined,
+        vendor: "ubiquiti",
+        quality: classifySignal(signalNum),
+      };
+      return result;
+    }
+  } catch {
+    // Ubiquiti OIDs not supported, try next
+  }
+
+  // Try MikroTik
+  try {
+    const mtBase = "1.3.6.1.4.1.14988.1.1.1";
+    const mtResults = await snmpSubtree(session, mtBase);
+    if (mtResults.length > 0) {
+      const findVal = (baseOid: string): any => {
+        for (const r of mtResults) {
+          if (r.oid.startsWith(baseOid)) return r.value;
+        }
+        return undefined;
+      };
+      const signal = findVal(MIKROTIK_WIRELESS.mtxrWlStatStrength);
+      const noise = findVal(MIKROTIK_WIRELESS.mtxrWlStatNoiseFloor);
+      const signalNum = signal != null ? toNumber(signal) : undefined;
+      const noiseNum = noise != null ? toNumber(noise) : undefined;
+      const result: SnmpWireless = {
+        ssid: findVal(MIKROTIK_WIRELESS.mtxrWlStatSsid) != null ? toString(findVal(MIKROTIK_WIRELESS.mtxrWlStatSsid)) : undefined,
+        signal: signalNum,
+        noise: noiseNum,
+        snr: signalNum != null && noiseNum != null ? signalNum - noiseNum : undefined,
+        txRate: findVal(MIKROTIK_WIRELESS.mtxrWlStatTxRate) != null ? toNumber(findVal(MIKROTIK_WIRELESS.mtxrWlStatTxRate)) : undefined,
+        rxRate: findVal(MIKROTIK_WIRELESS.mtxrWlStatRxRate) != null ? toNumber(findVal(MIKROTIK_WIRELESS.mtxrWlStatRxRate)) : undefined,
+        frequency: findVal(MIKROTIK_WIRELESS.mtxrWlStatFreq) != null ? toNumber(findVal(MIKROTIK_WIRELESS.mtxrWlStatFreq)) : undefined,
+        vendor: "mikrotik",
+        quality: classifySignal(signalNum),
+      };
+      return result;
+    }
+  } catch {
+    // MikroTik OIDs not supported, try standard
+  }
+
+  // Fallback to standard IEEE 802.11 MIB
+  try {
+    const dot11Base = "1.2.840.10036";
+    const dot11Results = await snmpSubtree(session, dot11Base);
+    if (dot11Results.length > 0) {
+      const findVal = (baseOid: string): any => {
+        for (const r of dot11Results) {
+          if (r.oid.startsWith(baseOid)) return r.value;
+        }
+        return undefined;
+      };
+      const result: SnmpWireless = {
+        frequency: findVal(DOT11_WIRELESS.dot11CurrentChannel) != null ? toNumber(findVal(DOT11_WIRELESS.dot11CurrentChannel)) : undefined,
+        txRate: findVal(DOT11_WIRELESS.dot11CurrentTxPowerLevel) != null ? toNumber(findVal(DOT11_WIRELESS.dot11CurrentTxPowerLevel)) : undefined,
+        vendor: "standard",
+        quality: "fair", // Can't determine signal from standard MIB alone
+      };
+      return result;
+    }
+  } catch {
+    // Standard 802.11 MIB not supported
+  }
+
+  return null;
+}
+
 // ── Main polling function ────────────────────────────────────────────────────
 
-async function pollDevice(ip: string, community: string, deviceType?: string): Promise<SnmpResult> {
+async function pollDevice(ip: string, community: string, deviceType?: string, mode?: string): Promise<SnmpResult> {
   const result: SnmpResult = {
     ip,
     timestamp: Date.now(),
@@ -386,6 +546,15 @@ async function pollDevice(ip: string, community: string, deviceType?: string): P
       // HOST-RESOURCES not supported
     }
 
+    // ── Wireless stats (when mode=wireless) ──
+    if (mode === "wireless") {
+      try {
+        result.wireless = await pollWireless(session);
+      } catch {
+        result.wireless = null;
+      }
+    }
+
   } catch (err: any) {
     result.error = err.message || "SNMP error";
   } finally {
@@ -397,24 +566,39 @@ async function pollDevice(ip: string, community: string, deviceType?: string): P
 
 // ── Route handler ─────────────────────────────────────────────────────────────
 
+// Wireless cache has shorter TTL (15s) since radio stats change fast
+const WIRELESS_CACHE_TTL = 15_000;
+
+function getCachedWithTtl(key: string, ttl: number): SnmpResult | null {
+  const entry = cache.get(key);
+  if (!entry) return null;
+  if (Date.now() - entry.ts > ttl) {
+    cache.delete(key);
+    return null;
+  }
+  return entry.data;
+}
+
 export async function POST(request: NextRequest) {
   try {
-    const { ip, community, deviceType } = await request.json();
+    const { ip, community, deviceType, mode } = await request.json();
 
     if (!ip) {
       return NextResponse.json({ error: "IP required" }, { status: 400 });
     }
 
     const comm = community || "public";
-    const cacheKey = `${ip}:${comm}:${deviceType || "all"}`;
+    const isWireless = mode === "wireless";
+    const cacheKey = `${ip}:${comm}:${deviceType || "all"}${isWireless ? ":wireless" : ""}`;
+    const ttl = isWireless ? WIRELESS_CACHE_TTL : CACHE_TTL;
 
     // Check cache first
-    const cached = getCached(cacheKey);
+    const cached = getCachedWithTtl(cacheKey, ttl);
     if (cached) {
       return NextResponse.json({ ...cached, cached: true });
     }
 
-    const result = await pollDevice(ip, comm, deviceType);
+    const result = await pollDevice(ip, comm, deviceType, mode);
 
     // Only cache successful results
     if (result.reachable) {

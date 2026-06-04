@@ -32,6 +32,7 @@ import OnvifDiscoveryModal from "./OnvifDiscoveryModal";
 import EventReportModal from "./EventReportModal";
 import CameraStreamConfigModal, { type CameraStreamConfig } from "./CameraStreamConfigModal";
 import AntennaConfigModal, { type AntennaConfig } from "./AntennaConfigModal";
+import AntennaStatusPanel from "./AntennaStatusPanel";
 import CameraStreamViewer from "./CameraStreamViewer";
 import CameraTooltipViewer from "./CameraTooltipViewer";
 import IconPickerModal from "./IconPickerModal";
@@ -648,8 +649,9 @@ export default function LeafletMapView({
 
   // Camera stream modals
   const [streamConfigNodeId, setStreamConfigNodeId] = useState<string | null>(null);
-  // Antenna config modal
+  // Antenna config modal + SNMP wireless panel
   const [antennaConfigNodeId, setAntennaConfigNodeId] = useState<string | null>(null);
+  const [antennaSnmpNodeId, setAntennaSnmpNodeId] = useState<string | null>(null);
   const [streamViewers, setStreamViewers] = useState<{ nodeId: string; mode: "tooltip" | "pip" }[]>([]);
   const [focusedViewer, setFocusedViewer] = useState<string | null>(null);
   const [tooltipAnchor, setTooltipAnchor] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
@@ -3585,6 +3587,18 @@ export default function LeafletMapView({
             icon: menuIcons.Signal,
             onClick: () => setAntennaConfigNodeId(nodeId),
           },
+          {
+            label: "SNMP Wireless",
+            icon: menuIcons.Signal,
+            onClick: () => {
+              const antCd = safeJsonParse<NodeCustomData>(node?.custom_data);
+              if (antCd.ip) {
+                setAntennaSnmpNodeId(nodeId);
+              } else {
+                toast.info("Configura una IP en la antena para usar SNMP", { id: "antenna-snmp-noip" });
+              }
+            },
+          },
         ],
       }] : []),
       // ── Copiar / Duplicar ──
@@ -4953,6 +4967,8 @@ export default function LeafletMapView({
           bandwidth: antCd.bandwidth || "40 MHz",
           protocol: antCd.protocol || "",
           peerNodeId: antCd.peerNodeId || "",
+          ip: (antCd.ip as string) || "",
+          snmpCommunity: (antCd.snmpCommunity as string) || "public",
         };
         // Get other antenna nodes for peer selection
         const antennaNodes = nodesRef.current
@@ -4978,6 +4994,8 @@ export default function LeafletMapView({
                 ncd.bandwidth = config.bandwidth;
                 ncd.protocol = config.protocol || undefined;
                 ncd.peerNodeId = config.peerNodeId || undefined;
+                ncd.ip = config.ip || undefined;
+                ncd.snmpCommunity = config.snmpCommunity || undefined;
                 nodesRef.current[idx] = { ...nodesRef.current[idx], custom_data: JSON.stringify(ncd) };
                 // Re-render to update beam
                 if (LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current);
@@ -4986,6 +5004,21 @@ export default function LeafletMapView({
               toast.success("Antena configurada");
             }}
             onClose={() => setAntennaConfigNodeId(null)}
+          />
+        );
+      })()}
+
+      {/* ── Antenna SNMP Wireless Panel ── */}
+      {antennaSnmpNodeId && (() => {
+        const antNode = nodesRef.current.find((n) => n.id === antennaSnmpNodeId);
+        const antCd = safeJsonParse<NodeCustomData>(antNode?.custom_data);
+        if (!antCd.ip) return null;
+        return (
+          <AntennaStatusPanel
+            ip={antCd.ip as string}
+            community={(antCd.snmpCommunity as string) || "public"}
+            antennaName={antNode?.label || "Antena"}
+            onClose={() => setAntennaSnmpNodeId(null)}
           />
         );
       })()}

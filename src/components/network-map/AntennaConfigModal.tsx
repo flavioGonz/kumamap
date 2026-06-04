@@ -15,6 +15,8 @@ export interface AntennaConfig {
   bandwidth: string;
   protocol: string;
   peerNodeId: string;
+  ip: string;
+  snmpCommunity: string;
 }
 
 interface AntennaConfigModalProps {
@@ -243,6 +245,17 @@ export default function AntennaConfigModal({
                   <label style={labelStyle}>SSID</label>
                   <input type="text" value={config.ssid} onChange={(e) => update("ssid", e.target.value)} placeholder="Nombre de red inalámbrica" style={{ ...inputStyle, padding: "6px 10px", fontSize: "12px" }} />
                 </div>
+
+                <div className="grid grid-cols-2 gap-2 mt-2">
+                  <div>
+                    <label style={labelStyle}>IP</label>
+                    <input type="text" value={config.ip} onChange={(e) => update("ip", e.target.value)} placeholder="192.168.1.1" style={{ ...inputStyle, padding: "6px 10px", fontSize: "12px", fontFamily: "monospace" }} />
+                  </div>
+                  <div>
+                    <label style={labelStyle}>Comunidad SNMP</label>
+                    <input type="text" value={config.snmpCommunity} onChange={(e) => update("snmpCommunity", e.target.value)} placeholder="public" style={{ ...inputStyle, padding: "6px 10px", fontSize: "12px", fontFamily: "monospace" }} />
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -326,6 +339,8 @@ export default function AntennaConfigModal({
                   <span>Apertura</span><span className="font-semibold" style={{ color: "var(--text-primary)" }}>{config.beamWidth}°</span>
                   {config.ssid && <><span>SSID</span><span className="font-semibold truncate" style={{ color: "var(--text-primary)" }}>{config.ssid}</span></>}
                   {config.protocol && <><span>Protocolo</span><span className="font-semibold truncate" style={{ color: "var(--text-primary)" }}>{config.protocol}</span></>}
+                  {config.ip && <><span>IP</span><span className="font-semibold truncate font-mono" style={{ color: "var(--text-primary)" }}>{config.ip}</span></>}
+                  {config.snmpCommunity && <><span>SNMP</span><span className="font-semibold truncate font-mono" style={{ color: "var(--text-primary)" }}>{config.snmpCommunity}</span></>}
                 </div>
               </div>
             </div>

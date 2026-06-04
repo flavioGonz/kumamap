@@ -1478,6 +1478,7 @@ export default function LeafletMapView({
     nodesRef.current.forEach((node) => {
       const isLabel = node.icon === "_textLabel";
       const isCamera = node.icon === "_camera";
+      const isAntenna = node.icon === "_antenna";
       const isWaypoint = node.icon === "_waypoint";
       const isPolygon = node.icon === "_polygon";
       const isRack = node.icon === "_rack";
@@ -1568,6 +1569,33 @@ export default function LeafletMapView({
           </div>`,
           iconSize: [camSize, camSize],
           iconAnchor: [camSize / 2, camSize / 2],
+        });
+      } else if (isAntenna) {
+        // Antenna node — radio tower icon with type badge
+        const antSize = Math.round(24 * nodeScale);
+        const antIcon = Math.round(14 * nodeScale);
+        const antType = cd.antennaType || "ptp";
+        const typeBadge = antType === "ptp"
+          ? `<span style="position:absolute;top:-6px;right:-8px;background:#f59e0b;color:#000;font-size:6px;font-weight:900;padding:1px 3px;border-radius:3px;letter-spacing:0.5px;line-height:1;box-shadow:0 1px 4px rgba(0,0,0,0.5);">PTP</span>`
+          : antType === "ptmp"
+          ? `<span style="position:absolute;top:-6px;right:-8px;background:#8b5cf6;color:#fff;font-size:6px;font-weight:900;padding:1px 3px;border-radius:3px;letter-spacing:0.5px;line-height:1;box-shadow:0 1px 4px rgba(0,0,0,0.5);">PTMP</span>`
+          : antType === "sector"
+          ? `<span style="position:absolute;top:-6px;right:-8px;background:#06b6d4;color:#fff;font-size:6px;font-weight:900;padding:1px 3px;border-radius:3px;letter-spacing:0.5px;line-height:1;box-shadow:0 1px 4px rgba(0,0,0,0.5);">SEC</span>`
+          : "";
+        const freqBadge = cd.frequency
+          ? `<span style="position:absolute;bottom:-8px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.7);color:#fff;font-size:7px;font-weight:700;padding:1px 4px;border-radius:3px;white-space:nowrap;line-height:1;">${cd.frequency}</span>`
+          : "";
+        nodeIcon = L.divIcon({
+          className: "antenna-marker",
+          html: `<div style="position:relative;display:flex;align-items:center;justify-content:center;transform:rotate(${rotation}deg);">
+            <div style="width:${antSize}px;height:${antSize}px;border-radius:50%;background:${color};border:2px solid ${isSource ? "#60a5fa" : color};box-shadow:0 0 14px ${color}88, 0 0 6px ${color};cursor:pointer;display:flex;align-items:center;justify-content:center;">
+              <svg width="${antIcon}" height="${antIcon}" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12 7 2"/><path d="m7 12 5-10"/><path d="m12 12 5-10"/><path d="m17 12 5-10"/><path d="M4.5 7h15"/><path d="M12 16v6"/></svg>
+            </div>
+            ${typeBadge}
+            ${freqBadge}
+          </div>`,
+          iconSize: [antSize, antSize],
+          iconAnchor: [antSize / 2, antSize / 2],
         });
       } else {
         const hasLinkedMap = Array.isArray(cd.linkedMaps) && cd.linkedMaps.length > 0;
@@ -1760,6 +1788,130 @@ export default function LeafletMapView({
         });
         fovHandle.addTo(map);
         camHandlesRef.current.set(node.id + "-fov", fovHandle);
+      }
+
+      // ── Antenna beam cone (same technique as camera FOV) ──
+      if (isAntenna && cd.type === "antenna") {
+        const beamColor = cd.beamColor || "#f59e0b";
+        const beamWidth = cd.beamWidth || 30;
+        const rawBeamRange = cd.beamRange || (isImageMode ? 300 : 0.003);
+        const beamRange = isImageMode && rawBeamRange < 1 ? rawBeamRange * 100000 : rawBeamRange;
+        const beamOpacity = 0.12;
+        const radConst = Math.PI / 180;
+
+        function buildBeamPoints(cx: number, cy: number, rot: number, range: number, bw: number): [number, number][] {
+          const pts: [number, number][] = [[cx, cy]];
+          const s = rot - bw / 2;
+          const e = rot + bw / 2;
+          for (let a = s; a <= e; a += 2) pts.push([cx + range * Math.cos(a * radConst), cy + range * Math.sin(a * radConst)]);
+          pts.push([cx, cy]);
+          return pts;
+        }
+
+        const beamPoly = L.polygon(buildBeamPoints(node.x, node.y, rotation, beamRange, beamWidth), {
+          color: beamColor, fillColor: beamColor, fillOpacity: beamOpacity,
+          weight: 1, opacity: beamOpacity + 0.2, interactive: false,
+          dashArray: "4 3",
+        });
+        beamPoly.addTo(map);
+        fovLayersRef.current.set(node.id, beamPoly);
+
+        // Gradient for antenna beam
+        const applyBeamGradient = () => {
+          const path = (beamPoly as any)._path as SVGPathElement | undefined;
+          if (!path) return;
+          const svg = path.closest("svg");
+          if (!svg) return;
+          const antPt = map.latLngToLayerPoint([node.x, node.y]);
+          const tipLat = node.x + beamRange * Math.cos(rotation * radConst);
+          const tipLng = node.y + beamRange * Math.sin(rotation * radConst);
+          const tipPt = map.latLngToLayerPoint([tipLat, tipLng]);
+          const radius = Math.sqrt(Math.pow(tipPt.x - antPt.x, 2) + Math.pow(tipPt.y - antPt.y, 2));
+          let defs: Element | null = svg.querySelector("defs");
+          if (!defs) { defs = document.createElementNS("http://www.w3.org/2000/svg", "defs"); svg.insertBefore(defs, svg.firstChild); }
+          const gradId = `beamGrad-${node.id.replace(/[^a-zA-Z0-9]/g, "_")}`;
+          const existing = defs!.querySelector(`#${gradId}`);
+          if (existing) existing.remove();
+          const grad = document.createElementNS("http://www.w3.org/2000/svg", "radialGradient");
+          grad.setAttribute("id", gradId);
+          grad.setAttribute("cx", String(antPt.x));
+          grad.setAttribute("cy", String(antPt.y));
+          grad.setAttribute("r", String(radius));
+          grad.setAttribute("gradientUnits", "userSpaceOnUse");
+          const s1 = document.createElementNS("http://www.w3.org/2000/svg", "stop");
+          s1.setAttribute("offset", "0%"); s1.setAttribute("stop-color", beamColor); s1.setAttribute("stop-opacity", String(beamOpacity * 5));
+          const s2 = document.createElementNS("http://www.w3.org/2000/svg", "stop");
+          s2.setAttribute("offset", "60%"); s2.setAttribute("stop-color", beamColor); s2.setAttribute("stop-opacity", String(beamOpacity));
+          const s3 = document.createElementNS("http://www.w3.org/2000/svg", "stop");
+          s3.setAttribute("offset", "100%"); s3.setAttribute("stop-color", beamColor); s3.setAttribute("stop-opacity", "0");
+          grad.appendChild(s1); grad.appendChild(s2); grad.appendChild(s3);
+          defs!.appendChild(grad);
+          path.setAttribute("fill", `url(#${gradId})`);
+          path.setAttribute("fill-opacity", "1");
+          path.setAttribute("stroke", beamColor);
+          path.setAttribute("stroke-opacity", "0.3");
+          path.setAttribute("stroke-dasharray", "4 3");
+        };
+        requestAnimationFrame(applyBeamGradient);
+        map.on("zoomend", applyBeamGradient);
+
+        // Rotation handle for antenna beam
+        const rotHandleLat = node.x + beamRange * 0.7 * Math.cos(rotation * radConst);
+        const rotHandleLng = node.y + beamRange * 0.7 * Math.sin(rotation * radConst);
+        const rotHandle = L.marker([rotHandleLat, rotHandleLng], {
+          icon: L.divIcon({
+            className: "antenna-handle",
+            html: `<div style="width:14px;height:14px;border-radius:50%;background:rgba(245,158,11,0.8);border:2px solid #f59e0b;box-shadow:0 0 8px rgba(245,158,11,0.6);cursor:grab;"></div>`,
+            iconSize: [14, 14], iconAnchor: [7, 7],
+          }),
+          draggable: !isLocked,
+        });
+        rotHandle.bindTooltip("Apuntar", { direction: "top", offset: [0, -10], className: "leaflet-label-dark" });
+        rotHandle.on("drag", () => {
+          const hp = rotHandle.getLatLng();
+          const mp = marker.getLatLng();
+          const angle = Math.atan2(hp.lng - mp.lng, hp.lat - mp.lat) * (180 / Math.PI);
+          const idx = nodesRef.current.findIndex((n) => n.id === node.id);
+          if (idx >= 0) {
+            const ncd = safeJsonParse<NodeCustomData>(nodesRef.current[idx].custom_data);
+            ncd.rotation = Math.round(angle);
+            nodesRef.current[idx] = { ...nodesRef.current[idx], custom_data: JSON.stringify(ncd) };
+            beamPoly.setLatLngs(buildBeamPoints(mp.lat, mp.lng, Math.round(angle), ncd.beamRange || beamRange, ncd.beamWidth || beamWidth));
+          }
+        });
+        rotHandle.addTo(map);
+        camHandlesRef.current.set(node.id + "-rot", rotHandle);
+
+        // Range handle for antenna beam
+        const rangeHandleLat = node.x + beamRange * Math.cos(rotation * radConst);
+        const rangeHandleLng = node.y + beamRange * Math.sin(rotation * radConst);
+        const rangeHandle = L.marker([rangeHandleLat, rangeHandleLng], {
+          icon: L.divIcon({
+            className: "antenna-handle",
+            html: `<div style="width:12px;height:12px;border-radius:2px;background:rgba(34,197,94,0.8);border:2px solid #4ade80;box-shadow:0 0 8px rgba(34,197,94,0.5);cursor:ns-resize;transform:rotate(45deg);"></div>`,
+            iconSize: [12, 12], iconAnchor: [6, 6],
+          }),
+          draggable: !isLocked,
+        });
+        rangeHandle.bindTooltip("Alcance", { direction: "top", offset: [0, -10], className: "leaflet-label-dark" });
+        rangeHandle.on("drag", () => {
+          const rp = rangeHandle.getLatLng();
+          const mp = marker.getLatLng();
+          const dist = Math.sqrt(Math.pow(rp.lat - mp.lat, 2) + Math.pow(rp.lng - mp.lng, 2));
+          const newRange = Math.max(0.00005, dist);
+          const idx = nodesRef.current.findIndex((n) => n.id === node.id);
+          if (idx >= 0) {
+            const ncd = safeJsonParse<NodeCustomData>(nodesRef.current[idx].custom_data);
+            ncd.beamRange = parseFloat(newRange.toFixed(6));
+            nodesRef.current[idx] = { ...nodesRef.current[idx], custom_data: JSON.stringify(ncd) };
+            const rot = ncd.rotation || rotation;
+            beamPoly.setLatLngs(buildBeamPoints(mp.lat, mp.lng, rot, newRange, ncd.beamWidth || beamWidth));
+            const roh = camHandlesRef.current.get(node.id + "-rot");
+            if (roh) roh.setLatLng([mp.lat + newRange * 0.7 * Math.cos(rot * radConst), mp.lng + newRange * 0.7 * Math.sin(rot * radConst)]);
+          }
+        });
+        rangeHandle.addTo(map);
+        camHandlesRef.current.set(node.id + "-range", rangeHandle);
       }
 
       // ── Label rotation handle (◆ above the label, drag to rotate) ──
@@ -3981,6 +4133,26 @@ export default function LeafletMapView({
                 nodesRef.current = [...nodesRef.current, { id, kuma_monitor_id: null, label: "Camara", x: center.lat, y: center.lng, icon: "_camera", custom_data: JSON.stringify({ type: "camera", rotation: 0, fov: 60, fovRange: isImageMode ? 200 : 0.002 }) }];
                 if (LRef.current) renderNodes(LRef.current, mapRef.current);
                 toast.success("Camara agregada — clic derecho para rotar");
+              }}
+            />
+            <DropdownItem
+              icon={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 12 7 2"/><path d="m7 12 5-10"/><path d="m12 12 5-10"/><path d="m17 12 5-10"/><path d="M4.5 7h15"/><path d="M12 16v6"/></svg>}
+              label="Antena PTP"
+              onClick={() => {
+                setDdNodos(false);
+                if (!mapRef.current) return;
+                const center = mapRef.current.getCenter();
+                const id = `antenna-${Date.now()}`;
+                nodesRef.current = [...nodesRef.current, {
+                  id, kuma_monitor_id: null, label: "Antena", x: center.lat, y: center.lng, icon: "_antenna",
+                  custom_data: JSON.stringify({
+                    type: "antenna", antennaType: "ptp", frequency: "5.8 GHz", antennaGain: 23,
+                    beamWidth: 30, beamRange: isImageMode ? 300 : 0.003, beamColor: "#3b82f6",
+                    protocol: "AirMax", bandwidth: "40 MHz",
+                  }),
+                }];
+                if (LRef.current) renderNodes(LRef.current, mapRef.current);
+                toast.success("Antena agregada — clic derecho para configurar");
               }}
             />
             <DropdownItem

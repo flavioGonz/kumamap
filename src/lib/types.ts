@@ -77,6 +77,19 @@ export interface NodeCustomData {
   devices?: RackDeviceSummary[];
   totalUnits?: number;
 
+  // Antenna / PTP Link
+  antennaType?: "ptp" | "ptmp" | "omni" | "sector";  // Point-to-point, Point-to-multipoint, Omni, Sector
+  frequency?: string;       // e.g. "5.8 GHz", "2.4 GHz", "60 GHz"
+  antennaGain?: number;     // dBi
+  txPower?: number;         // dBm
+  beamWidth?: number;       // degrees (horizontal beam width for rendering)
+  beamRange?: number;       // coverage range in map units
+  beamColor?: string;       // color for the beam visualization
+  ssid?: string;            // wireless SSID
+  bandwidth?: string;       // e.g. "20 MHz", "40 MHz", "80 MHz"
+  protocol?: string;        // e.g. "802.11ac", "AirMax", "NanoBeam"
+  peerNodeId?: string;      // ID of the other antenna in a PTP pair
+
   // Credentials (stored locally)
   credUser?: string;
   credPass?: string;

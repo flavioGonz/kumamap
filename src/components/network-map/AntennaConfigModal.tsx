@@ -109,12 +109,13 @@ export default function AntennaConfigModal({
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
       <div
-        className="relative w-full max-w-lg rounded-2xl overflow-hidden"
+        className="relative w-full rounded-2xl overflow-hidden"
         style={{
           background: "var(--card)",
           border: "1px solid var(--glass-border)",
           boxShadow: "0 25px 60px rgba(0,0,0,0.5)",
-          maxHeight: "90vh",
+          maxWidth: "680px",
+          maxHeight: "80vh",
         }}
       >
         {/* Header */}
@@ -151,229 +152,184 @@ export default function AntennaConfigModal({
           </button>
         </div>
 
-        {/* Body */}
-        <div className="overflow-y-auto px-5 py-4 space-y-4" style={{ maxHeight: "calc(90vh - 130px)" }}>
+        {/* Body — 2-column layout */}
+        <div className="overflow-y-auto px-5 py-4" style={{ maxHeight: "calc(80vh - 120px)" }}>
+          <div className="grid grid-cols-2 gap-4">
 
-          {/* ── Antenna Type ── */}
-          <div style={sectionStyle}>
-            <div className="flex items-center gap-2 mb-3">
-              <Signal className="h-3.5 w-3.5" style={{ color: "#f59e0b" }} />
-              <span className="text-xs font-bold" style={{ color: "var(--text-primary)" }}>Tipo de Antena</span>
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              {ANTENNA_TYPES.map((t) => (
-                <button
-                  key={t.value}
-                  onClick={() => update("antennaType", t.value)}
-                  className="flex items-center gap-2 rounded-xl px-3 py-2.5 text-left transition-all"
-                  style={{
-                    background: config.antennaType === t.value ? "rgba(245,158,11,0.12)" : "var(--surface-hover)",
-                    border: `1px solid ${config.antennaType === t.value ? "rgba(245,158,11,0.35)" : "var(--glass-border)"}`,
-                    color: config.antennaType === t.value ? "#f59e0b" : "var(--text-secondary)",
-                  }}
-                >
-                  <span className="text-lg leading-none">{t.icon}</span>
-                  <div>
-                    <div className="text-[11px] font-bold">{t.label}</div>
-                    <div className="text-[9px] opacity-60">{t.desc}</div>
-                  </div>
-                </button>
-              ))}
-            </div>
-          </div>
+            {/* ══════ LEFT COLUMN ══════ */}
+            <div className="space-y-3">
 
-          {/* ── Radio Parameters ── */}
-          <div style={sectionStyle}>
-            <div className="flex items-center gap-2 mb-3">
-              <Wifi className="h-3.5 w-3.5" style={{ color: "#3b82f6" }} />
-              <span className="text-xs font-bold" style={{ color: "var(--text-primary)" }}>Parámetros de Radio</span>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              {/* Frequency */}
-              <div>
-                <label style={labelStyle}>Frecuencia</label>
-                <select
-                  value={config.frequency}
-                  onChange={(e) => update("frequency", e.target.value)}
-                  style={{ ...inputStyle, cursor: "pointer" }}
-                >
-                  {FREQUENCIES.map((f) => <option key={f} value={f}>{f}</option>)}
-                </select>
-              </div>
-
-              {/* Bandwidth */}
-              <div>
-                <label style={labelStyle}>Ancho de Banda</label>
-                <select
-                  value={config.bandwidth}
-                  onChange={(e) => update("bandwidth", e.target.value)}
-                  style={{ ...inputStyle, cursor: "pointer" }}
-                >
-                  {BANDWIDTHS.map((b) => <option key={b} value={b}>{b}</option>)}
-                </select>
-              </div>
-
-              {/* Gain */}
-              <div>
-                <label style={labelStyle}>Ganancia (dBi)</label>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="range"
-                    min={0} max={40} step={1}
-                    value={config.antennaGain}
-                    onChange={(e) => update("antennaGain", Number(e.target.value))}
-                    className="flex-1 h-1.5 rounded-full appearance-none cursor-pointer"
-                    style={{ background: `linear-gradient(to right, #f59e0b ${(config.antennaGain / 40) * 100}%, var(--muted) 0%)` }}
-                  />
-                  <span className="text-xs font-mono font-bold min-w-[32px] text-right" style={{ color: "#f59e0b" }}>
-                    {config.antennaGain}
-                  </span>
+              {/* ── Antenna Type ── */}
+              <div style={sectionStyle}>
+                <div className="flex items-center gap-2 mb-2">
+                  <Signal className="h-3.5 w-3.5" style={{ color: "#f59e0b" }} />
+                  <span className="text-xs font-bold" style={{ color: "var(--text-primary)" }}>Tipo de Antena</span>
                 </div>
-              </div>
-
-              {/* TX Power */}
-              <div>
-                <label style={labelStyle}>Potencia TX (dBm)</label>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="range"
-                    min={0} max={30} step={1}
-                    value={config.txPower}
-                    onChange={(e) => update("txPower", Number(e.target.value))}
-                    className="flex-1 h-1.5 rounded-full appearance-none cursor-pointer"
-                    style={{ background: `linear-gradient(to right, #ef4444 ${(config.txPower / 30) * 100}%, var(--muted) 0%)` }}
-                  />
-                  <span className="text-xs font-mono font-bold min-w-[32px] text-right" style={{ color: "#ef4444" }}>
-                    {config.txPower}
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            {/* SSID */}
-            <div className="mt-3">
-              <label style={labelStyle}>SSID</label>
-              <input
-                type="text"
-                value={config.ssid}
-                onChange={(e) => update("ssid", e.target.value)}
-                placeholder="Nombre de red inalámbrica"
-                style={inputStyle}
-              />
-            </div>
-
-            {/* Protocol */}
-            <div className="mt-3 relative">
-              <label style={labelStyle}>Protocolo</label>
-              <button
-                onClick={() => setShowProtocols(!showProtocols)}
-                className="flex items-center justify-between w-full transition-all"
-                style={inputStyle}
-              >
-                <span>{config.protocol || "Seleccionar..."}</span>
-                <ChevronDown className="h-3.5 w-3.5" style={{ color: "var(--text-tertiary)", transform: showProtocols ? "rotate(180deg)" : "" }} />
-              </button>
-              {showProtocols && (
-                <>
-                  <div className="fixed inset-0 z-10" onClick={() => setShowProtocols(false)} />
-                  <div
-                    className="absolute left-0 right-0 mt-1 rounded-xl overflow-hidden z-20"
-                    style={{
-                      background: "var(--card)",
-                      border: "1px solid var(--glass-border)",
-                      boxShadow: "0 12px 40px rgba(0,0,0,0.4)",
-                      maxHeight: "200px",
-                      overflowY: "auto",
-                    }}
-                  >
-                    {PROTOCOLS.map((p) => (
-                      <button
-                        key={p}
-                        onClick={() => { update("protocol", p); setShowProtocols(false); }}
-                        className="w-full text-left px-3 py-2 text-xs transition-all hover:bg-[var(--surface-hover)]"
-                        style={{
-                          color: config.protocol === p ? "#f59e0b" : "var(--text-secondary)",
-                          fontWeight: config.protocol === p ? 700 : 400,
-                        }}
-                      >
-                        {p}
-                      </button>
-                    ))}
-                  </div>
-                </>
-              )}
-            </div>
-          </div>
-
-          {/* ── Beam / Coverage ── */}
-          <div style={sectionStyle}>
-            <div className="flex items-center gap-2 mb-3">
-              <Globe className="h-3.5 w-3.5" style={{ color: "#22c55e" }} />
-              <span className="text-xs font-bold" style={{ color: "var(--text-primary)" }}>Cobertura / Haz</span>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              {/* Beam Width */}
-              <div>
-                <label style={labelStyle}>Apertura ({config.beamWidth}°)</label>
-                <input
-                  type="range"
-                  min={5} max={360} step={5}
-                  value={config.beamWidth}
-                  onChange={(e) => update("beamWidth", Number(e.target.value))}
-                  className="w-full h-1.5 rounded-full appearance-none cursor-pointer"
-                  style={{ background: `linear-gradient(to right, #22c55e ${(config.beamWidth / 360) * 100}%, var(--muted) 0%)` }}
-                  disabled={config.antennaType === "omni"}
-                />
-              </div>
-
-              {/* Beam Color */}
-              <div>
-                <label style={labelStyle}>Color del Haz</label>
-                <div className="flex items-center gap-1.5 flex-wrap">
-                  {BEAM_COLORS.map((c) => (
+                <div className="grid grid-cols-2 gap-1.5">
+                  {ANTENNA_TYPES.map((t) => (
                     <button
-                      key={c.value}
-                      onClick={() => update("beamColor", c.value)}
-                      className="rounded-full transition-all"
+                      key={t.value}
+                      onClick={() => update("antennaType", t.value)}
+                      className="flex items-center gap-2 rounded-lg px-2.5 py-2 text-left transition-all"
                       style={{
-                        width: 22, height: 22,
-                        background: c.value,
-                        border: config.beamColor === c.value ? "3px solid var(--text-primary)" : "2px solid var(--glass-border)",
-                        boxShadow: config.beamColor === c.value ? `0 0 8px ${c.value}88` : "none",
+                        background: config.antennaType === t.value ? "rgba(245,158,11,0.12)" : "var(--surface-hover)",
+                        border: `1px solid ${config.antennaType === t.value ? "rgba(245,158,11,0.35)" : "var(--glass-border)"}`,
+                        color: config.antennaType === t.value ? "#f59e0b" : "var(--text-secondary)",
                       }}
-                      title={c.label}
-                    />
+                    >
+                      <span className="text-base leading-none">{t.icon}</span>
+                      <div>
+                        <div className="text-[10px] font-bold leading-tight">{t.label}</div>
+                        <div className="text-[8px] opacity-50 leading-tight">{t.desc}</div>
+                      </div>
+                    </button>
                   ))}
                 </div>
               </div>
+
+              {/* ── Radio Parameters ── */}
+              <div style={sectionStyle}>
+                <div className="flex items-center gap-2 mb-2">
+                  <Wifi className="h-3.5 w-3.5" style={{ color: "#3b82f6" }} />
+                  <span className="text-xs font-bold" style={{ color: "var(--text-primary)" }}>Parámetros de Radio</span>
+                </div>
+
+                <div className="grid grid-cols-3 gap-2">
+                  <div>
+                    <label style={labelStyle}>Frecuencia</label>
+                    <select value={config.frequency} onChange={(e) => update("frequency", e.target.value)} style={{ ...inputStyle, cursor: "pointer", padding: "6px 8px", fontSize: "12px" }}>
+                      {FREQUENCIES.map((f) => <option key={f} value={f}>{f}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label style={labelStyle}>Ancho Banda</label>
+                    <select value={config.bandwidth} onChange={(e) => update("bandwidth", e.target.value)} style={{ ...inputStyle, cursor: "pointer", padding: "6px 8px", fontSize: "12px" }}>
+                      {BANDWIDTHS.map((b) => <option key={b} value={b}>{b}</option>)}
+                    </select>
+                  </div>
+                  <div className="relative">
+                    <label style={labelStyle}>Protocolo</label>
+                    <button onClick={() => setShowProtocols(!showProtocols)} className="flex items-center justify-between w-full transition-all" style={{ ...inputStyle, cursor: "pointer", padding: "6px 8px", fontSize: "12px" }}>
+                      <span className="truncate">{config.protocol || "Seleccionar"}</span>
+                      <ChevronDown className="h-3 w-3 flex-shrink-0" style={{ color: "var(--text-tertiary)", transform: showProtocols ? "rotate(180deg)" : "", transition: "transform 0.15s" }} />
+                    </button>
+                    {showProtocols && (
+                      <>
+                        <div className="fixed inset-0 z-10" onClick={() => setShowProtocols(false)} />
+                        <div className="absolute left-0 right-0 mt-1 rounded-xl overflow-hidden z-20" style={{ background: "var(--card)", border: "1px solid var(--glass-border)", boxShadow: "0 12px 40px rgba(0,0,0,0.4)", maxHeight: "180px", overflowY: "auto" }}>
+                          {PROTOCOLS.map((p) => (
+                            <button key={p} onClick={() => { update("protocol", p); setShowProtocols(false); }} className="w-full text-left px-3 py-1.5 text-[11px] transition-all hover:bg-[var(--surface-hover)]" style={{ color: config.protocol === p ? "#f59e0b" : "var(--text-secondary)", fontWeight: config.protocol === p ? 700 : 400 }}>
+                              {p}
+                            </button>
+                          ))}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3 mt-2">
+                  <div>
+                    <label style={labelStyle}>Ganancia — {config.antennaGain} dBi</label>
+                    <input type="range" min={0} max={40} step={1} value={config.antennaGain} onChange={(e) => update("antennaGain", Number(e.target.value))} className="w-full h-1.5 rounded-full appearance-none cursor-pointer" style={{ background: `linear-gradient(to right, #f59e0b ${(config.antennaGain / 40) * 100}%, var(--muted) 0%)` }} />
+                  </div>
+                  <div>
+                    <label style={labelStyle}>Potencia TX — {config.txPower} dBm</label>
+                    <input type="range" min={0} max={30} step={1} value={config.txPower} onChange={(e) => update("txPower", Number(e.target.value))} className="w-full h-1.5 rounded-full appearance-none cursor-pointer" style={{ background: `linear-gradient(to right, #ef4444 ${(config.txPower / 30) * 100}%, var(--muted) 0%)` }} />
+                  </div>
+                </div>
+
+                <div className="mt-2">
+                  <label style={labelStyle}>SSID</label>
+                  <input type="text" value={config.ssid} onChange={(e) => update("ssid", e.target.value)} placeholder="Nombre de red inalámbrica" style={{ ...inputStyle, padding: "6px 10px", fontSize: "12px" }} />
+                </div>
+              </div>
+            </div>
+
+            {/* ══════ RIGHT COLUMN ══════ */}
+            <div className="space-y-3">
+
+              {/* ── Beam / Coverage ── */}
+              <div style={sectionStyle}>
+                <div className="flex items-center gap-2 mb-2">
+                  <Globe className="h-3.5 w-3.5" style={{ color: "#22c55e" }} />
+                  <span className="text-xs font-bold" style={{ color: "var(--text-primary)" }}>Cobertura / Haz</span>
+                </div>
+
+                <div className="mb-3">
+                  <label style={labelStyle}>Apertura del haz — {config.beamWidth}°</label>
+                  <input type="range" min={5} max={360} step={5} value={config.beamWidth} onChange={(e) => update("beamWidth", Number(e.target.value))} className="w-full h-1.5 rounded-full appearance-none cursor-pointer" style={{ background: `linear-gradient(to right, #22c55e ${(config.beamWidth / 360) * 100}%, var(--muted) 0%)` }} disabled={config.antennaType === "omni"} />
+                  {config.antennaType === "omni" && <p className="text-[9px] mt-1" style={{ color: "var(--text-tertiary)" }}>Omni = 360° (no editable)</p>}
+                </div>
+
+                <div>
+                  <label style={labelStyle}>Color del Haz</label>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {BEAM_COLORS.map((c) => (
+                      <button key={c.value} onClick={() => update("beamColor", c.value)} className="rounded-full transition-all" style={{ width: 26, height: 26, background: c.value, border: config.beamColor === c.value ? "3px solid var(--text-primary)" : "2px solid var(--glass-border)", boxShadow: config.beamColor === c.value ? `0 0 8px ${c.value}88` : "none" }} title={c.label} />
+                    ))}
+                  </div>
+                </div>
+
+                {/* Visual beam preview */}
+                <div className="mt-3 flex items-center justify-center" style={{ height: 80 }}>
+                  <svg viewBox="0 0 120 80" width="120" height="80">
+                    {/* Beam cone preview */}
+                    {(() => {
+                      const cx = 10, cy = 40, range = 100;
+                      const halfAngle = Math.min(config.beamWidth, 360) / 2;
+                      const rad = Math.PI / 180;
+                      const x1 = cx + range * Math.cos(-halfAngle * rad);
+                      const y1 = cy + range * Math.sin(-halfAngle * rad);
+                      const x2 = cx + range * Math.cos(halfAngle * rad);
+                      const y2 = cy + range * Math.sin(halfAngle * rad);
+                      const largeArc = config.beamWidth > 180 ? 1 : 0;
+                      return (
+                        <>
+                          <path d={`M${cx},${cy} L${x1},${y1} A${range},${range} 0 ${largeArc},1 ${x2},${y2} Z`} fill={config.beamColor} fillOpacity={0.2} stroke={config.beamColor} strokeWidth={1} strokeOpacity={0.5} />
+                          <circle cx={cx} cy={cy} r={4} fill={config.beamColor} />
+                        </>
+                      );
+                    })()}
+                  </svg>
+                </div>
+              </div>
+
+              {/* ── Peer / Link ── */}
+              {config.antennaType === "ptp" && (
+                <div style={sectionStyle}>
+                  <div className="flex items-center gap-2 mb-2">
+                    <Zap className="h-3.5 w-3.5" style={{ color: "#8b5cf6" }} />
+                    <span className="text-xs font-bold" style={{ color: "var(--text-primary)" }}>Enlace PTP</span>
+                  </div>
+                  <label style={labelStyle}>Antena Peer (otro extremo)</label>
+                  <select value={config.peerNodeId} onChange={(e) => update("peerNodeId", e.target.value)} style={{ ...inputStyle, cursor: "pointer", padding: "6px 10px", fontSize: "12px" }}>
+                    <option value="">Sin enlazar</option>
+                    {availableNodes.map((n) => (
+                      <option key={n.id} value={n.id}>{n.label || n.id}</option>
+                    ))}
+                  </select>
+                  <p className="text-[9px] mt-1" style={{ color: "var(--text-tertiary)" }}>
+                    Seleccioná la antena del otro extremo del enlace
+                  </p>
+                </div>
+              )}
+
+              {/* ── Summary card ── */}
+              <div style={{ ...sectionStyle, background: "rgba(245,158,11,0.04)", border: "1px solid rgba(245,158,11,0.12)" }}>
+                <div className="text-[10px] font-bold mb-1.5" style={{ color: "#f59e0b" }}>Resumen</div>
+                <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-[10px]" style={{ color: "var(--text-secondary)" }}>
+                  <span>Tipo</span><span className="font-semibold" style={{ color: "var(--text-primary)" }}>{ANTENNA_TYPES.find(t => t.value === config.antennaType)?.label}</span>
+                  <span>Frecuencia</span><span className="font-semibold" style={{ color: "var(--text-primary)" }}>{config.frequency}</span>
+                  <span>Ganancia</span><span className="font-semibold" style={{ color: "var(--text-primary)" }}>{config.antennaGain} dBi</span>
+                  <span>TX</span><span className="font-semibold" style={{ color: "var(--text-primary)" }}>{config.txPower} dBm</span>
+                  <span>Apertura</span><span className="font-semibold" style={{ color: "var(--text-primary)" }}>{config.beamWidth}°</span>
+                  {config.ssid && <><span>SSID</span><span className="font-semibold truncate" style={{ color: "var(--text-primary)" }}>{config.ssid}</span></>}
+                  {config.protocol && <><span>Protocolo</span><span className="font-semibold truncate" style={{ color: "var(--text-primary)" }}>{config.protocol}</span></>}
+                </div>
+              </div>
             </div>
           </div>
-
-          {/* ── Peer / Link ── */}
-          {config.antennaType === "ptp" && (
-            <div style={sectionStyle}>
-              <div className="flex items-center gap-2 mb-3">
-                <Zap className="h-3.5 w-3.5" style={{ color: "#8b5cf6" }} />
-                <span className="text-xs font-bold" style={{ color: "var(--text-primary)" }}>Enlace PTP</span>
-              </div>
-              <label style={labelStyle}>Antena Peer (otro extremo)</label>
-              <select
-                value={config.peerNodeId}
-                onChange={(e) => update("peerNodeId", e.target.value)}
-                style={{ ...inputStyle, cursor: "pointer" }}
-              >
-                <option value="">Sin enlazar</option>
-                {availableNodes.map((n) => (
-                  <option key={n.id} value={n.id}>{n.label || n.id}</option>
-                ))}
-              </select>
-              <p className="text-[10px] mt-1.5" style={{ color: "var(--text-tertiary)" }}>
-                Seleccioná la antena del otro extremo del enlace punto a punto
-              </p>
-            </div>
-          )}
         </div>
 
         {/* Footer */}

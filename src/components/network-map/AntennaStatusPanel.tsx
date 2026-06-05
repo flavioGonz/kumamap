@@ -1,1154 +1,491 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import {
-  Radio, RefreshCw, Wifi, WifiOff, X,
-  Clock, Signal, ArrowUpDown, Activity,
-  Network, ChevronDown, ChevronUp,
-  Server, MapPin, User, Monitor, Zap,
-} from "lucide-react";
+import { Radio, RefreshCw, Wifi, WifiOff, X, Clock, Signal, ArrowUpDown, Activity, ChevronDown, ChevronUp, Server } from "lucide-react";
 import { apiUrl } from "@/lib/api";
 
-// ── Types matching the wireless API response ────────────────────────────────
+// ── Types ──────────────────────────────────────────────────────────────────
 
 interface SnmpWireless {
-  ssid?: string;
-  signal?: number;
-  noise?: number;
-  snr?: number;
-  ccq?: number;
-  txRate?: number;
-  rxRate?: number;
-  frequency?: number;
-  channelWidth?: number;
-  connectedTime?: number;
-  dlRssi?: number;
-  ulRssi?: number;
-  dlSnr?: number;
-  ulSnr?: number;
-  dlMcs?: number;
-  ulMcs?: number;
-  txCapacity?: number;
-  rxCapacity?: number;
-  connectedAp?: string;
-  txPower?: number;
-  swVersion?: string;
+  ssid?: string; signal?: number; noise?: number; snr?: number; ccq?: number;
+  txRate?: number; rxRate?: number; frequency?: number; channelWidth?: number;
+  connectedTime?: number; dlRssi?: number; ulRssi?: number; dlSnr?: number;
+  ulSnr?: number; dlMcs?: number; ulMcs?: number; txCapacity?: number;
+  rxCapacity?: number; connectedAp?: string; txPower?: number; swVersion?: string;
   vendor: "ubiquiti" | "mikrotik" | "cambium" | "standard" | "unknown";
   quality: "excellent" | "good" | "fair" | "poor" | "critical";
 }
 
-interface SnmpSystem {
-  description?: string;
-  uptime?: number;
-  uptimeStr?: string;
-  name?: string;
-  contact?: string;
-  location?: string;
-}
+interface SnmpSystem { description?: string; uptime?: number; uptimeStr?: string; name?: string; contact?: string; location?: string; }
+interface SnmpInterface { index: number; name: string; alias?: string; type: number; speed: number; operStatus: string; adminStatus: string; inOctets: number; outOctets: number; inErrors: number; outErrors: number; }
+interface WirelessResult { ip: string; timestamp: number; reachable: boolean; cached?: boolean; error?: string; system?: SnmpSystem; wireless?: SnmpWireless | null; interfaces?: SnmpInterface[]; }
 
-interface SnmpInterface {
-  index: number;
-  name: string;
-  alias?: string;
-  type: number;
-  speed: number;
-  operStatus: string;
-  adminStatus: string;
-  inOctets: number;
-  outOctets: number;
-  inErrors: number;
-  outErrors: number;
-}
+// ── Constants ──────────────────────────────────────────────────────────────
 
-interface WirelessResult {
-  ip: string;
-  timestamp: number;
-  reachable: boolean;
-  cached?: boolean;
-  error?: string;
-  system?: SnmpSystem;
-  wireless?: SnmpWireless | null;
-  interfaces?: SnmpInterface[];
-}
-
-// ── Quality badge config ────────────────────────────────────────────────────
-
-const QUALITY_CONFIG: Record<string, { label: string; color: string; bg: string }> = {
-  excellent: { label: "Excelente", color: "#22c55e", bg: "rgba(34,197,94,0.12)" },
-  good:      { label: "Bueno",     color: "#3b82f6", bg: "rgba(59,130,246,0.12)" },
-  fair:      { label: "Regular",   color: "#f59e0b", bg: "rgba(245,158,11,0.12)" },
-  poor:      { label: "Debil",     color: "#f97316", bg: "rgba(249,115,22,0.12)" },
-  critical:  { label: "Critico",   color: "#ef4444", bg: "rgba(239,68,68,0.12)" },
+const QUALITY: Record<string, { label: string; color: string }> = {
+  excellent: { label: "Excelente", color: "#22c55e" },
+  good: { label: "Bueno", color: "#3b82f6" },
+  fair: { label: "Regular", color: "#f59e0b" },
+  poor: { label: "Débil", color: "#f97316" },
+  critical: { label: "Crítico", color: "#ef4444" },
 };
 
-// ── Vendor display config ───────────────────────────────────────────────────
-
-const VENDOR_CONFIG: Record<string, { label: string; color: string; bg: string }> = {
-  ubiquiti:  { label: "Ubiquiti",  color: "#8b5cf6", bg: "rgba(139,92,246,0.10)" },
-  mikrotik:  { label: "MikroTik", color: "#06b6d4", bg: "rgba(6,182,212,0.10)" },
-  cambium:   { label: "Cambium",  color: "#f97316", bg: "rgba(249,115,22,0.10)" },
-  standard:  { label: "802.11",   color: "#64748b", bg: "rgba(100,116,139,0.10)" },
-  unknown:   { label: "Desconocido", color: "#64748b", bg: "rgba(100,116,139,0.10)" },
+const VENDOR: Record<string, { label: string; color: string }> = {
+  ubiquiti: { label: "Ubiquiti", color: "#8b5cf6" },
+  mikrotik: { label: "MikroTik", color: "#06b6d4" },
+  cambium: { label: "Cambium", color: "#f97316" },
+  standard: { label: "802.11", color: "#64748b" },
+  unknown: { label: "?", color: "#64748b" },
 };
 
-// ── Signal helpers ──────────────────────────────────────────────────────────
+// ── Helpers ────────────────────────────────────────────────────────────────
 
-function signalColor(signal: number): string {
-  if (signal >= -45) return "#22c55e";
-  if (signal >= -55) return "#3b82f6";
-  if (signal >= -65) return "#f59e0b";
-  if (signal >= -75) return "#f97316";
-  return "#ef4444";
-}
+function sigColor(s: number): string { return s >= -45 ? "#22c55e" : s >= -55 ? "#3b82f6" : s >= -65 ? "#f59e0b" : s >= -75 ? "#f97316" : "#ef4444"; }
+function sigPct(s: number): number { return Math.max(0, Math.min(100, ((Math.max(-90, Math.min(-30, s)) + 90) / 60) * 100)); }
+function fmtTime(secs: number): string { const d=Math.floor(secs/86400),h=Math.floor((secs%86400)/3600),m=Math.floor((secs%3600)/60); return d>0?`${d}d ${h}h`:h>0?`${h}h ${m}m`:`${m}m`; }
+function fmtBytes(b: number): string { return b>=1073741824?`${(b/1073741824).toFixed(1)} GB`:b>=1048576?`${(b/1048576).toFixed(1)} MB`:b>=1024?`${(b/1024).toFixed(0)} KB`:`${b} B`; }
+function fmtSpeed(mbps: number): string { return mbps >= 1000 ? `${(mbps/1000).toFixed(1)} Gbps` : `${mbps} Mbps`; }
 
-function formatConnTime(secs: number): string {
-  const d = Math.floor(secs / 86400);
-  const h = Math.floor((secs % 86400) / 3600);
-  const m = Math.floor((secs % 3600) / 60);
-  if (d > 0) return `${d}d ${h}h ${m}m`;
-  if (h > 0) return `${h}h ${m}m`;
-  return `${m}m`;
-}
+// ── Sparkline SVG ──────────────────────────────────────────────────────────
 
-function formatOctets(bytes: number): string {
-  if (bytes >= 1_073_741_824) return `${(bytes / 1_073_741_824).toFixed(1)} GB`;
-  if (bytes >= 1_048_576) return `${(bytes / 1_048_576).toFixed(1)} MB`;
-  if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${bytes} B`;
-}
-
-function formatSpeed(mbps: number): string {
-  if (mbps >= 1000) return `${(mbps / 1000).toFixed(mbps % 1000 === 0 ? 0 : 1)} Gbps`;
-  if (mbps > 0) return `${mbps} Mbps`;
-  return "--";
-}
-
-// ── SVG Signal Gauge ────────────────────────────────────────────────────────
-
-function SignalGauge({ signal, quality }: { signal: number; quality: string }) {
-  const qCfg = QUALITY_CONFIG[quality] || QUALITY_CONFIG.critical;
-
-  const cx = 110;
-  const cy = 100;
-  const r = 80;
-  const startAngle = Math.PI;
-  const minSignal = -90;
-  const maxSignal = -30;
-  const clampedSignal = Math.max(minSignal, Math.min(maxSignal, signal));
-  const normalizedValue = (clampedSignal - minSignal) / (maxSignal - minSignal);
-  const needleAngle = startAngle - normalizedValue * Math.PI;
-
-  const arcPath = (startFrac: number, endFrac: number): string => {
-    const a1 = startAngle - startFrac * Math.PI;
-    const a2 = startAngle - endFrac * Math.PI;
-    const x1 = cx + r * Math.cos(a1);
-    const y1 = cy - r * Math.sin(a1);
-    const x2 = cx + r * Math.cos(a2);
-    const y2 = cy - r * Math.sin(a2);
-    const largeArc = (a1 - a2) > Math.PI ? 1 : 0;
-    return `M ${x1} ${y1} A ${r} ${r} 0 ${largeArc} 1 ${x2} ${y2}`;
-  };
-
-  const zones = [
-    { start: 0, end: 0.25, color: "#ef4444" },
-    { start: 0.25, end: 0.417, color: "#f97316" },
-    { start: 0.417, end: 0.583, color: "#f59e0b" },
-    { start: 0.583, end: 0.75, color: "#3b82f6" },
-    { start: 0.75, end: 1, color: "#22c55e" },
-  ];
-
-  const needleLen = r - 12;
-  const needleX = cx + needleLen * Math.cos(needleAngle);
-  const needleY = cy - needleLen * Math.sin(needleAngle);
-  const ticks = [-90, -80, -70, -60, -50, -40, -30];
-
+function Sparkline({ data, color, maxVal, width = 260, height = 50 }: { data: number[]; color: string; maxVal?: number; width?: number; height?: number }) {
+  if (data.length < 2) return <div style={{ width, height, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, color: "var(--text-tertiary)" }}>Recopilando datos...</div>;
+  const max = maxVal || Math.max(...data, 1);
+  const pts = data.map((v, i) => ({ x: (i / (data.length - 1)) * width, y: height - (v / max) * (height - 4) - 2 }));
+  const line = pts.map((p, i) => `${i === 0 ? "M" : "L"}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
+  const area = `${line} L${width},${height} L0,${height} Z`;
   return (
-    <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
-      <svg viewBox="0 0 220 130" width={220} height={130}>
-        <path d={arcPath(0, 1)} fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth={14} strokeLinecap="round" />
-        {zones.map((zone, i) => (
-          <path key={i} d={arcPath(zone.start, zone.end)} fill="none" stroke={zone.color} strokeWidth={14} strokeLinecap="butt" opacity={0.35} />
-        ))}
-        <path d={arcPath(0, Math.min(1, normalizedValue))} fill="none" stroke={signalColor(signal)} strokeWidth={14} strokeLinecap="round" opacity={0.7} style={{ transition: "all 0.6s ease" }} />
-        {ticks.map((tickVal) => {
-          const frac = (tickVal - minSignal) / (maxSignal - minSignal);
-          const tickAngle = startAngle - frac * Math.PI;
-          const outerR = r + 10;
-          const innerR = r + 4;
-          const tx1 = cx + outerR * Math.cos(tickAngle);
-          const ty1 = cy - outerR * Math.sin(tickAngle);
-          const tx2 = cx + innerR * Math.cos(tickAngle);
-          const ty2 = cy - innerR * Math.sin(tickAngle);
-          const labelR = r + 20;
-          const lx = cx + labelR * Math.cos(tickAngle);
-          const ly = cy - labelR * Math.sin(tickAngle);
-          return (
-            <g key={tickVal}>
-              <line x1={tx1} y1={ty1} x2={tx2} y2={ty2} stroke="rgba(255,255,255,0.2)" strokeWidth={1.5} />
-              <text x={lx} y={ly} textAnchor="middle" dominantBaseline="central" fill="rgba(255,255,255,0.25)" fontSize={7} fontFamily="monospace">{tickVal}</text>
-            </g>
-          );
-        })}
-        <line x1={cx} y1={cy} x2={needleX} y2={needleY} stroke={signalColor(signal)} strokeWidth={2.5} strokeLinecap="round" style={{ transition: "all 0.6s ease" }} />
-        <circle cx={cx} cy={cy} r={5} fill={signalColor(signal)} opacity={0.9} />
-        <circle cx={cx} cy={cy} r={2.5} fill="var(--card, #111)" />
-        <text x={cx} y={cy + 22} textAnchor="middle" fill={signalColor(signal)} fontSize={20} fontWeight={800} fontFamily="monospace" style={{ transition: "fill 0.3s ease" }}>{signal} dBm</text>
-        <text x={cx} y={cy + 36} textAnchor="middle" fill={qCfg.color} fontSize={10} fontWeight={700}>{qCfg.label}</text>
-      </svg>
-    </div>
-  );
-}
-
-// ── Signal History Sparkline ────────────────────────────────────────────────
-
-function SignalSparkline({ history }: { history: number[] }) {
-  if (history.length < 2) return null;
-
-  const w = 530;
-  const h = 60;
-  const padX = 8;
-  const padY = 6;
-  const chartW = w - padX * 2;
-  const chartH = h - padY * 2;
-  const minY = -90;
-  const maxY = -30;
-
-  const points = history.map((val, i) => {
-    const x = padX + (i / (history.length - 1)) * chartW;
-    const clamped = Math.max(minY, Math.min(maxY, val));
-    const y = padY + ((maxY - clamped) / (maxY - minY)) * chartH;
-    return { x, y };
-  });
-
-  const lineD = points.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x} ${p.y}`).join(" ");
-  const areaD = `${lineD} L ${points[points.length - 1].x} ${h} L ${points[0].x} ${h} Z`;
-  const lastVal = history[history.length - 1];
-  const lineColor = signalColor(lastVal);
-
-  return (
-    <svg viewBox={`0 0 ${w} ${h}`} width="100%" height={60} style={{ display: "block" }}>
-      <defs>
-        <linearGradient id="sparkFill" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor={lineColor} stopOpacity="0.25" />
-          <stop offset="100%" stopColor={lineColor} stopOpacity="0.02" />
-        </linearGradient>
-      </defs>
-      {[-80, -60, -40].map((val) => {
-        const y = padY + ((maxY - val) / (maxY - minY)) * chartH;
-        return (
-          <g key={val}>
-            <line x1={padX} y1={y} x2={w - padX} y2={y} stroke="rgba(255,255,255,0.06)" strokeWidth={0.5} />
-            <text x={w - padX + 3} y={y + 3} fill="rgba(255,255,255,0.2)" fontSize={6} fontFamily="monospace">{val}</text>
-          </g>
-        );
-      })}
-      <path d={areaD} fill="url(#sparkFill)" />
-      <path d={lineD} fill="none" stroke={lineColor} strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" />
-      <circle cx={points[points.length - 1].x} cy={points[points.length - 1].y} r={3} fill={lineColor} />
-      <circle cx={points[points.length - 1].x} cy={points[points.length - 1].y} r={5} fill={lineColor} opacity={0.3} />
+    <svg width={width} height={height} style={{ display: "block" }}>
+      <defs><linearGradient id={`sg-${color.replace("#","")}`} x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={color} stopOpacity="0.3" /><stop offset="100%" stopColor={color} stopOpacity="0.02" /></linearGradient></defs>
+      {[0.25, 0.5, 0.75].map(f => <line key={f} x1={0} y1={height * f} x2={width} y2={height * f} stroke="var(--glass-border)" strokeWidth={0.5} />)}
+      <path d={area} fill={`url(#sg-${color.replace("#","")})`} />
+      <path d={line} fill="none" stroke={color} strokeWidth={1.5} strokeLinejoin="round" />
+      <circle cx={pts[pts.length-1].x} cy={pts[pts.length-1].y} r={3} fill={color} stroke="var(--card)" strokeWidth={1.5} />
     </svg>
   );
 }
 
-// ── Metric Card ─────────────────────────────────────────────────────────────
+// ── Frequency Channel Bar ──────────────────────────────────────────────────
 
-function MetricCard({ label, value, unit, color }: { label: string; value: string | number; unit: string; color: string }) {
-  const borderColor = "var(--glass-border, rgba(255,255,255,0.08))";
+function FrequencyBar({ freq, chWidth }: { freq?: number; chWidth?: number }) {
+  if (!freq) return null;
+  const is5g = freq > 4000;
+  const rangeStart = is5g ? 5150 : 2400;
+  const rangeEnd = is5g ? 5850 : 2500;
+  const range = rangeEnd - rangeStart;
+  const cw = chWidth || 20;
+  const left = ((freq - cw / 2 - rangeStart) / range) * 100;
+  const width = (cw / range) * 100;
   return (
-    <div style={{
-      flex: 1,
-      background: "var(--surface-card, rgba(255,255,255,0.02))",
-      border: `1px solid ${borderColor}`,
-      borderRadius: 10,
-      padding: "8px 6px",
-      textAlign: "center",
-      minWidth: 0,
-    }}>
-      <div style={{ fontSize: 8, fontWeight: 700, color: "var(--text-tertiary, rgba(255,255,255,0.35))", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{label}</div>
-      <div style={{ fontSize: 20, fontWeight: 800, fontFamily: "monospace", color, lineHeight: 1.1, transition: "color 0.3s ease" }}>{value}</div>
-      <div style={{ fontSize: 8, color: "var(--text-tertiary, rgba(255,255,255,0.25))", marginTop: 2 }}>{unit}</div>
-    </div>
-  );
-}
-
-// ── Throughput Bar ───────────────────────────────────────────────────────────
-
-function ThroughputBar({ label, value, color, maxRef }: { label: string; value: number; color: string; maxRef: number }) {
-  const pct = Math.min(100, (value / maxRef) * 100);
-  return (
-    <div style={{ flex: 1 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4 }}>
-        <span style={{ fontSize: 10, fontWeight: 700, color, letterSpacing: "0.04em" }}>{label}</span>
-        <span style={{ fontSize: 16, fontWeight: 800, fontFamily: "monospace", color: "var(--text-primary, rgba(255,255,255,0.85))" }}>
-          {value} <span style={{ fontSize: 9, color: "var(--text-tertiary, rgba(255,255,255,0.35))" }}>Mbps</span>
-        </span>
+    <div style={{ padding: "8px 12px", background: "var(--surface-card)", borderRadius: 10, border: "1px solid var(--glass-border)" }}>
+      <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 6, marginBottom: 6 }}>
+        <span style={{ fontSize: 15, fontWeight: 800, fontFamily: "monospace", color: "var(--text-primary)" }}>{freq}</span>
+        <span style={{ fontSize: 10, color: "var(--text-tertiary)" }}>({cw})</span>
+        <span style={{ fontSize: 11, fontWeight: 700, color: "var(--text-secondary)" }}>MHz</span>
       </div>
-      <div style={{ width: "100%", height: 8, borderRadius: 4, background: "rgba(255,255,255,0.06)", overflow: "hidden" }}>
-        <div style={{ width: `${pct}%`, height: "100%", borderRadius: 4, background: `linear-gradient(90deg, ${color}88, ${color})`, transition: "width 0.5s ease" }} />
+      <div style={{ position: "relative", height: 12, borderRadius: 6, background: "var(--muted)", overflow: "hidden" }}>
+        <div style={{ position: "absolute", left: `${Math.max(0, left)}%`, width: `${Math.min(width, 100)}%`, height: "100%", background: `linear-gradient(90deg, #3b82f6, #06b6d4)`, borderRadius: 6, boxShadow: "0 0 8px rgba(59,130,246,0.4)" }} />
+      </div>
+      <div style={{ display: "flex", justifyContent: "space-between", marginTop: 3 }}>
+        <span style={{ fontSize: 8, fontFamily: "monospace", color: "var(--text-tertiary)" }}>{rangeStart}</span>
+        {is5g && <span style={{ fontSize: 8, fontFamily: "monospace", color: "var(--text-tertiary)" }}>5500</span>}
+        <span style={{ fontSize: 8, fontFamily: "monospace", color: "var(--text-tertiary)" }}>{rangeEnd}</span>
       </div>
     </div>
   );
 }
 
-// ── Refresh Countdown ───────────────────────────────────────────────────────
+// ── MCS Rate Bar ───────────────────────────────────────────────────────────
 
-function RefreshCountdown({ seconds }: { seconds: number }) {
-  const radius = 7;
-  const circumference = 2 * Math.PI * radius;
-  const progress = seconds / 30;
-  const dashOffset = circumference * (1 - progress);
-
+function McsBar({ currentMcs, label }: { currentMcs?: number; label?: string }) {
+  const levels = Array.from({ length: 9 }, (_, i) => i + 1);
+  const active = currentMcs != null ? Math.min(Math.max(Math.round(currentMcs), 0), 9) : -1;
   return (
-    <div className="flex items-center gap-1" title={`Proxima actualizacion en ${seconds}s`}>
-      <svg width={18} height={18} viewBox="0 0 18 18" style={{ transform: "rotate(-90deg)" }}>
-        <circle cx={9} cy={9} r={radius} fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth={2} />
-        <circle cx={9} cy={9} r={radius} fill="none" stroke="#22c55e" strokeWidth={2} strokeDasharray={circumference} strokeDashoffset={dashOffset} strokeLinecap="round" style={{ transition: "stroke-dashoffset 1s linear" }} />
-      </svg>
-      <span style={{ fontSize: 9, fontFamily: "monospace", color: "var(--text-tertiary, rgba(255,255,255,0.3))", minWidth: 18, textAlign: "right" }}>{seconds}s</span>
-    </div>
-  );
-}
-
-// ── Interface Utilization Bar ───────────────────────────────────────────────
-
-function UtilizationBar({ inOctets, outOctets, speedMbps }: { inOctets: number; outOctets: number; speedMbps: number }) {
-  if (speedMbps <= 0) return <span style={{ fontSize: 9, color: "var(--text-tertiary, rgba(255,255,255,0.2))" }}>--</span>;
-  // Total bytes transferred as approximate utilization indicator
-  const totalBytes = inOctets + outOctets;
-  // speedMbps * 1e6 / 8 = bytes per second capacity; assume counter = cumulative, show as bar relative hint
-  // This is not real-time rate but gives a visual hint of traffic volume
-  const maxBytes = speedMbps * 125000 * 3600; // 1 hour of max capacity as reference
-  const pct = Math.min(100, Math.max(1, (totalBytes / maxBytes) * 100));
-  const color = pct > 80 ? "#ef4444" : pct > 50 ? "#f59e0b" : "#22c55e";
-
-  return (
-    <div style={{ width: "100%", height: 4, borderRadius: 2, background: "rgba(255,255,255,0.06)", overflow: "hidden", minWidth: 40 }}>
-      <div style={{ width: `${pct}%`, height: "100%", borderRadius: 2, background: color, transition: "width 0.5s ease" }} />
-    </div>
-  );
-}
-
-// ── Interface Traffic Sparkline (mini) ──────────────────────────────────────
-
-function InterfaceSparkline({ history }: { history: number[] }) {
-  if (history.length < 2) return null;
-  const w = 50;
-  const h = 14;
-  const max = Math.max(...history, 1);
-  const points = history.map((v, i) => {
-    const x = (i / (history.length - 1)) * w;
-    const y = h - (v / max) * (h - 2) - 1;
-    return `${i === 0 ? "M" : "L"} ${x.toFixed(1)} ${y.toFixed(1)}`;
-  }).join(" ");
-
-  return (
-    <svg viewBox={`0 0 ${w} ${h}`} width={w} height={h} style={{ display: "block" }}>
-      <path d={points} fill="none" stroke="#3b82f6" strokeWidth={1} strokeLinecap="round" opacity={0.6} />
-    </svg>
-  );
-}
-
-// ── System Info Card (for non-wireless devices) ─────────────────────────────
-
-function SystemInfoCard({ sys }: { sys: SnmpSystem }) {
-  const borderColor = "var(--glass-border, rgba(255,255,255,0.08))";
-  return (
-    <div style={{
-      background: "var(--surface-card, rgba(255,255,255,0.02))",
-      border: `1px solid ${borderColor}`,
-      borderRadius: 10,
-      padding: "12px 14px",
-    }}>
-      {/* Device name large */}
-      {sys.name && (
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-          <div style={{
-            width: 28, height: 28, borderRadius: 8,
-            background: "rgba(59,130,246,0.12)",
-            border: "1px solid rgba(59,130,246,0.25)",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            flexShrink: 0,
-          }}>
-            <Server size={14} style={{ color: "#3b82f6" }} />
-          </div>
-          <div style={{ minWidth: 0 }}>
-            <div style={{
-              fontSize: 16, fontWeight: 800, fontFamily: "monospace",
-              color: "var(--text-primary, rgba(255,255,255,0.9))",
-              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-            }}>
-              {sys.name}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Description */}
-      {sys.description && (
-        <div style={{
-          fontSize: 10, color: "var(--text-secondary, rgba(255,255,255,0.5))",
-          marginBottom: 8, lineHeight: 1.4,
-          overflow: "hidden", textOverflow: "ellipsis",
-          display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical",
-        } as React.CSSProperties}
-          title={sys.description}
-        >
-          {sys.description}
-        </div>
-      )}
-
-      {/* Info rows */}
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
-        {sys.uptimeStr && (
-          <div className="flex items-center gap-1.5">
-            <Clock size={12} style={{ color: "#22c55e", flexShrink: 0 }} />
-            <span style={{ fontSize: 11, fontWeight: 600, fontFamily: "monospace", color: "var(--text-primary, rgba(255,255,255,0.8))" }}>
-              {sys.uptimeStr}
-            </span>
-            <span style={{ fontSize: 9, color: "var(--text-tertiary, rgba(255,255,255,0.3))" }}>uptime</span>
-          </div>
-        )}
-        {sys.contact && (
-          <div className="flex items-center gap-1.5">
-            <User size={12} style={{ color: "var(--text-tertiary, rgba(255,255,255,0.3))", flexShrink: 0 }} />
-            <span style={{ fontSize: 10, color: "var(--text-secondary, rgba(255,255,255,0.5))" }}>{sys.contact}</span>
-          </div>
-        )}
-        {sys.location && (
-          <div className="flex items-center gap-1.5">
-            <MapPin size={12} style={{ color: "var(--text-tertiary, rgba(255,255,255,0.3))", flexShrink: 0 }} />
-            <span style={{ fontSize: 10, color: "var(--text-secondary, rgba(255,255,255,0.5))" }}>{sys.location}</span>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ── Cambium-specific Section ────────────────────────────────────────────────
-
-function CambiumDetails({ wireless }: { wireless: SnmpWireless }) {
-  const borderColor = "var(--glass-border, rgba(255,255,255,0.08))";
-  const rows: Array<{ label: string; value: string; color?: string }> = [];
-
-  if (wireless.dlRssi != null && wireless.ulRssi != null) {
-    rows.push({ label: "DL RSSI / UL RSSI", value: `${wireless.dlRssi} dBm / ${wireless.ulRssi} dBm`, color: signalColor(wireless.dlRssi) });
-  } else if (wireless.dlRssi != null) {
-    rows.push({ label: "DL RSSI", value: `${wireless.dlRssi} dBm`, color: signalColor(wireless.dlRssi) });
-  }
-  if (wireless.dlSnr != null && wireless.ulSnr != null) {
-    rows.push({ label: "DL SNR / UL SNR", value: `${wireless.dlSnr} dB / ${wireless.ulSnr} dB` });
-  } else if (wireless.dlSnr != null) {
-    rows.push({ label: "DL SNR", value: `${wireless.dlSnr} dB` });
-  }
-  if (wireless.dlMcs != null || wireless.ulMcs != null) {
-    const dl = wireless.dlMcs != null ? `DL: MCS${wireless.dlMcs}` : "";
-    const ul = wireless.ulMcs != null ? `UL: MCS${wireless.ulMcs}` : "";
-    rows.push({ label: "MCS Index", value: [dl, ul].filter(Boolean).join(" / ") });
-  }
-  if (wireless.txCapacity != null || wireless.rxCapacity != null) {
-    const tx = wireless.txCapacity != null ? `TX: ${(wireless.txCapacity / 1000).toFixed(1)}` : "";
-    const rx = wireless.rxCapacity != null ? `RX: ${(wireless.rxCapacity / 1000).toFixed(1)}` : "";
-    rows.push({ label: "Capacidad (Mbps)", value: [tx, rx].filter(Boolean).join(" / ") });
-  }
-  if (wireless.connectedAp) {
-    rows.push({ label: "AP Conectado", value: wireless.connectedAp });
-  }
-  if (wireless.txPower != null) {
-    rows.push({ label: "Potencia TX", value: `${wireless.txPower} dBm` });
-  }
-  if (wireless.swVersion) {
-    rows.push({ label: "Firmware", value: wireless.swVersion });
-  }
-
-  if (rows.length === 0) return null;
-
-  return (
-    <div style={{
-      background: "var(--surface-card, rgba(255,255,255,0.02))",
-      border: `1px solid ${borderColor}`,
-      borderRadius: 10,
-      padding: "10px 12px",
-    }}>
-      <div className="flex items-center gap-1.5 mb-2">
-        <Zap size={12} style={{ color: "#f97316" }} />
-        <span style={{ fontSize: 10, fontWeight: 700, color: "#f97316", textTransform: "uppercase", letterSpacing: "0.06em" }}>
-          Cambium Details
-        </span>
-      </div>
-      <div style={{ display: "grid", gridTemplateColumns: "140px 1fr", gap: "4px 8px", fontSize: 11 }}>
-        {rows.map((row, i) => (
-          <div key={i} style={{ display: "contents" }}>
-            <span style={{ color: "var(--text-tertiary, rgba(255,255,255,0.35))" }}>{row.label}</span>
-            <span style={{
-              color: row.color || "var(--text-primary, rgba(255,255,255,0.85))",
-              fontWeight: 600, fontFamily: "monospace",
-              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-            }}>
-              {row.value}
-            </span>
-          </div>
+    <div>
+      {label && <div style={{ fontSize: 9, fontWeight: 700, color: "var(--text-tertiary)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>{label}</div>}
+      <div style={{ display: "flex", gap: 2 }}>
+        {levels.map(l => (
+          <div key={l} style={{
+            flex: 1, height: 6 + l * 2, borderRadius: 2,
+            background: l <= active ? (l <= 3 ? "#ef4444" : l <= 5 ? "#f59e0b" : l <= 7 ? "#3b82f6" : "#22c55e") : "var(--muted)",
+            opacity: l <= active ? 1 : 0.3,
+            transition: "all 0.3s",
+          }} />
         ))}
       </div>
+      <div style={{ display: "flex", justifyContent: "space-between", marginTop: 2 }}>
+        <span style={{ fontSize: 7, fontFamily: "monospace", color: "var(--text-tertiary)" }}>1X</span>
+        <span style={{ fontSize: 7, fontFamily: "monospace", color: "var(--text-tertiary)" }}>5X</span>
+        <span style={{ fontSize: 7, fontFamily: "monospace", color: "var(--text-tertiary)" }}>9X</span>
+      </div>
     </div>
   );
 }
 
-// ── Main component ──────────────────────────────────────────────────────────
+// ── Signal Gauge Mini ──────────────────────────────────────────────────────
 
-export default function AntennaStatusPanel({
-  ip,
-  community,
-  antennaName,
-  onClose,
-}: {
-  ip: string;
-  community?: string;
-  antennaName?: string;
-  onClose: () => void;
-}) {
+function SignalGauge({ value, label, unit = "dBm", size = 90 }: { value: number; label: string; unit?: string; size?: number }) {
+  const pct = sigPct(value);
+  const color = sigColor(value);
+  const r = size * 0.4;
+  const cx = size / 2, cy = size * 0.55;
+  const startAngle = Math.PI, endAngle = 0;
+  const angle = startAngle - (pct / 100) * Math.PI;
+  const sx = cx + r * Math.cos(startAngle), sy = cy - r * Math.sin(startAngle);
+  const ex = cx + r * Math.cos(endAngle), ey = cy - r * Math.sin(endAngle);
+  const ax = cx + r * Math.cos(angle), ay = cy - r * Math.sin(angle);
+  const nx = cx + (r + 6) * Math.cos(angle), ny = cy - (r + 6) * Math.sin(angle);
+  return (
+    <div style={{ textAlign: "center" }}>
+      <svg width={size} height={size * 0.65} viewBox={`0 0 ${size} ${size * 0.65}`}>
+        <path d={`M${sx},${sy} A${r},${r} 0 0,1 ${ex},${ey}`} fill="none" stroke="var(--muted)" strokeWidth={6} strokeLinecap="round" />
+        <path d={`M${sx},${sy} A${r},${r} 0 ${pct > 50 ? 1 : 0},1 ${ax},${ay}`} fill="none" stroke={color} strokeWidth={6} strokeLinecap="round" />
+        <circle cx={nx} cy={ny} r={4} fill={color} stroke="var(--card)" strokeWidth={2} />
+        <text x={cx} y={cy + 2} textAnchor="middle" style={{ fontSize: 14, fontWeight: 800, fontFamily: "monospace", fill: color }}>{value}</text>
+        <text x={cx} y={cy + 12} textAnchor="middle" style={{ fontSize: 7, fill: "var(--text-tertiary)" }}>{unit}</text>
+      </svg>
+      <div style={{ fontSize: 8, fontWeight: 700, color: "var(--text-tertiary)", textTransform: "uppercase", letterSpacing: "0.05em", marginTop: -2 }}>{label}</div>
+    </div>
+  );
+}
+
+// ── Stat Card ──────────────────────────────────────────────────────────────
+
+function Stat({ label, value, unit, color }: { label: string; value: string | number; unit?: string; color?: string }) {
+  return (
+    <div style={{ textAlign: "center", padding: "6px 8px", background: "var(--surface-card)", borderRadius: 8, border: "1px solid var(--glass-border)" }}>
+      <div style={{ fontSize: 8, fontWeight: 700, color: "var(--text-tertiary)", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 2 }}>{label}</div>
+      <div style={{ fontSize: 16, fontWeight: 800, fontFamily: "monospace", color: color || "var(--text-primary)", lineHeight: 1 }}>{value}</div>
+      {unit && <div style={{ fontSize: 7, color: "var(--text-tertiary)", marginTop: 1 }}>{unit}</div>}
+    </div>
+  );
+}
+
+// ── Throughput Bar ──────────────────────────────────────────────────────────
+
+function ThroughputBar({ label, value, max, color, arrow }: { label: string; value: number; max: number; color: string; arrow: "up" | "down" }) {
+  const pct = max > 0 ? Math.min(100, (value / max) * 100) : 0;
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      <div style={{ width: 24, textAlign: "center" }}>
+        <span style={{ fontSize: 9, fontWeight: 800, color }}>{arrow === "up" ? "TX" : "RX"}</span>
+        <div style={{ fontSize: 7, color: "var(--text-tertiary)" }}>{arrow === "up" ? "▲" : "▼"}</div>
+      </div>
+      <div style={{ flex: 1 }}>
+        <div style={{ height: 10, borderRadius: 5, background: "var(--muted)", overflow: "hidden", position: "relative" }}>
+          <div style={{ height: "100%", width: `${pct}%`, borderRadius: 5, background: `linear-gradient(90deg, ${color}88, ${color})`, transition: "width 0.5s ease" }} />
+        </div>
+      </div>
+      <div style={{ minWidth: 70, textAlign: "right" }}>
+        <span style={{ fontSize: 14, fontWeight: 800, fontFamily: "monospace", color: "var(--text-primary)" }}>{value.toFixed(1)}</span>
+        <span style={{ fontSize: 9, color: "var(--text-tertiary)", marginLeft: 3 }}>Mbps</span>
+      </div>
+    </div>
+  );
+}
+
+// ── Main Component ─────────────────────────────────────────────────────────
+
+export default function AntennaStatusPanel({ ip, community, antennaName, onClose }: { ip: string; community?: string; antennaName?: string; onClose: () => void }) {
   const [data, setData] = useState<WirelessResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [signalHistory, setSignalHistory] = useState<number[]>([]);
-  const [showInterfaces, setShowInterfaces] = useState(false);
+  const [signalHist, setSignalHist] = useState<number[]>([]);
+  const [txHist, setTxHist] = useState<number[]>([]);
+  const [rxHist, setRxHist] = useState<number[]>([]);
   const [countdown, setCountdown] = useState(30);
+  const [ifOpen, setIfOpen] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const mountedRef = useRef(true);
+  const panelRef = useRef<HTMLDivElement>(null);
   const [dragging, setDragging] = useState(false);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
-  const [position, setPosition] = useState({ right: 16, bottom: 80 });
-  const panelRef = useRef<HTMLDivElement>(null);
-
-  // Track interface traffic history for sparklines
-  const ifTrafficHistory = useRef<Map<number, number[]>>(new Map());
+  const [position, setPosition] = useState({ right: 16, bottom: 60 });
 
   const poll = useCallback(async () => {
     if (!ip) return;
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
-
-    setLoading(true);
-    setError(null);
-
+    setLoading(true); setError(null);
     try {
-      const res = await fetch(apiUrl("/api/snmp/poll"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ip, community: community || "public", mode: "wireless" }),
-        signal: controller.signal,
-      });
+      const res = await fetch(apiUrl("/api/snmp/poll"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ip, community: community || "public", mode: "wireless" }), signal: controller.signal });
       const result: WirelessResult = await res.json();
-
       if (!mountedRef.current) return;
-
-      // Track interface traffic history
-      if (result.interfaces) {
-        for (const iface of result.interfaces) {
-          const total = iface.inOctets + iface.outOctets;
-          const history = ifTrafficHistory.current.get(iface.index) || [];
-          history.push(total);
-          if (history.length > 10) history.splice(0, history.length - 10);
-          ifTrafficHistory.current.set(iface.index, history);
-        }
-      }
-
       setData(result);
-      setCountdown(30);
-
-      if (result.wireless?.signal != null) {
-        setSignalHistory((prev) => {
-          const next = [...prev, result.wireless!.signal!];
-          return next.length > 20 ? next.slice(-20) : next;
-        });
-      }
-
-      if (!result.reachable) {
-        setError("No se pudo alcanzar el equipo");
-      }
-    } catch (err: unknown) {
-      if (err instanceof Error && err.name === "AbortError") return;
-      if (mountedRef.current) {
-        setError(err instanceof Error ? err.message : "Error de red");
-      }
+      if (result.wireless?.signal != null) setSignalHist(prev => [...prev.slice(-19), result.wireless!.signal!]);
+      if (result.wireless?.txRate != null) setTxHist(prev => [...prev.slice(-19), result.wireless!.txRate!]);
+      if (result.wireless?.rxRate != null) setRxHist(prev => [...prev.slice(-19), result.wireless!.rxRate!]);
+      if (!result.reachable) setError("No alcanzable");
+    } catch (err: any) {
+      if (err.name !== "AbortError" && mountedRef.current) setError(err.message || "Error");
     } finally {
-      if (mountedRef.current) setLoading(false);
+      if (mountedRef.current) { setLoading(false); setCountdown(30); }
     }
   }, [ip, community]);
 
-  useEffect(() => {
-    mountedRef.current = true;
-    poll();
-    return () => {
-      mountedRef.current = false;
-      abortRef.current?.abort();
-    };
-  }, [poll]);
+  useEffect(() => { mountedRef.current = true; poll(); return () => { mountedRef.current = false; abortRef.current?.abort(); }; }, [poll]);
+  useEffect(() => { const i = setInterval(poll, 30000); return () => clearInterval(i); }, [poll]);
+  useEffect(() => { const i = setInterval(() => setCountdown(c => Math.max(0, c - 1)), 1000); return () => clearInterval(i); }, []);
 
-  // Auto-refresh every 30s
-  useEffect(() => {
-    const interval = setInterval(poll, 30_000);
-    return () => clearInterval(interval);
-  }, [poll]);
-
-  // Countdown timer
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setCountdown((prev) => (prev <= 1 ? 30 : prev - 1));
-    }, 1000);
-    return () => clearInterval(timer);
-  }, []);
-
-  // Drag handlers
-  const onMouseDown = (e: React.MouseEvent) => {
-    if (!panelRef.current) return;
-    setDragging(true);
-    const rect = panelRef.current.getBoundingClientRect();
-    setOffset({ x: e.clientX - rect.left, y: e.clientY - rect.top });
-  };
-
+  // Drag
+  const onMouseDown = (e: React.MouseEvent) => { if (!panelRef.current) return; setDragging(true); const r = panelRef.current.getBoundingClientRect(); setOffset({ x: e.clientX - r.left, y: e.clientY - r.top }); };
   useEffect(() => {
     if (!dragging) return;
-    const onMouseMove = (e: MouseEvent) => {
-      if (!panelRef.current) return;
-      const parentW = window.innerWidth;
-      const parentH = window.innerHeight;
-      const rect = panelRef.current.getBoundingClientRect();
-      const newRight = parentW - e.clientX - (rect.width - offset.x);
-      const newBottom = parentH - e.clientY - (rect.height - offset.y);
-      setPosition({
-        right: Math.max(0, Math.min(parentW - rect.width, newRight)),
-        bottom: Math.max(0, Math.min(parentH - rect.height, newBottom)),
-      });
-    };
-    const onMouseUp = () => setDragging(false);
-    window.addEventListener("mousemove", onMouseMove);
-    window.addEventListener("mouseup", onMouseUp);
-    return () => {
-      window.removeEventListener("mousemove", onMouseMove);
-      window.removeEventListener("mouseup", onMouseUp);
-    };
+    const mm = (e: MouseEvent) => { if (!panelRef.current) return; const r = panelRef.current.getBoundingClientRect(); setPosition({ right: Math.max(0, window.innerWidth - e.clientX - (r.width - offset.x)), bottom: Math.max(0, window.innerHeight - e.clientY - (r.height - offset.y)) }); };
+    const mu = () => setDragging(false);
+    window.addEventListener("mousemove", mm); window.addEventListener("mouseup", mu);
+    return () => { window.removeEventListener("mousemove", mm); window.removeEventListener("mouseup", mu); };
   }, [dragging, offset]);
 
   if (!ip) return null;
 
-  const wireless = data?.wireless;
+  const w = data?.wireless;
   const sys = data?.system;
-  const quality = wireless ? QUALITY_CONFIG[wireless.quality] || QUALITY_CONFIG.critical : null;
-  const vendorCfg = wireless?.vendor ? VENDOR_CONFIG[wireless.vendor] || VENDOR_CONFIG.unknown : null;
-  const isCambium = wireless?.vendor === "cambium";
+  const ifs = data?.interfaces?.filter(i => i.operStatus === "up") || [];
+  const q = w ? QUALITY[w.quality] : null;
+  const v = w ? VENDOR[w.vendor] : null;
+  const maxRate = Math.max(w?.txRate || 0, w?.rxRate || 0, 100);
+  const isCambium = w?.vendor === "cambium";
 
-  const cardBg = "var(--card, rgba(15,15,15,0.95))";
-  const borderColor = "var(--glass-border, rgba(255,255,255,0.08))";
-  const panelBg = "var(--surface-card, rgba(255,255,255,0.02))";
-  const sectionStyle: React.CSSProperties = {
-    background: panelBg,
-    border: `1px solid ${borderColor}`,
-    borderRadius: 10,
-    padding: "10px 12px",
-  };
-
-  const txVal = wireless?.txRate ?? 0;
-  const rxVal = wireless?.rxRate ?? 0;
-  const throughputMax = Math.max(300, txVal, rxVal);
-
-  // Show all interfaces, not just active ones
-  const allInterfaces = data?.interfaces || [];
-  const activeInterfaces = allInterfaces.filter(
-    (iface) => iface.operStatus === "up" || iface.adminStatus === "up"
-  );
-  const downInterfaces = allInterfaces.filter(
-    (iface) => iface.operStatus !== "up" && iface.adminStatus !== "up"
-  );
+  const sec: React.CSSProperties = { background: "var(--surface-card)", border: "1px solid var(--glass-border)", borderRadius: 10, padding: "10px 12px" };
 
   return (
-    <div
-      ref={panelRef}
-      className="fixed z-[9999]"
-      style={{
-        right: position.right,
-        bottom: position.bottom,
-        width: 580,
-        maxHeight: "calc(100vh - 40px)",
-        background: cardBg,
-        border: `1px solid ${borderColor}`,
-        borderRadius: 16,
-        boxShadow: "0 20px 60px rgba(0,0,0,0.5), 0 0 1px rgba(255,255,255,0.1)",
-        backdropFilter: "blur(20px)",
-        overflow: "hidden",
-        userSelect: dragging ? "none" : "auto",
-        display: "flex",
-        flexDirection: "column",
-      }}
-    >
-      {/* ── Header ────────────────────────────────────────────────────────── */}
-      <div
-        className="flex items-center justify-between px-4 py-3"
-        style={{
-          borderBottom: `1px solid ${borderColor}`,
-          cursor: "grab",
-          background: "rgba(245,158,11,0.04)",
-          flexShrink: 0,
-        }}
-        onMouseDown={onMouseDown}
-      >
-        <div className="flex items-center gap-2.5" style={{ minWidth: 0 }}>
-          <div
-            className="flex items-center justify-center rounded-lg shrink-0"
-            style={{
-              width: 32, height: 32,
-              background: "rgba(245,158,11,0.12)",
-              border: "1px solid rgba(245,158,11,0.25)",
-            }}
-          >
+    <div ref={panelRef} className="fixed z-[9999]" style={{ right: position.right, bottom: position.bottom, width: 720, background: "var(--card)", border: "1px solid var(--glass-border)", borderRadius: 16, boxShadow: "0 20px 60px rgba(0,0,0,0.5)", backdropFilter: "blur(20px)", overflow: "hidden", userSelect: dragging ? "none" : "auto", maxHeight: "calc(100vh - 40px)", display: "flex", flexDirection: "column" }}>
+
+      {/* ═══ HEADER ═══ */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 16px", borderBottom: "1px solid var(--glass-border)", cursor: "grab", background: "linear-gradient(90deg, rgba(59,130,246,0.04), rgba(245,158,11,0.04))" }} onMouseDown={onMouseDown}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ width: 32, height: 32, borderRadius: 10, background: "rgba(245,158,11,0.12)", border: "1px solid rgba(245,158,11,0.25)", display: "flex", alignItems: "center", justifyContent: "center" }}>
             <Radio className="h-4 w-4" style={{ color: "#f59e0b" }} />
           </div>
-          <div style={{ minWidth: 0 }}>
-            <div
-              className="text-sm font-bold"
-              style={{
-                color: "var(--text-primary, #eee)",
-                whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-              }}
-            >
-              {antennaName || "Antena"}
-            </div>
-            <div className="flex items-center gap-2" style={{ marginTop: 1 }}>
-              <span className="text-[10px] font-mono" style={{ color: "var(--text-tertiary, #666)" }}>
-                {ip}
-              </span>
-              {data?.cached && (
-                <span className="text-[9px] px-1.5 py-0.5 rounded" style={{
-                  background: "rgba(255,255,255,0.05)",
-                  color: "var(--text-tertiary, #555)",
-                }}>
-                  cache
-                </span>
-              )}
-            </div>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 800, color: "var(--text-primary)" }}>{antennaName || "Antena"}</div>
+            <div style={{ fontSize: 10, fontFamily: "monospace", color: "var(--text-tertiary)" }}>{ip}</div>
           </div>
+          {v && <span style={{ fontSize: 9, fontWeight: 800, padding: "2px 8px", borderRadius: 20, background: `${v.color}15`, border: `1px solid ${v.color}30`, color: v.color, textTransform: "uppercase", letterSpacing: "0.04em" }}>{v.label}</span>}
+          {q && <span style={{ fontSize: 9, fontWeight: 800, padding: "2px 8px", borderRadius: 20, background: `${q.color}15`, border: `1px solid ${q.color}30`, color: q.color }}>{q.label}</span>}
         </div>
-
-        <div className="flex items-center gap-2 shrink-0">
-          {/* Vendor badge */}
-          {vendorCfg && (
-            <span className="px-2 py-0.5 rounded-full text-[9px] font-bold uppercase" style={{
-              background: vendorCfg.bg,
-              border: `1px solid ${vendorCfg.color}33`,
-              color: vendorCfg.color,
-              letterSpacing: "0.04em",
-            }}>
-              {vendorCfg.label}
-            </span>
-          )}
-          {/* Quality badge */}
-          {quality && (
-            <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full" style={{
-              background: quality.bg,
-              border: `1px solid ${quality.color}33`,
-            }}>
-              <span className="w-2 h-2 rounded-full" style={{
-                background: quality.color,
-                boxShadow: `0 0 6px ${quality.color}88`,
-                animation: "pulse 2s ease-in-out infinite",
-              }} />
-              <span style={{ fontSize: 10, color: quality.color, fontWeight: 700 }}>
-                {quality.label}
-              </span>
-            </div>
-          )}
-          {/* Refresh countdown */}
-          <RefreshCountdown seconds={countdown} />
-          {/* Refresh */}
-          <button
-            onClick={() => { poll(); setCountdown(30); }}
-            disabled={loading}
-            className="rounded-lg p-1.5 transition-all hover:bg-[rgba(255,255,255,0.06)]"
-            style={{ color: "var(--text-tertiary, #666)" }}
-            title="Actualizar"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
-          </button>
-          {/* Close */}
-          <button
-            onClick={onClose}
-            className="rounded-lg p-1.5 transition-all hover:bg-[rgba(255,255,255,0.06)]"
-            style={{ color: "var(--text-tertiary, #666)" }}
-          >
-            <X className="w-3.5 h-3.5" />
-          </button>
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          {/* Countdown */}
+          <div style={{ position: "relative", width: 20, height: 20 }}>
+            <svg width={20} height={20} style={{ transform: "rotate(-90deg)" }}><circle cx={10} cy={10} r={8} fill="none" stroke="var(--muted)" strokeWidth={2} /><circle cx={10} cy={10} r={8} fill="none" stroke="var(--text-tertiary)" strokeWidth={2} strokeDasharray={`${(countdown / 30) * 50.3} 50.3`} /></svg>
+            <span style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 7, fontWeight: 700, fontFamily: "monospace", color: "var(--text-tertiary)" }}>{countdown}</span>
+          </div>
+          <button onClick={poll} disabled={loading} style={{ padding: 4, borderRadius: 6, color: "var(--text-tertiary)", background: "transparent", border: "none", cursor: "pointer" }}><RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} /></button>
+          <button onClick={onClose} style={{ padding: 4, borderRadius: 6, color: "var(--text-tertiary)", background: "transparent", border: "none", cursor: "pointer" }}><X className="w-3.5 h-3.5" /></button>
         </div>
       </div>
 
-      {/* ── Body (scrollable) ─────────────────────────────────────────────── */}
-      <div className="p-3 flex flex-col gap-2.5" style={{ overflowY: "auto", flex: 1 }}>
+      {/* ═══ BODY ═══ */}
+      <div style={{ flex: 1, overflowY: "auto", padding: 12, display: "flex", flexDirection: "column", gap: 10 }}>
 
-        {/* Loading state */}
+        {/* Loading */}
         {loading && !data && (
-          <div style={sectionStyle} className="flex items-center justify-center gap-2 py-6">
-            <RefreshCw className="w-5 h-5 animate-spin" style={{ color: "#f59e0b" }} />
-            <span style={{ fontSize: 12, color: "var(--text-tertiary, rgba(255,255,255,0.45))" }}>
-              Consultando SNMP wireless en {ip}...
-            </span>
+          <div style={{ ...sec, textAlign: "center", padding: 20 }}>
+            <RefreshCw className="w-5 h-5 animate-spin" style={{ color: "#f59e0b", margin: "0 auto 8px" }} />
+            <div style={{ fontSize: 11, color: "var(--text-tertiary)" }}>Consultando SNMP en {ip}...</div>
           </div>
         )}
 
-        {/* Error state */}
+        {/* Error */}
         {error && !data?.reachable && (
-          <div style={sectionStyle} className="flex items-center gap-2">
-            <WifiOff className="w-4 h-4 shrink-0" style={{ color: "#ef4444" }} />
+          <div style={{ ...sec, display: "flex", alignItems: "center", gap: 8 }}>
+            <WifiOff className="w-4 h-4" style={{ color: "#ef4444" }} />
             <span style={{ fontSize: 11, color: "#ef4444" }}>{error}</span>
           </div>
         )}
 
-        {/* Data states */}
-        {data?.reachable && (
-          <>
-            {/* SNMP reachable badge */}
-            <div className="flex items-center gap-2">
-              <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full" style={{
-                background: "rgba(34,197,94,0.08)",
-                border: "1px solid rgba(34,197,94,0.18)",
-              }}>
-                <Wifi className="w-3 h-3" style={{ color: "#22c55e" }} />
-                <span style={{ fontSize: 9, color: "#22c55e", fontWeight: 700, letterSpacing: "0.04em" }}>
-                  SNMP OK
-                </span>
+        {data?.reachable && <>
+
+          {/* ═══ LINK OVERVIEW STRIP ═══ */}
+          <div style={{ ...sec, background: "linear-gradient(90deg, rgba(59,130,246,0.06), rgba(34,197,94,0.06))", padding: "12px 16px" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              {/* LOCAL */}
+              <div style={{ flex: 1 }}>
+                <div style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 8px", borderRadius: 4, background: "rgba(59,130,246,0.15)", marginBottom: 6 }}>
+                  <span style={{ fontSize: 8, fontWeight: 900, color: "#3b82f6", letterSpacing: "0.08em" }}>LOCAL</span>
+                </div>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-primary)" }}>{sys?.name || antennaName || "—"}</div>
+                <div style={{ fontSize: 9, color: "var(--text-tertiary)", fontFamily: "monospace" }}>{ip}</div>
+                {w?.txPower != null && <div style={{ fontSize: 10, color: "var(--text-secondary)", marginTop: 2 }}>TX POWER <span style={{ fontWeight: 800, fontFamily: "monospace", color: "#ef4444" }}>{w.txPower} dBm</span></div>}
               </div>
-              {sys?.name && (
-                <span style={{ fontSize: 11, fontWeight: 600, color: "var(--text-secondary, rgba(255,255,255,0.6))" }}>
-                  {sys.name}
-                </span>
+
+              {/* CENTER — SSID + Freq + CCQ */}
+              <div style={{ flex: 1.2, textAlign: "center" }}>
+                {w?.ssid && <div style={{ display: "inline-block", padding: "2px 10px", borderRadius: 20, background: "var(--surface-elevated)", border: "1px solid var(--glass-border)", fontSize: 11, fontWeight: 700, fontFamily: "monospace", color: "var(--text-primary)", marginBottom: 4 }}>SSID: {w.ssid}</div>}
+                {w?.frequency && <div style={{ fontSize: 12, fontWeight: 800, fontFamily: "monospace", color: "var(--text-primary)" }}>{w.frequency} MHz</div>}
+                {w?.ccq != null && (
+                  <div style={{ marginTop: 4 }}>
+                    <div style={{ fontSize: 8, color: "var(--text-tertiary)", fontWeight: 700, textTransform: "uppercase", marginBottom: 2 }}>CCQ {w.ccq}%</div>
+                    <div style={{ height: 5, borderRadius: 3, background: "var(--muted)", overflow: "hidden" }}>
+                      <div style={{ height: "100%", width: `${w.ccq}%`, borderRadius: 3, background: w.ccq >= 80 ? "#22c55e" : w.ccq >= 50 ? "#f59e0b" : "#ef4444", transition: "width 0.5s" }} />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* REMOTE */}
+              <div style={{ flex: 1, textAlign: "right" }}>
+                <div style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 8px", borderRadius: 4, background: "rgba(34,197,94,0.15)", marginBottom: 6 }}>
+                  <span style={{ fontSize: 8, fontWeight: 900, color: "#22c55e", letterSpacing: "0.08em" }}>REMOTE</span>
+                </div>
+                {w?.connectedAp ? (
+                  <>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-primary)" }}>{w.connectedAp}</div>
+                    {w.swVersion && <div style={{ fontSize: 9, color: "var(--text-tertiary)", fontFamily: "monospace" }}>v{w.swVersion}</div>}
+                  </>
+                ) : (
+                  <div style={{ fontSize: 10, color: "var(--text-tertiary)" }}>—</div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* ═══ FREQUENCY BAR ═══ */}
+          {w?.frequency && <FrequencyBar freq={w.frequency} chWidth={w.channelWidth} />}
+
+          {/* ═══ SIGNAL SECTION ═══ */}
+          {w && (w.signal != null || w.dlRssi != null) && (
+            <div style={{ display: "grid", gridTemplateColumns: isCambium ? "1fr 1fr" : "1fr 1fr 1fr 1fr", gap: 8 }}>
+              {isCambium ? (
+                <>
+                  {/* Cambium DL/UL layout */}
+                  <div style={sec}>
+                    <div style={{ fontSize: 9, fontWeight: 800, color: "#3b82f6", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>Downlink</div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                      <SignalGauge value={w.dlRssi ?? w.signal ?? -90} label="RSSI" />
+                      <div>
+                        {w.dlSnr != null && <Stat label="SNR" value={w.dlSnr} unit="dB" color={w.dlSnr >= 25 ? "#22c55e" : w.dlSnr >= 15 ? "#f59e0b" : "#ef4444"} />}
+                        {w.dlMcs != null && <div style={{ marginTop: 6 }}><McsBar currentMcs={w.dlMcs} label="MCS DL" /></div>}
+                      </div>
+                    </div>
+                  </div>
+                  <div style={sec}>
+                    <div style={{ fontSize: 9, fontWeight: 800, color: "#22c55e", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>Uplink</div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                      <SignalGauge value={w.ulRssi ?? w.signal ?? -90} label="RSSI" />
+                      <div>
+                        {w.ulSnr != null && <Stat label="SNR" value={w.ulSnr} unit="dB" color={w.ulSnr >= 25 ? "#22c55e" : w.ulSnr >= 15 ? "#f59e0b" : "#ef4444"} />}
+                        {w.ulMcs != null && <div style={{ marginTop: 6 }}><McsBar currentMcs={w.ulMcs} label="MCS UL" /></div>}
+                      </div>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <>
+                  {/* Generic: Signal + SNR + Noise + CCQ */}
+                  {w.signal != null && <Stat label="Señal" value={w.signal} unit="dBm" color={sigColor(w.signal)} />}
+                  {w.snr != null && <Stat label="SNR" value={w.snr} unit="dB" color={w.snr >= 25 ? "#22c55e" : w.snr >= 15 ? "#f59e0b" : "#ef4444"} />}
+                  {w.noise != null && <Stat label="Ruido" value={w.noise} unit="dBm" />}
+                  {w.ccq != null ? <Stat label="CCQ" value={`${w.ccq}%`} color={w.ccq >= 80 ? "#22c55e" : w.ccq >= 50 ? "#f59e0b" : "#ef4444"} /> : sys?.uptimeStr ? <Stat label="Uptime" value={sys.uptimeStr} /> : null}
+                </>
               )}
             </div>
+          )}
 
-            {/* ── System Info (prominent when no wireless) ────────────────── */}
-            {!wireless && sys && (
-              <SystemInfoCard sys={sys} />
-            )}
-
-            {/* ── Signal Gauge ────────────────────────────────────────────── */}
-            {wireless?.signal != null && (
-              <div style={sectionStyle} className="flex flex-col items-center">
-                <div className="flex items-center gap-1.5 self-start mb-1">
-                  <Signal className="w-3 h-3" style={{ color: signalColor(wireless.signal) }} />
-                  <span style={{ fontSize: 10, fontWeight: 700, color: "var(--text-tertiary, rgba(255,255,255,0.4))", textTransform: "uppercase", letterSpacing: "0.06em" }}>
-                    Nivel de Senal
-                  </span>
-                </div>
-                <SignalGauge signal={wireless.signal} quality={wireless.quality} />
+          {/* ═══ THROUGHPUT ═══ */}
+          {w && (w.txRate != null || w.rxRate != null) && (
+            <div style={sec}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
+                <ArrowUpDown className="w-3.5 h-3.5" style={{ color: "#3b82f6" }} />
+                <span style={{ fontSize: 10, fontWeight: 800, color: "var(--text-tertiary)", textTransform: "uppercase", letterSpacing: "0.05em" }}>Throughput</span>
+                <span style={{ fontSize: 9, color: "var(--text-tertiary)", marginLeft: "auto" }}>max {maxRate.toFixed(0)} Mbps</span>
               </div>
-            )}
-
-            {/* ── Key Metrics Row ─────────────────────────────────────────── */}
-            {wireless && (
-              <div style={{ display: "flex", gap: 8 }}>
-                {wireless.snr != null && (
-                  <MetricCard
-                    label="Senal/Ruido"
-                    value={wireless.snr}
-                    unit="dB"
-                    color={wireless.snr >= 25 ? "#22c55e" : wireless.snr >= 15 ? "#f59e0b" : "#ef4444"}
-                  />
-                )}
-                {wireless.ccq != null && (
-                  <MetricCard
-                    label="Calidad Conexion"
-                    value={wireless.ccq}
-                    unit="%"
-                    color={wireless.ccq >= 80 ? "#22c55e" : wireless.ccq >= 50 ? "#f59e0b" : "#ef4444"}
-                  />
-                )}
-                {wireless.noise != null && (
-                  <MetricCard
-                    label="Piso de Ruido"
-                    value={wireless.noise}
-                    unit="dBm"
-                    color="var(--text-secondary, rgba(255,255,255,0.6))"
-                  />
-                )}
-                <MetricCard
-                  label="Tiempo Activo"
-                  value={sys?.uptimeStr ?? (wireless.connectedTime != null ? formatConnTime(wireless.connectedTime) : "--")}
-                  unit=""
-                  color="var(--text-secondary, rgba(255,255,255,0.6))"
-                />
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {w.txRate != null && <ThroughputBar label="TX" value={w.txRate} max={maxRate} color="#22c55e" arrow="up" />}
+                {w.rxRate != null && <ThroughputBar label="RX" value={w.rxRate} max={maxRate} color="#3b82f6" arrow="down" />}
               </div>
-            )}
+            </div>
+          )}
 
-            {/* ── Cambium-specific Section ─────────────────────────────────── */}
-            {wireless && isCambium && (
-              <CambiumDetails wireless={wireless} />
-            )}
-
-            {/* ── Throughput ──────────────────────────────────────────────── */}
-            {wireless && (wireless.txRate != null || wireless.rxRate != null) && (
-              <div style={sectionStyle}>
-                <div className="flex items-center gap-1.5 mb-3">
-                  <ArrowUpDown className="w-3 h-3" style={{ color: "#3b82f6" }} />
-                  <span style={{ fontSize: 10, fontWeight: 700, color: "var(--text-tertiary, rgba(255,255,255,0.4))", textTransform: "uppercase", letterSpacing: "0.06em" }}>
-                    Throughput
-                  </span>
-                </div>
-                <div style={{ display: "flex", gap: 16 }}>
-                  {wireless.txRate != null && (
-                    <ThroughputBar label="TX" value={wireless.txRate} color="#22c55e" maxRef={throughputMax} />
-                  )}
-                  {wireless.rxRate != null && (
-                    <ThroughputBar label="RX" value={wireless.rxRate} color="#3b82f6" maxRef={throughputMax} />
-                  )}
-                </div>
+          {/* ═══ CAPACITY CHART ═══ */}
+          {(txHist.length > 1 || rxHist.length > 1 || signalHist.length > 1) && (
+            <div style={sec}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
+                <Activity className="w-3.5 h-3.5" style={{ color: "var(--text-tertiary)" }} />
+                <span style={{ fontSize: 10, fontWeight: 800, color: "var(--text-tertiary)", textTransform: "uppercase", letterSpacing: "0.05em" }}>Historial en Tiempo Real</span>
               </div>
-            )}
-
-            {/* ── Signal History ──────────────────────────────────────────── */}
-            {signalHistory.length >= 2 && (
-              <div style={sectionStyle}>
-                <div className="flex items-center justify-between mb-1">
-                  <div className="flex items-center gap-1.5">
-                    <Activity className="w-3 h-3" style={{ color: "var(--text-tertiary, rgba(255,255,255,0.3))" }} />
-                    <span style={{ fontSize: 10, fontWeight: 700, color: "var(--text-tertiary, rgba(255,255,255,0.4))", textTransform: "uppercase", letterSpacing: "0.06em" }}>
-                      Historial de Senal
-                    </span>
+              <div style={{ display: "grid", gridTemplateColumns: signalHist.length > 1 ? "1fr 1fr" : "1fr", gap: 10 }}>
+                {/* Signal history */}
+                {signalHist.length > 1 && (
+                  <div>
+                    <div style={{ fontSize: 8, fontWeight: 700, color: "var(--text-tertiary)", marginBottom: 4 }}>SEÑAL (dBm)</div>
+                    <Sparkline data={signalHist.map(s => s + 100)} color={sigColor(signalHist[signalHist.length - 1])} maxVal={70} width={320} height={45} />
                   </div>
-                  <span style={{ fontSize: 9, color: "var(--text-tertiary, rgba(255,255,255,0.3))", fontFamily: "monospace" }}>
-                    {signalHistory.length} lecturas
-                  </span>
-                </div>
-                <SignalSparkline history={signalHistory} />
-              </div>
-            )}
-
-            {/* ── Link Details ────────────────────────────────────────────── */}
-            {wireless && (
-              <div style={sectionStyle}>
-                <div className="flex items-center gap-1.5 mb-2">
-                  <Radio className="w-3 h-3" style={{ color: "var(--text-tertiary, rgba(255,255,255,0.3))" }} />
-                  <span style={{ fontSize: 10, fontWeight: 700, color: "var(--text-tertiary, rgba(255,255,255,0.4))", textTransform: "uppercase", letterSpacing: "0.06em" }}>
-                    Detalles del Enlace
-                  </span>
-                </div>
-                <div style={{ display: "grid", gridTemplateColumns: "140px 1fr", gap: "4px 8px", fontSize: 11 }}>
-                  {wireless.ssid && (
-                    <>
-                      <span style={{ color: "var(--text-tertiary, rgba(255,255,255,0.35))" }}>SSID</span>
-                      <span style={{ color: "var(--text-primary, rgba(255,255,255,0.85))", fontWeight: 600, fontFamily: "monospace", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{wireless.ssid}</span>
-                    </>
-                  )}
-                  {wireless.frequency != null && (
-                    <>
-                      <span style={{ color: "var(--text-tertiary, rgba(255,255,255,0.35))" }}>Frecuencia</span>
-                      <span style={{ color: "var(--text-primary, rgba(255,255,255,0.85))", fontWeight: 600, fontFamily: "monospace" }}>
-                        {wireless.frequency} MHz
-                        {wireless.frequency >= 5000 && <span style={{ fontSize: 9, marginLeft: 6, color: "#8b5cf6", fontWeight: 400 }}>5 GHz</span>}
-                        {wireless.frequency > 0 && wireless.frequency < 5000 && <span style={{ fontSize: 9, marginLeft: 6, color: "#06b6d4", fontWeight: 400 }}>2.4 GHz</span>}
-                      </span>
-                    </>
-                  )}
-                  {wireless.channelWidth != null && (
-                    <>
-                      <span style={{ color: "var(--text-tertiary, rgba(255,255,255,0.35))" }}>Ancho de Canal</span>
-                      <span style={{ color: "var(--text-primary, rgba(255,255,255,0.85))", fontWeight: 600, fontFamily: "monospace" }}>{wireless.channelWidth} MHz</span>
-                    </>
-                  )}
-                  {wireless.connectedTime != null && (
-                    <>
-                      <span style={{ color: "var(--text-tertiary, rgba(255,255,255,0.35))" }}>Tiempo Conectado</span>
-                      <span className="flex items-center gap-1" style={{ color: "var(--text-primary, rgba(255,255,255,0.85))", fontWeight: 600, fontFamily: "monospace" }}>
-                        <Clock className="w-3 h-3 shrink-0" style={{ color: "var(--text-tertiary, rgba(255,255,255,0.25))" }} />
-                        {formatConnTime(wireless.connectedTime)}
-                      </span>
-                    </>
-                  )}
-                  {wireless.vendor && (
-                    <>
-                      <span style={{ color: "var(--text-tertiary, rgba(255,255,255,0.35))" }}>Vendor</span>
-                      <span style={{ color: "var(--text-primary, rgba(255,255,255,0.85))", fontWeight: 600, textTransform: "capitalize" }}>{wireless.vendor}</span>
-                    </>
-                  )}
-                  {sys?.name && (
-                    <>
-                      <span style={{ color: "var(--text-tertiary, rgba(255,255,255,0.35))" }}>System Name</span>
-                      <span style={{ color: "var(--text-primary, rgba(255,255,255,0.85))", fontWeight: 600, fontFamily: "monospace", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{sys.name}</span>
-                    </>
-                  )}
-                  {sys?.description && (
-                    <>
-                      <span style={{ color: "var(--text-tertiary, rgba(255,255,255,0.35))" }}>System Description</span>
-                      <span style={{ color: "var(--text-primary, rgba(255,255,255,0.7))", fontWeight: 400, fontSize: 10, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={sys.description}>
-                        {sys.description.length > 80 ? sys.description.substring(0, 80) + "..." : sys.description}
-                      </span>
-                    </>
-                  )}
-                  {sys?.uptimeStr && (
-                    <>
-                      <span style={{ color: "var(--text-tertiary, rgba(255,255,255,0.35))" }}>Uptime Sistema</span>
-                      <span className="flex items-center gap-1" style={{ color: "var(--text-primary, rgba(255,255,255,0.85))", fontWeight: 600, fontFamily: "monospace" }}>
-                        <Clock className="w-3 h-3 shrink-0" style={{ color: "var(--text-tertiary, rgba(255,255,255,0.25))" }} />
-                        {sys.uptimeStr}
-                      </span>
-                    </>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* ── Interface Stats (improved) ─────────────────────────────── */}
-            {allInterfaces.length > 0 && (
-              <div style={sectionStyle}>
-                <button
-                  onClick={() => setShowInterfaces((v) => !v)}
-                  className="flex items-center justify-between w-full"
-                  style={{ background: "none", border: "none", cursor: "pointer", padding: 0 }}
-                >
-                  <div className="flex items-center gap-1.5">
-                    <Network className="w-3 h-3" style={{ color: "var(--text-tertiary, rgba(255,255,255,0.3))" }} />
-                    <span style={{ fontSize: 10, fontWeight: 700, color: "var(--text-tertiary, rgba(255,255,255,0.4))", textTransform: "uppercase", letterSpacing: "0.06em" }}>
-                      Interfaces
-                    </span>
-                    <span style={{ fontSize: 9, color: "#22c55e", fontWeight: 600 }}>
-                      {activeInterfaces.length} up
-                    </span>
-                    {downInterfaces.length > 0 && (
-                      <span style={{ fontSize: 9, color: "#ef4444", fontWeight: 600 }}>
-                        {downInterfaces.length} down
-                      </span>
-                    )}
-                  </div>
-                  {showInterfaces
-                    ? <ChevronUp className="w-3 h-3" style={{ color: "var(--text-tertiary, rgba(255,255,255,0.3))" }} />
-                    : <ChevronDown className="w-3 h-3" style={{ color: "var(--text-tertiary, rgba(255,255,255,0.3))" }} />
-                  }
-                </button>
-
-                {showInterfaces && (
-                  <div style={{ marginTop: 8, overflowX: "auto" }}>
-                    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 10 }}>
-                      <thead>
-                        <tr style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
-                          {["Interfaz", "Estado", "Velocidad", "IN", "OUT", "Errores", "Trafico"].map((h) => (
-                            <th key={h} style={{
-                              padding: "4px 6px",
-                              textAlign: "left",
-                              fontSize: 8,
-                              fontWeight: 700,
-                              color: "var(--text-tertiary, rgba(255,255,255,0.3))",
-                              textTransform: "uppercase",
-                              letterSpacing: "0.06em",
-                              whiteSpace: "nowrap",
-                            }}>
-                              {h}
-                            </th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {allInterfaces.map((iface) => {
-                          const isUp = iface.operStatus === "up";
-                          const trafficHist = ifTrafficHistory.current.get(iface.index) || [];
-                          return (
-                            <tr key={iface.index} style={{ borderBottom: "1px solid rgba(255,255,255,0.03)", opacity: isUp ? 1 : 0.45 }}>
-                              <td style={{
-                                padding: "5px 6px", fontFamily: "monospace",
-                                color: "var(--text-primary, rgba(255,255,255,0.8))",
-                                maxWidth: 110, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                              }}
-                                title={`${iface.name}${iface.alias ? ` (${iface.alias})` : ""}`}
-                              >
-                                {iface.alias || iface.name}
-                              </td>
-                              <td style={{ padding: "5px 6px" }}>
-                                <span style={{
-                                  display: "inline-flex", alignItems: "center", gap: 3,
-                                  fontSize: 9, fontWeight: 600,
-                                  color: isUp ? "#22c55e" : "#ef4444",
-                                }}>
-                                  <span style={{
-                                    width: 6, height: 6, borderRadius: "50%",
-                                    background: isUp ? "#22c55e" : "#ef4444",
-                                    boxShadow: isUp ? "0 0 4px rgba(34,197,94,0.5)" : "0 0 4px rgba(239,68,68,0.5)",
-                                  }} />
-                                  {iface.operStatus}
-                                </span>
-                              </td>
-                              <td style={{
-                                padding: "5px 6px", fontFamily: "monospace",
-                                color: "var(--text-secondary, rgba(255,255,255,0.6))",
-                                whiteSpace: "nowrap", fontSize: 9,
-                              }}>
-                                {formatSpeed(iface.speed)}
-                              </td>
-                              <td style={{ padding: "5px 6px" }}>
-                                <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                                  <span style={{ fontFamily: "monospace", color: "var(--text-secondary, rgba(255,255,255,0.6))", whiteSpace: "nowrap", fontSize: 9 }}>
-                                    {formatOctets(iface.inOctets)}
-                                  </span>
-                                  {isUp && <UtilizationBar inOctets={iface.inOctets} outOctets={0} speedMbps={iface.speed} />}
-                                </div>
-                              </td>
-                              <td style={{ padding: "5px 6px" }}>
-                                <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                                  <span style={{ fontFamily: "monospace", color: "var(--text-secondary, rgba(255,255,255,0.6))", whiteSpace: "nowrap", fontSize: 9 }}>
-                                    {formatOctets(iface.outOctets)}
-                                  </span>
-                                  {isUp && <UtilizationBar inOctets={0} outOctets={iface.outOctets} speedMbps={iface.speed} />}
-                                </div>
-                              </td>
-                              <td style={{
-                                padding: "5px 6px", fontFamily: "monospace",
-                                color: (iface.inErrors + iface.outErrors) > 0 ? "#f59e0b" : "var(--text-tertiary, rgba(255,255,255,0.25))",
-                                whiteSpace: "nowrap", fontSize: 9,
-                              }}>
-                                {iface.inErrors + iface.outErrors > 0
-                                  ? `${iface.inErrors}/${iface.outErrors}`
-                                  : "0"
-                                }
-                              </td>
-                              <td style={{ padding: "5px 6px" }}>
-                                {trafficHist.length >= 2 ? (
-                                  <InterfaceSparkline history={trafficHist} />
-                                ) : (
-                                  <span style={{ fontSize: 8, color: "var(--text-tertiary, rgba(255,255,255,0.15))" }}>--</span>
-                                )}
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
+                )}
+                {/* TX/RX history */}
+                {(txHist.length > 1 || rxHist.length > 1) && (
+                  <div>
+                    <div style={{ display: "flex", gap: 10, fontSize: 8, fontWeight: 700, color: "var(--text-tertiary)", marginBottom: 4 }}>
+                      <span>CAPACIDAD</span>
+                      <span style={{ color: "#22c55e" }}>● TX</span>
+                      <span style={{ color: "#3b82f6" }}>● RX</span>
+                    </div>
+                    <div style={{ position: "relative" }}>
+                      {txHist.length > 1 && <Sparkline data={txHist} color="#22c55e" maxVal={maxRate} width={320} height={45} />}
+                      {rxHist.length > 1 && <div style={{ position: "absolute", inset: 0, opacity: 0.7 }}><Sparkline data={rxHist} color="#3b82f6" maxVal={maxRate} width={320} height={45} /></div>}
+                    </div>
                   </div>
                 )}
               </div>
-            )}
+            </div>
+          )}
 
-            {/* No wireless data — rich fallback */}
-            {!wireless && data.reachable && (
-              <div style={{ ...sectionStyle, textAlign: "center", padding: "14px 12px" }}>
-                <div className="flex items-center justify-center gap-2 mb-1">
-                  <Monitor size={14} style={{ color: "var(--text-tertiary, rgba(255,255,255,0.3))" }} />
-                  <span style={{ fontSize: 11, fontWeight: 600, color: "var(--text-tertiary, rgba(255,255,255,0.45))" }}>
-                    Sin datos wireless
-                  </span>
+          {/* ═══ DETAILS TABLE ═══ */}
+          <div style={sec}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "4px 16px", fontSize: 10 }}>
+              {w?.frequency && <><span style={{ color: "var(--text-tertiary)" }}>Frecuencia</span><span style={{ color: "var(--text-primary)", fontWeight: 600, fontFamily: "monospace", gridColumn: "2/4" }}>{w.frequency} MHz{w.channelWidth ? ` / ${w.channelWidth} MHz` : ""}</span></>}
+              {w?.ssid && <><span style={{ color: "var(--text-tertiary)" }}>SSID</span><span style={{ color: "var(--text-primary)", fontWeight: 600, fontFamily: "monospace", gridColumn: "2/4" }}>{w.ssid}</span></>}
+              {w?.connectedTime != null && <><span style={{ color: "var(--text-tertiary)" }}>Conectado</span><span style={{ color: "var(--text-primary)", fontWeight: 600, fontFamily: "monospace", gridColumn: "2/4" }}>{fmtTime(w.connectedTime)}</span></>}
+              {sys?.uptimeStr && <><span style={{ color: "var(--text-tertiary)" }}>Uptime</span><span style={{ color: "var(--text-primary)", fontWeight: 600, fontFamily: "monospace", gridColumn: "2/4" }}>{sys.uptimeStr}</span></>}
+              {sys?.description && <><span style={{ color: "var(--text-tertiary)" }}>Equipo</span><span style={{ color: "var(--text-secondary)", fontSize: 9, gridColumn: "2/4", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{sys.description}</span></>}
+              {w?.swVersion && <><span style={{ color: "var(--text-tertiary)" }}>Firmware</span><span style={{ color: "var(--text-primary)", fontWeight: 600, fontFamily: "monospace", gridColumn: "2/4" }}>{w.swVersion}</span></>}
+            </div>
+          </div>
+
+          {/* ═══ INTERFACES (collapsible) ═══ */}
+          {ifs.length > 0 && (
+            <div style={sec}>
+              <button onClick={() => setIfOpen(!ifOpen)} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", background: "none", border: "none", cursor: "pointer", color: "var(--text-tertiary)", padding: 0 }}>
+                <span style={{ fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.05em" }}>Interfaces ({ifs.length})</span>
+                {ifOpen ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+              </button>
+              {ifOpen && (
+                <div style={{ marginTop: 8, fontSize: 10 }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "2fr 50px 70px 70px 70px 50px", gap: "4px 8px", fontWeight: 700, color: "var(--text-tertiary)", textTransform: "uppercase", fontSize: 8, marginBottom: 4 }}>
+                    <span>Interfaz</span><span>Estado</span><span>Velocidad</span><span>IN</span><span>OUT</span><span>Errores</span>
+                  </div>
+                  {ifs.map(iface => (
+                    <div key={iface.index} style={{ display: "grid", gridTemplateColumns: "2fr 50px 70px 70px 70px 50px", gap: "4px 8px", padding: "3px 0", borderTop: "1px solid var(--glass-border)" }}>
+                      <span style={{ color: "var(--text-primary)", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{iface.name}</span>
+                      <span style={{ display: "flex", alignItems: "center", gap: 4 }}><span style={{ width: 6, height: 6, borderRadius: "50%", background: iface.operStatus === "up" ? "#22c55e" : "#ef4444", boxShadow: `0 0 4px ${iface.operStatus === "up" ? "#22c55e" : "#ef4444"}88` }} /><span style={{ fontSize: 9, color: "var(--text-secondary)" }}>{iface.operStatus}</span></span>
+                      <span style={{ color: "var(--text-secondary)", fontFamily: "monospace" }}>{fmtSpeed(iface.speed)}</span>
+                      <span style={{ color: "var(--text-secondary)", fontFamily: "monospace" }}>{fmtBytes(iface.inOctets)}</span>
+                      <span style={{ color: "var(--text-secondary)", fontFamily: "monospace" }}>{fmtBytes(iface.outOctets)}</span>
+                      <span style={{ color: iface.inErrors + iface.outErrors > 0 ? "#ef4444" : "var(--text-tertiary)", fontFamily: "monospace" }}>{iface.inErrors + iface.outErrors}</span>
+                    </div>
+                  ))}
                 </div>
-                <span style={{ fontSize: 10, color: "var(--text-tertiary, rgba(255,255,255,0.3))" }}>
-                  Se intentaron MIBs Ubiquiti, MikroTik, Cambium y 802.11 estandar.
-                  <br />
-                  Los datos de sistema e interfaces se muestran arriba.
-                </span>
+              )}
+            </div>
+          )}
+
+          {/* No wireless data */}
+          {!w && data.reachable && (
+            <div style={{ ...sec, textAlign: "center", padding: 16 }}>
+              <Server className="w-5 h-5" style={{ color: "var(--text-tertiary)", margin: "0 auto 6px" }} />
+              <div style={{ fontSize: 11, color: "var(--text-tertiary)" }}>
+                Equipo alcanzable — OIDs wireless no disponibles
+                <br /><span style={{ fontSize: 9 }}>MIBs probadas: Ubiquiti, MikroTik, Cambium, 802.11</span>
               </div>
-            )}
-          </>
-        )}
+              {sys?.name && <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-primary)", marginTop: 6 }}>{sys.name}</div>}
+              {sys?.description && <div style={{ fontSize: 10, color: "var(--text-secondary)", marginTop: 2 }}>{sys.description.substring(0, 80)}</div>}
+              {sys?.uptimeStr && <div style={{ fontSize: 10, color: "var(--text-tertiary)", marginTop: 2 }}>Uptime: {sys.uptimeStr}</div>}
+            </div>
+          )}
+        </>}
       </div>
-
-      {/* Pulse animation keyframe */}
-      <style>{`
-        @keyframes pulse {
-          0%, 100% { opacity: 1; }
-          50% { opacity: 0.4; }
-        }
-      `}</style>
     </div>
   );
 }

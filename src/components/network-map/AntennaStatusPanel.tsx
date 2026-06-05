@@ -5,6 +5,7 @@ import {
   Radio, RefreshCw, Wifi, WifiOff, X,
   Clock, Signal, ArrowUpDown, Activity,
   Network, ChevronDown, ChevronUp,
+  Server, MapPin, User, Monitor, Zap,
 } from "lucide-react";
 import { apiUrl } from "@/lib/api";
 
@@ -21,7 +22,18 @@ interface SnmpWireless {
   frequency?: number;
   channelWidth?: number;
   connectedTime?: number;
-  vendor?: "ubiquiti" | "mikrotik" | "standard" | "unknown";
+  dlRssi?: number;
+  ulRssi?: number;
+  dlSnr?: number;
+  ulSnr?: number;
+  dlMcs?: number;
+  ulMcs?: number;
+  txCapacity?: number;
+  rxCapacity?: number;
+  connectedAp?: string;
+  txPower?: number;
+  swVersion?: string;
+  vendor: "ubiquiti" | "mikrotik" | "cambium" | "standard" | "unknown";
   quality: "excellent" | "good" | "fair" | "poor" | "critical";
 }
 
@@ -74,6 +86,7 @@ const QUALITY_CONFIG: Record<string, { label: string; color: string; bg: string 
 const VENDOR_CONFIG: Record<string, { label: string; color: string; bg: string }> = {
   ubiquiti:  { label: "Ubiquiti",  color: "#8b5cf6", bg: "rgba(139,92,246,0.10)" },
   mikrotik:  { label: "MikroTik", color: "#06b6d4", bg: "rgba(6,182,212,0.10)" },
+  cambium:   { label: "Cambium",  color: "#f97316", bg: "rgba(249,115,22,0.10)" },
   standard:  { label: "802.11",   color: "#64748b", bg: "rgba(100,116,139,0.10)" },
   unknown:   { label: "Desconocido", color: "#64748b", bg: "rgba(100,116,139,0.10)" },
 };
@@ -104,28 +117,27 @@ function formatOctets(bytes: number): string {
   return `${bytes} B`;
 }
 
+function formatSpeed(mbps: number): string {
+  if (mbps >= 1000) return `${(mbps / 1000).toFixed(mbps % 1000 === 0 ? 0 : 1)} Gbps`;
+  if (mbps > 0) return `${mbps} Mbps`;
+  return "--";
+}
+
 // ── SVG Signal Gauge ────────────────────────────────────────────────────────
 
 function SignalGauge({ signal, quality }: { signal: number; quality: string }) {
   const qCfg = QUALITY_CONFIG[quality] || QUALITY_CONFIG.critical;
 
-  // Gauge geometry
   const cx = 110;
   const cy = 100;
   const r = 80;
-  const startAngle = Math.PI;       // 180 degrees (left)
-  const endAngle = 0;               // 0 degrees (right)
-
-  // Signal range: -90 to -30
+  const startAngle = Math.PI;
   const minSignal = -90;
   const maxSignal = -30;
   const clampedSignal = Math.max(minSignal, Math.min(maxSignal, signal));
   const normalizedValue = (clampedSignal - minSignal) / (maxSignal - minSignal);
-
-  // Needle angle (from left=180deg to right=0deg)
   const needleAngle = startAngle - normalizedValue * Math.PI;
 
-  // Arc helper
   const arcPath = (startFrac: number, endFrac: number): string => {
     const a1 = startAngle - startFrac * Math.PI;
     const a2 = startAngle - endFrac * Math.PI;
@@ -137,12 +149,6 @@ function SignalGauge({ signal, quality }: { signal: number; quality: string }) {
     return `M ${x1} ${y1} A ${r} ${r} 0 ${largeArc} 1 ${x2} ${y2}`;
   };
 
-  // Color zones as fractions of the arc (0=left/-90, 1=right/-30)
-  // Red: -90 to -75 = 0 to 0.25
-  // Orange: -75 to -65 = 0.25 to 0.417
-  // Yellow: -65 to -55 = 0.417 to 0.583
-  // Blue: -55 to -45 = 0.583 to 0.75
-  // Green: -45 to -30 = 0.75 to 1
   const zones = [
     { start: 0, end: 0.25, color: "#ef4444" },
     { start: 0.25, end: 0.417, color: "#f97316" },
@@ -151,51 +157,19 @@ function SignalGauge({ signal, quality }: { signal: number; quality: string }) {
     { start: 0.75, end: 1, color: "#22c55e" },
   ];
 
-  // Needle endpoint
   const needleLen = r - 12;
   const needleX = cx + needleLen * Math.cos(needleAngle);
   const needleY = cy - needleLen * Math.sin(needleAngle);
-
-  // Tick marks
   const ticks = [-90, -80, -70, -60, -50, -40, -30];
 
   return (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
       <svg viewBox="0 0 220 130" width={220} height={130}>
-        {/* Background arc */}
-        <path
-          d={arcPath(0, 1)}
-          fill="none"
-          stroke="rgba(255,255,255,0.06)"
-          strokeWidth={14}
-          strokeLinecap="round"
-        />
-
-        {/* Color zone arcs */}
+        <path d={arcPath(0, 1)} fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth={14} strokeLinecap="round" />
         {zones.map((zone, i) => (
-          <path
-            key={i}
-            d={arcPath(zone.start, zone.end)}
-            fill="none"
-            stroke={zone.color}
-            strokeWidth={14}
-            strokeLinecap="butt"
-            opacity={0.35}
-          />
+          <path key={i} d={arcPath(zone.start, zone.end)} fill="none" stroke={zone.color} strokeWidth={14} strokeLinecap="butt" opacity={0.35} />
         ))}
-
-        {/* Active zone highlight (brighter up to needle position) */}
-        <path
-          d={arcPath(0, Math.min(1, normalizedValue))}
-          fill="none"
-          stroke={signalColor(signal)}
-          strokeWidth={14}
-          strokeLinecap="round"
-          opacity={0.7}
-          style={{ transition: "all 0.6s ease" }}
-        />
-
-        {/* Tick marks */}
+        <path d={arcPath(0, Math.min(1, normalizedValue))} fill="none" stroke={signalColor(signal)} strokeWidth={14} strokeLinecap="round" opacity={0.7} style={{ transition: "all 0.6s ease" }} />
         {ticks.map((tickVal) => {
           const frac = (tickVal - minSignal) / (maxSignal - minSignal);
           const tickAngle = startAngle - frac * Math.PI;
@@ -210,62 +184,16 @@ function SignalGauge({ signal, quality }: { signal: number; quality: string }) {
           const ly = cy - labelR * Math.sin(tickAngle);
           return (
             <g key={tickVal}>
-              <line
-                x1={tx1} y1={ty1} x2={tx2} y2={ty2}
-                stroke="rgba(255,255,255,0.2)"
-                strokeWidth={1.5}
-              />
-              <text
-                x={lx} y={ly}
-                textAnchor="middle"
-                dominantBaseline="central"
-                fill="rgba(255,255,255,0.25)"
-                fontSize={7}
-                fontFamily="monospace"
-              >
-                {tickVal}
-              </text>
+              <line x1={tx1} y1={ty1} x2={tx2} y2={ty2} stroke="rgba(255,255,255,0.2)" strokeWidth={1.5} />
+              <text x={lx} y={ly} textAnchor="middle" dominantBaseline="central" fill="rgba(255,255,255,0.25)" fontSize={7} fontFamily="monospace">{tickVal}</text>
             </g>
           );
         })}
-
-        {/* Needle */}
-        <line
-          x1={cx} y1={cy}
-          x2={needleX} y2={needleY}
-          stroke={signalColor(signal)}
-          strokeWidth={2.5}
-          strokeLinecap="round"
-          style={{ transition: "all 0.6s ease" }}
-        />
-
-        {/* Needle center dot */}
+        <line x1={cx} y1={cy} x2={needleX} y2={needleY} stroke={signalColor(signal)} strokeWidth={2.5} strokeLinecap="round" style={{ transition: "all 0.6s ease" }} />
         <circle cx={cx} cy={cy} r={5} fill={signalColor(signal)} opacity={0.9} />
         <circle cx={cx} cy={cy} r={2.5} fill="var(--card, #111)" />
-
-        {/* Center value text */}
-        <text
-          x={cx} y={cy + 22}
-          textAnchor="middle"
-          fill={signalColor(signal)}
-          fontSize={20}
-          fontWeight={800}
-          fontFamily="monospace"
-          style={{ transition: "fill 0.3s ease" }}
-        >
-          {signal} dBm
-        </text>
-
-        {/* Quality label */}
-        <text
-          x={cx} y={cy + 36}
-          textAnchor="middle"
-          fill={qCfg.color}
-          fontSize={10}
-          fontWeight={700}
-        >
-          {qCfg.label}
-        </text>
+        <text x={cx} y={cy + 22} textAnchor="middle" fill={signalColor(signal)} fontSize={20} fontWeight={800} fontFamily="monospace" style={{ transition: "fill 0.3s ease" }}>{signal} dBm</text>
+        <text x={cx} y={cy + 36} textAnchor="middle" fill={qCfg.color} fontSize={10} fontWeight={700}>{qCfg.label}</text>
       </svg>
     </div>
   );
@@ -282,7 +210,6 @@ function SignalSparkline({ history }: { history: number[] }) {
   const padY = 6;
   const chartW = w - padX * 2;
   const chartH = h - padY * 2;
-
   const minY = -90;
   const maxY = -30;
 
@@ -295,7 +222,6 @@ function SignalSparkline({ history }: { history: number[] }) {
 
   const lineD = points.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x} ${p.y}`).join(" ");
   const areaD = `${lineD} L ${points[points.length - 1].x} ${h} L ${points[0].x} ${h} Z`;
-
   const lastVal = history[history.length - 1];
   const lineColor = signalColor(lastVal);
 
@@ -307,8 +233,6 @@ function SignalSparkline({ history }: { history: number[] }) {
           <stop offset="100%" stopColor={lineColor} stopOpacity="0.02" />
         </linearGradient>
       </defs>
-
-      {/* Grid lines */}
       {[-80, -60, -40].map((val) => {
         const y = padY + ((maxY - val) / (maxY - minY)) * chartH;
         return (
@@ -318,14 +242,8 @@ function SignalSparkline({ history }: { history: number[] }) {
           </g>
         );
       })}
-
-      {/* Area fill */}
       <path d={areaD} fill="url(#sparkFill)" />
-
-      {/* Line */}
       <path d={lineD} fill="none" stroke={lineColor} strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" />
-
-      {/* Last point dot */}
       <circle cx={points[points.length - 1].x} cy={points[points.length - 1].y} r={3} fill={lineColor} />
       <circle cx={points[points.length - 1].x} cy={points[points.length - 1].y} r={5} fill={lineColor} opacity={0.3} />
     </svg>
@@ -334,17 +252,7 @@ function SignalSparkline({ history }: { history: number[] }) {
 
 // ── Metric Card ─────────────────────────────────────────────────────────────
 
-function MetricCard({
-  label,
-  value,
-  unit,
-  color,
-}: {
-  label: string;
-  value: string | number;
-  unit: string;
-  color: string;
-}) {
+function MetricCard({ label, value, unit, color }: { label: string; value: string | number; unit: string; color: string }) {
   const borderColor = "var(--glass-border, rgba(255,255,255,0.08))";
   return (
     <div style={{
@@ -356,53 +264,16 @@ function MetricCard({
       textAlign: "center",
       minWidth: 0,
     }}>
-      <div style={{
-        fontSize: 8,
-        fontWeight: 700,
-        color: "var(--text-tertiary, rgba(255,255,255,0.35))",
-        textTransform: "uppercase",
-        letterSpacing: "0.06em",
-        marginBottom: 4,
-        whiteSpace: "nowrap",
-        overflow: "hidden",
-        textOverflow: "ellipsis",
-      }}>
-        {label}
-      </div>
-      <div style={{
-        fontSize: 20,
-        fontWeight: 800,
-        fontFamily: "monospace",
-        color,
-        lineHeight: 1.1,
-        transition: "color 0.3s ease",
-      }}>
-        {value}
-      </div>
-      <div style={{
-        fontSize: 8,
-        color: "var(--text-tertiary, rgba(255,255,255,0.25))",
-        marginTop: 2,
-      }}>
-        {unit}
-      </div>
+      <div style={{ fontSize: 8, fontWeight: 700, color: "var(--text-tertiary, rgba(255,255,255,0.35))", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{label}</div>
+      <div style={{ fontSize: 20, fontWeight: 800, fontFamily: "monospace", color, lineHeight: 1.1, transition: "color 0.3s ease" }}>{value}</div>
+      <div style={{ fontSize: 8, color: "var(--text-tertiary, rgba(255,255,255,0.25))", marginTop: 2 }}>{unit}</div>
     </div>
   );
 }
 
 // ── Throughput Bar ───────────────────────────────────────────────────────────
 
-function ThroughputBar({
-  label,
-  value,
-  color,
-  maxRef,
-}: {
-  label: string;
-  value: number;
-  color: string;
-  maxRef: number;
-}) {
+function ThroughputBar({ label, value, color, maxRef }: { label: string; value: number; color: string; maxRef: number }) {
   const pct = Math.min(100, (value / maxRef) * 100);
   return (
     <div style={{ flex: 1 }}>
@@ -412,20 +283,212 @@ function ThroughputBar({
           {value} <span style={{ fontSize: 9, color: "var(--text-tertiary, rgba(255,255,255,0.35))" }}>Mbps</span>
         </span>
       </div>
-      <div style={{
-        width: "100%",
-        height: 8,
-        borderRadius: 4,
-        background: "rgba(255,255,255,0.06)",
-        overflow: "hidden",
-      }}>
+      <div style={{ width: "100%", height: 8, borderRadius: 4, background: "rgba(255,255,255,0.06)", overflow: "hidden" }}>
+        <div style={{ width: `${pct}%`, height: "100%", borderRadius: 4, background: `linear-gradient(90deg, ${color}88, ${color})`, transition: "width 0.5s ease" }} />
+      </div>
+    </div>
+  );
+}
+
+// ── Refresh Countdown ───────────────────────────────────────────────────────
+
+function RefreshCountdown({ seconds }: { seconds: number }) {
+  const radius = 7;
+  const circumference = 2 * Math.PI * radius;
+  const progress = seconds / 30;
+  const dashOffset = circumference * (1 - progress);
+
+  return (
+    <div className="flex items-center gap-1" title={`Proxima actualizacion en ${seconds}s`}>
+      <svg width={18} height={18} viewBox="0 0 18 18" style={{ transform: "rotate(-90deg)" }}>
+        <circle cx={9} cy={9} r={radius} fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth={2} />
+        <circle cx={9} cy={9} r={radius} fill="none" stroke="#22c55e" strokeWidth={2} strokeDasharray={circumference} strokeDashoffset={dashOffset} strokeLinecap="round" style={{ transition: "stroke-dashoffset 1s linear" }} />
+      </svg>
+      <span style={{ fontSize: 9, fontFamily: "monospace", color: "var(--text-tertiary, rgba(255,255,255,0.3))", minWidth: 18, textAlign: "right" }}>{seconds}s</span>
+    </div>
+  );
+}
+
+// ── Interface Utilization Bar ───────────────────────────────────────────────
+
+function UtilizationBar({ inOctets, outOctets, speedMbps }: { inOctets: number; outOctets: number; speedMbps: number }) {
+  if (speedMbps <= 0) return <span style={{ fontSize: 9, color: "var(--text-tertiary, rgba(255,255,255,0.2))" }}>--</span>;
+  // Total bytes transferred as approximate utilization indicator
+  const totalBytes = inOctets + outOctets;
+  // speedMbps * 1e6 / 8 = bytes per second capacity; assume counter = cumulative, show as bar relative hint
+  // This is not real-time rate but gives a visual hint of traffic volume
+  const maxBytes = speedMbps * 125000 * 3600; // 1 hour of max capacity as reference
+  const pct = Math.min(100, Math.max(1, (totalBytes / maxBytes) * 100));
+  const color = pct > 80 ? "#ef4444" : pct > 50 ? "#f59e0b" : "#22c55e";
+
+  return (
+    <div style={{ width: "100%", height: 4, borderRadius: 2, background: "rgba(255,255,255,0.06)", overflow: "hidden", minWidth: 40 }}>
+      <div style={{ width: `${pct}%`, height: "100%", borderRadius: 2, background: color, transition: "width 0.5s ease" }} />
+    </div>
+  );
+}
+
+// ── Interface Traffic Sparkline (mini) ──────────────────────────────────────
+
+function InterfaceSparkline({ history }: { history: number[] }) {
+  if (history.length < 2) return null;
+  const w = 50;
+  const h = 14;
+  const max = Math.max(...history, 1);
+  const points = history.map((v, i) => {
+    const x = (i / (history.length - 1)) * w;
+    const y = h - (v / max) * (h - 2) - 1;
+    return `${i === 0 ? "M" : "L"} ${x.toFixed(1)} ${y.toFixed(1)}`;
+  }).join(" ");
+
+  return (
+    <svg viewBox={`0 0 ${w} ${h}`} width={w} height={h} style={{ display: "block" }}>
+      <path d={points} fill="none" stroke="#3b82f6" strokeWidth={1} strokeLinecap="round" opacity={0.6} />
+    </svg>
+  );
+}
+
+// ── System Info Card (for non-wireless devices) ─────────────────────────────
+
+function SystemInfoCard({ sys }: { sys: SnmpSystem }) {
+  const borderColor = "var(--glass-border, rgba(255,255,255,0.08))";
+  return (
+    <div style={{
+      background: "var(--surface-card, rgba(255,255,255,0.02))",
+      border: `1px solid ${borderColor}`,
+      borderRadius: 10,
+      padding: "12px 14px",
+    }}>
+      {/* Device name large */}
+      {sys.name && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+          <div style={{
+            width: 28, height: 28, borderRadius: 8,
+            background: "rgba(59,130,246,0.12)",
+            border: "1px solid rgba(59,130,246,0.25)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            flexShrink: 0,
+          }}>
+            <Server size={14} style={{ color: "#3b82f6" }} />
+          </div>
+          <div style={{ minWidth: 0 }}>
+            <div style={{
+              fontSize: 16, fontWeight: 800, fontFamily: "monospace",
+              color: "var(--text-primary, rgba(255,255,255,0.9))",
+              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+            }}>
+              {sys.name}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Description */}
+      {sys.description && (
         <div style={{
-          width: `${pct}%`,
-          height: "100%",
-          borderRadius: 4,
-          background: `linear-gradient(90deg, ${color}88, ${color})`,
-          transition: "width 0.5s ease",
-        }} />
+          fontSize: 10, color: "var(--text-secondary, rgba(255,255,255,0.5))",
+          marginBottom: 8, lineHeight: 1.4,
+          overflow: "hidden", textOverflow: "ellipsis",
+          display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical",
+        } as React.CSSProperties}
+          title={sys.description}
+        >
+          {sys.description}
+        </div>
+      )}
+
+      {/* Info rows */}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
+        {sys.uptimeStr && (
+          <div className="flex items-center gap-1.5">
+            <Clock size={12} style={{ color: "#22c55e", flexShrink: 0 }} />
+            <span style={{ fontSize: 11, fontWeight: 600, fontFamily: "monospace", color: "var(--text-primary, rgba(255,255,255,0.8))" }}>
+              {sys.uptimeStr}
+            </span>
+            <span style={{ fontSize: 9, color: "var(--text-tertiary, rgba(255,255,255,0.3))" }}>uptime</span>
+          </div>
+        )}
+        {sys.contact && (
+          <div className="flex items-center gap-1.5">
+            <User size={12} style={{ color: "var(--text-tertiary, rgba(255,255,255,0.3))", flexShrink: 0 }} />
+            <span style={{ fontSize: 10, color: "var(--text-secondary, rgba(255,255,255,0.5))" }}>{sys.contact}</span>
+          </div>
+        )}
+        {sys.location && (
+          <div className="flex items-center gap-1.5">
+            <MapPin size={12} style={{ color: "var(--text-tertiary, rgba(255,255,255,0.3))", flexShrink: 0 }} />
+            <span style={{ fontSize: 10, color: "var(--text-secondary, rgba(255,255,255,0.5))" }}>{sys.location}</span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Cambium-specific Section ────────────────────────────────────────────────
+
+function CambiumDetails({ wireless }: { wireless: SnmpWireless }) {
+  const borderColor = "var(--glass-border, rgba(255,255,255,0.08))";
+  const rows: Array<{ label: string; value: string; color?: string }> = [];
+
+  if (wireless.dlRssi != null && wireless.ulRssi != null) {
+    rows.push({ label: "DL RSSI / UL RSSI", value: `${wireless.dlRssi} dBm / ${wireless.ulRssi} dBm`, color: signalColor(wireless.dlRssi) });
+  } else if (wireless.dlRssi != null) {
+    rows.push({ label: "DL RSSI", value: `${wireless.dlRssi} dBm`, color: signalColor(wireless.dlRssi) });
+  }
+  if (wireless.dlSnr != null && wireless.ulSnr != null) {
+    rows.push({ label: "DL SNR / UL SNR", value: `${wireless.dlSnr} dB / ${wireless.ulSnr} dB` });
+  } else if (wireless.dlSnr != null) {
+    rows.push({ label: "DL SNR", value: `${wireless.dlSnr} dB` });
+  }
+  if (wireless.dlMcs != null || wireless.ulMcs != null) {
+    const dl = wireless.dlMcs != null ? `DL: MCS${wireless.dlMcs}` : "";
+    const ul = wireless.ulMcs != null ? `UL: MCS${wireless.ulMcs}` : "";
+    rows.push({ label: "MCS Index", value: [dl, ul].filter(Boolean).join(" / ") });
+  }
+  if (wireless.txCapacity != null || wireless.rxCapacity != null) {
+    const tx = wireless.txCapacity != null ? `TX: ${(wireless.txCapacity / 1000).toFixed(1)}` : "";
+    const rx = wireless.rxCapacity != null ? `RX: ${(wireless.rxCapacity / 1000).toFixed(1)}` : "";
+    rows.push({ label: "Capacidad (Mbps)", value: [tx, rx].filter(Boolean).join(" / ") });
+  }
+  if (wireless.connectedAp) {
+    rows.push({ label: "AP Conectado", value: wireless.connectedAp });
+  }
+  if (wireless.txPower != null) {
+    rows.push({ label: "Potencia TX", value: `${wireless.txPower} dBm` });
+  }
+  if (wireless.swVersion) {
+    rows.push({ label: "Firmware", value: wireless.swVersion });
+  }
+
+  if (rows.length === 0) return null;
+
+  return (
+    <div style={{
+      background: "var(--surface-card, rgba(255,255,255,0.02))",
+      border: `1px solid ${borderColor}`,
+      borderRadius: 10,
+      padding: "10px 12px",
+    }}>
+      <div className="flex items-center gap-1.5 mb-2">
+        <Zap size={12} style={{ color: "#f97316" }} />
+        <span style={{ fontSize: 10, fontWeight: 700, color: "#f97316", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+          Cambium Details
+        </span>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "140px 1fr", gap: "4px 8px", fontSize: 11 }}>
+        {rows.map((row, i) => (
+          <div key={i} style={{ display: "contents" }}>
+            <span style={{ color: "var(--text-tertiary, rgba(255,255,255,0.35))" }}>{row.label}</span>
+            <span style={{
+              color: row.color || "var(--text-primary, rgba(255,255,255,0.85))",
+              fontWeight: 600, fontFamily: "monospace",
+              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+            }}>
+              {row.value}
+            </span>
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -449,12 +512,16 @@ export default function AntennaStatusPanel({
   const [error, setError] = useState<string | null>(null);
   const [signalHistory, setSignalHistory] = useState<number[]>([]);
   const [showInterfaces, setShowInterfaces] = useState(false);
+  const [countdown, setCountdown] = useState(30);
   const abortRef = useRef<AbortController | null>(null);
   const mountedRef = useRef(true);
   const [dragging, setDragging] = useState(false);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const [position, setPosition] = useState({ right: 16, bottom: 80 });
   const panelRef = useRef<HTMLDivElement>(null);
+
+  // Track interface traffic history for sparklines
+  const ifTrafficHistory = useRef<Map<number, number[]>>(new Map());
 
   const poll = useCallback(async () => {
     if (!ip) return;
@@ -476,9 +543,20 @@ export default function AntennaStatusPanel({
 
       if (!mountedRef.current) return;
 
-      setData(result);
+      // Track interface traffic history
+      if (result.interfaces) {
+        for (const iface of result.interfaces) {
+          const total = iface.inOctets + iface.outOctets;
+          const history = ifTrafficHistory.current.get(iface.index) || [];
+          history.push(total);
+          if (history.length > 10) history.splice(0, history.length - 10);
+          ifTrafficHistory.current.set(iface.index, history);
+        }
+      }
 
-      // Push signal reading to history
+      setData(result);
+      setCountdown(30);
+
       if (result.wireless?.signal != null) {
         setSignalHistory((prev) => {
           const next = [...prev, result.wireless!.signal!];
@@ -513,6 +591,14 @@ export default function AntennaStatusPanel({
     const interval = setInterval(poll, 30_000);
     return () => clearInterval(interval);
   }, [poll]);
+
+  // Countdown timer
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCountdown((prev) => (prev <= 1 ? 30 : prev - 1));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
 
   // Drag handlers
   const onMouseDown = (e: React.MouseEvent) => {
@@ -551,6 +637,7 @@ export default function AntennaStatusPanel({
   const sys = data?.system;
   const quality = wireless ? QUALITY_CONFIG[wireless.quality] || QUALITY_CONFIG.critical : null;
   const vendorCfg = wireless?.vendor ? VENDOR_CONFIG[wireless.vendor] || VENDOR_CONFIG.unknown : null;
+  const isCambium = wireless?.vendor === "cambium";
 
   const cardBg = "var(--card, rgba(15,15,15,0.95))";
   const borderColor = "var(--glass-border, rgba(255,255,255,0.08))";
@@ -562,14 +649,17 @@ export default function AntennaStatusPanel({
     padding: "10px 12px",
   };
 
-  // Determine throughput max reference for bar scaling
   const txVal = wireless?.txRate ?? 0;
   const rxVal = wireless?.rxRate ?? 0;
   const throughputMax = Math.max(300, txVal, rxVal);
 
-  // Filter active interfaces
-  const activeInterfaces = data?.interfaces?.filter(
+  // Show all interfaces, not just active ones
+  const allInterfaces = data?.interfaces || [];
+  const activeInterfaces = allInterfaces.filter(
     (iface) => iface.operStatus === "up" || iface.adminStatus === "up"
+  );
+  const downInterfaces = allInterfaces.filter(
+    (iface) => iface.operStatus !== "up" && iface.adminStatus !== "up"
   );
 
   return (
@@ -580,6 +670,7 @@ export default function AntennaStatusPanel({
         right: position.right,
         bottom: position.bottom,
         width: 580,
+        maxHeight: "calc(100vh - 40px)",
         background: cardBg,
         border: `1px solid ${borderColor}`,
         borderRadius: 16,
@@ -587,6 +678,8 @@ export default function AntennaStatusPanel({
         backdropFilter: "blur(20px)",
         overflow: "hidden",
         userSelect: dragging ? "none" : "auto",
+        display: "flex",
+        flexDirection: "column",
       }}
     >
       {/* ── Header ────────────────────────────────────────────────────────── */}
@@ -596,6 +689,7 @@ export default function AntennaStatusPanel({
           borderBottom: `1px solid ${borderColor}`,
           cursor: "grab",
           background: "rgba(245,158,11,0.04)",
+          flexShrink: 0,
         }}
         onMouseDown={onMouseDown}
       >
@@ -664,9 +758,11 @@ export default function AntennaStatusPanel({
               </span>
             </div>
           )}
+          {/* Refresh countdown */}
+          <RefreshCountdown seconds={countdown} />
           {/* Refresh */}
           <button
-            onClick={poll}
+            onClick={() => { poll(); setCountdown(30); }}
             disabled={loading}
             className="rounded-lg p-1.5 transition-all hover:bg-[rgba(255,255,255,0.06)]"
             style={{ color: "var(--text-tertiary, #666)" }}
@@ -674,13 +770,6 @@ export default function AntennaStatusPanel({
           >
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
           </button>
-          {/* Auto-refresh indicator */}
-          <div title="Auto-actualiza cada 30s" style={{
-            width: 6, height: 6, borderRadius: "50%",
-            background: "#22c55e",
-            boxShadow: "0 0 4px #22c55e88",
-            animation: "pulse 3s ease-in-out infinite",
-          }} />
           {/* Close */}
           <button
             onClick={onClose}
@@ -693,7 +782,7 @@ export default function AntennaStatusPanel({
       </div>
 
       {/* ── Body (scrollable) ─────────────────────────────────────────────── */}
-      <div className="p-3 flex flex-col gap-2.5" style={{ maxHeight: 560, overflowY: "auto" }}>
+      <div className="p-3 flex flex-col gap-2.5" style={{ overflowY: "auto", flex: 1 }}>
 
         {/* Loading state */}
         {loading && !data && (
@@ -734,16 +823,17 @@ export default function AntennaStatusPanel({
               )}
             </div>
 
-            {/* ── Section 2: Signal Gauge ──────────────────────────────────── */}
+            {/* ── System Info (prominent when no wireless) ────────────────── */}
+            {!wireless && sys && (
+              <SystemInfoCard sys={sys} />
+            )}
+
+            {/* ── Signal Gauge ────────────────────────────────────────────── */}
             {wireless?.signal != null && (
               <div style={sectionStyle} className="flex flex-col items-center">
                 <div className="flex items-center gap-1.5 self-start mb-1">
                   <Signal className="w-3 h-3" style={{ color: signalColor(wireless.signal) }} />
-                  <span style={{
-                    fontSize: 10, fontWeight: 700,
-                    color: "var(--text-tertiary, rgba(255,255,255,0.4))",
-                    textTransform: "uppercase", letterSpacing: "0.06em",
-                  }}>
+                  <span style={{ fontSize: 10, fontWeight: 700, color: "var(--text-tertiary, rgba(255,255,255,0.4))", textTransform: "uppercase", letterSpacing: "0.06em" }}>
                     Nivel de Senal
                   </span>
                 </div>
@@ -751,7 +841,7 @@ export default function AntennaStatusPanel({
               </div>
             )}
 
-            {/* ── Section 3: Key Metrics Row ──────────────────────────────── */}
+            {/* ── Key Metrics Row ─────────────────────────────────────────── */}
             {wireless && (
               <div style={{ display: "flex", gap: 8 }}>
                 {wireless.snr != null && (
@@ -787,16 +877,17 @@ export default function AntennaStatusPanel({
               </div>
             )}
 
-            {/* ── Section 4: Throughput ────────────────────────────────────── */}
+            {/* ── Cambium-specific Section ─────────────────────────────────── */}
+            {wireless && isCambium && (
+              <CambiumDetails wireless={wireless} />
+            )}
+
+            {/* ── Throughput ──────────────────────────────────────────────── */}
             {wireless && (wireless.txRate != null || wireless.rxRate != null) && (
               <div style={sectionStyle}>
                 <div className="flex items-center gap-1.5 mb-3">
                   <ArrowUpDown className="w-3 h-3" style={{ color: "#3b82f6" }} />
-                  <span style={{
-                    fontSize: 10, fontWeight: 700,
-                    color: "var(--text-tertiary, rgba(255,255,255,0.4))",
-                    textTransform: "uppercase", letterSpacing: "0.06em",
-                  }}>
+                  <span style={{ fontSize: 10, fontWeight: 700, color: "var(--text-tertiary, rgba(255,255,255,0.4))", textTransform: "uppercase", letterSpacing: "0.06em" }}>
                     Throughput
                   </span>
                 </div>
@@ -811,24 +902,17 @@ export default function AntennaStatusPanel({
               </div>
             )}
 
-            {/* ── Section 5: Signal History ────────────────────────────────── */}
+            {/* ── Signal History ──────────────────────────────────────────── */}
             {signalHistory.length >= 2 && (
               <div style={sectionStyle}>
                 <div className="flex items-center justify-between mb-1">
                   <div className="flex items-center gap-1.5">
                     <Activity className="w-3 h-3" style={{ color: "var(--text-tertiary, rgba(255,255,255,0.3))" }} />
-                    <span style={{
-                      fontSize: 10, fontWeight: 700,
-                      color: "var(--text-tertiary, rgba(255,255,255,0.4))",
-                      textTransform: "uppercase", letterSpacing: "0.06em",
-                    }}>
+                    <span style={{ fontSize: 10, fontWeight: 700, color: "var(--text-tertiary, rgba(255,255,255,0.4))", textTransform: "uppercase", letterSpacing: "0.06em" }}>
                       Historial de Senal
                     </span>
                   </div>
-                  <span style={{
-                    fontSize: 9, color: "var(--text-tertiary, rgba(255,255,255,0.3))",
-                    fontFamily: "monospace",
-                  }}>
+                  <span style={{ fontSize: 9, color: "var(--text-tertiary, rgba(255,255,255,0.3))", fontFamily: "monospace" }}>
                     {signalHistory.length} lecturas
                   </span>
                 </div>
@@ -836,16 +920,12 @@ export default function AntennaStatusPanel({
               </div>
             )}
 
-            {/* ── Section 6: Link Details ──────────────────────────────────── */}
+            {/* ── Link Details ────────────────────────────────────────────── */}
             {wireless && (
               <div style={sectionStyle}>
                 <div className="flex items-center gap-1.5 mb-2">
                   <Radio className="w-3 h-3" style={{ color: "var(--text-tertiary, rgba(255,255,255,0.3))" }} />
-                  <span style={{
-                    fontSize: 10, fontWeight: 700,
-                    color: "var(--text-tertiary, rgba(255,255,255,0.4))",
-                    textTransform: "uppercase", letterSpacing: "0.06em",
-                  }}>
+                  <span style={{ fontSize: 10, fontWeight: 700, color: "var(--text-tertiary, rgba(255,255,255,0.4))", textTransform: "uppercase", letterSpacing: "0.06em" }}>
                     Detalles del Enlace
                   </span>
                 </div>
@@ -853,13 +933,7 @@ export default function AntennaStatusPanel({
                   {wireless.ssid && (
                     <>
                       <span style={{ color: "var(--text-tertiary, rgba(255,255,255,0.35))" }}>SSID</span>
-                      <span style={{
-                        color: "var(--text-primary, rgba(255,255,255,0.85))",
-                        fontWeight: 600, fontFamily: "monospace",
-                        overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                      }}>
-                        {wireless.ssid}
-                      </span>
+                      <span style={{ color: "var(--text-primary, rgba(255,255,255,0.85))", fontWeight: 600, fontFamily: "monospace", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{wireless.ssid}</span>
                     </>
                   )}
                   {wireless.frequency != null && (
@@ -867,30 +941,21 @@ export default function AntennaStatusPanel({
                       <span style={{ color: "var(--text-tertiary, rgba(255,255,255,0.35))" }}>Frecuencia</span>
                       <span style={{ color: "var(--text-primary, rgba(255,255,255,0.85))", fontWeight: 600, fontFamily: "monospace" }}>
                         {wireless.frequency} MHz
-                        {wireless.frequency >= 5000 && (
-                          <span style={{ fontSize: 9, marginLeft: 6, color: "#8b5cf6", fontWeight: 400 }}>5 GHz</span>
-                        )}
-                        {wireless.frequency > 0 && wireless.frequency < 5000 && (
-                          <span style={{ fontSize: 9, marginLeft: 6, color: "#06b6d4", fontWeight: 400 }}>2.4 GHz</span>
-                        )}
+                        {wireless.frequency >= 5000 && <span style={{ fontSize: 9, marginLeft: 6, color: "#8b5cf6", fontWeight: 400 }}>5 GHz</span>}
+                        {wireless.frequency > 0 && wireless.frequency < 5000 && <span style={{ fontSize: 9, marginLeft: 6, color: "#06b6d4", fontWeight: 400 }}>2.4 GHz</span>}
                       </span>
                     </>
                   )}
                   {wireless.channelWidth != null && (
                     <>
                       <span style={{ color: "var(--text-tertiary, rgba(255,255,255,0.35))" }}>Ancho de Canal</span>
-                      <span style={{ color: "var(--text-primary, rgba(255,255,255,0.85))", fontWeight: 600, fontFamily: "monospace" }}>
-                        {wireless.channelWidth} MHz
-                      </span>
+                      <span style={{ color: "var(--text-primary, rgba(255,255,255,0.85))", fontWeight: 600, fontFamily: "monospace" }}>{wireless.channelWidth} MHz</span>
                     </>
                   )}
                   {wireless.connectedTime != null && (
                     <>
                       <span style={{ color: "var(--text-tertiary, rgba(255,255,255,0.35))" }}>Tiempo Conectado</span>
-                      <span className="flex items-center gap-1" style={{
-                        color: "var(--text-primary, rgba(255,255,255,0.85))",
-                        fontWeight: 600, fontFamily: "monospace",
-                      }}>
+                      <span className="flex items-center gap-1" style={{ color: "var(--text-primary, rgba(255,255,255,0.85))", fontWeight: 600, fontFamily: "monospace" }}>
                         <Clock className="w-3 h-3 shrink-0" style={{ color: "var(--text-tertiary, rgba(255,255,255,0.25))" }} />
                         {formatConnTime(wireless.connectedTime)}
                       </span>
@@ -899,36 +964,19 @@ export default function AntennaStatusPanel({
                   {wireless.vendor && (
                     <>
                       <span style={{ color: "var(--text-tertiary, rgba(255,255,255,0.35))" }}>Vendor</span>
-                      <span style={{
-                        color: "var(--text-primary, rgba(255,255,255,0.85))",
-                        fontWeight: 600, textTransform: "capitalize",
-                      }}>
-                        {wireless.vendor}
-                      </span>
+                      <span style={{ color: "var(--text-primary, rgba(255,255,255,0.85))", fontWeight: 600, textTransform: "capitalize" }}>{wireless.vendor}</span>
                     </>
                   )}
                   {sys?.name && (
                     <>
                       <span style={{ color: "var(--text-tertiary, rgba(255,255,255,0.35))" }}>System Name</span>
-                      <span style={{
-                        color: "var(--text-primary, rgba(255,255,255,0.85))",
-                        fontWeight: 600, fontFamily: "monospace",
-                        overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                      }}>
-                        {sys.name}
-                      </span>
+                      <span style={{ color: "var(--text-primary, rgba(255,255,255,0.85))", fontWeight: 600, fontFamily: "monospace", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{sys.name}</span>
                     </>
                   )}
                   {sys?.description && (
                     <>
                       <span style={{ color: "var(--text-tertiary, rgba(255,255,255,0.35))" }}>System Description</span>
-                      <span style={{
-                        color: "var(--text-primary, rgba(255,255,255,0.7))",
-                        fontWeight: 400, fontSize: 10,
-                        overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                      }}
-                        title={sys.description}
-                      >
+                      <span style={{ color: "var(--text-primary, rgba(255,255,255,0.7))", fontWeight: 400, fontSize: 10, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={sys.description}>
                         {sys.description.length > 80 ? sys.description.substring(0, 80) + "..." : sys.description}
                       </span>
                     </>
@@ -936,10 +984,7 @@ export default function AntennaStatusPanel({
                   {sys?.uptimeStr && (
                     <>
                       <span style={{ color: "var(--text-tertiary, rgba(255,255,255,0.35))" }}>Uptime Sistema</span>
-                      <span className="flex items-center gap-1" style={{
-                        color: "var(--text-primary, rgba(255,255,255,0.85))",
-                        fontWeight: 600, fontFamily: "monospace",
-                      }}>
+                      <span className="flex items-center gap-1" style={{ color: "var(--text-primary, rgba(255,255,255,0.85))", fontWeight: 600, fontFamily: "monospace" }}>
                         <Clock className="w-3 h-3 shrink-0" style={{ color: "var(--text-tertiary, rgba(255,255,255,0.25))" }} />
                         {sys.uptimeStr}
                       </span>
@@ -949,8 +994,8 @@ export default function AntennaStatusPanel({
               </div>
             )}
 
-            {/* ── Section 7: Interface Stats (collapsible) ────────────────── */}
-            {activeInterfaces && activeInterfaces.length > 0 && (
+            {/* ── Interface Stats (improved) ─────────────────────────────── */}
+            {allInterfaces.length > 0 && (
               <div style={sectionStyle}>
                 <button
                   onClick={() => setShowInterfaces((v) => !v)}
@@ -959,13 +1004,17 @@ export default function AntennaStatusPanel({
                 >
                   <div className="flex items-center gap-1.5">
                     <Network className="w-3 h-3" style={{ color: "var(--text-tertiary, rgba(255,255,255,0.3))" }} />
-                    <span style={{
-                      fontSize: 10, fontWeight: 700,
-                      color: "var(--text-tertiary, rgba(255,255,255,0.4))",
-                      textTransform: "uppercase", letterSpacing: "0.06em",
-                    }}>
-                      Interfaces ({activeInterfaces.length})
+                    <span style={{ fontSize: 10, fontWeight: 700, color: "var(--text-tertiary, rgba(255,255,255,0.4))", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                      Interfaces
                     </span>
+                    <span style={{ fontSize: 9, color: "#22c55e", fontWeight: 600 }}>
+                      {activeInterfaces.length} up
+                    </span>
+                    {downInterfaces.length > 0 && (
+                      <span style={{ fontSize: 9, color: "#ef4444", fontWeight: 600 }}>
+                        {downInterfaces.length} down
+                      </span>
+                    )}
                   </div>
                   {showInterfaces
                     ? <ChevronUp className="w-3 h-3" style={{ color: "var(--text-tertiary, rgba(255,255,255,0.3))" }} />
@@ -978,7 +1027,7 @@ export default function AntennaStatusPanel({
                     <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 10 }}>
                       <thead>
                         <tr style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
-                          {["Interfaz", "Estado", "Velocidad", "IN", "OUT", "Errores"].map((h) => (
+                          {["Interfaz", "Estado", "Velocidad", "IN", "OUT", "Errores", "Trafico"].map((h) => (
                             <th key={h} style={{
                               padding: "4px 6px",
                               textAlign: "left",
@@ -995,63 +1044,77 @@ export default function AntennaStatusPanel({
                         </tr>
                       </thead>
                       <tbody>
-                        {activeInterfaces.map((iface) => (
-                          <tr key={iface.index} style={{ borderBottom: "1px solid rgba(255,255,255,0.03)" }}>
-                            <td style={{
-                              padding: "4px 6px", fontFamily: "monospace",
-                              color: "var(--text-primary, rgba(255,255,255,0.8))",
-                              maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                            }}
-                              title={iface.alias || iface.name}
-                            >
-                              {iface.alias || iface.name}
-                            </td>
-                            <td style={{ padding: "4px 6px" }}>
-                              <span style={{
-                                display: "inline-flex", alignItems: "center", gap: 3,
-                                fontSize: 9, fontWeight: 600,
-                                color: iface.operStatus === "up" ? "#22c55e" : "#ef4444",
-                              }}>
+                        {allInterfaces.map((iface) => {
+                          const isUp = iface.operStatus === "up";
+                          const trafficHist = ifTrafficHistory.current.get(iface.index) || [];
+                          return (
+                            <tr key={iface.index} style={{ borderBottom: "1px solid rgba(255,255,255,0.03)", opacity: isUp ? 1 : 0.45 }}>
+                              <td style={{
+                                padding: "5px 6px", fontFamily: "monospace",
+                                color: "var(--text-primary, rgba(255,255,255,0.8))",
+                                maxWidth: 110, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                              }}
+                                title={`${iface.name}${iface.alias ? ` (${iface.alias})` : ""}`}
+                              >
+                                {iface.alias || iface.name}
+                              </td>
+                              <td style={{ padding: "5px 6px" }}>
                                 <span style={{
-                                  width: 5, height: 5, borderRadius: "50%",
-                                  background: iface.operStatus === "up" ? "#22c55e" : "#ef4444",
-                                }} />
-                                {iface.operStatus}
-                              </span>
-                            </td>
-                            <td style={{
-                              padding: "4px 6px", fontFamily: "monospace",
-                              color: "var(--text-secondary, rgba(255,255,255,0.6))",
-                              whiteSpace: "nowrap",
-                            }}>
-                              {iface.speed > 0 ? `${iface.speed} Mbps` : "--"}
-                            </td>
-                            <td style={{
-                              padding: "4px 6px", fontFamily: "monospace",
-                              color: "var(--text-secondary, rgba(255,255,255,0.6))",
-                              whiteSpace: "nowrap",
-                            }}>
-                              {formatOctets(iface.inOctets)}
-                            </td>
-                            <td style={{
-                              padding: "4px 6px", fontFamily: "monospace",
-                              color: "var(--text-secondary, rgba(255,255,255,0.6))",
-                              whiteSpace: "nowrap",
-                            }}>
-                              {formatOctets(iface.outOctets)}
-                            </td>
-                            <td style={{
-                              padding: "4px 6px", fontFamily: "monospace",
-                              color: (iface.inErrors + iface.outErrors) > 0 ? "#f59e0b" : "var(--text-tertiary, rgba(255,255,255,0.25))",
-                              whiteSpace: "nowrap",
-                            }}>
-                              {iface.inErrors + iface.outErrors > 0
-                                ? `${iface.inErrors}/${iface.outErrors}`
-                                : "0"
-                              }
-                            </td>
-                          </tr>
-                        ))}
+                                  display: "inline-flex", alignItems: "center", gap: 3,
+                                  fontSize: 9, fontWeight: 600,
+                                  color: isUp ? "#22c55e" : "#ef4444",
+                                }}>
+                                  <span style={{
+                                    width: 6, height: 6, borderRadius: "50%",
+                                    background: isUp ? "#22c55e" : "#ef4444",
+                                    boxShadow: isUp ? "0 0 4px rgba(34,197,94,0.5)" : "0 0 4px rgba(239,68,68,0.5)",
+                                  }} />
+                                  {iface.operStatus}
+                                </span>
+                              </td>
+                              <td style={{
+                                padding: "5px 6px", fontFamily: "monospace",
+                                color: "var(--text-secondary, rgba(255,255,255,0.6))",
+                                whiteSpace: "nowrap", fontSize: 9,
+                              }}>
+                                {formatSpeed(iface.speed)}
+                              </td>
+                              <td style={{ padding: "5px 6px" }}>
+                                <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                                  <span style={{ fontFamily: "monospace", color: "var(--text-secondary, rgba(255,255,255,0.6))", whiteSpace: "nowrap", fontSize: 9 }}>
+                                    {formatOctets(iface.inOctets)}
+                                  </span>
+                                  {isUp && <UtilizationBar inOctets={iface.inOctets} outOctets={0} speedMbps={iface.speed} />}
+                                </div>
+                              </td>
+                              <td style={{ padding: "5px 6px" }}>
+                                <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                                  <span style={{ fontFamily: "monospace", color: "var(--text-secondary, rgba(255,255,255,0.6))", whiteSpace: "nowrap", fontSize: 9 }}>
+                                    {formatOctets(iface.outOctets)}
+                                  </span>
+                                  {isUp && <UtilizationBar inOctets={0} outOctets={iface.outOctets} speedMbps={iface.speed} />}
+                                </div>
+                              </td>
+                              <td style={{
+                                padding: "5px 6px", fontFamily: "monospace",
+                                color: (iface.inErrors + iface.outErrors) > 0 ? "#f59e0b" : "var(--text-tertiary, rgba(255,255,255,0.25))",
+                                whiteSpace: "nowrap", fontSize: 9,
+                              }}>
+                                {iface.inErrors + iface.outErrors > 0
+                                  ? `${iface.inErrors}/${iface.outErrors}`
+                                  : "0"
+                                }
+                              </td>
+                              <td style={{ padding: "5px 6px" }}>
+                                {trafficHist.length >= 2 ? (
+                                  <InterfaceSparkline history={trafficHist} />
+                                ) : (
+                                  <span style={{ fontSize: 8, color: "var(--text-tertiary, rgba(255,255,255,0.15))" }}>--</span>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
@@ -1059,13 +1122,19 @@ export default function AntennaStatusPanel({
               </div>
             )}
 
-            {/* No wireless data warning */}
+            {/* No wireless data — rich fallback */}
             {!wireless && data.reachable && (
               <div style={{ ...sectionStyle, textAlign: "center", padding: "14px 12px" }}>
-                <span style={{ fontSize: 11, color: "var(--text-tertiary, rgba(255,255,255,0.35))" }}>
-                  Equipo alcanzable pero no devolvio OIDs wireless.
+                <div className="flex items-center justify-center gap-2 mb-1">
+                  <Monitor size={14} style={{ color: "var(--text-tertiary, rgba(255,255,255,0.3))" }} />
+                  <span style={{ fontSize: 11, fontWeight: 600, color: "var(--text-tertiary, rgba(255,255,255,0.45))" }}>
+                    Sin datos wireless
+                  </span>
+                </div>
+                <span style={{ fontSize: 10, color: "var(--text-tertiary, rgba(255,255,255,0.3))" }}>
+                  Se intentaron MIBs Ubiquiti, MikroTik, Cambium y 802.11 estandar.
                   <br />
-                  <span style={{ fontSize: 10 }}>Se intentaron MIBs Ubiquiti, MikroTik y 802.11 estandar.</span>
+                  Los datos de sistema e interfaces se muestran arriba.
                 </span>
               </div>
             )}
@@ -1073,7 +1142,7 @@ export default function AntennaStatusPanel({
         )}
       </div>
 
-      {/* Pulse animation keyframe (injected once) */}
+      {/* Pulse animation keyframe */}
       <style>{`
         @keyframes pulse {
           0%, 100% { opacity: 1; }

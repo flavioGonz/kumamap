@@ -97,6 +97,36 @@ const MIKROTIK_WIRELESS = {
   mtxrWlStatNoiseFloor:  "1.3.6.1.4.1.14988.1.1.1.1.1.9",
 };
 
+// Cambium Networks wireless MIB (ePMP / PMP / Force series)
+const CAMBIUM_WIRELESS = {
+  // cambiumCurrentSoftwareVersion
+  cambiumSwVersion:       "1.3.6.1.4.1.17713.21.3.4.3.0",
+  // Radio/wireless stats — ePMP series
+  cambiumSTADLRSSI:       "1.3.6.1.4.1.17713.21.1.2.3.0",    // DL RSSI (signal) dBm
+  cambiumSTAULRSSI:       "1.3.6.1.4.1.17713.21.1.2.4.0",    // UL RSSI dBm
+  cambiumSTADLSNR:        "1.3.6.1.4.1.17713.21.1.2.1.0",    // DL SNR dB
+  cambiumSTAULSNR:        "1.3.6.1.4.1.17713.21.1.2.2.0",    // UL SNR dB
+  cambiumSTADLMCS:        "1.3.6.1.4.1.17713.21.1.2.7.0",    // DL MCS index
+  cambiumSTAULMCS:        "1.3.6.1.4.1.17713.21.1.2.8.0",    // UL MCS index
+  cambiumSTATxCapacity:   "1.3.6.1.4.1.17713.21.1.2.15.0",   // TX capacity kbps
+  cambiumSTARxCapacity:   "1.3.6.1.4.1.17713.21.1.2.16.0",   // RX capacity kbps
+  cambiumSTAConnectedAP:  "1.3.6.1.4.1.17713.21.1.2.19.0",   // Connected AP name
+  cambiumFrequency:       "1.3.6.1.4.1.17713.21.1.1.5.0",    // Operating frequency MHz
+  cambiumChannelWidth:    "1.3.6.1.4.1.17713.21.1.1.9.0",    // Channel bandwidth MHz
+  cambiumSSID:            "1.3.6.1.4.1.17713.21.1.1.4.0",    // SSID
+  cambiumTxPower:         "1.3.6.1.4.1.17713.21.1.1.6.0",    // TX power dBm
+  cambiumSessionUptime:   "1.3.6.1.4.1.17713.21.1.2.20.0",   // Session uptime seconds
+  // PMP450 / Force300 series (different OID tree)
+  pmp450DLRSSI:           "1.3.6.1.4.1.17713.8.12.2.0",      // DL RSSI
+  pmp450ULRSSI:           "1.3.6.1.4.1.17713.8.12.4.0",      // UL RSSI
+  pmp450DLSNR:            "1.3.6.1.4.1.17713.8.12.6.0",      // DL SNR
+  pmp450ULSNR:            "1.3.6.1.4.1.17713.8.12.8.0",      // UL SNR
+  pmp450Frequency:        "1.3.6.1.4.1.17713.8.4.2.0",       // Frequency
+  pmp450ChannelWidth:     "1.3.6.1.4.1.17713.8.4.4.0",       // Channel width
+  pmp450TxCapacity:       "1.3.6.1.4.1.17713.8.12.12.0",     // TX throughput
+  pmp450RxCapacity:       "1.3.6.1.4.1.17713.8.12.14.0",     // RX throughput
+};
+
 // Standard IEEE 802.11 MIB
 const DOT11_WIRELESS = {
   dot11StationID:           "1.2.840.10036.1.1.1.1",
@@ -153,7 +183,18 @@ interface SnmpWireless {
   frequency?: number;     // MHz
   channelWidth?: number;  // MHz
   connectedTime?: number; // seconds
-  vendor?: "ubiquiti" | "mikrotik" | "standard" | "unknown";
+  dlRssi?: number;        // Downlink RSSI (Cambium)
+  ulRssi?: number;        // Uplink RSSI (Cambium)
+  dlSnr?: number;         // Downlink SNR (Cambium)
+  ulSnr?: number;         // Uplink SNR (Cambium)
+  dlMcs?: number;         // DL MCS index
+  ulMcs?: number;         // UL MCS index
+  txCapacity?: number;    // TX capacity kbps
+  rxCapacity?: number;    // RX capacity kbps
+  connectedAp?: string;   // Connected AP name
+  txPower?: number;       // TX power dBm
+  swVersion?: string;     // Software version
+  vendor: "ubiquiti" | "mikrotik" | "cambium" | "standard" | "unknown";
   quality: "excellent" | "good" | "fair" | "poor" | "critical";
 }
 
@@ -258,19 +299,128 @@ function classifySignal(signal: number | undefined): SnmpWireless["quality"] {
   return "critical";
 }
 
-// ── Wireless polling (Ubiquiti → MikroTik → 802.11 fallback) ────────────────
+// ── Cambium polling helper ───────────────────────────────────────────────────
 
-async function pollWireless(session: any): Promise<SnmpWireless | null> {
-  // Try Ubiquiti first (most common in PTP deployments)
+async function pollCambium(session: any): Promise<SnmpWireless | null> {
+  // Try ePMP OIDs first (subtree walk on 1.3.6.1.4.1.17713.21)
+  try {
+    const epmpBase = "1.3.6.1.4.1.17713.21";
+    const epmpResults = await snmpSubtree(session, epmpBase);
+    if (epmpResults.length > 0) {
+      const findVal = (baseOid: string): any => {
+        for (const r of epmpResults) {
+          if (r.oid.startsWith(baseOid)) return r.value;
+        }
+        return undefined;
+      };
+      const dlRssi = findVal(CAMBIUM_WIRELESS.cambiumSTADLRSSI);
+      const ulRssi = findVal(CAMBIUM_WIRELESS.cambiumSTAULRSSI);
+      const dlSnr = findVal(CAMBIUM_WIRELESS.cambiumSTADLSNR);
+      const ulSnr = findVal(CAMBIUM_WIRELESS.cambiumSTAULSNR);
+      const dlRssiNum = dlRssi != null ? toNumber(dlRssi) : undefined;
+      const ulRssiNum = ulRssi != null ? toNumber(ulRssi) : undefined;
+      const dlSnrNum = dlSnr != null ? toNumber(dlSnr) : undefined;
+      const ulSnrNum = ulSnr != null ? toNumber(ulSnr) : undefined;
+      const txCapKbps = findVal(CAMBIUM_WIRELESS.cambiumSTATxCapacity);
+      const rxCapKbps = findVal(CAMBIUM_WIRELESS.cambiumSTARxCapacity);
+      const txCapNum = txCapKbps != null ? toNumber(txCapKbps) : undefined;
+      const rxCapNum = rxCapKbps != null ? toNumber(rxCapKbps) : undefined;
+      const swVer = findVal(CAMBIUM_WIRELESS.cambiumSwVersion);
+
+      const result: SnmpWireless = {
+        ssid: findVal(CAMBIUM_WIRELESS.cambiumSSID) != null ? toString(findVal(CAMBIUM_WIRELESS.cambiumSSID)) : undefined,
+        signal: dlRssiNum,
+        snr: dlSnrNum,
+        frequency: findVal(CAMBIUM_WIRELESS.cambiumFrequency) != null ? toNumber(findVal(CAMBIUM_WIRELESS.cambiumFrequency)) : undefined,
+        channelWidth: findVal(CAMBIUM_WIRELESS.cambiumChannelWidth) != null ? toNumber(findVal(CAMBIUM_WIRELESS.cambiumChannelWidth)) : undefined,
+        connectedTime: findVal(CAMBIUM_WIRELESS.cambiumSessionUptime) != null ? toNumber(findVal(CAMBIUM_WIRELESS.cambiumSessionUptime)) : undefined,
+        txRate: txCapNum != null ? Math.round(txCapNum / 1000) : undefined,   // kbps → Mbps
+        rxRate: rxCapNum != null ? Math.round(rxCapNum / 1000) : undefined,   // kbps → Mbps
+        dlRssi: dlRssiNum,
+        ulRssi: ulRssiNum,
+        dlSnr: dlSnrNum,
+        ulSnr: ulSnrNum,
+        dlMcs: findVal(CAMBIUM_WIRELESS.cambiumSTADLMCS) != null ? toNumber(findVal(CAMBIUM_WIRELESS.cambiumSTADLMCS)) : undefined,
+        ulMcs: findVal(CAMBIUM_WIRELESS.cambiumSTAULMCS) != null ? toNumber(findVal(CAMBIUM_WIRELESS.cambiumSTAULMCS)) : undefined,
+        txCapacity: txCapNum,
+        rxCapacity: rxCapNum,
+        connectedAp: findVal(CAMBIUM_WIRELESS.cambiumSTAConnectedAP) != null ? toString(findVal(CAMBIUM_WIRELESS.cambiumSTAConnectedAP)) : undefined,
+        txPower: findVal(CAMBIUM_WIRELESS.cambiumTxPower) != null ? toNumber(findVal(CAMBIUM_WIRELESS.cambiumTxPower)) : undefined,
+        swVersion: swVer != null ? toString(swVer) : undefined,
+        vendor: "cambium",
+        quality: classifySignal(dlRssiNum),
+      };
+      return result;
+    }
+  } catch {
+    // ePMP OIDs not supported
+  }
+
+  // Try PMP450 / Force300 OIDs (subtree walk on 1.3.6.1.4.1.17713.8)
+  try {
+    const pmpBase = "1.3.6.1.4.1.17713.8";
+    const pmpResults = await snmpSubtree(session, pmpBase);
+    if (pmpResults.length > 0) {
+      const findVal = (baseOid: string): any => {
+        for (const r of pmpResults) {
+          if (r.oid.startsWith(baseOid)) return r.value;
+        }
+        return undefined;
+      };
+      const dlRssi = findVal(CAMBIUM_WIRELESS.pmp450DLRSSI);
+      const ulRssi = findVal(CAMBIUM_WIRELESS.pmp450ULRSSI);
+      const dlSnr = findVal(CAMBIUM_WIRELESS.pmp450DLSNR);
+      const ulSnr = findVal(CAMBIUM_WIRELESS.pmp450ULSNR);
+      const dlRssiNum = dlRssi != null ? toNumber(dlRssi) : undefined;
+      const ulRssiNum = ulRssi != null ? toNumber(ulRssi) : undefined;
+      const dlSnrNum = dlSnr != null ? toNumber(dlSnr) : undefined;
+      const ulSnrNum = ulSnr != null ? toNumber(ulSnr) : undefined;
+      const txCapKbps = findVal(CAMBIUM_WIRELESS.pmp450TxCapacity);
+      const rxCapKbps = findVal(CAMBIUM_WIRELESS.pmp450RxCapacity);
+      const txCapNum = txCapKbps != null ? toNumber(txCapKbps) : undefined;
+      const rxCapNum = rxCapKbps != null ? toNumber(rxCapKbps) : undefined;
+
+      const result: SnmpWireless = {
+        signal: dlRssiNum,
+        snr: dlSnrNum,
+        frequency: findVal(CAMBIUM_WIRELESS.pmp450Frequency) != null ? toNumber(findVal(CAMBIUM_WIRELESS.pmp450Frequency)) : undefined,
+        channelWidth: findVal(CAMBIUM_WIRELESS.pmp450ChannelWidth) != null ? toNumber(findVal(CAMBIUM_WIRELESS.pmp450ChannelWidth)) : undefined,
+        txRate: txCapNum != null ? Math.round(txCapNum / 1000) : undefined,   // kbps → Mbps
+        rxRate: rxCapNum != null ? Math.round(rxCapNum / 1000) : undefined,   // kbps → Mbps
+        dlRssi: dlRssiNum,
+        ulRssi: ulRssiNum,
+        dlSnr: dlSnrNum,
+        ulSnr: ulSnrNum,
+        txCapacity: txCapNum,
+        rxCapacity: rxCapNum,
+        vendor: "cambium",
+        quality: classifySignal(dlRssiNum),
+      };
+      return result;
+    }
+  } catch {
+    // PMP450 OIDs not supported
+  }
+
+  return null;
+}
+
+// ── Wireless polling (sysDescr-aware: Cambium first if detected) ────────────
+
+async function pollWireless(session: any, sysDescr?: string): Promise<SnmpWireless | null> {
+  // If sysDescr hints at Cambium, try Cambium OIDs FIRST
+  const isCambiumHint = sysDescr != null && /cambium|cambiumnetworks|epmp|pmp/i.test(sysDescr);
+
+  if (isCambiumHint) {
+    const cambiumResult = await pollCambium(session);
+    if (cambiumResult) return cambiumResult;
+  }
+
+  // Try Ubiquiti (most common in PTP deployments)
   try {
     const ubntBase = "1.3.6.1.4.1.41112.1.4";
     const ubntResults = await snmpSubtree(session, ubntBase);
     if (ubntResults.length > 0) {
-      const byOid: Record<string, any> = {};
-      for (const r of ubntResults) {
-        byOid[r.oid] = r.value;
-      }
-      // Find first matching values by walking subtree results
       const findVal = (baseOid: string): any => {
         for (const r of ubntResults) {
           if (r.oid.startsWith(baseOid)) return r.value;
@@ -329,7 +479,13 @@ async function pollWireless(session: any): Promise<SnmpWireless | null> {
       return result;
     }
   } catch {
-    // MikroTik OIDs not supported, try standard
+    // MikroTik OIDs not supported, try next
+  }
+
+  // Try Cambium (if not already tried via sysDescr hint)
+  if (!isCambiumHint) {
+    const cambiumResult = await pollCambium(session);
+    if (cambiumResult) return cambiumResult;
   }
 
   // Fallback to standard IEEE 802.11 MIB
@@ -549,7 +705,7 @@ async function pollDevice(ip: string, community: string, deviceType?: string, mo
     // ── Wireless stats (when mode=wireless) ──
     if (mode === "wireless") {
       try {
-        result.wireless = await pollWireless(session);
+        result.wireless = await pollWireless(session, result.system?.description);
       } catch {
         result.wireless = null;
       }

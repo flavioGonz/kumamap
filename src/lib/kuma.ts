@@ -1,11 +1,17 @@
 import { io, Socket } from "socket.io-client";
 import type { KumaMonitor, KumaHeartbeat } from "./types";
 import { onHeartbeat as pushOnHeartbeat } from "./push-sender";
+import { onHeartbeat as whatsappOnHeartbeat } from "./whatsapp-sender";
+import { getMonitorNgVirtualMonitors } from './monitorng';
 
 // Re-export types for backward compatibility
 export type { KumaMonitor, KumaHeartbeat } from "./types";
 
 const MAX_HISTORY = 1440; // Keep last 1440 heartbeats per monitor (~24h at 60s intervals)
+/** Kuma never ACKing a `login` used to hang the client forever. */
+const LOGIN_TIMEOUT_MS = 10_000;
+/** How often to check for the "socket connected but never authenticated" state. */
+const WATCHDOG_INTERVAL_MS = 30_000;
 
 class KumaClient {
   private socket: Socket | null = null;
@@ -16,15 +22,82 @@ class KumaClient {
   private authenticated = false;
   private initPromise: Promise<void> | null = null;
   private pollIntervalId: ReturnType<typeof setInterval> | null = null;
+  private watchdogId: ReturnType<typeof setInterval> | null = null;
   private kumaUrl: string = "";
   private lastConnectAt: string | null = null;
   private lastDisconnectAt: string | null = null;
   private lastAuthAt: string | null = null;
   private lastError: string | null = null;
   private connectAttempts = 0;
+  /** When the socket came up but auth hasn't completed. Drives the watchdog. */
+  private connectedSince: number | null = null;
 
   get isConnected() {
     return this.connected && this.authenticated;
+  }
+
+  /**
+   * Drop all cached state for monitors that no longer exist in Kuma.
+   *
+   * Previously only `this.monitors` was pruned, so `heartbeats`, the per-monitor
+   * `heartbeatHistory` arrays, and the beats cache grew forever as monitors were
+   * created and deleted — a slow leak on a long-lived process.
+   */
+  private pruneDeleted(liveIds: Set<number>) {
+    for (const id of this.monitors.keys()) {
+      if (!liveIds.has(id)) this.monitors.delete(id);
+    }
+    for (const id of this.heartbeats.keys()) {
+      if (!liveIds.has(id)) this.heartbeats.delete(id);
+    }
+    for (const id of this.heartbeatHistory.keys()) {
+      if (!liveIds.has(id)) this.heartbeatHistory.delete(id);
+    }
+    for (const key of this.beatsCache.keys()) {
+      const id = parseInt(key.split("-")[0], 10);
+      if (!Number.isNaN(id) && !liveIds.has(id)) this.beatsCache.delete(key);
+    }
+  }
+
+  /**
+   * Merge a monitor record coming from Kuma's list with whatever live state we
+   * already hold. Used by BOTH `monitorList` and the 30s reconcile poll, which
+   * previously applied different precedence rules and could momentarily flip a
+   * monitor's status during a list refresh.
+   */
+  private mergeMonitor(mid: number, monitor: any): KumaMonitor {
+    const existing = this.monitors.get(mid);
+    const hb = this.heartbeats.get(mid);
+
+    // A heartbeat is always fresher than a list snapshot; fall back to whatever
+    // we already had, and only then to the list's own status field.
+    const status = hb?.status ?? existing?.status ?? monitor.status;
+
+    return {
+      id: mid,
+      name: monitor.name,
+      type: monitor.type,
+      url: monitor.url || "",
+      hostname: monitor.hostname || "",
+      port: monitor.port || 0,
+      interval: monitor.interval || 60,
+      active: monitor.active !== false,
+      parent: monitor.parent ?? null,
+      tags: (monitor.tags || []).map((t: any) => ({ name: t.name, color: t.color })),
+      status,
+      ping: hb?.ping ?? existing?.ping ?? null,
+      msg: hb?.msg ?? existing?.msg ?? "",
+      // Preserve the DOWN streak start across list refreshes.
+      downTime: status === 0 ? (existing?.downTime ?? hb?.time) : undefined,
+      // Carry over data that arrives on separate events (uptime/avgPing/certInfo)
+      // — a naive rebuild would wipe it on every list refresh.
+      uptime24: existing?.uptime24,
+      uptime: existing?.uptime,
+      avgPing: existing?.avgPing,
+      certExpiryDays: existing?.certExpiryDays,
+      certValid: existing?.certValid,
+      maintenance: status === 3,
+    };
   }
 
   /** Diagnostic info for health/debug endpoints */
@@ -59,8 +132,13 @@ class KumaClient {
       clearInterval(this.pollIntervalId);
       this.pollIntervalId = null;
     }
+    if (this.watchdogId) {
+      clearInterval(this.watchdogId);
+      this.watchdogId = null;
+    }
     this.connected = false;
     this.authenticated = false;
+    this.connectedSince = null;
     this.initPromise = null; // Allow connect() to run again
     this.lastError = null;
 
@@ -89,115 +167,133 @@ class KumaClient {
         transports: ["websocket"],
       });
 
+      const applyMonitorList = (data: Record<string, any>) => {
+        const liveIds = new Set<number>();
+        for (const key of Object.keys(data)) {
+          const mid = parseInt(key, 10);
+          if (!Number.isNaN(mid)) liveIds.add(mid);
+        }
+        // Prune every cache, not just `monitors` (see pruneDeleted).
+        this.pruneDeleted(liveIds);
+
+        for (const [id, monitor] of Object.entries(data)) {
+          const mid = parseInt(id, 10);
+          if (Number.isNaN(mid)) continue;
+          this.monitors.set(mid, this.mergeMonitor(mid, monitor));
+        }
+      };
+
       const startPolling = () => {
         if (this.pollIntervalId) clearInterval(this.pollIntervalId);
+        // Reconcile the monitor list every 30s — catches renames/additions/
+        // deletions that a missed push event would otherwise leave stale.
         this.pollIntervalId = setInterval(() => {
           if (this.socket && this.authenticated) {
             this.socket.emit("getMonitorList", (res: any) => {
-              if (res?.ok && res.data) {
-                const data: Record<string, any> = res.data;
-                const newIds = new Set(Object.keys(data).map((k) => parseInt(k)));
-                for (const existingId of this.monitors.keys()) {
-                  if (!newIds.has(existingId)) this.monitors.delete(existingId);
-                }
-                for (const [id, monitor] of Object.entries(data)) {
-                  const mid = parseInt(id);
-                  if (isNaN(mid)) continue;
-                  const existing = this.monitors.get(mid);
-                  const hb = this.heartbeats.get(mid);
-                  const effectiveStatus2 = existing?.status ?? hb?.status ?? monitor.status;
-                  this.monitors.set(mid, {
-                    id: mid,
-                    name: monitor.name,
-                    type: monitor.type,
-                    url: monitor.url || "",
-                    hostname: monitor.hostname || "",
-                    port: monitor.port || 0,
-                    interval: monitor.interval || 60,
-                    active: monitor.active !== false,
-                    parent: monitor.parent ?? null,
-                    tags: (monitor.tags || []).map((t: any) => ({ name: t.name, color: t.color })),
-                    status: effectiveStatus2,
-                    ping: existing?.ping ?? hb?.ping ?? null,
-                    msg: existing?.msg ?? hb?.msg ?? "",
-                    uptime24: existing?.uptime24,
-                    downTime: effectiveStatus2 === 0 ? (existing?.downTime ?? hb?.time) : undefined,
-                  });
-                }
-              }
+              if (res?.ok && res.data) applyMonitorList(res.data);
             });
           }
         }, 30000);
       };
 
-      const doLogin = (cb?: () => void) => {
-        this.socket!.emit(
-          "login",
-          { username, password, token: "" },
-          (res: any) => {
-            if (res.ok) {
-              console.log("[Kuma] Authenticated successfully");
-              this.authenticated = true;
-              this.lastAuthAt = new Date().toISOString();
-              this.lastError = null;
-              startPolling(); // Restart polling after every successful auth
-            } else {
-              const errMsg = `Auth failed: ${res.msg || "unknown"}`;
-              console.error(`[Kuma] ${errMsg}`);
-              this.authenticated = false;
-              this.lastError = errMsg;
-            }
-            cb?.();
+      /**
+       * Backfill heartbeat history right after auth.
+       *
+       * Kuma only pushes *new* heartbeats, so on a fresh boot (or after a Kuma
+       * restart) our in-memory history started empty and stayed thin until 1440
+       * live beats accumulated — sparklines were blank for hours. Pull the last
+       * 24h for every monitor once, in small batches so we don't hammer Kuma.
+       */
+      const backfillHistory = async () => {
+        try {
+          const ids = Array.from(this.monitors.keys());
+          if (ids.length === 0) return;
+          const beats = await this.getAllBeats(ids, 24);
+          let filled = 0;
+          for (const [id, list] of beats) {
+            if (!list.length) continue;
+            // Don't clobber live beats that arrived while we were fetching.
+            const live = this.heartbeatHistory.get(id) || [];
+            const merged = [...list, ...live].slice(-MAX_HISTORY);
+            this.heartbeatHistory.set(id, merged);
+            filled++;
           }
-        );
+          console.log(`[Kuma] Historial precargado para ${filled}/${ids.length} monitores`);
+        } catch (err) {
+          console.error("[Kuma] Backfill de historial falló:", err);
+        }
       };
+
+      const doLogin = (cb?: () => void) => {
+        let settled = false;
+
+        // A login that never gets ACKed used to leave the client permanently
+        // "connected but not authenticated" with no retry path.
+        const timer = setTimeout(() => {
+          if (settled) return;
+          settled = true;
+          this.authenticated = false;
+          this.lastError = "Login timeout: Uptime Kuma no respondió";
+          console.error("[Kuma] Login timeout — se reintentará por el watchdog");
+          cb?.();
+        }, LOGIN_TIMEOUT_MS);
+
+        this.socket!.emit("login", { username, password, token: "" }, (res: any) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+
+          if (res?.ok) {
+            console.log("[Kuma] Authenticated successfully");
+            this.authenticated = true;
+            this.lastAuthAt = new Date().toISOString();
+            this.lastError = null;
+            startPolling(); // Restart polling after every successful auth
+
+            // Ask for the list immediately, then warm the history cache.
+            this.socket!.emit("getMonitorList", (listRes: any) => {
+              if (listRes?.ok && listRes.data) applyMonitorList(listRes.data);
+              void backfillHistory();
+            });
+          } else {
+            const errMsg = `Auth failed: ${res?.msg || "unknown"}`;
+            console.error(`[Kuma] ${errMsg}`);
+            this.authenticated = false;
+            this.lastError = errMsg;
+          }
+          cb?.();
+        });
+      };
+
+      // Watchdog: if the socket is up but auth never landed, force a full
+      // reconnect instead of sitting there silently broken.
+      if (this.watchdogId) clearInterval(this.watchdogId);
+      this.watchdogId = setInterval(() => {
+        if (
+          this.connected &&
+          !this.authenticated &&
+          this.connectedSince &&
+          Date.now() - this.connectedSince > LOGIN_TIMEOUT_MS * 2
+        ) {
+          console.warn("[Kuma] Conectado pero sin autenticar — forzando reconexión");
+          this.forceReconnect();
+        }
+      }, WATCHDOG_INTERVAL_MS);
 
       // "connect" fires on BOTH initial connection and reconnections in Socket.IO v4
       this.socket.on("connect", () => {
         const wasConnected = this.connected;
         this.connected = true;
+        this.connectedSince = Date.now();
         this.connectAttempts++;
         this.lastConnectAt = new Date().toISOString();
         console.log(`[Kuma] Socket ${wasConnected ? "re" : ""}connected (attempt #${this.connectAttempts}), authenticating...`);
         doLogin(() => resolve());
       });
 
-      this.socket.on(
-        "monitorList",
-        (data: Record<string, any>) => {
-          // Rebuild full list (handles additions AND deletions)
-          const newIds = new Set(Object.keys(data).map((k) => parseInt(k)));
-          // Remove monitors that no longer exist
-          for (const existingId of this.monitors.keys()) {
-            if (!newIds.has(existingId)) this.monitors.delete(existingId);
-          }
-          for (const [id, monitor] of Object.entries(data)) {
-            const mid = parseInt(id);
-            const hb = this.heartbeats.get(mid);
-            const effectiveStatus = hb?.status ?? monitor.status;
-            this.monitors.set(mid, {
-              id: mid,
-              name: monitor.name,
-              type: monitor.type,
-              url: monitor.url || "",
-              hostname: monitor.hostname || "",
-              port: monitor.port || 0,
-              interval: monitor.interval || 60,
-              active: monitor.active !== false,
-              parent: monitor.parent ?? null,
-              tags: (monitor.tags || []).map((t: any) => ({
-                name: t.name,
-                color: t.color,
-              })),
-              status: effectiveStatus,
-              ping: hb?.ping ?? null,
-              msg: hb?.msg ?? "",
-              // If monitor is currently DOWN, seed downTime from the latest heartbeat time
-              downTime: effectiveStatus === 0 && hb?.time ? hb.time : undefined,
-            });
-          }
-        }
-      );
+      this.socket.on("monitorList", (data: Record<string, any>) => {
+        applyMonitorList(data);
+      });
 
       this.socket.on("heartbeat", (data: KumaHeartbeat) => {
         this.heartbeats.set(data.monitorID, data);
@@ -226,48 +322,53 @@ class KumaClient {
           pushOnHeartbeat(data.monitorID, monitor?.name || `Monitor #${data.monitorID}`, data.status, data.msg, data.ping);
         } catch {}
 
+        // Send WhatsApp alert on status change
+        try {
+          whatsappOnHeartbeat(data.monitorID, monitor?.name || `Monitor #${data.monitorID}`, data.status, data.msg, data.ping);
+        } catch {}
+
         // If heartbeat arrives for unknown monitor, request updated list
         if (!monitor && this.authenticated) {
           this.socket!.emit("getMonitorList", () => {});
         }
       });
 
-      this.socket.on(
-        "uptime",
-        (monitorId: number, period: number, uptime: number) => {
-          if (period === 24) {
-            const monitor = this.monitors.get(monitorId);
-            if (monitor) monitor.uptime24 = uptime;
-          }
-        }
-      );
+      // Kuma emits uptime for several windows (1h, 24h, 30d, 1y). We used to
+      // keep only the 24h figure and throw the rest away.
+      this.socket.on("uptime", (monitorId: number, period: number, uptime: number) => {
+        const monitor = this.monitors.get(monitorId);
+        if (!monitor) return;
+        monitor.uptime = { ...(monitor.uptime || {}), [period]: uptime };
+        if (period === 24) monitor.uptime24 = uptime; // keep the legacy field working
+      });
 
-      // Also listen for individual monitor additions/edits
+      // Rolling average ping, computed by Kuma. Previously ignored, forcing the
+      // report route to recompute it from raw beats.
+      this.socket.on("avgPing", (monitorId: number, avgPing: number | null) => {
+        const monitor = this.monitors.get(monitorId);
+        if (monitor) monitor.avgPing = avgPing;
+      });
+
+      // TLS certificate expiry — a core Kuma feature that was entirely invisible
+      // on the map. Now every https monitor can show "expira en N días".
+      this.socket.on("certInfo", (monitorId: number, certInfoRaw: string) => {
+        const monitor = this.monitors.get(monitorId);
+        if (!monitor) return;
+        try {
+          const parsed = typeof certInfoRaw === "string" ? JSON.parse(certInfoRaw) : certInfoRaw;
+          monitor.certValid = parsed?.valid ?? undefined;
+          monitor.certExpiryDays = parsed?.certInfo?.daysRemaining ?? null;
+        } catch {
+          // Malformed payload — leave previous cert data untouched.
+        }
+      });
+
+      // Some Kuma versions use this event name for the same payload.
       this.socket.on("monitorListDesktop", (data: Record<string, any>) => {
-        // Same handler as monitorList — Kuma uses this event in some versions
         for (const [id, monitor] of Object.entries(data)) {
-          const mid = parseInt(id);
-          if (isNaN(mid)) continue;
-          const hb = this.heartbeats.get(mid);
-          const existing = this.monitors.get(mid);
-          const effectiveStatus = hb?.status ?? monitor.status;
-          this.monitors.set(mid, {
-            id: mid,
-            name: monitor.name,
-            type: monitor.type,
-            url: monitor.url || "",
-            hostname: monitor.hostname || "",
-            port: monitor.port || 0,
-            interval: monitor.interval || 60,
-            active: monitor.active !== false,
-            parent: monitor.parent ?? null,
-            tags: (monitor.tags || []).map((t: any) => ({ name: t.name, color: t.color })),
-            status: effectiveStatus,
-            ping: hb?.ping ?? null,
-            msg: hb?.msg ?? "",
-            // Preserve existing downTime if still DOWN, or seed from heartbeat
-            downTime: effectiveStatus === 0 ? (existing?.downTime ?? hb?.time) : undefined,
-          });
+          const mid = parseInt(id, 10);
+          if (Number.isNaN(mid)) continue;
+          this.monitors.set(mid, this.mergeMonitor(mid, monitor));
         }
       });
 
@@ -275,6 +376,7 @@ class KumaClient {
         console.log(`[Kuma] Disconnected (reason: ${reason})`);
         this.connected = false;
         this.authenticated = false;
+        this.connectedSince = null;
         this.lastDisconnectAt = new Date().toISOString();
         this.lastError = `Disconnected: ${reason}`;
         if (this.pollIntervalId) { clearInterval(this.pollIntervalId); this.pollIntervalId = null; }
@@ -296,11 +398,11 @@ class KumaClient {
   }
 
   getMonitors(): KumaMonitor[] {
-    return Array.from(this.monitors.values());
+    return [...Array.from(this.monitors.values()), ...getMonitorNgVirtualMonitors()];
   }
 
   getMonitor(id: number): KumaMonitor | undefined {
-    return this.monitors.get(id);
+    return this.monitors.get(id) ?? getMonitorNgVirtualMonitors().find((m) => m.id === id);
   }
 
   getHistory(monitorId: number): KumaHeartbeat[] {

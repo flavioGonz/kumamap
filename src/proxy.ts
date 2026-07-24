@@ -7,9 +7,32 @@ import crypto from "crypto";
 // Features sliding-session renewal: tokens are refreshed when >50% of their
 // lifetime has elapsed, so active users never hit expiration.
 
-const SECRET = process.env.SESSION_SECRET || process.env.KUMA_PASS || "kumamap-default-secret";
+// ── Session signing secret ──────────────────────────────────────────────────
+// SECURITY: never fall back to a hardcoded default — a public default secret
+// lets anyone forge a valid session token. If SESSION_SECRET is missing we
+// derive a per-boot random secret: sessions won't survive a restart, but they
+// cannot be forged. A loud warning is printed so the operator sets it properly.
+function resolveSecret(): string {
+  const explicit = process.env.SESSION_SECRET;
+  if (explicit && explicit.length >= 16) return explicit;
+
+  if (explicit) {
+    console.warn("[Auth] SESSION_SECRET is too short (<16 chars) — ignoring it.");
+  }
+  const ephemeral = crypto.randomBytes(32).toString("hex");
+  console.warn(
+    "[Auth] SESSION_SECRET is not set. Using an ephemeral per-boot secret: " +
+      "all sessions will be invalidated on restart. " +
+      "Set SESSION_SECRET=<32+ random chars> in .env to fix."
+  );
+  return ephemeral;
+}
+
+const SECRET = resolveSecret();
 const TOKEN_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 const TOKEN_RENEW_THRESHOLD = TOKEN_MAX_AGE_MS / 2; // renew when <3.5 days remaining
+/** Set COOKIE_SECURE=1 once the deployment is behind HTTPS */
+const COOKIE_SECURE = process.env.COOKIE_SECURE === "1";
 
 // Routes that never require authentication
 const PUBLIC_PATHS = [
@@ -35,10 +58,12 @@ const PUBLIC_GET_PREFIXES = [
   "/api/hik/images",       // Hikvision event images (used by LPR feed)
   "/api/hik/events/stream", // SSE event stream (used by LPR feed)
   "/api/uploads",           // uploaded files (map background images, etc.)
+  "/api/ups",              // UPS SNMP polling + history (needed by kiosk tour tooltip)
 ];
 
 // API routes accessible via ANY method without auth (needed by mobile PWA)
 const PUBLIC_ANY_PREFIXES = [
+  "/api/monitor-ng",      // monitor-ng ingest (auth propia por Bearer token)
   "/api/push",             // push subscription CRUD + test (needed by mobile PWA)
   "/api/hik/events",       // Hikvision camera event webhooks (NVR pushes here)
 ];
@@ -94,14 +119,12 @@ function validateToken(token: string): TokenResult {
       };
     }
 
-    // Legacy base64 tokens (backward compat — will expire naturally after 7 days)
-    const decoded = Buffer.from(token, "base64").toString();
-    if (decoded.includes(":")) {
-      const [user] = decoded.split(":");
-      const validUser = process.env.KUMA_USER || "";
-      if (user && user === validUser) return { username: user, needsRenewal: true }; // always renew legacy
-    }
-
+    // SECURITY: the legacy unsigned base64 token path was REMOVED.
+    // It accepted any `base64("<KUMA_USER>:...")` value with no signature check,
+    // which allowed a trivial no-password admin bypass:
+    //     document.cookie = "kumamap_session=" + btoa("admin:")
+    // Only HMAC-signed tokens (payload.signature) are accepted now. Users holding
+    // an old cookie simply get a 401 and re-login once.
     return { username: null, needsRenewal: false };
   } catch {
     return { username: null, needsRenewal: false };
@@ -120,44 +143,34 @@ function createToken(username: string): string {
   return `${payloadB64}.${sig}`;
 }
 
-export function proxy(req: NextRequest) {
-  const { pathname } = req.nextUrl;
+/**
+ * Build the response for an allowed request, propagating identity downstream.
+ *
+ * Every request that reaches a route handler carries `x-kumamap-auth`:
+ *   "1" → a valid session was presented
+ *   "0" → anonymous (public kiosk / PWA path)
+ *
+ * Route handlers that return device credentials (cameras, map node custom_data)
+ * MUST redact secrets when this header is "0". See `src/lib/redact.ts`.
+ *
+ * These headers are stripped-and-reset on every request, so a client cannot
+ * spoof them by sending their own `x-kumamap-auth: 1`.
+ */
+function allow(req: NextRequest, username: string | null, needsRenewal: boolean) {
+  const headers = new Headers(req.headers);
+  headers.delete("x-kumamap-user");
+  headers.delete("x-kumamap-auth");
+  headers.set("x-kumamap-auth", username ? "1" : "0");
+  if (username) headers.set("x-kumamap-user", username);
 
-  // Skip public paths
-  if (isPublicPath(pathname)) return NextResponse.next();
-
-  // Only protect API routes — pages handle their own redirects
-  if (!pathname.startsWith("/api/")) return NextResponse.next();
-
-  // Allow read-only API access for public kiosk view (/view/[id])
-  if (isPublicGetRoute(req.method, pathname)) return NextResponse.next();
-
-  // Allow any-method public routes (push subscriptions for mobile PWA)
-  if (isPublicAnyRoute(pathname)) return NextResponse.next();
-
-  // Validate session cookie
-  const token = req.cookies.get("kumamap_session")?.value;
-  if (!token) {
-    return NextResponse.json({ error: "No autenticado" }, { status: 401 });
-  }
-
-  const { username, needsRenewal } = validateToken(token);
-  if (!username) {
-    // Don't delete the cookie here — let the frontend handle the redirect.
-    // Deleting the cookie on every 401 causes cascading failures with auto-save.
-    return NextResponse.json({ error: "Sesión expirada" }, { status: 401 });
-  }
-
-  // Add user info to request headers for downstream routes
-  const response = NextResponse.next();
-  response.headers.set("x-kumamap-user", username);
+  const response = NextResponse.next({ request: { headers } });
 
   // Sliding session: renew token when >50% of lifetime has elapsed
-  if (needsRenewal) {
-    const newToken = createToken(username);
-    response.cookies.set("kumamap_session", newToken, {
+  if (username && needsRenewal) {
+    response.cookies.set("kumamap_session", createToken(username), {
       httpOnly: true,
       sameSite: "lax",
+      secure: COOKIE_SECURE,
       path: "/",
       maxAge: 86400 * 7,
     });
@@ -165,6 +178,46 @@ export function proxy(req: NextRequest) {
 
   return response;
 }
+
+export function proxy(req: NextRequest) {
+  const { pathname } = req.nextUrl;
+
+  // Skip public paths (login page, kiosk page, Next internals)
+  if (isPublicPath(pathname)) return NextResponse.next();
+
+  // Only protect API routes — pages handle their own redirects
+  if (!pathname.startsWith("/api/")) return NextResponse.next();
+
+  // Always evaluate the session, even on public routes, so downstream handlers
+  // can tell an authenticated operator from an anonymous kiosk and redact
+  // credentials accordingly.
+  const token = req.cookies.get("kumamap_session")?.value;
+  const { username, needsRenewal } = token
+    ? validateToken(token)
+    : { username: null, needsRenewal: false };
+
+  // Public routes: pass through, authenticated or not
+  if (isPublicGetRoute(req.method, pathname) || isPublicAnyRoute(pathname)) {
+    return allow(req, username, needsRenewal);
+  }
+
+  // Everything else requires a valid session
+  if (!token) {
+    return NextResponse.json({ error: "No autenticado" }, { status: 401 });
+  }
+  if (!username) {
+    // Don't delete the cookie here — let the frontend handle the redirect.
+    // Deleting the cookie on every 401 causes cascading failures with auto-save.
+    return NextResponse.json({ error: "Sesión expirada" }, { status: 401 });
+  }
+
+  return allow(req, username, needsRenewal);
+}
+
+// NOTE: do not add further exports to this file. Next.js expects a proxy/
+// middleware module to export only the handler and `config`. Route handlers that
+// need the auth flag should read the `x-kumamap-auth` header directly, or use
+// `publicSafe()` from src/lib/redact.ts.
 
 export const config = {
   matcher: ["/api/:path*"],

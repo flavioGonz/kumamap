@@ -193,6 +193,15 @@ export function getMonitorNgVirtualMonitors(): KumaMonitor[] {
       ping: null,
       msg: n.stale ? `monitor-ng | sin reporte (ultimo: ${n.ts || "?"})` : buildMsg(n),
       interval: 20,
+      mng: {
+        state: n.state,
+        ts: n.ts,
+        ok: n.ok,
+        warn: n.warn,
+        crit: n.crit,
+        stale: n.stale,
+        metrics: (n.metrics || []).map((mm) => ({ ...mm, label: METRIC_LABELS[mm.id] || mm.id })),
+      },
     });
   }
   return out;

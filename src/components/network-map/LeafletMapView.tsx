@@ -2,7 +2,7 @@
 
 import React, { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { apiUrl } from "@/lib/api";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/SileoToast";
 import type { KumaMonitor } from "./MonitorPanel";
 import ContextMenu, { menuIcons } from "./ContextMenu";
 import LinkModal, { type LinkFormData } from "./LinkModal";
@@ -15,29 +15,32 @@ import {
   Save,
   Loader2,
   Activity,
-  Server,
-  Network,
-  Cable,
-  Zap,
-  Router,
-  PlugZap,
-  HardDrive,
   Layers,
   Search,
   X as XIcon,
 } from "lucide-react";
+import dynamic from "next/dynamic";
 import Tooltip from "./Tooltip";
-import TimeMachine from "./TimeMachine";
-import OnvifDiscoveryModal from "./OnvifDiscoveryModal";
-import EventReportModal from "./EventReportModal";
-import CameraStreamConfigModal, { type CameraStreamConfig } from "./CameraStreamConfigModal";
-import AntennaConfigModal, { type AntennaConfig } from "./AntennaConfigModal";
-import AntennaStatusPanel from "./AntennaStatusPanel";
-import CameraStreamViewer from "./CameraStreamViewer";
-import CameraTooltipViewer from "./CameraTooltipViewer";
-import IconPickerModal from "./IconPickerModal";
-import NodeSizeModal from "./NodeSizeModal";
-import RackDesignerDrawer from "./RackDesignerDrawer";
+
+// ── Heavy / conditional components — lazy loaded ──────────────────
+const TimeMachine = dynamic(() => import("./TimeMachine"), { ssr: false });
+const OnvifDiscoveryModal = dynamic(() => import("./OnvifDiscoveryModal"), { ssr: false });
+const EventReportModal = dynamic(() => import("./EventReportModal"), { ssr: false });
+const AntennaStatusPanel = dynamic(() => import("./AntennaStatusPanel"), { ssr: false });
+const CameraStreamViewer = dynamic(() => import("./CameraStreamViewer"), { ssr: false });
+const CameraTooltipViewer = dynamic(() => import("./CameraTooltipViewer"), { ssr: false });
+const IconPickerModal = dynamic(() => import("./IconPickerModal"), { ssr: false });
+const NodeSizeModal = dynamic(() => import("./NodeSizeModal"), { ssr: false });
+const RackDesignerDrawer = dynamic(() => import("./RackDesignerDrawer"), { ssr: false });
+const UpsPanel = dynamic(() => import("./UpsPanel"), { ssr: false });
+
+// Type-only imports (erased at compile time — no bundle cost)
+import type { CameraStreamConfig } from "./CameraStreamConfigModal";
+const CameraStreamConfigModal = dynamic(() => import("./CameraStreamConfigModal"), { ssr: false });
+import type { AntennaConfig } from "./AntennaConfigModal";
+const AntennaConfigModal = dynamic(() => import("./AntennaConfigModal"), { ssr: false });
+import type { UpsConfig } from "@/lib/ups";
+const UpsConfigModal = dynamic(() => import("./UpsConfigModal"), { ssr: false });
 import { safeJsonParse, safeFetch } from "@/lib/error-handler";
 import type { NodeCustomData, EdgeCustomData, RackDeviceSummary } from "@/lib/types";
 import { formatTraffic } from "@/utils/format";
@@ -45,25 +48,31 @@ import { statusColors, getStatusColor as _getStatusColor, getMonitorData as _get
 import { iconSvgPaths, getIconSvg, createMarkerIcon } from "@/utils/map-icons";
 // map-export utils no longer used — export is now ZIP only
 import MapClock from "./MapClock";
-import VisualizationPanel from "./VisualizationPanel";
-// MapSearchPanel removed — search is now inline in the toolbar
-import AlertManagerPanel, { useAlertCount, type TimelineEvent } from "./AlertManagerPanel";
-import FOVColorPickerModal from "./FOVColorPickerModal";
-import LensPickerModal from "./LensPickerModal";
-import NewMonitorModal from "./NewMonitorModal";
+const VisualizationPanel = dynamic(() => import("./VisualizationPanel"), { ssr: false });
+// AlertManagerPanel: hook useAlertCount must stay static, component is lazy
+import { useAlertCount, type TimelineEvent } from "./AlertManagerPanel";
+const AlertManagerPanel = dynamic(() => import("./AlertManagerPanel"), { ssr: false });
+const WhatsAppSettingsPanel = dynamic(() => import("./WhatsAppSettingsPanel"), { ssr: false });
+const FOVColorPickerModal = dynamic(() => import("./FOVColorPickerModal"), { ssr: false });
+const LensPickerModal = dynamic(() => import("./LensPickerModal"), { ssr: false });
+const NewMonitorModal = dynamic(() => import("./NewMonitorModal"), { ssr: false });
 import { useUndoHistory } from "@/hooks/useUndoHistory";
 import { useAnimationTimers } from "@/hooks/useAnimationTimers";
 import { useMapVisibility } from "@/hooks/useMapVisibility";
 import { useAlertSound } from "@/hooks/useAlertSound";
 import { useMapKeyboard } from "@/hooks/useMapKeyboard";
+import { useAutoRefresh } from "@/hooks/useAutoRefresh";
 import { formatElapsed, formatSince, buildSparkline } from "./map-utils";
-import NodeEditModal, { type NodeEditConfig } from "./NodeEditModal";
-import AssignMonitorModal from "./AssignMonitorModal";
-import LinkedMapsModal from "./LinkedMapsModal";
-import HikDetectionPopup from "./HikDetectionPopup";
-import LprFeedPanel from "./LprFeedPanel";
+import type { NodeEditConfig } from "./NodeEditModal";
+const NodeEditModal = dynamic(() => import("./NodeEditModal"), { ssr: false });
+const AssignMonitorModal = dynamic(() => import("./AssignMonitorModal"), { ssr: false });
+const LinkedMapsModal = dynamic(() => import("./LinkedMapsModal"), { ssr: false });
+const HikDetectionPopup = dynamic(() => import("./HikDetectionPopup"), { ssr: false });
+const LprFeedPanel = dynamic(() => import("./LprFeedPanel"), { ssr: false });
 import { useHikEvents } from "@/lib/useHikEvents";
-import SubnetDiscoveryModal from "./SubnetDiscoveryModal";
+import { loadCameraWindows, saveCameraWindows, updateCameraWindow, removeCameraWindow } from "@/lib/camera-persistence";
+import type { CameraWindowState } from "./CameraStreamViewer";
+const SubnetDiscoveryModal = dynamic(() => import("./SubnetDiscoveryModal"), { ssr: false });
 
 
 interface SavedNode {
@@ -120,259 +129,23 @@ interface LeafletMapViewProps {
   onSetLiveMap?: () => void;
   /** Navigate to a linked map in the same window */
   onOpenMap?: (mapId: string) => void;
+  /** Kiosk: expose map handle for programmatic flyTo */
+  onMapReady?: (handle: KioskMapHandle) => void;
+}
+
+export interface KioskMapHandle {
+  flyTo: (lat: number, lng: number, zoom: number, durationSec?: number) => void;
+  fitAll: () => void;
+  getNodes: () => SavedNode[];
+  openPopup: (nodeId: string) => void;
+  closePopup: () => void;
+  /** Convert a node's map coordinates to screen pixel position (for overlay positioning) */
+  getNodeScreenPos: (nodeId: string) => { x: number; y: number } | null;
 }
 
 
 
-// ── Rack Device Picker Modal ─────────────────────────────────────────────────
-// Must be a proper component (not IIFE) so React hooks are valid
-
-import { STATUS_COLORS as STATUS_COLORS_RACK } from "@/constants/ui";
-
-function RackDevicePickerModal({
-  devices,
-  rackName,
-  isSrc,
-  onSelect,
-  onCancel,
-  getMonitorData,
-}: {
-  devices: RackDeviceSummary[];
-  rackName: string;
-  isSrc: boolean;
-  onSelect: (hint: string) => void;
-  onCancel: () => void;
-  getMonitorData: (id: number) => KumaMonitor | undefined;
-}) {
-  const [query, setQuery] = React.useState("");
-  const [selectedDevice, setSelectedDevice] = React.useState<RackDeviceSummary | null>(null); // step 2
-
-  const TYPE_ICON: Record<string, React.ReactNode> = {
-    server:        <Server className="w-3.5 h-3.5" />,
-    switch:        <Network className="w-3.5 h-3.5" />,
-    patchpanel:    <Cable className="w-3.5 h-3.5" />,
-    router:        <Router className="w-3.5 h-3.5" />,
-    ups:           <Zap className="w-3.5 h-3.5" />,
-    pdu:           <PlugZap className="w-3.5 h-3.5" />,
-    "tray-fiber":  <HardDrive className="w-3.5 h-3.5" />,
-    other:         <Layers className="w-3.5 h-3.5" />,
-  };
-  const TYPE_LABEL: Record<string, string> = {
-    server: "Servidor", switch: "Switch", patchpanel: "Patch Panel",
-    router: "Router", ups: "UPS", pdu: "PDU",
-    "tray-fiber": "Fibra", "tray-1u": "Bandeja", "tray-2u": "Bandeja",
-    "cable-organizer": "Org. Cable", other: "Otro",
-  };
-  const TYPE_COLOR: Record<string, string> = {
-    server: "#3b82f6", switch: "#22c55e", patchpanel: "#f59e0b",
-    router: "#8b5cf6", ups: "#ef4444", pdu: "#ec4899",
-    "tray-fiber": "#06b6d4", other: "#6b7280",
-  };
-
-  const filtered = devices.filter((d) =>
-    !query || d.label?.toLowerCase().includes(query.toLowerCase()) || TYPE_LABEL[d.type || ""]?.toLowerCase().includes(query.toLowerCase())
-  );
-
-  const deviceBaseHint = (d: RackDeviceSummary) => `${d.label} (U${d.unit}${(d.sizeUnits || 1) > 1 ? `-${(d.unit || 0) + (d.sizeUnits || 1) - 1}` : ""})`;
-
-  // Determine if a device has selectable interfaces/ports
-  const getDeviceInterfaces = (d: RackDeviceSummary): { id: string; label: string; sub: string; connected: boolean }[] => {
-    if (d.type === "switch" && d.switchPorts?.length) {
-      return d.switchPorts.map((p) => ({
-        id: String(p.port),
-        label: p.label && p.label !== String(p.port) ? `Puerto ${p.port} — ${p.label}` : `Puerto ${p.port}`,
-        sub: [p.speed || "", p.connected ? "conectado" : "libre", p.vlan ? `VLAN ${p.vlan}` : ""].filter(Boolean).join(" · "),
-        connected: !!p.connected,
-      }));
-    }
-    if (d.type === "patchpanel" && d.ports?.length) {
-      return d.ports.map((p) => ({
-        id: String(p.port),
-        label: p.label && p.label !== `P${p.port}` ? `Puerto ${p.port} — ${p.label}` : `Puerto ${p.port}`,
-        sub: [p.connected ? "conectado" : "libre", p.destination || ""].filter(Boolean).join(" · "),
-        connected: !!p.connected,
-      }));
-    }
-    if (d.type === "router" && d.routerInterfaces?.length) {
-      return d.routerInterfaces.map((iface) => ({
-        id: iface.id,
-        label: iface.name,
-        sub: [iface.type, iface.ipAddress || "", iface.connected ? "conectado" : "libre"].filter(Boolean).join(" · "),
-        connected: !!iface.connected,
-      }));
-    }
-    return [];
-  };
-
-  const handleDeviceClick = (d: RackDeviceSummary) => {
-    const ifaces = getDeviceInterfaces(d);
-    if (ifaces.length === 0) {
-      // No ports — select directly
-      onSelect(deviceBaseHint(d));
-    } else {
-      setSelectedDevice(d);
-    }
-  };
-
-  // ── Step 2: Port / Interface picker ─────────────────────────────────────────
-  if (selectedDevice) {
-    const ifaces = getDeviceInterfaces(selectedDevice);
-    const col = TYPE_COLOR[selectedDevice.type || ""] || "#6b7280";
-    return (
-      <div className="fixed inset-0 z-[99999] flex items-center justify-center" style={{ background: "rgba(0,0,0,0.65)", backdropFilter: "blur(6px)" }}>
-        <div className="rounded-2xl border border-white/10 overflow-hidden" style={{ background: "#111", width: 420, maxWidth: "92vw", boxShadow: "0 24px 64px rgba(0,0,0,0.7)" }}>
-          {/* Header */}
-          <div className="px-5 py-4 border-b border-white/[0.07] flex items-center gap-3">
-            <button onClick={() => setSelectedDevice(null)} className="w-7 h-7 flex items-center justify-center rounded-lg text-white/40 hover:text-white/80 hover:bg-white/[0.06] transition-all cursor-pointer">
-              <XIcon className="w-3.5 h-3.5" style={{ transform: "rotate(45deg)" }} />
-            </button>
-            <div className="flex-1 min-w-0">
-              <div className="text-[10px] font-bold uppercase tracking-widest text-white/30 mb-0.5">
-                {isSrc ? "Interfaz de origen" : "Interfaz de destino"}
-              </div>
-              <div className="text-sm font-bold text-white/90 truncate">{selectedDevice.label}</div>
-            </div>
-            <button onClick={onCancel} className="w-7 h-7 flex items-center justify-center rounded-lg text-white/30 hover:text-white/70 hover:bg-white/[0.06] transition-all cursor-pointer">
-              <XIcon className="w-4 h-4" />
-            </button>
-          </div>
-
-          {/* "Sin interfaz específica" */}
-          <div className="px-4 pt-3 pb-1">
-            <button
-              onClick={() => onSelect(deviceBaseHint(selectedDevice))}
-              className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-white/40 hover:text-white/70 hover:bg-white/[0.04] transition-all cursor-pointer text-xs border border-dashed border-white/[0.08]"
-            >
-              <Layers className="w-3.5 h-3.5 shrink-0" />
-              <span className="italic">Sin interfaz específica</span>
-            </button>
-          </div>
-
-          {/* Interface list */}
-          <div className="overflow-y-auto px-4 pb-4 mt-1" style={{ maxHeight: 340, scrollbarWidth: "thin", scrollbarColor: "rgba(255,255,255,0.1) transparent" }}>
-            {ifaces.map((iface) => (
-              <button
-                key={iface.id}
-                onClick={() => onSelect(`${selectedDevice.label} > ${iface.label}`)}
-                className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl mb-1 transition-all cursor-pointer text-left"
-                style={{ background: iface.connected ? `${col}12` : "rgba(255,255,255,0.025)" }}
-                onMouseEnter={e => (e.currentTarget.style.background = `${col}22`)}
-                onMouseLeave={e => (e.currentTarget.style.background = iface.connected ? `${col}12` : "rgba(255,255,255,0.025)")}
-              >
-                <div className="w-2 h-2 rounded-full shrink-0 mt-0.5" style={{ background: iface.connected ? "#22c55e" : "#4b5563", boxShadow: iface.connected ? "0 0 5px #22c55e88" : "none" }} />
-                <div className="flex-1 min-w-0">
-                  <div className="text-[12px] font-semibold text-white/85 truncate">{iface.label}</div>
-                  {iface.sub && <div className="text-[10px] text-white/35 truncate">{iface.sub}</div>}
-                </div>
-              </button>
-            ))}
-          </div>
-          <div className="px-5 py-2.5 border-t border-white/[0.05] text-[9px] text-white/20 text-center">
-            La interfaz seleccionada se asociará al link
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // ── Step 1: Device picker ────────────────────────────────────────────────────
-  return (
-    <div className="fixed inset-0 z-[99999] flex items-center justify-center" style={{ background: "rgba(0,0,0,0.65)", backdropFilter: "blur(6px)" }}>
-      <div
-        className="rounded-2xl border border-white/10 overflow-hidden"
-        style={{ background: "#111", width: 380, maxWidth: "90vw", boxShadow: "0 24px 64px rgba(0,0,0,0.7)" }}
-      >
-        {/* Header */}
-        <div className="px-5 py-4 border-b border-white/[0.07] flex items-center gap-3">
-          <div className="flex-1 min-w-0">
-            <div className="text-[10px] font-bold uppercase tracking-widest text-white/30 mb-0.5">
-              {isSrc ? "Equipo de origen" : "Equipo de destino"}
-            </div>
-            <div className="text-sm font-bold text-white/90 truncate">{rackName}</div>
-          </div>
-          <button onClick={onCancel} className="w-7 h-7 flex items-center justify-center rounded-lg text-white/30 hover:text-white/70 hover:bg-white/[0.06] transition-all cursor-pointer">
-            <XIcon className="w-4 h-4" />
-          </button>
-        </div>
-
-        {/* Search */}
-        <div className="px-4 pt-3 pb-2">
-          <div className="flex items-center gap-2 rounded-lg border border-white/[0.08] px-3 py-2" style={{ background: "rgba(255,255,255,0.03)" }}>
-            <Search className="w-3.5 h-3.5 text-white/30 shrink-0" />
-            <input
-              autoFocus
-              value={query}
-              onChange={e => setQuery(e.target.value)}
-              placeholder="Buscar equipo..."
-              className="flex-1 bg-transparent text-xs text-white/80 placeholder-white/25 outline-none"
-            />
-          </div>
-        </div>
-
-        {/* "Sin equipo específico" option */}
-        <div className="px-4 pb-1">
-          <button
-            onClick={() => onSelect("")}
-            className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-white/40 hover:text-white/70 hover:bg-white/[0.04] transition-all cursor-pointer text-xs border border-dashed border-white/[0.08]"
-          >
-            <Layers className="w-3.5 h-3.5 shrink-0" />
-            <span className="italic">Sin equipo específico</span>
-          </button>
-        </div>
-
-        {/* Device list */}
-        <div className="overflow-y-auto px-4 pb-4 mt-1" style={{ maxHeight: 320, scrollbarWidth: "thin", scrollbarColor: "rgba(255,255,255,0.1) transparent" }}>
-          {filtered.length === 0 && (
-            <div className="py-8 text-center text-xs text-white/25 italic">Sin equipos en este rack</div>
-          )}
-          {filtered.map((d: any) => {
-            const col = TYPE_COLOR[d.type] || "#6b7280";
-            const icon = TYPE_ICON[d.type] || TYPE_ICON.other;
-            const typeLabel = TYPE_LABEL[d.type] || d.type;
-            const monInfo = d.monitorId ? getMonitorData(d.monitorId) : null;
-            const monColor = monInfo && monInfo.status != null ? (STATUS_COLORS_RACK[monInfo.status as number] || "#6b7280") : null;
-            const hasInterfaces = getDeviceInterfaces(d).length > 0;
-
-            return (
-              <button
-                key={d.id}
-                onClick={() => handleDeviceClick(d)}
-                className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl mb-1 transition-all cursor-pointer group text-left"
-                style={{ background: "rgba(255,255,255,0.025)" }}
-                onMouseEnter={e => (e.currentTarget.style.background = `${col}18`)}
-                onMouseLeave={e => (e.currentTarget.style.background = "rgba(255,255,255,0.025)")}
-              >
-                <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ background: `${col}22`, border: `1px solid ${col}44`, color: col }}>
-                  {icon}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="text-[12px] font-semibold text-white/85 truncate">{d.label}</div>
-                  <div className="text-[10px] text-white/35 flex items-center gap-1.5">
-                    <span>{typeLabel}</span>
-                    <span>·</span>
-                    <span>U{d.unit}{d.sizeUnits > 1 ? `–${d.unit + d.sizeUnits - 1}` : ""}</span>
-                    {d.portCount && <><span>·</span><span>{d.portCount}P</span></>}
-                  </div>
-                </div>
-                {monColor && <div className="w-2 h-2 rounded-full shrink-0" style={{ background: monColor, boxShadow: `0 0 6px ${monColor}` }} />}
-                {/* Chevron if has interfaces */}
-                {hasInterfaces && <div className="text-white/25 text-xs shrink-0">›</div>}
-                <div className="text-[9px] font-bold px-1.5 py-0.5 rounded shrink-0" style={{ background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.3)" }}>
-                  U{d.unit}
-                </div>
-              </button>
-            );
-          })}
-        </div>
-
-        {/* Footer hint */}
-        <div className="px-5 py-3 border-t border-white/[0.05] text-[9px] text-white/20 text-center">
-          › indica que tiene puertos seleccionables
-        </div>
-      </div>
-    </div>
-  );
-}
+const RackDevicePickerModal = dynamic(() => import("./RackDevicePickerModal"), { ssr: false });
 
 /* ── Reusable Toolbar Dropdown ── */
 function ToolbarDropdown({
@@ -483,9 +256,148 @@ export default function LeafletMapView({
   onUploadBackground,
   onSetLiveMap,
   onOpenMap,
+  onMapReady,
 }: LeafletMapViewProps) {
   const isImageMode = !!imageBackground;
+  // Auto-refresh after 20 min idle to prevent memory leaks from Leaflet markers
+  useAutoRefresh(20);
+
+  // ── MikroTik traffic polling (2s interval, groups by router) ──
+  useEffect(() => {
+    let active = true;
+    let intervalId: ReturnType<typeof setInterval> | null = null;
+
+    const pollMikrotik = async () => {
+      if (!active) return;
+      // Collect current MikroTik edges, group by router
+      const routerGroups = new Map<string, {
+        host: string; user: string; pass: string; port?: number;
+        interfaces: string[];
+        edgeMap: Map<string, string>; // edgeId → interface name
+      }>();
+
+      for (const edge of edgesRef.current) {
+        const cd = safeJsonParse<EdgeCustomData>(edge.custom_data);
+        if (!cd.mikrotikTraffic || cd.hideTraffic) continue;
+        const mt = cd.mikrotikTraffic;
+        const key = `${mt.host}:${mt.port || 0}:${mt.user}`;
+        const g = routerGroups.get(key);
+        if (g) {
+          if (!g.interfaces.includes(mt.interface)) g.interfaces.push(mt.interface);
+          g.edgeMap.set(edge.id, mt.interface);
+        } else {
+          routerGroups.set(key, {
+            host: mt.host, user: mt.user, pass: mt.pass, port: mt.port,
+            interfaces: [mt.interface],
+            edgeMap: new Map([[edge.id, mt.interface]]),
+          });
+        }
+      }
+
+      if (routerGroups.size === 0) return;
+
+      for (const [, group] of routerGroups) {
+        try {
+          const res = await fetch(apiUrl("/api/mikrotik/traffic"), {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              host: group.host, user: group.user, pass: group.pass,
+              interfaces: group.interfaces, port: group.port,
+            }),
+          });
+          if (!res.ok) continue;
+          const json = await res.json() as { ts: number; interfaces: Record<string, { rxBps: number; txBps: number }> };
+
+          for (const [edgeId, ifaceName] of group.edgeMap) {
+            const ifaceData = json.interfaces?.[ifaceName];
+            if (!ifaceData) continue;
+
+            const existing = mikrotikDataRef.current.get(edgeId) || { current: null, history: [] };
+            const sample = { rxBps: ifaceData.rxBps, txBps: ifaceData.txBps };
+            existing.history.push(sample);
+            if (existing.history.length > 60) existing.history.shift();
+            existing.current = sample;
+            mikrotikDataRef.current.set(edgeId, existing);
+
+            // Live-update the existing Leaflet traffic label marker
+            const L = LRef.current;
+            const marker = labelMarkersRef.current.get(`${edgeId}-traffic`);
+            if (marker && L) {
+              const rx = sample.rxBps;
+              const tx = sample.txBps;
+              const rxFmt = formatTraffic(rx);
+              const txFmt = formatTraffic(tx);
+              const color = "#22c55e";
+
+              // Rebuild dual sparkline
+              let sparkSvg = "";
+              if (existing.history.length >= 2) {
+                const pts = existing.history.slice(-30);
+                const maxV = Math.max(...pts.map((p) => Math.max(p.rxBps, p.txBps)), 1);
+                const w = 80, h = 28;
+                const rxPath = pts.map((v, i) => {
+                  const x = (i / (pts.length - 1)) * w;
+                  const y = h - (v.rxBps / maxV) * (h - 4);
+                  return `${i === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`;
+                });
+                const txPath = pts.map((v, i) => {
+                  const x = (i / (pts.length - 1)) * w;
+                  const y = h - (v.txBps / maxV) * (h - 4);
+                  return `${i === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`;
+                });
+                sparkSvg = `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" style="display:block;margin-top:2px">
+                  <path d="${rxPath.join(" ")}" fill="none" stroke="#22c55e" stroke-width="1.2" stroke-linecap="round" opacity="0.8"/>
+                  <path d="${txPath.join(" ")}" fill="none" stroke="#3b82f6" stroke-width="1.2" stroke-linecap="round" opacity="0.8"/>
+                </svg>`;
+              }
+
+              marker.setIcon(L.divIcon({
+                className: "traffic-label",
+                html: `<div style="
+                  background:rgba(6,6,10,0.92);
+                  border:1px solid ${color}44;
+                  font-size:9px;font-weight:700;
+                  font-family:ui-monospace,monospace;
+                  padding:4px 8px;border-radius:8px;
+                  white-space:nowrap;
+                  box-shadow:0 4px 16px rgba(0,0,0,0.6), 0 0 12px ${color}15;
+                  cursor:${isLockedRef.current ? "default" : "grab"};
+                  min-width:80px;
+                ">
+                  <div style="display:flex;align-items:center;gap:3px;color:#3b82f6;">
+                    <span style="font-size:7px;">▲</span>
+                    <span>TX ${txFmt}</span>
+                  </div>
+                  <div style="display:flex;align-items:center;gap:3px;color:#22c55e;">
+                    <span style="font-size:7px;">▼</span>
+                    <span>RX ${rxFmt}</span>
+                  </div>
+                  ${sparkSvg}
+                </div>`,
+                iconSize: [0, 0],
+                iconAnchor: [0, 14],
+              }));
+            }
+          }
+        } catch {
+          // Ignore polling errors silently
+        }
+      }
+    };
+
+    // Start polling
+    pollMikrotik();
+    intervalId = setInterval(pollMikrotik, 2000);
+
+    return () => {
+      active = false;
+      if (intervalId) clearInterval(intervalId);
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps — reads edgesRef.current each iteration
+
   const [alertOpen, setAlertOpen] = useState(false);
+  const [whatsappOpen, setWhatsappOpen] = useState(false);
   const polledAlertCount = useAlertCount(60000);
   const [liveAlertCount, setLiveAlertCount] = useState<number | null>(null);
   const alertCount = liveAlertCount ?? polledAlertCount;
@@ -585,6 +497,10 @@ export default function LeafletMapView({
 
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<any>(null);
+  // ── O(1) node lookup by ID — rebuilt at the start of renderNodes/renderEdges ──
+  const nodeByIdRef = useRef<Map<string, SavedNode>>(new Map());
+  // ── Edge adjacency index — nodeId → edges touching that node ──
+  const edgesByNodeRef = useRef<Map<string, SavedEdge[]>>(new Map());
   const markersRef = useRef<Map<string, any>>(new Map());
   const failPopupsRef = useRef<Map<string, any>>(new Map());
   const downSinceRef = useRef<Map<number, number>>(new Map()); // monitorId → timestamp when DOWN detected
@@ -652,10 +568,15 @@ export default function LeafletMapView({
   // Antenna config modal + SNMP wireless panel
   const [antennaConfigNodeId, setAntennaConfigNodeId] = useState<string | null>(null);
   const [antennaSnmpNodeId, setAntennaSnmpNodeId] = useState<string | null>(null);
+  const [upsPanelState, setUpsPanelState] = useState<{ nodeId: string; x: number; y: number } | null>(null);
+  const [upsConfigNodeId, setUpsConfigNodeId] = useState<string | null>(null);
   const [streamViewers, setStreamViewers] = useState<{ nodeId: string; mode: "tooltip" | "pip" }[]>([]);
   const [focusedViewer, setFocusedViewer] = useState<string | null>(null);
   const [tooltipAnchor, setTooltipAnchor] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const MAX_STREAMS = 4;
+  // Camera window position/size persistence
+  const cameraWindowStates = useRef<Map<string, CameraWindowState>>(new Map());
+  const camerasRestored = useRef(false);
 
   // Icon picker & Node size modals (Leaflet)
   const [iconPickerNodeId, setIconPickerNodeId] = useState<string | null>(null);
@@ -685,6 +606,12 @@ export default function LeafletMapView({
   const polygonPointsRef = useRef<[number, number][]>([]);
   const polygonPreviewRef = useRef<any>(null);
   const polygonLayersRef = useRef<Map<string, any>>(new Map());
+
+  // ── Measurement / ruler tool state ──
+  const [measureMode, setMeasureMode] = useState(false);
+  const measureModeRef = useRef(false);
+  const measurePointsRef = useRef<[number, number][]>([]);
+  const measureLayersRef = useRef<any[]>([]);
   const edgeUpdateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [importMapPickerOpen, setImportMapPickerOpen] = useState(false);
   const [importMapSearch, setImportMapSearch] = useState("");
@@ -705,18 +632,32 @@ export default function LeafletMapView({
       .filter(n => n.kuma_monitor_id != null && n.kuma_monitor_id > 0)
       .map(n => n.kuma_monitor_id!);
   }, [initialNodes, mapMonitorIdsVersion]);
+
+  // ── Memoized derived data (avoids new-object-every-render for child props) ──
+  const tmMonitors = useMemo(() => kumaMonitors.map((m) => ({
+    id: m.id, name: m.name, type: m.type, status: m.status, parent: m.parent,
+  })), [kumaMonitors]);
+  const snmpMonitorsMemo = useMemo(() => kumaMonitors.filter(
+    (m) => m.type === "snmp" || m.type === "push" || m.type === "port"
+  ), [kumaMonitors]);
+  const lprEventsMemo = useMemo(() => hikEvents.events.filter(
+    (e: any) => e.eventType === "anpr"
+  ), [hikEvents.events]);
+
   const [timeBlurPulse, setTimeBlurPulse] = useState(0);
   const [colorPickerNodeId, setColorPickerNodeId] = useState<string>("");
 
   // ── Toolbar dropdown states ──
-  const [ddNodos, setDdNodos] = useState(false);
-  const [ddDibujar, setDdDibujar] = useState(false);
-  const [ddMapa, setDdMapa] = useState(false);
-  const [ddBrillo, setDdBrillo] = useState(false);
+  // ── Toolbar dropdown — only one open at a time (saves 3 useState) ──
+  const [activeDropdown, setActiveDropdown] = useState<"nodos" | "dibujar" | "mapa" | "brillo" | null>(null);
+  const ddNodos = activeDropdown === "nodos";
+  const ddDibujar = activeDropdown === "dibujar";
+  const ddMapa = activeDropdown === "mapa";
+  const ddBrillo = activeDropdown === "brillo";
   const [tbSearch, setTbSearch] = useState("");
   const [tbSearchResults, setTbSearchResults] = useState<Array<{ id: string; label: string; x: number; y: number }>>([]);
   const [tbSearchFocused, setTbSearchFocused] = useState(false);
-  const closeAllDropdowns = useCallback(() => { setDdNodos(false); setDdDibujar(false); setDdMapa(false); setDdBrillo(false); }, []);
+  const closeAllDropdowns = useCallback(() => { setActiveDropdown(null); }, []);
   const [lensPickerOpen, setLensPickerOpen] = useState(false);
   const [lensPickerNodeId, setLensPickerNodeId] = useState<string>("");
 
@@ -741,12 +682,22 @@ export default function LeafletMapView({
 
   // Keep ref in sync with state for closures
   useEffect(() => { linkSourceRef.current = linkSource; }, [linkSource]);
+  useEffect(() => {
+    measureModeRef.current = measureMode;
+    // Toggle crosshair cursor on the map container while measuring
+    const container = containerRef.current;
+    if (container) {
+      if (measureMode) container.style.cursor = "crosshair";
+      else container.style.cursor = "";
+    }
+  }, [measureMode]);
 
   // Visibility toggles + map rotation are handled by useMapVisibility hook
 
   // ── Keyboard shortcuts (extracted hook) ──
   useMapKeyboard({
     onEscape: () => {
+      if (measureModeRef.current) { clearMeasurement(); setMeasureMode(false); }
       if (linkSourceRef.current) cancelLinkCreation();
       if (polygonPointsRef.current.length > 0) cancelPolygon();
       setPolygonMode(false);
@@ -1076,6 +1027,9 @@ export default function LeafletMapView({
   const tileLayerRef = useRef<any>(null);
   const labelMarkersRef = useRef<Map<string, any>>(new Map());
 
+  // MikroTik traffic polling data: edgeId → { current, history }
+  const mikrotikDataRef = useRef<Map<string, { current: { rxBps: number; txBps: number } | null; history: { rxBps: number; txBps: number }[] }>>(new Map());
+
   const tileUrls: Record<string, { url: string; maxZoom: number; maxNativeZoom?: number }> = {
     dark: { url: "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", maxZoom: 22, maxNativeZoom: 19 },
     satellite: { url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", maxZoom: 22, maxNativeZoom: 18 },
@@ -1130,6 +1084,7 @@ export default function LeafletMapView({
           map.setMaxBounds(imgBounds);
 
           map.on("click", (e: any) => {
+            if (measureModeRef.current) { handleMeasureClick(e.latlng); return; }
             if (polygonPointsRef.current !== undefined && document.querySelector("[data-polygon-active]")) {
               handlePolygonClick(e.latlng);
             }
@@ -1142,6 +1097,7 @@ export default function LeafletMapView({
             });
           });
           map.on("dblclick", (e: any) => {
+            if (measureModeRef.current) { e.originalEvent?.preventDefault?.(); finishMeasurement(); return; }
             if (polygonPointsRef.current.length >= 3 && document.querySelector("[data-polygon-active]")) {
               e.originalEvent?.preventDefault?.();
               finishPolygon();
@@ -1211,8 +1167,9 @@ export default function LeafletMapView({
 
         mapRef.current = map;
 
-        // General map click handler (for polygon drawing)
+        // General map click handler (for polygon drawing + measurement)
         map.on("click", (e: any) => {
+          if (measureModeRef.current) { handleMeasureClick(e.latlng); return; }
           if (polygonPointsRef.current !== undefined && document.querySelector("[data-polygon-active]")) {
             handlePolygonClick(e.latlng);
           }
@@ -1225,6 +1182,7 @@ export default function LeafletMapView({
           });
         });
         map.on("dblclick", (e: any) => {
+          if (measureModeRef.current) { e.originalEvent?.preventDefault?.(); finishMeasurement(); return; }
           if (polygonPointsRef.current.length >= 3 && document.querySelector("[data-polygon-active]")) {
             e.originalEvent?.preventDefault?.();
             finishPolygon();
@@ -1255,6 +1213,41 @@ export default function LeafletMapView({
               const bounds = initialNodes.map((n) => [n.x, n.y] as [number, number]);
               if (bounds.length > 0) map.fitBounds(bounds, { padding: [50, 50] });
             }
+          // Expose kiosk handle when map + nodes are ready
+          if (onMapReady) {
+            onMapReady({
+              flyTo: (lat, lng, zoom, dur = 1.5) => {
+                if (dur <= 0) {
+                  map.setView([lat, lng], zoom, { animate: false });
+                } else {
+                  map.flyTo([lat, lng], zoom, { animate: true, duration: dur });
+                }
+              },
+              fitAll: () => {
+                const b = nodesRef.current.map(n => [n.x, n.y] as [number, number]);
+                if (b.length) map.fitBounds(b, { padding: [50, 50], animate: true });
+              },
+              getNodes: () => nodesRef.current,
+              openPopup: (nodeId: string) => {
+                const node = nodesRef.current.find(n => n.id === nodeId);
+                const marker = markersRef.current.get(nodeId);
+                if (!node || !marker) return;
+                const popup = L.popup({ className: "leaflet-popup-dark", maxWidth: 280 })
+                  .setLatLng(marker.getLatLng())
+                  .setContent(createPopupContent(node));
+                popup.openOn(map);
+              },
+              closePopup: () => {
+                map.closePopup();
+              },
+              getNodeScreenPos: (nodeId: string) => {
+                const node = nodesRef.current.find(n => n.id === nodeId);
+                if (!node) return null;
+                const pt = map.latLngToContainerPoint([node.x, node.y]);
+                return { x: pt.x, y: pt.y };
+              },
+            });
+          }
           }, 300);
         });
       }
@@ -1276,6 +1269,24 @@ export default function LeafletMapView({
     mapRef.current.removeLayer(tileLayerRef.current);
     tileLayerRef.current = LRef.current.tileLayer(tile.url, { maxZoom: tile.maxZoom, maxNativeZoom: tile.maxNativeZoom }).addTo(mapRef.current);
   }, [mapStyle]);
+
+  // ── Restore persisted camera windows ──
+  useEffect(() => {
+    if (camerasRestored.current) return;
+    camerasRestored.current = true;
+    const saved = loadCameraWindows(mapId);
+    if (saved.length > 0) {
+      // Validate that saved nodeIds still exist in the current map
+      const nodeIds = new Set(initialNodes.map(n => n.id));
+      const valid = saved.filter(s => nodeIds.has(s.nodeId));
+      if (valid.length > 0) {
+        // Populate window states ref
+        valid.forEach(s => cameraWindowStates.current.set(s.nodeId, s));
+        // Open the viewers
+        setStreamViewers(valid.map(s => ({ nodeId: s.nodeId, mode: "pip" as const })));
+      }
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Update markers when kuma data changes
   useEffect(() => {
@@ -1325,13 +1336,20 @@ export default function LeafletMapView({
     }
     const deviceStatuses = monitored.map((d) => {
       const m = getMonitorData(d.monitorId!);
-      const s = m?.status ?? 2;
-      return { label: d.label || "Equipo", type: d.type || "other", status: s, color: statusColors[s] || "#6b7280", ping: m?.ping ?? null, uptime24: m?.uptime24 ?? null, monitorId: d.monitorId ?? null, ip: (d as any).managementIp || "" };
+      const isPaused = m ? !m.active : false;
+      const s = isPaused ? -1 : (m?.status ?? 2);
+      return { label: d.label || "Equipo", type: d.type || "other", status: s, color: isPaused ? "#6b7280" : (statusColors[s] || "#6b7280"), ping: m?.ping ?? null, uptime24: m?.uptime24 ?? null, monitorId: d.monitorId ?? null, ip: (d as any).managementIp || "" };
     });
+    // Only consider active (non-paused) devices for worst-status calculation
+    const activeDevices = deviceStatuses.filter(d => d.status >= 0);
     let worstStatus = 1;
-    if (deviceStatuses.some(d => d.status === 0)) worstStatus = 0;
-    else if (deviceStatuses.some(d => d.status === 2)) worstStatus = 2;
-    else if (deviceStatuses.some(d => d.status === 3)) worstStatus = 3;
+    if (activeDevices.length === 0) {
+      // All monitored devices are paused — return gray
+      return { status: -1, color: "#6b7280", pulse: false, monitoredCount: monitored.length, totalDevices: devices.length, deviceStatuses };
+    }
+    if (activeDevices.some(d => d.status === 0)) worstStatus = 0;
+    else if (activeDevices.some(d => d.status === 2)) worstStatus = 2;
+    else if (activeDevices.some(d => d.status === 3)) worstStatus = 3;
     return {
       status: worstStatus,
       color: statusColors[worstStatus] || "#22c55e",
@@ -1356,63 +1374,117 @@ export default function LeafletMapView({
       const upCount = rack.deviceStatuses.filter(d => d.status === 1).length;
       const downCount = rack.deviceStatuses.filter(d => d.status === 0).length;
       const pendCount = rack.deviceStatuses.filter(d => d.status === 2 || d.status === 3).length;
+      const pausedCount = rack.deviceStatuses.filter(d => d.status === -1).length;
       const unmonitored = rack.totalDevices - rack.monitoredCount;
-      const st = rack.status === 0 ? "DOWN" : rack.status === 2 ? "PENDING" : rack.status === 3 ? "MAINT" : rack.monitoredCount > 0 ? "OK" : "SIN SENSOR";
+      const st = rack.status === -1 ? "PAUSADO" : rack.status === 0 ? "DOWN" : rack.status === 2 ? "PENDING" : rack.status === 3 ? "MAINT" : rack.monitoredCount > 0 ? "OK" : "SIN SENSOR";
       const col = rack.color;
+      // Rack header color based on worst status
+      const rackBg = rack.status === 0 ? "rgba(127,29,29,0.55)" : rack.status === 2 || rack.status === 3 ? "rgba(113,63,18,0.55)" : rack.status === -1 ? "rgba(55,65,81,0.55)" : "rgba(22,101,52,0.45)";
+      const rackBorder = rack.status === 0 ? "rgba(239,68,68,0.3)" : rack.status === 2 || rack.status === 3 ? "rgba(245,158,11,0.3)" : rack.status === -1 ? "rgba(156,163,175,0.25)" : "rgba(34,197,94,0.25)";
+
       const rows = rack.deviceStatuses.map(d => {
-        const stT = d.status === 0 ? "DOWN" : d.status === 2 ? "PEND" : d.status === 3 ? "MAINT" : "UP";
+        const stT = d.status === -1 ? "⏸" : d.status === 0 ? "DOWN" : d.status === 2 ? "PEND" : d.status === 3 ? "MAINT" : "UP";
         const pingT = d.ping != null ? `${d.ping}ms` : "";
         const clickable = d.monitorId != null;
         const onclick = clickable ? `onclick="window.__kumamap_showEventDetail(${d.monitorId}, '${d.label.replace(/'/g, "\\'")}')"` : "";
         const cursorStyle = clickable ? "cursor:pointer;" : "";
-        const hoverBg = clickable ? "onmouseenter=\"this.style.background='rgba(255,255,255,0.06)'\" onmouseleave=\"this.style.background='transparent'\"" : "";
-        return `<div style="display:flex;align-items:center;gap:6px;padding:3px 4px;border-bottom:1px solid rgba(255,255,255,0.04);border-radius:4px;${cursorStyle}" ${onclick} ${hoverBg}>
-          <div style="width:7px;height:7px;border-radius:50%;background:${d.color};box-shadow:0 0 5px ${d.color}88;flex-shrink:0;${d.status===0||d.status===2?"animation:ping-badge 1.5s ease-in-out infinite;":""}"></div>
+        const hoverBg = clickable ? "onmouseenter=\"this.style.background='rgba(255,255,255,0.05)'\" onmouseleave=\"this.style.background='transparent'\"" : "";
+        return `<div style="display:flex;align-items:center;gap:8px;padding:5px 6px;border-bottom:1px solid rgba(255,255,255,0.03);border-radius:6px;${cursorStyle}transition:background 0.15s;" ${onclick} ${hoverBg}>
+          <div style="width:6px;height:6px;border-radius:50%;background:${d.color};box-shadow:0 0 6px ${d.color}88;flex-shrink:0;${d.status===0||d.status===2?"animation:sileo-pulse 1.5s ease-in-out infinite;":""}${d.status===-1?"opacity:0.4;":""}"></div>
           <div style="flex:1;overflow:hidden;">
-            <div style="font-size:10px;color:#ccc;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${d.label}</div>
-            ${d.ip ? `<div style="font-size:8px;color:#666;font-family:monospace;">${d.ip}</div>` : ""}
+            <div style="font-size:11px;color:rgba(255,255,255,0.75);font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${d.label}</div>
+            ${d.ip ? `<div style="font-size:9px;color:rgba(255,255,255,0.25);font-family:ui-monospace,monospace;">${d.ip}</div>` : ""}
           </div>
-          <span style="font-size:8px;font-weight:700;color:${d.color};background:${d.color}22;padding:1px 4px;border-radius:3px;">${stT}</span>
-          ${pingT ? `<span style="font-size:8px;color:#666;font-family:monospace;">${pingT}</span>` : ""}
+          <span style="font-size:9px;font-weight:700;color:${d.color};background:${d.color}18;padding:2px 6px;border-radius:5px;letter-spacing:0.03em;">${stT}</span>
+          ${pingT ? `<span style="font-size:9px;color:rgba(255,255,255,0.3);font-family:ui-monospace,monospace;">${pingT}</span>` : ""}
         </div>`;
       }).join("");
-      return `<div style="background:#0f0f0f;color:#eee;padding:10px 14px;border-radius:12px;min-width:240px;max-width:300px;font-family:system-ui;border:1px solid ${col}44;">
-        <div style="height:2px;background:linear-gradient(90deg,${col},${col}44);border-radius:1px;margin:-10px -14px 8px;"></div>
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
-          <div style="width:10px;height:10px;border-radius:50%;background:${col};box-shadow:0 0 8px ${col};flex-shrink:0;"></div>
-          <strong style="font-size:13px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${node.label}</strong>
-          <span style="color:${col};font-size:9px;font-weight:700;background:${col}22;padding:1px 6px;border-radius:4px;letter-spacing:0.5px;">${st}</span>
+
+      // Stat card helper
+      const statCard = (val: number, label: string, c: string) =>
+        `<div style="flex:1;background:${c}0c;border:1px solid ${c}25;border-radius:10px;padding:6px 8px;text-align:center;">
+          <div style="font-size:16px;font-weight:800;color:${c};line-height:1;">${val}</div>
+          <div style="font-size:8px;color:rgba(255,255,255,0.3);font-weight:600;letter-spacing:0.06em;margin-top:2px;">${label}</div>
+        </div>`;
+
+      return `<div style="min-width:260px;max-width:320px;font-family:system-ui,-apple-system,sans-serif;">
+        <!-- Rack header -->
+        <div style="background:${rackBg};border-bottom:1px solid ${rackBorder};padding:14px 16px;display:flex;align-items:center;gap:10px;">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="${col}" stroke-width="1.5" stroke-linecap="round"><rect x="4" y="2" width="16" height="20" rx="2"/><line x1="8" y1="6" x2="16" y2="6"/><line x1="8" y1="10" x2="16" y2="10"/><line x1="8" y1="14" x2="16" y2="14"/><circle cx="12" cy="18" r="1" fill="${col}"/></svg>
+          <div style="flex:1;min-width:0;">
+            <div style="font-size:14px;font-weight:700;color:#f0f0f0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${node.label}</div>
+            <div style="font-size:10px;color:rgba(255,255,255,0.35);font-weight:500;margin-top:1px;">${rack.totalDevices} equipos · ${cd.totalUnits || 42}U</div>
+          </div>
+          <span style="font-size:10px;font-weight:800;color:${col};background:${col}20;padding:2px 8px;border-radius:6px;letter-spacing:0.06em;">${st}</span>
         </div>
-        ${rack.monitoredCount > 0 ? `
-        <div style="display:flex;gap:5px;margin-bottom:8px;">
-          <div style="flex:1;background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.2);border-radius:6px;padding:4px 6px;text-align:center;">
-            <div style="font-size:14px;font-weight:800;color:#22c55e;">${upCount}</div>
-            <div style="font-size:8px;color:#555;letter-spacing:0.5px;">UP</div>
+        <!-- Body -->
+        <div style="padding:10px 16px 14px;">
+          ${rack.monitoredCount > 0 ? `
+          <div style="display:flex;gap:6px;margin-bottom:10px;">
+            ${statCard(upCount, "UP", "#22c55e")}
+            ${statCard(downCount, "DOWN", "#ef4444")}
+            ${statCard(pendCount, "PEND", "#f59e0b")}
+            ${pausedCount > 0 ? statCard(pausedCount, "PAUSA", "#6b7280") : ""}
           </div>
-          <div style="flex:1;background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.2);border-radius:6px;padding:4px 6px;text-align:center;">
-            <div style="font-size:14px;font-weight:800;color:#ef4444;">${downCount}</div>
-            <div style="font-size:8px;color:#555;letter-spacing:0.5px;">DOWN</div>
-          </div>
-          <div style="flex:1;background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.2);border-radius:6px;padding:4px 6px;text-align:center;">
-            <div style="font-size:14px;font-weight:800;color:#f59e0b;">${pendCount}</div>
-            <div style="font-size:8px;color:#555;letter-spacing:0.5px;">PEND</div>
-          </div>
-        </div>
-        <div style="max-height:140px;overflow-y:auto;">${rows}</div>` : ""}
-        <div style="font-size:9px;color:#555;margin-top:6px;display:flex;justify-content:space-between;">
-          <span>${rack.totalDevices} equipos · ${cd.totalUnits || 42}U</span>
-          ${unmonitored > 0 ? `<span>${unmonitored} sin sensor</span>` : ""}
+          <div style="max-height:150px;overflow-y:auto;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.04);border-radius:10px;padding:2px 4px;">${rows}</div>` : ""}
+          ${unmonitored > 0 ? `<div style="font-size:9px;color:rgba(255,255,255,0.2);margin-top:8px;text-align:center;">${unmonitored} equipos sin sensor</div>` : ""}
         </div>
       </div>`;
     }
 
     const m = getMonitorData(node.kuma_monitor_id);
     const color = getStatusColor(node.kuma_monitor_id);
-    const statusText = m ? (m.status === 1 ? "UP" : m.status === 0 ? "DOWN" : "PENDING") : "N/A";
+    const statusText = m ? (!m.active ? "PAUSADO" : m.status === 1 ? "UP" : m.status === 0 ? "DOWN" : "PENDING") : "N/A";
+    const isDown = m?.status === 0;
+    const isPaused = m && !m.active;
+    const isPending = m?.status === 2 || m?.status === 3;
+    const mng: any = m && (m as any).type === "monitor-ng" ? (m as any).mng : null;
+    const mngStatus = mng ? ((mng.stale || isPaused) ? "SIN REPORTE" : isDown ? "CRITICO" : isPending ? "ATENCION" : "ESTABLE") : null;
+    let mngGrid = "";
+    if (mng && Array.isArray(mng.metrics) && mng.metrics.length) {
+      const MCOL: Record<string, string> = { ok: "#22c55e", warn: "#f59e0b", crit: "#ef4444" };
+      const MTAG: Record<string, string> = { cpu: "CPU", mem: "MEM", dsk: "DSK", store: "IMG", raid: "RAID", pg: "PG", sys: "SYS", crash: "CRSH", svc: "SVC", net: "NET", temp: "TMP", log: "LOG" };
+      const dim = mng.stale ? "opacity:0.45;filter:saturate(0.4);" : "";
+      const chips = mng.metrics.map((mt: any) => {
+        const c = MCOL[mt.state] || "#6b7280";
+        const lbl = String(mt.label || mt.id).replace(/"/g, "&quot;");
+        const val = String(mt.value ?? "");
+        return `<div title="${lbl}" style="display:flex;flex-direction:column;align-items:center;gap:2px;background:${c}14;border:1px solid ${c}33;border-radius:8px;padding:6px 2px;min-width:0;${dim}">` +
+          `<span style="font-size:8.5px;font-weight:800;letter-spacing:0.04em;color:${c};">${MTAG[mt.id] || String(mt.id).toUpperCase()}</span>` +
+          `<span style="font-size:9.5px;font-weight:600;color:rgba(255,255,255,0.85);font-family:ui-monospace,monospace;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:0 3px;">${val}</span></div>`;
+      }).join("");
+      const bad = mng.metrics.filter((mt: any) => mt.state !== "ok").map((mt: any) => {
+        const c = MCOL[mt.state] || "#6b7280";
+        return `<div style="display:flex;gap:6px;align-items:center;padding:3px 0;"><span style="width:6px;height:6px;border-radius:50%;background:${c};flex-shrink:0;"></span>` +
+          `<span style="font-size:10px;color:rgba(255,255,255,0.55);">${mt.label || mt.id}:</span>` +
+          `<span style="font-size:10px;font-weight:600;color:${c};font-family:ui-monospace,monospace;">${mt.value}</span></div>`;
+      }).join("");
+      mngGrid = `<div style="margin-top:4px;">` +
+        `<div style="display:flex;justify-content:space-between;align-items:center;margin:2px 0 7px;">` +
+        `<span style="font-size:9px;font-weight:800;letter-spacing:0.09em;color:rgba(255,255,255,0.35);">SENSORES MONITOR-NG</span>` +
+        `<span style="font-size:9px;font-weight:700;font-family:ui-monospace,monospace;"><span style="color:#22c55e;">${mng.ok} OK</span><span style="color:rgba(255,255,255,0.25);"> &middot; </span><span style="color:#f59e0b;">${mng.warn} ATEN</span><span style="color:rgba(255,255,255,0.25);"> &middot; </span><span style="color:#ef4444;">${mng.crit} CRIT</span></span></div>` +
+        `<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:5px;">${chips}</div>` +
+        (bad && !mng.stale ? `<div style="margin-top:8px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.05);border-radius:8px;padding:5px 10px;">${bad}</div>` : "") +
+        `<div style="margin-top:7px;font-size:9px;color:rgba(255,255,255,0.3);text-align:right;font-family:ui-monospace,monospace;">${mng.stale ? "SIN REPORTE &mdash; ultimo: " : "ultimo reporte: "}${mng.ts || "?"}</div></div>`;
+    }
+
+    // Sileo status colors
+    const statusBg = isDown ? "rgba(127,29,29,0.55)" : isPaused ? "rgba(55,65,81,0.55)" : isPending ? "rgba(113,63,18,0.55)" : "rgba(22,101,52,0.45)";
+    const statusBorder = isDown ? "rgba(239,68,68,0.3)" : isPaused ? "rgba(156,163,175,0.25)" : isPending ? "rgba(245,158,11,0.3)" : "rgba(34,197,94,0.25)";
+    const accentColor = isDown ? "#ef4444" : isPaused ? "#9ca3af" : isPending ? "#f59e0b" : "#22c55e";
+
+    // Animated SVG status icon
+    const statusSvg = isDown
+      ? `<svg width="22" height="22" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="${accentColor}" stroke-width="1.5" stroke-dasharray="50" stroke-dashoffset="50" stroke-linecap="round"><animate attributeName="stroke-dashoffset" from="50" to="0" dur="0.5s" fill="freeze"/></circle><circle cx="12" cy="12" r="4" fill="${accentColor}" opacity="0.2"><animate attributeName="r" values="4;8;4" dur="1.5s" repeatCount="indefinite"/><animate attributeName="opacity" values="0.3;0;0.3" dur="1.5s" repeatCount="indefinite"/></circle><line x1="15" y1="9" x2="9" y2="15" stroke="${accentColor}" stroke-width="2" stroke-linecap="round" stroke-dasharray="8.5" stroke-dashoffset="8.5"><animate attributeName="stroke-dashoffset" from="8.5" to="0" dur="0.25s" begin="0.35s" fill="freeze"/></line><line x1="9" y1="9" x2="15" y2="15" stroke="${accentColor}" stroke-width="2" stroke-linecap="round" stroke-dasharray="8.5" stroke-dashoffset="8.5"><animate attributeName="stroke-dashoffset" from="8.5" to="0" dur="0.25s" begin="0.5s" fill="freeze"/></line></svg>`
+      : isPaused
+      ? `<svg width="22" height="22" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="${accentColor}" stroke-width="1.5" opacity="0.4"/><rect x="9" y="8" width="2.5" height="8" rx="0.8" fill="${accentColor}" opacity="0.7"/><rect x="12.5" y="8" width="2.5" height="8" rx="0.8" fill="${accentColor}" opacity="0.7"/></svg>`
+      : isPending
+      ? `<svg width="22" height="22" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="${accentColor}" stroke-width="1.5" stroke-dasharray="50" stroke-dashoffset="50" stroke-linecap="round"><animate attributeName="stroke-dashoffset" from="50" to="0" dur="0.6s" fill="freeze"/></circle><circle cx="8" cy="12" r="1.2" fill="${accentColor}"><animate attributeName="opacity" values="0.3;1;0.3" dur="1.2s" begin="0s" repeatCount="indefinite"/></circle><circle cx="12" cy="12" r="1.2" fill="${accentColor}"><animate attributeName="opacity" values="0.3;1;0.3" dur="1.2s" begin="0.2s" repeatCount="indefinite"/></circle><circle cx="16" cy="12" r="1.2" fill="${accentColor}"><animate attributeName="opacity" values="0.3;1;0.3" dur="1.2s" begin="0.4s" repeatCount="indefinite"/></circle></svg>`
+      : `<svg width="22" height="22" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="${accentColor}" stroke-width="1.5" stroke-dasharray="50" stroke-dashoffset="50" stroke-linecap="round"><animate attributeName="stroke-dashoffset" from="50" to="0" dur="0.5s" fill="freeze"/></circle><polyline points="8 12 11 15 16 9" stroke="${accentColor}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="14" stroke-dashoffset="14"><animate attributeName="stroke-dashoffset" from="14" to="0" dur="0.3s" begin="0.35s" fill="freeze"/></polyline></svg>`;
 
     // Get tag info for display
     const tagBadges = (m?.tags || []).map((t: any) =>
-      `<span style="background:${t.color}22;border:1px solid ${t.color}44;color:${t.color};padding:1px 5px;border-radius:4px;font-size:8px;font-weight:700;">${t.name}</span>`
+      `<span style="background:${t.color}18;border:1px solid ${t.color}30;color:${t.color};padding:2px 7px;border-radius:6px;font-size:9px;font-weight:600;letter-spacing:0.02em;">${t.name}</span>`
     ).join(" ");
 
     // Sparkline from history
@@ -1428,35 +1500,66 @@ export default function LeafletMapView({
       });
     }
 
+    // Metric row helper
+    const row = (label: string, value: string, valueColor?: string) =>
+      `<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid rgba(255,255,255,0.04);">
+        <span style="font-size:11px;color:rgba(255,255,255,0.4);font-weight:500;">${label}</span>
+        <span style="font-size:11px;font-weight:600;color:${valueColor || "rgba(255,255,255,0.8)"};font-family:ui-monospace,monospace;">${value}</span>
+      </div>`;
+
     return `
-      <div style="background:#111;color:#eee;padding:10px 14px;border-radius:12px;min-width:240px;max-width:300px;font-family:system-ui;border:1px solid ${color}44;">
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
-          <div style="width:10px;height:10px;border-radius:50%;background:${color};box-shadow:0 0 8px ${color};"></div>
-          <strong style="font-size:13px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${node.label}</strong>
-          <span style="color:${color};font-size:10px;font-weight:700;">${statusText}</span>
+      <div style="min-width:260px;max-width:320px;font-family:system-ui,-apple-system,sans-serif;">
+        <!-- Status header bar -->
+        <div style="background:${statusBg};border-bottom:1px solid ${statusBorder};padding:14px 16px;display:flex;align-items:center;gap:10px;">
+          <div style="flex-shrink:0;">${statusSvg}</div>
+          <div style="flex:1;min-width:0;">
+            <div style="font-size:14px;font-weight:700;color:#f0f0f0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;letter-spacing:-0.01em;">${node.label}</div>
+            ${m?.type ? `<div style="font-size:10px;color:rgba(255,255,255,0.4);font-weight:500;text-transform:uppercase;letter-spacing:0.06em;margin-top:2px;">${m.type}</div>` : ""}
+          </div>
+          <div style="flex-shrink:0;display:flex;flex-direction:column;align-items:flex-end;gap:2px;">
+            <span style="font-size:10px;font-weight:800;color:${accentColor};background:${accentColor}20;padding:2px 8px;border-radius:6px;letter-spacing:0.06em;">${mngStatus ?? statusText}</span>
+            ${m?.ping != null ? `<span style="font-size:10px;font-weight:600;color:rgba(255,255,255,0.5);font-family:ui-monospace,monospace;">${m.ping}ms</span>` : ""}
+          </div>
         </div>
-        ${tagBadges ? `<div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:6px;">${tagBadges}</div>` : ""}
-        ${cd.ip || cd.mac ? `
-          <div style="font-size:10px;color:#999;margin-bottom:6px;display:flex;gap:6px;flex-wrap:wrap;">
-            ${cd.ip ? `<a href="http://${cd.ip}" target="_blank" rel="noopener noreferrer" style="text-decoration:none;"><span style="background:rgba(59,130,246,0.12);border:1px solid rgba(59,130,246,0.25);color:#60a5fa;padding:1px 6px;border-radius:6px;font-family:monospace;font-size:10px;cursor:pointer;">${cd.ip}</span></a>` : ""}
-            ${cd.mac ? `<span style="background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.08);color:#888;padding:1px 6px;border-radius:6px;font-family:monospace;font-size:9px;">${cd.mac}</span>` : ""}
-          </div>
-        ` : ""}
-        ${m ? `
-          <div style="font-size:10px;color:#888;">
-            ${m.type ? `<div style="display:flex;justify-content:space-between;"><span>Tipo</span><span style="color:#bbb;text-transform:uppercase;">${m.type}</span></div>` : ""}
-            ${m.ping != null ? `<div style="display:flex;justify-content:space-between;"><span>Latencia</span><span style="color:#bbb;">${m.ping}ms</span></div>` : ""}
-            ${m.uptime24 != null ? `<div style="display:flex;justify-content:space-between;"><span>Uptime</span><span style="color:${m.uptime24 > 0.99 ? "#22c55e" : "#f59e0b"};">${(m.uptime24 * 100).toFixed(2)}%</span></div>` : ""}
-            ${m.msg ? `<div style="display:flex;justify-content:space-between;gap:8px;"><span>Msg</span><span style="color:#777;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:140px;">${m.msg}</span></div>` : ""}
-          </div>
-        ` : '<div style="font-size:10px;color:#666;font-style:italic;">Nodo manual</div>'}
-        ${sparkline}
+
+        <!-- Body -->
+        <div style="padding:10px 16px 14px;">
+          ${tagBadges ? `<div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:8px;">${tagBadges}</div>` : ""}
+
+          ${cd.ip || cd.mac ? `
+            <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;">
+              ${cd.ip ? `<a href="http://${cd.ip}" target="_blank" rel="noopener noreferrer" style="text-decoration:none;"><span style="display:inline-flex;align-items:center;gap:4px;background:rgba(59,130,246,0.1);border:1px solid rgba(59,130,246,0.2);color:#60a5fa;padding:3px 8px;border-radius:8px;font-family:ui-monospace,monospace;font-size:11px;font-weight:500;cursor:pointer;transition:background 0.15s;">
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#60a5fa" stroke-width="2.5" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15 15 0 0 1 4 10 15 15 0 0 1-4 10 15 15 0 0 1-4-10A15 15 0 0 1 12 2z"/></svg>
+                ${cd.ip}</span></a>` : ""}
+              ${cd.mac ? `<span style="display:inline-flex;align-items:center;gap:4px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.06);color:rgba(255,255,255,0.4);padding:3px 8px;border-radius:8px;font-family:ui-monospace,monospace;font-size:10px;font-weight:500;">
+                <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.3)" stroke-width="2" stroke-linecap="round"><rect x="2" y="6" width="20" height="12" rx="2"/><line x1="6" y1="10" x2="6" y2="14"/><line x1="10" y1="10" x2="10" y2="14"/></svg>
+                ${cd.mac}</span>` : ""}
+            </div>
+          ` : ""}
+
+          ${m && !mng ? `
+            <div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.05);border-radius:10px;padding:2px 12px;">
+              ${m.ping != null ? row("Latencia", `${m.ping}ms`, m.ping > 100 ? "#f59e0b" : m.ping > 300 ? "#ef4444" : "#22c55e") : ""}
+              ${m.uptime24 != null ? row("Uptime 24h", `${(m.uptime24 * 100).toFixed(2)}%`, m.uptime24 > 0.99 ? "#22c55e" : m.uptime24 > 0.95 ? "#f59e0b" : "#ef4444") : ""}
+              ${m.msg && !mng ? row("Mensaje", `<span style="max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-block;vertical-align:bottom;">${m.msg}</span>`, "rgba(255,255,255,0.5)") : ""}
+            </div>
+          ` : !m ? `<div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.05);border-radius:10px;padding:10px 12px;text-align:center;">
+            <span style="font-size:11px;color:rgba(255,255,255,0.25);font-style:italic;">Nodo sin monitor asignado</span>
+          </div>` : ``}
+
+          ${mngGrid}
+          ${sparkline}
+        </div>
       </div>
     `;
   }
 
   function renderNodes(L: any, map: any) {
     if (!map || !map.getContainer()) return;
+    // Rebuild O(1) node index
+    const nIdx = new Map<string, SavedNode>();
+    nodesRef.current.forEach(n => nIdx.set(n.id, n));
+    nodeByIdRef.current = nIdx;
     markersRef.current.forEach((m) => { try { map.removeLayer(m); } catch {} });
     markersRef.current.clear();
     fovLayersRef.current.forEach((l) => { try { map.removeLayer(l); } catch {} });
@@ -1490,7 +1593,7 @@ export default function LeafletMapView({
       const cd = safeJsonParse<NodeCustomData>(node.custom_data);
       let color = getStatusColor(node.kuma_monitor_id);
       const m = getMonitorData(node.kuma_monitor_id);
-      let pulse = !isLabel && (m?.status === 0 || m?.status === 2);
+      let pulse = !isLabel && (m?.status === 0 || m?.status === 2) && m?.active !== false;
       // Rack nodes: aggregate color+pulse from all device monitors
       if (isRack) {
         const rackInfo = getRackStatus(node);
@@ -2013,7 +2116,7 @@ export default function LeafletMapView({
             // Single linked map — navigate directly
             if (readonly) window.open(apiUrl(`/view/${linked[0].id}`), "_blank");
             else if (onOpenMap) onOpenMap(linked[0].id);
-            else window.open(apiUrl(`/?map=${linked[0].id}`), "_blank");
+            else window.open(apiUrl(`/map/${linked[0].id}`), "_blank");
           } else if (linked.length > 1) {
             if (readonly) window.open(apiUrl(`/view/${linked[0].id}`), "_blank");
             else setNodeMapModalNodeId(node.id);
@@ -2222,21 +2325,23 @@ export default function LeafletMapView({
 
   // Trace a route through waypoints to find the REAL endpoint nodes (with kuma_monitor_id)
   // Waypoints (icon === "waypoint" or no kuma_monitor_id and connected to exactly 2 edges) are transparent
-  function findRealEndpoints(edgeId: string): { srcStatus: number | undefined; tgtStatus: number | undefined } {
-    const edge = edgesRef.current.find((e) => e.id === edgeId);
-    if (!edge) return { srcStatus: undefined, tgtStatus: undefined };
+  function findRealEndpoints(edgeId: string, edge?: SavedEdge): { srcStatus: number | undefined; tgtStatus: number | undefined } {
+    const e = edge || edgesRef.current.find((e) => e.id === edgeId);
+    if (!e) return { srcStatus: undefined, tgtStatus: undefined };
 
-    const allNodes = nodesRef.current;
-    const allEdges = edgesRef.current;
+    const nodeIdx = nodeByIdRef.current;   // O(1) node lookup
+    const edgeAdj = edgesByNodeRef.current; // O(1) adjacent edges lookup
 
     // Walk from source side to find real node
     function walkToRealNode(startNodeId: string, fromEdgeId: string, visited: Set<string>): number | undefined {
-      const node = allNodes.find((n) => n.id === startNodeId);
+      const node = nodeIdx.get(startNodeId);
       if (!node) return undefined;
 
       // If this node has a kuma monitor, it's a real node — return its status
+      // Return -1 for paused monitors so link popup shows "PAUSADO" instead of wrong color
       if (node.kuma_monitor_id) {
-        const mon = kumaMonitors.find((m) => m.id === node.kuma_monitor_id);
+        const mon = monitorIndexRef.current.get(node.kuma_monitor_id);
+        if (mon && !mon.active) return -1;
         return mon?.status;
       }
 
@@ -2246,12 +2351,10 @@ export default function LeafletMapView({
 
       visited.add(fromEdgeId);
 
-      // Find other edges connected to this waypoint (not the one we came from)
-      const connectedEdges = allEdges.filter(
-        (e) => !visited.has(e.id) && (e.source_node_id === startNodeId || e.target_node_id === startNodeId)
-      );
-
-      for (const nextEdge of connectedEdges) {
+      // Find other edges connected to this waypoint via adjacency index (O(1) lookup)
+      const adjacent = edgeAdj.get(startNodeId) || [];
+      for (const nextEdge of adjacent) {
+        if (visited.has(nextEdge.id)) continue;
         const nextNodeId = nextEdge.source_node_id === startNodeId ? nextEdge.target_node_id : nextEdge.source_node_id;
         const result = walkToRealNode(nextNodeId, nextEdge.id, visited);
         if (result !== undefined) return result;
@@ -2260,14 +2363,29 @@ export default function LeafletMapView({
       return undefined; // dead end — no real node found
     }
 
-    const srcStatus = walkToRealNode(edge.source_node_id, edgeId, new Set([edgeId]));
-    const tgtStatus = walkToRealNode(edge.target_node_id, edgeId, new Set([edgeId]));
+    const srcStatus = walkToRealNode(e.source_node_id, edgeId, new Set([edgeId]));
+    const tgtStatus = walkToRealNode(e.target_node_id, edgeId, new Set([edgeId]));
 
     return { srcStatus, tgtStatus };
   }
 
   function renderEdges(L: any, map: any) {
     if (!map || !map.getContainer()) return;
+    // Rebuild O(1) node index (in case renderEdges called without renderNodes)
+    const nIdx = new Map<string, SavedNode>();
+    nodesRef.current.forEach(n => nIdx.set(n.id, n));
+    nodeByIdRef.current = nIdx;
+    // Rebuild edge adjacency index: nodeId → edges touching that node
+    const eAdj = new Map<string, SavedEdge[]>();
+    edgesRef.current.forEach(e => {
+      let arr = eAdj.get(e.source_node_id);
+      if (!arr) { arr = []; eAdj.set(e.source_node_id, arr); }
+      arr.push(e);
+      let arr2 = eAdj.get(e.target_node_id);
+      if (!arr2) { arr2 = []; eAdj.set(e.target_node_id, arr2); }
+      arr2.push(e);
+    });
+    edgesByNodeRef.current = eAdj;
     polylinesRef.current.forEach((p) => { try { map.removeLayer(p); } catch {} });
     polylinesRef.current.clear();
     // Clear interface label markers
@@ -2278,14 +2396,14 @@ export default function LeafletMapView({
     downtimeMarkersRef.current.clear();
 
     edgesRef.current.forEach((edge) => {
-      const srcNode = nodesRef.current.find((n) => n.id === edge.source_node_id);
-      const tgtNode = nodesRef.current.find((n) => n.id === edge.target_node_id);
+      const srcNode = nodeByIdRef.current.get(edge.source_node_id);
+      const tgtNode = nodeByIdRef.current.get(edge.target_node_id);
       if (!srcNode || !tgtNode) return;
 
       const cd = safeJsonParse<EdgeCustomData>(edge.custom_data);
 
-      // Find real endpoints through waypoint chains
-      const { srcStatus, tgtStatus } = findRealEndpoints(edge.id);
+      // Find real endpoints through waypoint chains (pass edge to avoid re-lookup)
+      const { srcStatus, tgtStatus } = findRealEndpoints(edge.id, edge);
       const isFiber = cd.linkType === "fiber";
       const isWireless = cd.linkType === "wireless";
       const isVPN = cd.linkType === "vpn";
@@ -2331,8 +2449,8 @@ export default function LeafletMapView({
       });
 
       // ── Link click popup — shows full link details ──
-      const statusLabel = (s: number | undefined) => s === 0 ? "🔴 DOWN" : s === 1 ? "🟢 UP" : s === 2 ? "🟡 PENDING" : s === 3 ? "🟣 MAINT" : "⚪ N/A";
-      const statusDot = (s: number | undefined) => s === 0 ? "#ef4444" : s === 1 ? "#22c55e" : s === 2 ? "#f59e0b" : s === 3 ? "#8b5cf6" : "#666";
+      const statusLabel = (s: number | undefined) => s === -1 ? "⏸️ PAUSADO" : s === 0 ? "🔴 DOWN" : s === 1 ? "🟢 UP" : s === 2 ? "🟡 PENDING" : s === 3 ? "🟣 MAINT" : "⚪ N/A";
+      const statusDot = (s: number | undefined) => s === -1 ? "#6b7280" : s === 0 ? "#ef4444" : s === 1 ? "#22c55e" : s === 2 ? "#f59e0b" : s === 3 ? "#8b5cf6" : "#666";
       const linkTypeLabel = isFiber ? "Fibra óptica" : isWireless ? "Wireless" : isVPN ? "VPN" : "Cobre/UTP";
       const linkTypeIcon = isFiber ? "🔵" : isWireless ? "📡" : isVPN ? "🔒" : "🟠";
 
@@ -2388,7 +2506,7 @@ export default function LeafletMapView({
           const savedPos = cd.trafficLabelPos;
           const posLat = savedPos ? savedPos[0] : (srcNode.x + tgtNode.x) / 2;
           const posLng = savedPos ? savedPos[1] : (srcNode.y + tgtNode.y) / 2;
-          const statusColor = snmpMon.status === 1 ? "#22c55e" : snmpMon.status === 0 ? "#ef4444" : "#f59e0b";
+          const statusColor = !snmpMon.active ? "#6b7280" : snmpMon.status === 1 ? "#22c55e" : snmpMon.status === 0 ? "#ef4444" : "#f59e0b";
 
           // Extract SNMP counter value from msg: "comparing NNNN >= YYYY"
           const extractCounter = (msg: string): number | null => {
@@ -2509,6 +2627,99 @@ export default function LeafletMapView({
           trafficLabel.addTo(map);
           labelMarkersRef.current.set(`${edge.id}-traffic`, trafficLabel);
         }
+      }
+
+      // MikroTik direct traffic widget — polls router REST API for live TX/RX
+      if (cd.mikrotikTraffic && !cd.hideTraffic && !cd.snmpMonitorId) {
+        const savedPos = cd.trafficLabelPos;
+        const posLat = savedPos ? savedPos[0] : (srcNode.x + tgtNode.x) / 2;
+        const posLng = savedPos ? savedPos[1] : (srcNode.y + tgtNode.y) / 2;
+
+        const cached = mikrotikDataRef.current.get(edge.id);
+        const rx = cached?.current?.rxBps ?? 0;
+        const tx = cached?.current?.txBps ?? 0;
+        const hasData = !!cached?.current;
+        const color = hasData ? "#22c55e" : "#6b7280";
+
+        const rxFmt = hasData ? formatTraffic(rx) : "...";
+        const txFmt = hasData ? formatTraffic(tx) : "...";
+
+        // Dual sparkline: TX (blue) + RX (green)
+        let sparkSvg = "";
+        if (cached && cached.history.length >= 2) {
+          const pts = cached.history.slice(-30);
+          const maxV = Math.max(...pts.map((p) => Math.max(p.rxBps, p.txBps)), 1);
+          const w = 80, h = 28;
+          const rxPath = pts.map((v, i) => {
+            const x = (i / (pts.length - 1)) * w;
+            const y = h - (v.rxBps / maxV) * (h - 4);
+            return `${i === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`;
+          });
+          const txPath = pts.map((v, i) => {
+            const x = (i / (pts.length - 1)) * w;
+            const y = h - (v.txBps / maxV) * (h - 4);
+            return `${i === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`;
+          });
+          sparkSvg = `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" style="display:block;margin-top:2px">
+            <path d="${rxPath.join(" ")}" fill="none" stroke="#22c55e" stroke-width="1.2" stroke-linecap="round" opacity="0.8"/>
+            <path d="${txPath.join(" ")}" fill="none" stroke="#3b82f6" stroke-width="1.2" stroke-linecap="round" opacity="0.8"/>
+          </svg>`;
+        }
+
+        const mtLabel = L.marker([posLat, posLng], {
+          draggable: !isLocked,
+          icon: L.divIcon({
+            className: "traffic-label",
+            html: `<div style="
+              background:rgba(6,6,10,0.92);
+              border:1px solid ${color}44;
+              font-size:9px;font-weight:700;
+              font-family:ui-monospace,monospace;
+              padding:4px 8px;border-radius:8px;
+              white-space:nowrap;
+              box-shadow:0 4px 16px rgba(0,0,0,0.6), 0 0 12px ${color}15;
+              cursor:${isLockedRef.current ? "default" : "grab"};
+              min-width:80px;
+            ">
+              <div style="display:flex;align-items:center;gap:3px;color:#3b82f6;">
+                <span style="font-size:7px;">▲</span>
+                <span>TX ${txFmt}</span>
+              </div>
+              <div style="display:flex;align-items:center;gap:3px;color:#22c55e;">
+                <span style="font-size:7px;">▼</span>
+                <span>RX ${rxFmt}</span>
+              </div>
+              ${sparkSvg}
+            </div>`,
+            iconSize: [0, 0],
+            iconAnchor: [0, 14],
+          }),
+          interactive: true,
+        });
+
+        mtLabel.on("dragend", () => {
+          const pos = mtLabel.getLatLng();
+          const idx = edgesRef.current.findIndex((e) => e.id === edge.id);
+          if (idx >= 0) {
+            const oldCd = safeJsonParse<EdgeCustomData>(edgesRef.current[idx].custom_data);
+            oldCd.trafficLabelPos = [pos.lat, pos.lng];
+            edgesRef.current[idx] = { ...edgesRef.current[idx], custom_data: JSON.stringify(oldCd) };
+          }
+        });
+
+        mtLabel.on("contextmenu", (e: any) => {
+          e.originalEvent.preventDefault();
+          e.originalEvent.stopPropagation();
+          ctxHandledRef.current = true;
+          setCtxMenu({
+            x: e.originalEvent.clientX,
+            y: e.originalEvent.clientY,
+            edgeId: edge.id,
+          });
+        });
+
+        mtLabel.addTo(map);
+        labelMarkersRef.current.set(`${edge.id}-traffic`, mtLabel);
       }
 
       // Invisible wider hit polyline for easier right-click on thin lines
@@ -2723,7 +2934,7 @@ export default function LeafletMapView({
 
       let color = getStatusColor(node.kuma_monitor_id);
       const m = getMonitorData(node.kuma_monitor_id);
-      let pulse = m?.status === 0 || m?.status === 2;
+      let pulse = (m?.status === 0 || m?.status === 2) && m?.active !== false;
       const cd = safeJsonParse<NodeCustomData>(node.custom_data);
       const ns: number = cd.nodeSize || 1.0;
 
@@ -2833,11 +3044,19 @@ export default function LeafletMapView({
 
   function handleLinkModalSubmit(data: LinkFormData) {
     const { sourceId, targetId, edgeId } = linkModalData;
-    const customData = {
+    const existingCd = edgeId
+      ? safeJsonParse<EdgeCustomData>(edgesRef.current.find((e) => e.id === edgeId)?.custom_data)
+      : {};
+    const customData: EdgeCustomData = {
+      ...existingCd,
       sourceInterface: data.sourceInterface,
       targetInterface: data.targetInterface,
-      snmpMonitorId: data.snmpMonitorId ?? null,
+      snmpMonitorId: data.snmpMonitorId ?? undefined,
+      mikrotikTraffic: data.mikrotikTraffic ?? undefined,
     };
+    // Clean up: remove the field not in use
+    if (!customData.snmpMonitorId) delete customData.snmpMonitorId;
+    if (!customData.mikrotikTraffic) delete customData.mikrotikTraffic;
 
     if (edgeId) {
       const idx = edgesRef.current.findIndex((e) => e.id === edgeId);
@@ -2949,6 +3168,123 @@ export default function LeafletMapView({
       try { mapRef.current.removeLayer(polygonPreviewRef.current); } catch {}
       polygonPreviewRef.current = null;
     }
+  }
+
+  // ─── Measurement / ruler tool ───────────────────────────────────────────────
+
+  /** Format a distance value for display */
+  function formatDistance(meters: number): string {
+    if (meters >= 1000) return `${(meters / 1000).toFixed(2)} km`;
+    if (meters >= 1) return `${meters.toFixed(1)} m`;
+    return `${(meters * 100).toFixed(0)} cm`;
+  }
+
+  /** Calculate distance between two points — meters for geo, pixels for image */
+  function calcDistance(p1: [number, number], p2: [number, number]): number {
+    const map = mapRef.current;
+    if (!map) return 0;
+    if (isImageMode) {
+      // Image mode: Euclidean pixel distance
+      return Math.sqrt((p2[0] - p1[0]) ** 2 + (p2[1] - p1[1]) ** 2);
+    }
+    // Geo mode: use Leaflet's haversine distance → meters
+    return map.distance(p1, p2);
+  }
+
+  /** Handle click on map while in measure mode */
+  function handleMeasureClick(latlng: { lat: number; lng: number }) {
+    const map = mapRef.current;
+    const L = LRef.current;
+    if (!map || !L) return;
+
+    const point: [number, number] = [latlng.lat, latlng.lng];
+    measurePointsRef.current.push(point);
+    const pts = measurePointsRef.current;
+
+    // Dot marker at clicked point
+    const dot = L.circleMarker(point, {
+      radius: 4, color: "#f97316", fillColor: "#f97316", fillOpacity: 1, weight: 2,
+      interactive: false,
+    }).addTo(map);
+    measureLayersRef.current.push(dot);
+
+    if (pts.length >= 2) {
+      const prev = pts[pts.length - 2];
+      const curr = pts[pts.length - 1];
+
+      // Segment line
+      const line = L.polyline([prev, curr], {
+        color: "#f97316", weight: 2, dashArray: "6,6", opacity: 0.9,
+        interactive: false,
+      }).addTo(map);
+      measureLayersRef.current.push(line);
+
+      // Segment distance label
+      const segDist = calcDistance(prev, curr);
+      const midLat = (prev[0] + curr[0]) / 2;
+      const midLng = (prev[1] + curr[1]) / 2;
+      const labelText = isImageMode ? `${segDist.toFixed(0)} px` : formatDistance(segDist);
+      const label = L.marker([midLat, midLng], {
+        icon: L.divIcon({
+          className: "measure-label",
+          html: `<div style="background:rgba(0,0,0,0.85);color:#f97316;padding:2px 6px;border-radius:4px;font-size:11px;font-weight:700;font-family:ui-monospace,monospace;white-space:nowrap;border:1px solid #f9731644;pointer-events:none;">${labelText}</div>`,
+          iconAnchor: [0, -8],
+        }),
+        interactive: false,
+      }).addTo(map);
+      measureLayersRef.current.push(label);
+
+      // Total distance label (updated at last point)
+      if (pts.length >= 3) {
+        // Remove previous total label (always the last layer if it was a total)
+        const prevTotal = measureLayersRef.current.find((l: any) => l._isMeasureTotal);
+        if (prevTotal) {
+          try { map.removeLayer(prevTotal); } catch {}
+          measureLayersRef.current = measureLayersRef.current.filter((l: any) => l !== prevTotal);
+        }
+      }
+      // Compute total
+      let totalDist = 0;
+      for (let i = 1; i < pts.length; i++) totalDist += calcDistance(pts[i - 1], pts[i]);
+      if (pts.length >= 3) {
+        const totalText = isImageMode ? `Total: ${totalDist.toFixed(0)} px` : `Total: ${formatDistance(totalDist)}`;
+        const totalLabel = L.marker(curr, {
+          icon: L.divIcon({
+            className: "measure-total-label",
+            html: `<div style="background:rgba(0,0,0,0.9);color:#22c55e;padding:3px 8px;border-radius:6px;font-size:12px;font-weight:800;font-family:ui-monospace,monospace;white-space:nowrap;border:1px solid #22c55e44;pointer-events:none;">${totalText}</div>`,
+            iconAnchor: [0, 14],
+          }),
+          interactive: false,
+        }).addTo(map);
+        (totalLabel as any)._isMeasureTotal = true;
+        measureLayersRef.current.push(totalLabel);
+      }
+    }
+  }
+
+  /** Handle double-click to finish measurement */
+  function finishMeasurement() {
+    const pts = measurePointsRef.current;
+    if (pts.length >= 2) {
+      let totalDist = 0;
+      for (let i = 1; i < pts.length; i++) totalDist += calcDistance(pts[i - 1], pts[i]);
+      const totalText = isImageMode ? `${totalDist.toFixed(0)} px` : formatDistance(totalDist);
+      toast.success(`Distancia total: ${totalText}`, { duration: 8000 });
+    }
+    setMeasureMode(false);
+    // Layers stay visible until clearMeasurement is called or new measure starts
+  }
+
+  /** Clear all measurement overlays */
+  function clearMeasurement() {
+    const map = mapRef.current;
+    if (map) {
+      measureLayersRef.current.forEach((layer) => {
+        try { map.removeLayer(layer); } catch {}
+      });
+    }
+    measureLayersRef.current = [];
+    measurePointsRef.current = [];
   }
 
   // ─── Context menu items ─────────────────────
@@ -3292,7 +3628,7 @@ export default function LeafletMapView({
               onClick: () => {
                 if (readonly) window.open(apiUrl(`/view/${lm.id}`), "_blank");
                 else if (onOpenMap) onOpenMap(lm.id);
-                else window.open(apiUrl(`/?map=${lm.id}`), "_blank");
+                else window.open(apiUrl(`/map/${lm.id}`), "_blank");
               },
             });
           });
@@ -3601,6 +3937,30 @@ export default function LeafletMapView({
           },
         ],
       }] : []),
+      // ── UPS-specific ──
+      ...(node?.icon === "ups" ? [
+        {
+          label: "Monitor UPS",
+          icon: menuIcons.Activity,
+          onClick: () => {
+            const upsCd = safeJsonParse<NodeCustomData>(node?.custom_data);
+            if (upsCd.ip) {
+              const cx = ctxMenu?.x ?? 400;
+              const cy = ctxMenu?.y ?? 200;
+              setUpsPanelState({ nodeId, x: cx, y: cy });
+            } else {
+              toast.info("Configura la UPS (IP o host NUT) para monitorearla", { id: "ups-noip" });
+              setUpsConfigNodeId(nodeId);
+            }
+          },
+        },
+        {
+          label: "Configurar UPS",
+          icon: menuIcons.Settings,
+          divider: true,
+          onClick: () => setUpsConfigNodeId(nodeId),
+        },
+      ] : []),
       // ── Copiar / Duplicar ──
       {
         label: "Copiar nodo",
@@ -3661,7 +4021,7 @@ export default function LeafletMapView({
             onClick: () => {
               if (readonly) window.open(apiUrl(`/view/${lm.id}`), "_blank");
               else if (onOpenMap) onOpenMap(lm.id);
-              else window.open(apiUrl(`/?map=${lm.id}`), "_blank");
+              else window.open(apiUrl(`/map/${lm.id}`), "_blank");
             },
           });
         });
@@ -3708,7 +4068,7 @@ export default function LeafletMapView({
             sourceId: edge?.source_node_id || "",
             targetId: edge?.target_node_id || "",
             edgeId,
-            initial: { sourceInterface: cd.sourceInterface || "", targetInterface: cd.targetInterface || "", label: edge?.label || "", snmpMonitorId: cd.snmpMonitorId ?? null },
+            initial: { sourceInterface: cd.sourceInterface || "", targetInterface: cd.targetInterface || "", label: edge?.label || "", snmpMonitorId: cd.snmpMonitorId ?? null, mikrotikTraffic: cd.mikrotikTraffic ?? null },
           });
           setLinkModalOpen(true);
         },
@@ -4157,13 +4517,13 @@ export default function LeafletMapView({
             icon={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>}
             label="Nodos"
             open={ddNodos}
-            onToggle={() => { setDdNodos(v => !v); setDdDibujar(false); setDdMapa(false); setDdBrillo(false); }}
+            onToggle={() => setActiveDropdown(v => v === "nodos" ? null : "nodos")}
           >
             <DropdownItem
               icon={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="16" height="20" x="4" y="2" rx="2" ry="2"/><line x1="8" x2="16" y1="6" y2="6"/><line x1="8" x2="16" y1="10" y2="10"/><line x1="8" x2="16" y1="14" y2="14"/><line x1="8" x2="16" y1="18" y2="18"/></svg>}
               label="Rack"
               onClick={() => {
-                setDdNodos(false);
+                setActiveDropdown(null);
                 if (!mapRef.current) return;
                 const center = mapRef.current.getCenter();
                 const id = `rack-${Date.now()}`;
@@ -4176,7 +4536,7 @@ export default function LeafletMapView({
               icon={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="20" height="8" x="2" y="2" rx="2" ry="2"/><rect width="20" height="8" x="2" y="14" rx="2" ry="2"/><line x1="6" x2="6.01" y1="6" y2="6"/><line x1="6" x2="6.01" y1="18" y2="18"/></svg>}
               label="Dispositivo"
               onClick={() => {
-                setDdNodos(false);
+                setActiveDropdown(null);
                 if (!mapRef.current) return;
                 const center = mapRef.current.getCenter();
                 const id = `node-${Date.now()}`;
@@ -4188,7 +4548,7 @@ export default function LeafletMapView({
               icon={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m16.24 7.76-1.804 5.412a2 2 0 0 1-1.265 1.265L7.76 16.24l1.804-5.412a2 2 0 0 1 1.265-1.265z"/><circle cx="12" cy="12" r="10"/></svg>}
               label="Cámara"
               onClick={() => {
-                setDdNodos(false);
+                setActiveDropdown(null);
                 if (!mapRef.current) return;
                 const center = mapRef.current.getCenter();
                 const id = `cam-${Date.now()}`;
@@ -4201,7 +4561,7 @@ export default function LeafletMapView({
               icon={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 12 7 2"/><path d="m7 12 5-10"/><path d="m12 12 5-10"/><path d="m17 12 5-10"/><path d="M4.5 7h15"/><path d="M12 16v6"/></svg>}
               label="Antena PTP"
               onClick={() => {
-                setDdNodos(false);
+                setActiveDropdown(null);
                 if (!mapRef.current) return;
                 const center = mapRef.current.getCenter();
                 const id = `antenna-${Date.now()}`;
@@ -4218,15 +4578,47 @@ export default function LeafletMapView({
               }}
             />
             <DropdownItem
+              icon={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="16" height="10" x="4" y="7" rx="2"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="m12 10-1.5 3h3L12 16"/></svg>}
+              label="UPS"
+              onClick={() => {
+                setActiveDropdown(null);
+                if (!mapRef.current) return;
+                const center = mapRef.current.getCenter();
+                const id = `ups-${Date.now()}`;
+                nodesRef.current = [...nodesRef.current, {
+                  id, kuma_monitor_id: null, label: "UPS", x: center.lat, y: center.lng, icon: "ups",
+                  custom_data: JSON.stringify({ type: "ups", upsProtocol: "snmp", upsSnmpCommunity: "public" }),
+                }];
+                if (LRef.current) renderNodes(LRef.current, mapRef.current);
+                setUpsConfigNodeId(id);
+                toast.success("UPS agregada — configurá la conexión");
+              }}
+            />
+            <DropdownItem
               icon={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="2" x2="12" y2="22"/><circle cx="12" cy="4" r="2"/></svg>}
               label="Columna"
               onClick={() => {
-                setDdNodos(false);
+                setActiveDropdown(null);
                 if (!mapRef.current) return;
                 const center = mapRef.current.getCenter();
                 const id = `node-${Date.now()}`;
                 nodesRef.current = [...nodesRef.current, { id, kuma_monitor_id: null, label: "Poste", x: center.lat, y: center.lng, icon: "_pole" }];
                 if (LRef.current) renderNodes(LRef.current, mapRef.current);
+              }}
+            />
+            <DropdownItem
+              icon={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 6.1H3"/><path d="M21 12.1H3"/><path d="M15.1 18H3"/></svg>}
+              label="Etiqueta"
+              onClick={() => {
+                setActiveDropdown(null);
+                if (!mapRef.current) return;
+                const text = prompt("Texto de la etiqueta:");
+                if (!text) return;
+                const center = mapRef.current.getCenter();
+                const id = `label-${Date.now()}`;
+                nodesRef.current = [...nodesRef.current, { id, kuma_monitor_id: null, label: text, x: center.lat, y: center.lng, icon: "_textLabel" }];
+                if (LRef.current) renderNodes(LRef.current, mapRef.current);
+                toast.success("Etiqueta creada");
               }}
             />
           </ToolbarDropdown>
@@ -4236,13 +4628,13 @@ export default function LeafletMapView({
             icon={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>}
             label="Dibujar"
             open={ddDibujar}
-            onToggle={() => { setDdDibujar(v => !v); setDdNodos(false); setDdMapa(false); setDdBrillo(false); }}
+            onToggle={() => setActiveDropdown(v => v === "dibujar" ? null : "dibujar")}
           >
             <DropdownItem
               icon={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/></svg>}
               label="Punto"
               onClick={() => {
-                setDdDibujar(false);
+                setActiveDropdown(null);
                 if (!mapRef.current) return;
                 const center = mapRef.current.getCenter();
                 const id = `wp-${Date.now()}`;
@@ -4256,7 +4648,7 @@ export default function LeafletMapView({
               label={linkSource ? "Cancelar link" : "Link"}
               active={!!linkSource}
               onClick={() => {
-                setDdDibujar(false);
+                setActiveDropdown(null);
                 if (linkSource) { cancelLinkCreation(); return; }
                 if (nodesRef.current.length === 0) { toast.error("Agrega nodos primero"); return; }
                 toast.info("Clic derecho en un nodo → Nuevo link", { duration: 4000 });
@@ -4267,13 +4659,28 @@ export default function LeafletMapView({
               label={polygonMode ? "Terminar zona" : "Zona"}
               active={polygonMode}
               onClick={() => {
-                setDdDibujar(false);
+                setActiveDropdown(null);
                 if (polygonMode) {
                   if (polygonPointsRef.current.length >= 3) finishPolygon();
                   else { cancelPolygon(); setPolygonMode(false); }
                 } else {
                   setPolygonMode(true);
                   toast.info("Clic en el mapa para agregar puntos. Doble clic para terminar.", { duration: 5000 });
+                }
+              }}
+            />
+            <DropdownItem
+              icon={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 22 22 2"/><path d="m15 2 7 0 0 7"/><path d="m2 15 0 7 7 0"/></svg>}
+              label={measureMode ? "Terminar medición" : "Medir"}
+              active={measureMode}
+              onClick={() => {
+                setActiveDropdown(null);
+                if (measureMode) {
+                  finishMeasurement();
+                } else {
+                  clearMeasurement(); // clear previous measurement if any
+                  setMeasureMode(true);
+                  toast.info("Clic en el mapa para medir distancias. Doble clic para terminar. Esc para cancelar.", { duration: 5000 });
                 }
               }}
             />
@@ -4284,26 +4691,26 @@ export default function LeafletMapView({
             icon={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>}
             label="Mapa"
             open={ddMapa}
-            onToggle={() => { setDdMapa(v => !v); setDdNodos(false); setDdDibujar(false); setDdBrillo(false); }}
+            onToggle={() => setActiveDropdown(v => v === "mapa" ? null : "mapa")}
           >
             {!isImageMode && <>
               <DropdownItem
                 icon={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg>}
                 label="Satélite"
                 active={mapStyle === "satellite"}
-                onClick={() => { setMapStyle("satellite"); setDdMapa(false); }}
+                onClick={() => { setMapStyle("satellite"); setActiveDropdown(null); }}
               />
               <DropdownItem
                 icon={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6l6-3 6 3 6-3v15l-6 3-6-3-6 3z"/><path d="M9 3v15"/><path d="M15 6v15"/></svg>}
                 label="Calles"
                 active={mapStyle === "streets"}
-                onClick={() => { setMapStyle("streets"); setDdMapa(false); }}
+                onClick={() => { setMapStyle("streets"); setActiveDropdown(null); }}
               />
               <DropdownItem
                 icon={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>}
                 label="Oscuro"
                 active={mapStyle === "dark"}
-                onClick={() => { setMapStyle("dark"); setDdMapa(false); }}
+                onClick={() => { setMapStyle("dark"); setActiveDropdown(null); }}
               />
               <DropdownSeparator />
             </>}
@@ -4311,21 +4718,21 @@ export default function LeafletMapView({
               <DropdownItem
                 icon={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>}
                 label="Imagen de fondo"
-                onClick={() => { setDdMapa(false); onUploadBackground?.(); }}
+                onClick={() => { setActiveDropdown(null); onUploadBackground?.(); }}
               />
             )}
             {!isImageMode && (
               <DropdownItem
                 icon={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>}
                 label="Imagen de fondo"
-                onClick={() => { setDdMapa(false); onUploadBackground?.(); }}
+                onClick={() => { setActiveDropdown(null); onUploadBackground?.(); }}
               />
             )}
             {isImageMode && (
               <DropdownItem
                 icon={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>}
                 label="Mapa real"
-                onClick={() => { setDdMapa(false); onSetLiveMap?.(); }}
+                onClick={() => { setActiveDropdown(null); onSetLiveMap?.(); }}
               />
             )}
           </ToolbarDropdown>
@@ -4333,7 +4740,7 @@ export default function LeafletMapView({
           {/* ── Brillo button (toggle slider panel below) ── */}
           <Tooltip content="Ajustar brillo" placement="bottom">
           <button
-            onClick={() => { setDdBrillo(v => !v); setDdNodos(false); setDdDibujar(false); setDdMapa(false); }}
+            onClick={() => setActiveDropdown(v => v === "brillo" ? null : "brillo")}
             className="flex items-center justify-center rounded-xl p-1.5 transition-all"
             style={{
               color: ddBrillo || overlayOpacity > 0 ? "#60a5fa" : "var(--text-secondary)",
@@ -4465,6 +4872,24 @@ export default function LeafletMapView({
           <div className="flex items-center gap-0.5 rounded-xl px-1.5 py-1 ml-0.5"
             style={{ background: "var(--surface-card)", border: "1px solid var(--glass-border)" }}>
 
+            {/* WhatsApp settings */}
+            <Tooltip content="WhatsApp" placement="bottom">
+              <button
+                onClick={() => setWhatsappOpen(v => !v)}
+                className="flex items-center justify-center rounded-lg p-1.5 transition-all hover:bg-white/5 active:scale-95"
+                style={{
+                  color: whatsappOpen ? "#25d366" : "var(--text-secondary)",
+                  background: whatsappOpen ? "rgba(37,211,102,0.1)" : "transparent",
+                }}
+              >
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z" />
+                </svg>
+              </button>
+            </Tooltip>
+
+            <div className="h-4 w-px mx-0.5" style={{ background: "var(--glass-border)" }} />
+
             {/* Export — single ZIP button (no dropdown) */}
             <Tooltip content="Exportar Mapa (ZIP)" placement="bottom">
               <button
@@ -4573,6 +4998,7 @@ export default function LeafletMapView({
         panelCollapsed={panelCollapsed}
         onTogglePanel={!readonly ? () => {
           if (alertOpen) setAlertOpen(false); // close alerts when opening monitors
+          if (whatsappOpen) setWhatsappOpen(false); // close whatsapp when opening monitors
           onTogglePanel?.();
         } : undefined}
         alertCount={alertCount}
@@ -4580,6 +5006,7 @@ export default function LeafletMapView({
         onToggleAlerts={!readonly ? () => {
           setAlertOpen(v => {
             if (!v && !panelCollapsed) onTogglePanel?.(); // close monitors when opening alerts
+            if (!v) setWhatsappOpen(false); // close whatsapp when opening alerts
             return !v;
           });
         } : undefined}
@@ -4597,6 +5024,12 @@ export default function LeafletMapView({
         mapMonitorIds={mapMonitorIds}
       />
 
+      {/* WhatsApp Settings Modal */}
+      <WhatsAppSettingsPanel
+        open={whatsappOpen}
+        onClose={() => setWhatsappOpen(false)}
+      />
+
       {/* Link Modal */}
       <LinkModal
         open={linkModalOpen}
@@ -4606,7 +5039,7 @@ export default function LeafletMapView({
         targetName={nodesRef.current.find((n) => n.id === linkModalData.targetId)?.label}
         initial={linkModalData.initial}
         title={linkModalData.edgeId ? "Editar conexion" : "Nueva conexion"}
-        snmpMonitors={kumaMonitors.filter((m) => m.type === "snmp" || m.type === "push" || m.type === "port")}
+        snmpMonitors={snmpMonitorsMemo}
       />
 
 
@@ -4818,13 +5251,7 @@ export default function LeafletMapView({
         jumpTo={tmJumpTo}
         onFocusEvent={handleTimeMachineFocusEvent}
         onTimeChange={handleTimeMachineChange}
-        monitors={kumaMonitors.map((m) => ({
-          id: m.id,
-          name: m.name,
-          type: m.type,
-          status: m.status,
-          parent: m.parent,
-        }))}
+        monitors={tmMonitors}
       />}
 
       {/* ── Event Report Modal ── */}
@@ -4848,7 +5275,7 @@ export default function LeafletMapView({
 
       {/* ── LPR Access Feed Panel (bottom bar) ── */}
       <LprFeedPanel
-        events={hikEvents.events.filter((e) => e.eventType === "anpr")}
+        events={lprEventsMemo}
         mapId={mapId}
         nodeLabels={hikNodeLabels}
         onOpenStream={handleOpenStreamFromFeed}
@@ -4963,18 +5390,91 @@ export default function LeafletMapView({
         );
       })()}
 
+      {/* ── UPS Panel ── */}
+      {upsPanelState && (() => {
+        const upsNode = nodesRef.current.find((n) => n.id === upsPanelState.nodeId);
+        const upsCd = safeJsonParse<NodeCustomData>(upsNode?.custom_data);
+        if (!upsCd.ip) return null;
+        return (
+          <UpsPanel
+            nodeId={upsPanelState.nodeId}
+            ip={upsCd.ip as string}
+            upsName={upsNode?.label || "UPS"}
+            anchorX={upsPanelState.x}
+            anchorY={upsPanelState.y}
+            onClose={() => setUpsPanelState(null)}
+            onConfigure={() => setUpsConfigNodeId(upsPanelState.nodeId)}
+          />
+        );
+      })()}
+
+      {/* ── UPS Config Modal ── */}
+      {upsConfigNodeId && (() => {
+        const upsNode = nodesRef.current.find((n) => n.id === upsConfigNodeId);
+        const upsCd = safeJsonParse<NodeCustomData>(upsNode?.custom_data);
+        const currentCfg: UpsConfig = {
+          protocol: (upsCd.upsProtocol || "snmp") as UpsConfig["protocol"],
+          ip: (upsCd.ip as string) || "",
+          snmpCommunity: (upsCd.upsSnmpCommunity as string) || (upsCd.snmpCommunity as string) || "public",
+          nutPort: upsCd.nutPort ?? 3493,
+          nutUpsName: upsCd.nutUpsName || "",
+          nutUser: upsCd.nutUser || "",
+          nutPassword: upsCd.nutPassword || "",
+          kumaMonitorId: upsCd.kumaMonitorId ?? null,
+          alertChargeBelow: upsCd.alertChargeBelow ?? 30,
+          alertLoadAbove: upsCd.alertLoadAbove ?? 90,
+          alertRuntimeBelow: upsCd.alertRuntimeBelow ?? 5,
+        };
+        return (
+          <UpsConfigModal
+            currentConfig={currentCfg}
+            upsName={upsNode?.label || "UPS"}
+            availableMonitors={kumaMonitors.map((m) => ({ id: m.id, name: m.name }))}
+            onSave={(config) => {
+              const idx = nodesRef.current.findIndex((n) => n.id === upsConfigNodeId);
+              if (idx >= 0) {
+                const ncd = safeJsonParse<NodeCustomData>(nodesRef.current[idx].custom_data);
+                // Field names must match what /api/ups/poll reads from custom_data.
+                ncd.type = "ups";
+                ncd.upsProtocol = config.protocol || "snmp";
+                ncd.ip = config.ip || undefined;
+                ncd.upsSnmpCommunity = config.snmpCommunity || undefined;
+                ncd.nutPort = config.nutPort ?? undefined;
+                ncd.nutUpsName = config.nutUpsName || undefined;
+                ncd.nutUser = config.nutUser || undefined;
+                ncd.nutPassword = config.nutPassword || undefined;
+                ncd.kumaMonitorId = config.kumaMonitorId ?? null;
+                ncd.alertChargeBelow = config.alertChargeBelow;
+                ncd.alertLoadAbove = config.alertLoadAbove;
+                ncd.alertRuntimeBelow = config.alertRuntimeBelow;
+                nodesRef.current[idx] = { ...nodesRef.current[idx], custom_data: JSON.stringify(ncd) };
+                if (LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current);
+              }
+              setUpsConfigNodeId(null);
+              toast.success("UPS configurada");
+            }}
+            onClose={() => setUpsConfigNodeId(null)}
+          />
+        );
+      })()}
+
       {/* ── Camera Stream Viewers (multi-view, up to 4) ── */}
       {streamViewers.map((viewer, idx) => {
         const camNode = nodesRef.current.find((n) => n.id === viewer.nodeId);
         const camCd = safeJsonParse<NodeCustomData>(camNode?.custom_data);
         if (!camCd.streamUrl) return null;
-        const viewCfg: CameraStreamConfig = {
+        const viewCfg: CameraStreamConfig & { streamRef?: string } = {
           streamType: (camCd.streamType || "mjpeg") as CameraStreamConfig["streamType"],
           streamUrl: camCd.streamUrl,
+          streamRef: camCd.streamRef,
           snapshotInterval: camCd.snapshotInterval,
           rtspFps: camCd.rtspFps,
         };
-        const closeViewer = () => setStreamViewers(prev => prev.filter(v => v.nodeId !== viewer.nodeId));
+        const closeViewer = () => {
+          setStreamViewers(prev => prev.filter(v => v.nodeId !== viewer.nodeId));
+          cameraWindowStates.current.delete(viewer.nodeId);
+          removeCameraWindow(mapId, viewer.nodeId);
+        };
         if (viewer.mode === "tooltip") {
           return (
             <CameraTooltipViewer
@@ -4993,10 +5493,17 @@ export default function LeafletMapView({
             key={viewer.nodeId}
             config={viewCfg}
             cameraName={camNode?.label || "Cámara"}
+            nodeId={viewer.nodeId}
+            mapId={mapId}
             onClose={closeViewer}
+            initialState={cameraWindowStates.current.get(viewer.nodeId)}
             initialOffset={idx}
             zLayer={focusedViewer === viewer.nodeId ? 10 : idx}
             onFocus={() => setFocusedViewer(viewer.nodeId)}
+            onStateChange={(state) => {
+              cameraWindowStates.current.set(viewer.nodeId, state);
+              updateCameraWindow(mapId, state);
+            }}
           />
         );
       })}
@@ -5079,7 +5586,7 @@ export default function LeafletMapView({
               if (LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current);
               toast.success("Mapa desvinculado");
             }}
-            onOpenMap={(id) => { if (onOpenMap) onOpenMap(id); else window.open(apiUrl(`/?map=${id}`), "_blank"); }}
+            onOpenMap={(id) => { if (onOpenMap) onOpenMap(id); else window.open(apiUrl(`/map/${id}`), "_blank"); }}
             onClose={() => setNodeMapModalNodeId(null)}
           />
         );
@@ -5101,22 +5608,38 @@ export default function LeafletMapView({
           border-top-color: rgba(10,10,10,0.9) !important;
         }
         .leaflet-popup-dark .leaflet-popup-content-wrapper {
-          background: rgba(14,14,14,0.95) !important;
-          backdrop-filter: blur(16px) !important;
-          border: 1px solid rgba(255,255,255,0.1) !important;
-          border-radius: 12px !important;
-          box-shadow: 0 8px 32px rgba(0,0,0,0.6) !important;
-          padding: 10px 14px !important;
+          background: rgba(10,10,10,0.96) !important;
+          backdrop-filter: blur(24px) saturate(180%) !important;
+          -webkit-backdrop-filter: blur(24px) saturate(180%) !important;
+          border: 1px solid rgba(255,255,255,0.08) !important;
+          border-radius: 16px !important;
+          box-shadow: 0 12px 48px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.04) !important;
+          padding: 0 !important;
+          overflow: hidden !important;
         }
         .leaflet-popup-dark .leaflet-popup-content {
           margin: 0 !important;
+          line-height: 1.4 !important;
         }
         .leaflet-popup-dark .leaflet-popup-tip {
-          background: rgba(14,14,14,0.95) !important;
+          background: rgba(10,10,10,0.96) !important;
+          box-shadow: none !important;
         }
         .leaflet-popup-close-button {
-          color: #888 !important;
+          color: rgba(255,255,255,0.35) !important;
+          font-size: 18px !important;
+          top: 8px !important;
+          right: 10px !important;
+          z-index: 10 !important;
+          transition: color 0.15s !important;
         }
+        .leaflet-popup-close-button:hover {
+          color: rgba(255,255,255,0.7) !important;
+        }
+        @keyframes sileo-pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+        @keyframes sileo-ring { 0%{r:4;opacity:0.6} 100%{r:10;opacity:0} }
+        @keyframes sileo-check-draw { 0%{stroke-dashoffset:14} 100%{stroke-dashoffset:0} }
+        @keyframes sileo-circle-draw { 0%{stroke-dashoffset:50} 100%{stroke-dashoffset:0} }
         .leaflet-control-zoom a {
           background: rgba(10,10,10,0.85) !important;
           color: #a0a0a0 !important;

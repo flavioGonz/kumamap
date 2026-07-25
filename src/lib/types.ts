@@ -3,6 +3,7 @@
  * Single source of truth for shared interfaces used across client & server code.
  */
 
+
 // ── Kuma Monitor Types ──
 
 export interface KumaMonitor {
@@ -21,6 +22,39 @@ export interface KumaMonitor {
   msg?: string;
   uptime24?: number;
   downTime?: string; // ISO timestamp of when this monitor first went DOWN in the current streak
+
+  // ── Data Uptime Kuma already publishes but KumaMap used to discard ──────────
+  /** Uptime ratio (0–1) per period in hours. Kuma emits 1, 24, 720, 8760. */
+  uptime?: Record<number, number>;
+  /** Rolling average ping (ms) as computed by Kuma itself. */
+  avgPing?: number | null;
+  /** TLS certificate info for https monitors — surfaces upcoming expiries. */
+  certExpiryDays?: number | null;
+  certValid?: boolean;
+  /** True while the monitor sits inside a scheduled maintenance window. */
+  maintenance?: boolean;
+
+  /** monitor-ng: detalle de sensores del agente (solo type "monitor-ng") */
+  mng?: {
+    state: string;
+    ts: string;
+    ok: number;
+    warn: number;
+    crit: number;
+    stale: boolean;
+    metrics: { id: string; state: string; value: string; label?: string }[];
+  };
+}
+
+/** Payload of Kuma's `certInfo` event (JSON string in the wire format). */
+export interface KumaCertInfo {
+  valid?: boolean;
+  certInfo?: {
+    daysRemaining?: number;
+    validTo?: string;
+    issuer?: unknown;
+    subject?: unknown;
+  } | null;
 }
 
 export interface KumaHeartbeat {
@@ -54,6 +88,8 @@ export interface NodeCustomData {
   fovOpacity?: number;
   streamType?: string;
   streamUrl?: string;
+  /** Server-signed opaque stream token — preferred over `streamUrl` for proxy calls. */
+  streamRef?: string;
   snapshotInterval?: number;
   rtspFps?: number;
   cameraType?: "ip" | "lpr" | "face";  // Camera intelligence type
@@ -97,6 +133,18 @@ export interface NodeCustomData {
   // SNMP
   snmpMonitorId?: number;
 
+  // UPS monitoring — field names must match what src/app/api/ups/poll reads
+  upsProtocol?: "snmp" | "nut";
+  upsSnmpCommunity?: string;  // SNMP community for UPS polling (default: "public")
+  nutPort?: number;           // default 3493
+  nutUpsName?: string;        // ups.conf section name
+  nutUser?: string;
+  nutPassword?: string;
+  kumaMonitorId?: number | null;
+  alertChargeBelow?: number;
+  alertLoadAbove?: number;
+  alertRuntimeBelow?: number;
+
   // Allow additional dynamic fields
   [key: string]: unknown;
 }
@@ -124,6 +172,14 @@ export interface EdgeCustomData {
   snmpMonitorId?: number;
   hideTraffic?: boolean;
   trafficLabelPos?: [number, number];
+  /** MikroTik direct traffic source — polls router REST API for live bps */
+  mikrotikTraffic?: {
+    host: string;
+    user: string;
+    pass: string;
+    interface: string;
+    port?: number;
+  };
   [key: string]: unknown;
 }
 

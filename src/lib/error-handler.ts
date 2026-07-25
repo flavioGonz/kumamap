@@ -1,4 +1,4 @@
-import { toast } from "sonner";
+import { toast } from "@/components/ui/SileoToast";
 
 const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH || "";
 
@@ -24,7 +24,7 @@ export async function safeFetch<T = any>(
           redirectingToLogin = true;
           toast.error("Sesión expirada", { description: "Redirigiendo al login…", duration: 3000 });
           setTimeout(() => {
-            window.location.href = `${BASE_PATH}/login`;
+            window.location.href = `${BASE_PATH}/`;
           }, 1000);
         }
         return null;

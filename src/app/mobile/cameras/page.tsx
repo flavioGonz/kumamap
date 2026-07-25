@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { apiUrl } from "@/lib/api";
+import { snapshotSrc } from "@/lib/camera-url";
 import { hapticTap } from "@/lib/haptics";
 import { useMjpegStream } from "@/hooks/useMjpegStream";
 import { SkeletonCameraGrid } from "@/components/mobile/Skeleton";
@@ -15,6 +16,7 @@ interface CameraInfo {
   ip: string;
   streamType: string;
   streamUrl: string;
+  streamRef?: string;
   snapshotInterval?: number;
   rtspFps?: number;
   manufacturer: string;
@@ -49,18 +51,13 @@ function CameraCell({
   const [activeBuf, setActiveBuf] = useState<"a" | "b">("a");
   const loadingRef = useRef(false);
   const hasStream =
-    camera.streamUrl && camera.streamType && camera.streamType !== "nvr";
+    (camera.streamUrl || camera.streamRef) && camera.streamType && camera.streamType !== "nvr";
 
   // On mobile, RTSP uses snapshot polling (Safari doesn't support MJPEG multipart/x-mixed-replace).
   // The /api/camera/snapshot endpoint already supports RTSP URLs via ffmpeg single-frame capture.
   const useSnapshotPolling = camera.streamType === "rtsp" || camera.streamType === "snapshot";
 
-  const getSnapshotUrl = useCallback((): string => {
-    if (!camera.streamUrl) return "";
-    return apiUrl(
-      `/api/camera/snapshot?url=${encodeURIComponent(camera.streamUrl)}&_t=${Date.now()}`
-    );
-  }, [camera]);
+  const getSnapshotUrl = useCallback((): string => snapshotSrc(camera), [camera]);
 
   const getStreamSrc = useCallback((): string => {
     if (!camera.streamUrl) return "";
@@ -77,7 +74,7 @@ function CameraCell({
       setLoading(false);
       return;
     }
-    if (!useSnapshotPolling || !camera.streamUrl) return;
+    if (!useSnapshotPolling || (!camera.streamUrl && !camera.streamRef)) return;
     errCountRef.current = 0;
     // RTSP snapshots via ffmpeg take ~3-5s, poll must be longer
     const ms = camera.streamType === "rtsp" ? 5000 : (camera.snapshotInterval || 2) * 1000;
@@ -313,12 +310,12 @@ function FullscreenViewer({
   hasNext: boolean;
 }) {
   const touchStartX = useRef<number | null>(null);
-  const hasRtsp = camera.streamType === "rtsp" && camera.streamUrl;
+  const hasRtsp = camera.streamType === "rtsp" && (camera.streamUrl || camera.streamRef);
 
   // Live RTSP stream — tries canvas (Chrome/Firefox), falls back to snapshot polling (Safari)
   const { canvasRef, status, mode, imgSrcA, imgSrcB, activeBuf } = useMjpegStream(
-    hasRtsp ? camera.streamUrl : null,
-    { fps: camera.rtspFps || 8, quality: 5 },
+    hasRtsp ? camera.streamUrl || null : null,
+    { fps: camera.rtspFps || 8, quality: 5, streamRef: hasRtsp ? camera.streamRef : undefined },
   );
 
   const isLive = status === "streaming";

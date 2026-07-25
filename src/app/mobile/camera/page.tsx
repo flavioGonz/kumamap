@@ -4,6 +4,7 @@ import React, { Suspense, useEffect, useState, useCallback, useRef } from "react
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { apiUrl } from "@/lib/api";
+import { snapshotSrc, streamSrc } from "@/lib/camera-url";
 import { safeJsonParse } from "@/lib/error-handler";
 import type { NodeCustomData } from "@/lib/types";
 
@@ -15,6 +16,7 @@ function MobileCameraViewer() {
   const [cameraName, setCameraName] = useState("");
   const [streamType, setStreamType] = useState("");
   const [streamUrl, setStreamUrl] = useState("");
+  const [streamRef, setStreamRef] = useState<string | undefined>(undefined);
   const [snapshotInterval, setSnapshotInterval] = useState(2);
   const [rtspFps, setRtspFps] = useState(2);
   const [loading, setLoading] = useState(true);
@@ -41,6 +43,7 @@ function MobileCameraViewer() {
           setCameraName(node.label || "Cámara");
           setStreamType(cd.streamType || "");
           setStreamUrl(cd.streamUrl || "");
+          setStreamRef(cd.streamRef);
           setSnapshotInterval(cd.snapshotInterval || 2);
           setRtspFps(cd.rtspFps || 2);
         }
@@ -52,33 +55,25 @@ function MobileCameraViewer() {
   useEffect(() => { fetchData(); }, [fetchData]);
 
   // Build the actual src URL for the stream
-  const getStreamSrc = useCallback((): string => {
-    if (!streamUrl) return "";
-    switch (streamType) {
-      case "rtsp":
-        return apiUrl(`/api/camera/rtsp-stream?url=${encodeURIComponent(streamUrl)}&fps=${rtspFps}`);
-      case "snapshot":
-        return apiUrl(`/api/camera/snapshot?url=${encodeURIComponent(streamUrl)}&_t=${Date.now()}`);
-      case "mjpeg":
-        return streamUrl;
-      default:
-        return streamUrl;
-    }
-  }, [streamUrl, streamType, rtspFps]);
+  const getStreamSrc = useCallback(
+    (): string => streamSrc({ streamUrl, streamRef, streamType, rtspFps }),
+    [streamUrl, streamRef, streamType, rtspFps],
+  );
 
   // Snapshot polling with double-buffer
   useEffect(() => {
-    if (streamType !== "snapshot" || !streamUrl) return;
+    if (streamType !== "snapshot") return;
+    if (!streamUrl && !streamRef) return;
     const ms = snapshotInterval * 1000;
 
-    const firstUrl = apiUrl(`/api/camera/snapshot?url=${encodeURIComponent(streamUrl)}&_t=${Date.now()}`);
+    const firstUrl = snapshotSrc({ streamUrl, streamRef });
     setBufferA(firstUrl);
     setActiveBuffer("a");
 
     const id = setInterval(() => {
       if (loadingNextRef.current) return;
       loadingNextRef.current = true;
-      const nextUrl = apiUrl(`/api/camera/snapshot?url=${encodeURIComponent(streamUrl)}&_t=${Date.now()}`);
+      const nextUrl = snapshotSrc({ streamUrl, streamRef });
       const img = new Image();
       img.onload = () => {
         loadingNextRef.current = false;
@@ -96,7 +91,7 @@ function MobileCameraViewer() {
       img.src = nextUrl;
     }, ms);
     return () => clearInterval(id);
-  }, [streamType, streamUrl, snapshotInterval]);
+  }, [streamType, streamUrl, streamRef, snapshotInterval]);
 
   // Toggle fullscreen
   const containerRef = useRef<HTMLDivElement>(null);

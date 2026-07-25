@@ -1,10 +1,17 @@
 import { NextRequest } from "next/server";
 import { spawn, type ChildProcess } from "child_process";
+import { resolveProxyTarget } from "@/lib/stream-token";
+import { assertSafeDeviceUrl } from "@/lib/ssrf-guard";
 
 /**
  * RTSP → MJPEG proxy using ffmpeg.
  *
- * GET /api/camera/rtsp-stream?url=rtsp://user:pass@ip:554/stream&fps=2&quality=5&scale=640
+ * GET /api/camera/rtsp-stream?ref=<signed-ref>&fps=2&quality=5&scale=640
+ *
+ * The target is passed as a server-signed `ref` (see lib/stream-token.ts), so
+ * credentials never reach the browser and callers cannot aim the proxy at an
+ * arbitrary host. Authenticated operators may still pass a raw `?url=` for the
+ * stream-test button; that path is validated by the SSRF guard.
  *
  * Optimized for low-latency streaming to browsers:
  * - TCP transport for reliability over WiFi/lossy networks
@@ -18,25 +25,19 @@ const BOUNDARY = "kumamap-rtsp-frame";
 const MAX_CONCURRENT = 8;
 let activeStreams = 0;
 
-/** Only allow rtsp:// protocol, block loopback */
-function validateRtspUrl(raw: string): { ok: boolean; reason?: string } {
-  try {
-    const parsed = new URL(raw);
-    if (parsed.protocol !== "rtsp:") return { ok: false, reason: "Only rtsp:// URLs allowed" };
-    const host = parsed.hostname.toLowerCase();
-    if (host === "localhost" || host === "127.0.0.1" || host === "::1") return { ok: false, reason: "Loopback blocked" };
-    return { ok: true };
-  } catch {
-    return { ok: false, reason: "Invalid RTSP URL" };
-  }
-}
-
 export async function GET(req: NextRequest) {
-  const rawUrl = req.nextUrl.searchParams.get("url");
-  if (!rawUrl) return new Response("Missing 'url' parameter", { status: 400 });
+  const target = resolveProxyTarget(req.nextUrl.searchParams, req.headers);
+  if ("error" in target) return new Response(target.error, { status: target.status });
 
-  const v = validateRtspUrl(rawUrl);
-  if (!v.ok) return new Response(v.reason, { status: 400 });
+  const rawUrl = target.url;
+
+  if (!rawUrl.startsWith("rtsp://") && !rawUrl.startsWith("rtsps://")) {
+    return new Response("Solo se permiten URLs rtsp://", { status: 400 });
+  }
+
+  // Resolves DNS and rejects loopback / link-local / public destinations.
+  const guard = await assertSafeDeviceUrl(rawUrl);
+  if (!guard.ok) return new Response(guard.reason, { status: 403 });
 
   if (activeStreams >= MAX_CONCURRENT) return new Response("Too many active streams", { status: 429 });
 

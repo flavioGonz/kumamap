@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import getDb from "@/lib/db";
+import { mintStreamRef } from "@/lib/stream-token";
+import { publicSafe } from "@/lib/redact";
 
 export const dynamic = "force-dynamic";
 
@@ -20,6 +22,12 @@ interface CameraInfo {
   nvrChannel?: number;
   mgmtUser?: string;
   mgmtPassword?: string;
+  /**
+   * Opaque, server-signed reference to `streamUrl`. Clients pass this to
+   * /api/camera/{snapshot,rtsp-stream} instead of the raw URL, so RTSP
+   * credentials never leave the server. See src/lib/stream-token.ts.
+   */
+  streamRef?: string;
 }
 
 interface NvrChannelApi {
@@ -74,7 +82,12 @@ function safeJson(s: string | null): any {
 }
 
 // ─── GET: list cameras + rack NVRs ─────────────
-export async function GET() {
+// NOTE: this route is reachable WITHOUT a session (the kiosk and the mobile PWA
+// need it). It therefore must never hand raw credentials to the caller:
+//   • every camera gets a signed `streamRef` the proxies can resolve
+//   • `publicSafe()` strips mgmtUser/mgmtPassword and `user:pass@` from URLs
+//     unless the proxy marked the request as authenticated (x-kumamap-auth: 1)
+export async function GET(req: NextRequest) {
   try {
     const db = getDb;
     const maps = db.prepare("SELECT id, name FROM network_maps").all() as { id: string; name: string }[];
@@ -117,6 +130,7 @@ export async function GET() {
             source: "camera",
             mgmtUser: data.mgmtUser,
             mgmtPassword: data.mgmtPassword,
+            streamRef: mintStreamRef(streamUrl),
           });
           mapCameraCount++;
         }
@@ -147,6 +161,7 @@ export async function GET() {
                 source: "nvr",
                 nvrNodeId: node.id,
                 nvrChannel: chId,
+                streamRef: mintStreamRef(rtspUrl),
               });
             }
           } else {
@@ -219,12 +234,16 @@ export async function GET() {
       });
     }
 
-    return NextResponse.json({
-      cameras,
-      maps: allMaps,
-      rackNvrs,
-      count: cameras.length,
-    });
+    // Redact credentials unless the proxy validated a session for this request.
+    // `streamRef` survives redaction, so the kiosk can still play every stream.
+    return NextResponse.json(
+      publicSafe(req.headers, {
+        cameras,
+        maps: allMaps,
+        rackNvrs,
+        count: cameras.length,
+      })
+    );
   } catch (err: any) {
     return NextResponse.json(
       { error: err.message || "Error listing cameras", cameras: [], maps: [], rackNvrs: [] },

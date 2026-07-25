@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { exec } from "child_process";
+import { execFile } from "child_process";
 import { promisify } from "util";
 import dns from "dns/promises";
 
-const execAsync = promisify(exec);
+// SECURITY: execFile (not exec) — arguments are passed as an array and never
+// interpolated into a shell string, so a hostile `subnet` cannot inject commands.
+const execFileAsync = promisify(execFile);
 
 /**
  * POST /api/discovery
@@ -22,23 +24,47 @@ interface DiscoveredHost {
   rtt: number | null;
 }
 
-// Validate that subnet looks like a private network prefix
-function isPrivateSubnet(subnet: string): boolean {
+/**
+ * Validate that `subnet` is a well-formed private /24 prefix like "192.168.1".
+ *
+ * SECURITY: the previous version only ran `parseInt` on the first two octets and
+ * never validated the third, so a payload like "10.0.1;reboot" passed the check
+ * and was then interpolated into a shell command. Every octet is now matched
+ * against a strict numeric regex and range-checked, and the value is additionally
+ * passed to `execFile` as an argument (never through a shell).
+ */
+const OCTET_RE = /^(0|[1-9]\d{0,2})$/;
+
+function parseOctets(subnet: string): number[] | null {
   const parts = subnet.split(".");
-  if (parts.length !== 3) return false;
-  const first = parseInt(parts[0]);
-  const second = parseInt(parts[1]);
-  if (first === 10) return true; // 10.x.x.x
-  if (first === 172 && second >= 16 && second <= 31) return true; // 172.16-31.x.x
-  if (first === 192 && second === 168) return true; // 192.168.x.x
+  if (parts.length !== 3) return null;
+
+  const octets: number[] = [];
+  for (const part of parts) {
+    if (!OCTET_RE.test(part)) return null; // rejects "", "01", "1;x", "1 2", "-1"
+    const n = Number(part);
+    if (!Number.isInteger(n) || n < 0 || n > 255) return null;
+    octets.push(n);
+  }
+  return octets;
+}
+
+function isPrivateSubnet(subnet: string): boolean {
+  const octets = parseOctets(subnet);
+  if (!octets) return false;
+  const [first, second] = octets;
+  if (first === 10) return true;                              // 10.0.0.0/8
+  if (first === 172 && second >= 16 && second <= 31) return true; // 172.16.0.0/12
+  if (first === 192 && second === 168) return true;           // 192.168.0.0/16
   return false;
 }
 
 async function pingHost(ip: string): Promise<{ alive: boolean; rtt: number | null }> {
   try {
-    // Cross-platform ping: -c 1 (Linux), -W timeout in seconds
-    const { stdout } = await execAsync(
-      `ping -c 1 -W 1 ${ip}`,
+    // Arguments as an array — no shell, no interpolation, no injection.
+    const { stdout } = await execFileAsync(
+      "ping",
+      ["-c", "1", "-W", "1", ip],
       { timeout: PING_TIMEOUT_MS + 1000 }
     );
     // Extract RTT from output like "time=1.23 ms"

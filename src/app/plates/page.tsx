@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { apiUrl } from "@/lib/api";
+import { streamSrc } from "@/lib/camera-url";
 import AiChatPanel from "@/components/AiChatPanel";
 import {
   ShieldCheck,
@@ -267,6 +268,7 @@ interface LprCamera {
   label: string;
   ip: string;
   streamUrl: string;
+  streamRef?: string;
   streamType: string;
   rtspFps?: number;
 }
@@ -1888,17 +1890,7 @@ function BoothTab({ mapId }: { mapId: string }) {
     return () => { esRef.current?.close(); };
   }, [mapId]);
 
-  const getStreamUrl = (cam: LprCamera) => {
-    if (!cam.streamUrl) return "";
-    if (cam.streamType === "rtsp") {
-      return apiUrl(`/api/camera/rtsp-stream?url=${encodeURIComponent(cam.streamUrl)}&fps=${cam.rtspFps || 2}`);
-    }
-    if (cam.streamType === "snapshot") {
-      return apiUrl(`/api/camera/snapshot?url=${encodeURIComponent(cam.streamUrl)}&_t=${Date.now()}`);
-    }
-    if (cam.streamType === "mjpeg") return cam.streamUrl;
-    return cam.streamUrl;
-  };
+  const getStreamUrl = (cam: LprCamera) => streamSrc(cam);
 
   const matchColors: Record<string, string> = {
     authorized: palette.authorized,

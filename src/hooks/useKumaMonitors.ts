@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/SileoToast";
 import type { KumaMonitor } from "@/components/network-map/MonitorPanel";
 import { getLastMonitorsPayload } from "@/lib/socket";
 

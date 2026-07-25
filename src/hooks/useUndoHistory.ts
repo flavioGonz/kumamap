@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef } from "react";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/SileoToast";
 
 /**
  * Generic undo history for map nodes & edges.

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { apiUrl } from "@/lib/api";
+import { rtspSrc, snapshotSrc } from "@/lib/camera-url";
 
 /**
  * useMjpegStream — live RTSP video on any browser (including Safari iOS).
@@ -19,6 +19,8 @@ interface MjpegOptions {
   fps?: number;
   quality?: number;
   enabled?: boolean;
+  /** Server-signed stream token — preferred over the raw `rtspUrl`. */
+  streamRef?: string;
 }
 
 type StreamStatus = "connecting" | "streaming" | "error" | "stopped";
@@ -28,7 +30,7 @@ export function useMjpegStream(
   rtspUrl: string | null,
   options: MjpegOptions = {},
 ) {
-  const { fps = 4, quality = 8, enabled = true } = options;
+  const { fps = 4, quality = 8, enabled = true, streamRef } = options;
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [status, setStatus] = useState<StreamStatus>("stopped");
   const [mode, setMode] = useState<StreamMode>("canvas");
@@ -40,11 +42,14 @@ export function useMjpegStream(
   const loadingRef = useRef(false);
 
   useEffect(() => {
-    if (!rtspUrl || !enabled) {
+    if ((!rtspUrl && !streamRef) || !enabled) {
       if (abortRef.current) { abortRef.current.abort(); abortRef.current = null; }
       setStatus("stopped");
       return;
     }
+
+    // Prefer the signed ref; fall back to the raw URL for authenticated operators.
+    const source = { streamUrl: rtspUrl || undefined, streamRef };
 
     const controller = new AbortController();
     abortRef.current = controller;
@@ -55,9 +60,7 @@ export function useMjpegStream(
     // ── Try ReadableStream first (Chrome, Firefox, modern Edge) ──
     const tryStreamMode = async (): Promise<boolean> => {
       try {
-        const streamUrl = apiUrl(
-          `/api/camera/rtsp-stream?url=${encodeURIComponent(rtspUrl)}&fps=${fps}&quality=${quality}`
-        );
+        const streamUrl = rtspSrc(source, { fps, quality });
         const res = await fetch(streamUrl, { signal: controller.signal });
 
         // Safari returns res.body === null for streaming responses
@@ -152,9 +155,7 @@ export function useMjpegStream(
       const ms = 3000; // 3s per snapshot (ffmpeg takes ~2-4s)
       let errCount = 0;
 
-      const getUrl = () => apiUrl(
-        `/api/camera/snapshot?url=${encodeURIComponent(rtspUrl)}&_t=${Date.now()}`
-      );
+      const getUrl = () => snapshotSrc(source);
 
       // Load first frame
       setImgSrcA(getUrl());
@@ -202,7 +203,7 @@ export function useMjpegStream(
       abortRef.current = null;
       if (cleanupSnapshot) cleanupSnapshot();
     };
-  }, [rtspUrl, fps, quality, enabled]);
+  }, [rtspUrl, streamRef, fps, quality, enabled]);
 
   return { canvasRef, status, mode, imgSrcA, imgSrcB, activeBuf };
 }

@@ -3,7 +3,7 @@
 import React, { useState, useCallback } from "react";
 import { Search, Loader2, X as XIcon, Network } from "lucide-react";
 import { apiUrl } from "@/lib/api";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/SileoToast";
 import { DEFAULT_TEMPLATES, type NodeTemplate } from "@/lib/node-templates";
 import { getIconSvg } from "@/utils/map-icons";
 

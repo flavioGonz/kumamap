@@ -1,0 +1,74 @@
+
+> kumamap@2.0.0 build
+> next build
+
+▲ Next.js 16.2.1 (Turbopack)
+- Environments: .env.local
+
+  Creating an optimized production build ...
+✓ Compiled successfully in 17.1s
+  Running TypeScript ...
+  Finished TypeScript in 18.9s ...
+  Collecting page data using 1 worker ...
+  Generating static pages using 1 worker (0/27) ...
+  Generating static pages using 1 worker (6/27) 
+  Generating static pages using 1 worker (13/27) 
+  Generating static pages using 1 worker (20/27) 
+✓ Generating static pages using 1 worker (27/27) in 459ms
+  Finalizing page optimization ...
+
+Route (app)
+┌ ○ /
+├ ○ /_not-found
+├ ○ /alerts
+├ ƒ /api/auth
+├ ƒ /api/camera/rtsp-stream
+├ ƒ /api/camera/snapshot
+├ ƒ /api/deploy
+├ ƒ /api/device-status
+├ ƒ /api/discovery
+├ ƒ /api/health
+├ ƒ /api/kuma
+├ ƒ /api/kuma/config
+├ ƒ /api/kuma/down-since
+├ ƒ /api/kuma/history/[monitorId]
+├ ƒ /api/kuma/monitors
+├ ƒ /api/kuma/report/[monitorId]
+├ ƒ /api/kuma/stream
+├ ƒ /api/kuma/timeline
+├ ƒ /api/kuma/timeline/summary
+├ ƒ /api/maps
+├ ƒ /api/maps/[id]
+├ ƒ /api/maps/[id]/background
+├ ƒ /api/maps/[id]/export
+├ ƒ /api/maps/[id]/state
+├ ƒ /api/maps/import
+├ ƒ /api/metrics
+├ ƒ /api/mikrotik/poll
+├ ƒ /api/mikrotik/query
+├ ƒ /api/push
+├ ƒ /api/rack-import
+├ ƒ /api/rack-report
+├ ƒ /api/rack-report-pdf
+├ ƒ /api/rack-report-xlsx
+├ ƒ /api/rack-template
+├ ƒ /api/snmp/poll
+├ ƒ /api/uploads/[...path]
+├ ƒ /api/version
+├ ○ /metrics
+├ ○ /mobile
+├ ○ /mobile/alerts
+├ ○ /mobile/camera
+├ ○ /mobile/map
+├ ○ /mobile/offline
+├ ○ /mobile/rack
+├ ○ /mobile/racks
+├ ○ /mobile/settings
+└ ƒ /view/[id]
+
+
+ƒ Proxy (Middleware)
+
+○  (Static)   prerendered as static content
+ƒ  (Dynamic)  server-rendered on demand
+

@@ -5,6 +5,8 @@ import { tmpdir } from "os";
 import { join } from "path";
 import { readFile, unlink } from "fs/promises";
 import { randomBytes } from "crypto";
+import { resolveProxyTarget } from "@/lib/stream-token";
+import { assertSafeDeviceUrl } from "@/lib/ssrf-guard";
 
 /**
  * Server-side proxy for camera snapshots.
@@ -68,17 +70,10 @@ function buildDigestHeader(
 }
 
 // ── SSRF Protection ───────────────────────────────────────────────────────────
-
-function validateUrlTarget(hostname: string): { ok: boolean; reason?: string } {
-  const lower = hostname.toLowerCase();
-  if (lower === "localhost" || lower === "127.0.0.1" || lower === "::1") {
-    return { ok: false, reason: "loopback blocked" };
-  }
-  if (lower.startsWith("169.254.")) {
-    return { ok: false, reason: "link-local blocked" };
-  }
-  return { ok: true };
-}
+// The hostname-string blocklist that used to live here was bypassable via
+// alternate loopback spellings, decimal/hex IPs and DNS rebinding. It is now
+// replaced by `assertSafeDeviceUrl`, which resolves DNS and allowlists private
+// LAN ranges only. See src/lib/ssrf-guard.ts.
 
 // ── RTSP snapshot via ffmpeg ──────────────────────────────────────────────────
 
@@ -129,16 +124,19 @@ async function captureRtspSnapshot(rtspUrl: string): Promise<Buffer> {
 // ── Main handler ──────────────────────────────────────────────────────────────
 
 export async function GET(req: NextRequest) {
-  const rawUrl = req.nextUrl.searchParams.get("url");
-  if (!rawUrl) {
-    return new Response("Missing 'url' parameter", { status: 400 });
+  // Target comes from a server-signed `ref` (credentials stay server-side), or
+  // from a raw `url` when an authenticated operator is testing a stream.
+  const target = resolveProxyTarget(req.nextUrl.searchParams, req.headers);
+  if ("error" in target) {
+    return new Response(target.error, { status: target.status });
   }
+  const rawUrl = target.url;
 
   try {
     const parsed = new URL(rawUrl);
 
-    // SSRF check
-    const ssrfCheck = validateUrlTarget(parsed.hostname);
+    // SSRF check — resolves DNS, allowlists private LAN ranges only.
+    const ssrfCheck = await assertSafeDeviceUrl(rawUrl);
     if (!ssrfCheck.ok) {
       return new Response(`Blocked: ${ssrfCheck.reason}`, { status: 403 });
     }

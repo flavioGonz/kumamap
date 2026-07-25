@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
 import { apiUrl } from "@/lib/api";
+import { snapshotSrc, streamSrc } from "@/lib/camera-url";
 
 // ─── Types ─────────────────────────────────────
 interface CameraInfo {
@@ -13,6 +14,7 @@ interface CameraInfo {
   ip: string;
   streamType: string;
   streamUrl: string;
+  streamRef?: string;
   snapshotInterval?: number;
   rtspFps?: number;
   manufacturer: string;
@@ -46,13 +48,12 @@ function findRecordingNvr(camera: CameraInfo, rackNvrs: RackNvrInfo[]): { nvr: R
 // ─── Capture snapshot as blob ──────────────────
 async function captureSnapshot(camera: CameraInfo): Promise<Blob | null> {
   try {
-    const url = camera.streamType === "rtsp"
-      ? apiUrl(`/api/camera/snapshot?url=${encodeURIComponent(camera.streamUrl)}&_t=${Date.now()}`)
-      : camera.streamType === "snapshot"
-        ? apiUrl(`/api/camera/snapshot?url=${encodeURIComponent(camera.streamUrl)}&_t=${Date.now()}`)
-        : camera.streamType === "mjpeg"
-          ? apiUrl(`/api/camera/snapshot?url=${encodeURIComponent(camera.streamUrl)}&_t=${Date.now()}`)
-          : null;
+    const url =
+      camera.streamType === "rtsp" ||
+      camera.streamType === "snapshot" ||
+      camera.streamType === "mjpeg"
+        ? snapshotSrc(camera)
+        : null;
     if (!url) return null;
     const res = await fetch(url);
     if (!res.ok) return null;
@@ -87,30 +88,22 @@ function NvrCell({
   const [hovered, setHovered] = useState(false);
   const [capturing, setCapturing] = useState(false);
   const [sendingWa, setSendingWa] = useState(false);
-  const hasStream = camera.streamUrl && camera.streamType && camera.streamType !== "nvr";
+  const hasStream = (camera.streamUrl || camera.streamRef) && camera.streamType && camera.streamType !== "nvr";
 
   const recording = findRecordingNvr(camera, rackNvrs);
 
-  const getStreamSrc = useCallback((): string => {
-    if (!camera.streamUrl) return "";
-    switch (camera.streamType) {
-      case "rtsp": return apiUrl(`/api/camera/rtsp-stream?url=${encodeURIComponent(camera.streamUrl)}&fps=${camera.rtspFps || 2}`);
-      case "snapshot": return apiUrl(`/api/camera/snapshot?url=${encodeURIComponent(camera.streamUrl)}&_t=${Date.now()}`);
-      case "mjpeg": return camera.streamUrl;
-      default: return camera.streamUrl;
-    }
-  }, [camera]);
+  const getStreamSrc = useCallback((): string => streamSrc(camera), [camera]);
 
   useEffect(() => {
     if (!hasStream) { setLoading(false); return; }
-    if (camera.streamType !== "snapshot" || !camera.streamUrl) return;
+    if (camera.streamType !== "snapshot") return;
     const ms = (camera.snapshotInterval || 2) * 1000;
-    setBufA(apiUrl(`/api/camera/snapshot?url=${encodeURIComponent(camera.streamUrl)}&_t=${Date.now()}`));
+    setBufA(snapshotSrc(camera));
     setActiveBuf("a");
     const id = setInterval(() => {
       if (loadingRef.current) return;
       loadingRef.current = true;
-      const nextUrl = apiUrl(`/api/camera/snapshot?url=${encodeURIComponent(camera.streamUrl)}&_t=${Date.now()}`);
+      const nextUrl = snapshotSrc(camera);
       const img = new Image();
       img.onload = () => { loadingRef.current = false; setActiveBuf((prev) => { if (prev === "a") { setBufB(nextUrl); return "b"; } else { setBufA(nextUrl); return "a"; } }); setLoading(false); setError(false); };
       img.onerror = () => { loadingRef.current = false; };
@@ -494,25 +487,18 @@ function FullscreenViewer({ camera, onClose, onPrev, onNext, label, rackNvrs }: 
   const loadingRef = useRef(false);
   const recording = findRecordingNvr(camera, rackNvrs);
 
-  const getStreamSrc = useCallback((): string => {
-    if (!camera.streamUrl) return "";
-    switch (camera.streamType) {
-      case "rtsp": return apiUrl(`/api/camera/rtsp-stream?url=${encodeURIComponent(camera.streamUrl)}&fps=${camera.rtspFps || 2}`);
-      case "snapshot": return apiUrl(`/api/camera/snapshot?url=${encodeURIComponent(camera.streamUrl)}&_t=${Date.now()}`);
-      case "mjpeg": return camera.streamUrl;
-      default: return camera.streamUrl;
-    }
-  }, [camera]);
+  const getStreamSrc = useCallback((): string => streamSrc(camera), [camera]);
 
   useEffect(() => {
-    if (camera.streamType !== "snapshot" || !camera.streamUrl) return;
+    if (camera.streamType !== "snapshot") return;
+    if (!camera.streamUrl && !camera.streamRef) return;
     const ms = (camera.snapshotInterval || 2) * 1000;
-    setBufA(apiUrl(`/api/camera/snapshot?url=${encodeURIComponent(camera.streamUrl)}&_t=${Date.now()}`));
+    setBufA(snapshotSrc(camera));
     setActiveBuf("a");
     const id = setInterval(() => {
       if (loadingRef.current) return;
       loadingRef.current = true;
-      const nextUrl = apiUrl(`/api/camera/snapshot?url=${encodeURIComponent(camera.streamUrl)}&_t=${Date.now()}`);
+      const nextUrl = snapshotSrc(camera);
       const img = new Image();
       img.onload = () => { loadingRef.current = false; setActiveBuf((p) => { if (p === "a") { setBufB(nextUrl); return "b"; } else { setBufA(nextUrl); return "a"; } }); setLoading(false); setError(false); };
       img.onerror = () => { loadingRef.current = false; };
@@ -1113,7 +1099,7 @@ export default function CamerasPage() {
             <p className="text-sm text-white/15 mt-3 font-mono">SIN CÁMARAS CONFIGURADAS</p>
             <div className="flex items-center gap-2 mt-4">
               <button onClick={() => setShowOnvif(true)} className="px-3 py-1.5 text-xs font-bold font-mono" style={{ background: "#06b6d4", color: "#000" }}>DISCOVER ONVIF</button>
-              <Link href={`/?map=${selectedMap.mapId}`} className="px-3 py-1.5 text-xs font-mono text-white/40" style={{ border: "1px solid #333" }}>ABRIR MAPA</Link>
+              <Link href={`/map/${selectedMap.mapId}`} className="px-3 py-1.5 text-xs font-mono text-white/40" style={{ border: "1px solid #333" }}>ABRIR MAPA</Link>
             </div>
           </div>
         ) : (

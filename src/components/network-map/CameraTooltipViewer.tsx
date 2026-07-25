@@ -2,11 +2,14 @@
 
 import { useState, useEffect, useRef, useCallback, type CSSProperties } from "react";
 import { X, Maximize2, Camera, RefreshCw } from "lucide-react";
-import { apiUrl } from "@/lib/api";
+import { snapshotSrc, rtspSrc } from "@/lib/camera-url";
 import type { CameraStreamConfig } from "./CameraStreamConfigModal";
 
+/** The viewer only reads the stream; it prefers the signed `streamRef` over the raw URL. */
+type CameraStreamView = CameraStreamConfig & { streamRef?: string };
+
 interface CameraTooltipViewerProps {
-  config: CameraStreamConfig;
+  config: CameraStreamView;
   cameraName: string;
   /** Screen-space position of the camera marker (x, y relative to viewport) */
   anchorX: number;
@@ -19,11 +22,6 @@ interface CameraTooltipViewerProps {
 const TOOLTIP_W = 320;
 const TOOLTIP_H_VIDEO = 200;
 const ARROW_H = 8;
-
-/** Build proxy URL for snapshot mode */
-function proxySnapshotUrl(cameraUrl: string, cacheBust: number): string {
-  return apiUrl(`/api/camera/snapshot?url=${encodeURIComponent(cameraUrl)}&_t=${cacheBust}`);
-}
 
 export default function CameraTooltipViewer({
   config,
@@ -46,14 +44,14 @@ export default function CameraTooltipViewer({
   useEffect(() => {
     if (config.streamType !== "snapshot") return;
     const ms = config.snapshotInterval ? config.snapshotInterval * 1000 : 1000;
-    const firstUrl = proxySnapshotUrl(config.streamUrl, Date.now());
+    const firstUrl = snapshotSrc(config);
     setBufferA(firstUrl);
     setActiveBuffer("a");
 
     const id = setInterval(() => {
       if (loadingNextRef.current) return;
       loadingNextRef.current = true;
-      const nextUrl = proxySnapshotUrl(config.streamUrl, Date.now());
+      const nextUrl = snapshotSrc(config);
       const img = new Image();
       img.onload = () => {
         loadingNextRef.current = false;
@@ -68,16 +66,16 @@ export default function CameraTooltipViewer({
       img.src = nextUrl;
     }, ms);
     return () => clearInterval(id);
-  }, [config.streamType, config.snapshotInterval, config.streamUrl]);
+  }, [config.streamType, config.snapshotInterval, config.streamUrl, config.streamRef]);
 
   const handleRefresh = useCallback(() => {
-    const url = proxySnapshotUrl(config.streamUrl, Date.now());
+    const url = snapshotSrc(config);
     setActiveBuffer(prev => {
       if (prev === "a") { setBufferB(url); return "b"; }
       else { setBufferA(url); return "a"; }
     });
     setError(false);
-  }, [config.streamUrl]);
+  }, [config]);
 
   // Position: place tooltip above the marker, centered horizontally
   // If it would go off-screen, flip below or adjust horizontally
@@ -282,7 +280,7 @@ export default function CameraTooltipViewer({
           {/* RTSP via ffmpeg proxy — renders as MJPEG multipart stream */}
           {config.streamType === "rtsp" && (
             <img
-              src={apiUrl(`/api/camera/rtsp-stream?url=${encodeURIComponent(config.streamUrl)}&fps=${config.rtspFps || 2}`)}
+              src={rtspSrc(config)}
               alt={cameraName}
               style={{
                 width: "100%",

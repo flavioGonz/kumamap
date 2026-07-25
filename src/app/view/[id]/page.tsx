@@ -1,12 +1,14 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useParams } from "next/navigation";
 import { apiUrl } from "@/lib/api";
 import { safeJsonParse, safeFetch } from "@/lib/error-handler";
 import { Network, MapIcon } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useKumaMonitorsSimple } from "@/hooks/useKumaMonitors";
+import type { KioskMapHandle } from "@/components/network-map/LeafletMapView";
+import KioskAutoTour from "@/components/network-map/KioskAutoTour";
 
 // Dynamic import to avoid SSR issues with Leaflet
 const LeafletMapView = dynamic(
@@ -30,6 +32,7 @@ export default function MapViewPage() {
   const [mapData, setMapData] = useState<MapData | null>(null);
   const { monitors, connected } = useKumaMonitorsSimple();
   const [loading, setLoading] = useState(true);
+  const [mapHandle, setMapHandle] = useState<KioskMapHandle | null>(null);
 
   // Fetch map data
   useEffect(() => {
@@ -40,6 +43,10 @@ export default function MapViewPage() {
       })
       .catch(() => setLoading(false));
   }, [mapId]);
+
+  const handleMapReady = useCallback((handle: KioskMapHandle) => {
+    setMapHandle(handle);
+  }, []);
 
   if (loading) {
     return (
@@ -97,18 +104,24 @@ export default function MapViewPage() {
         <span className="text-[10px] text-[#666] font-medium">KIOSKO</span>
       </div>
 
-      {/* Reuse the SAME LeafletMapView from the editor but in readonly mode */}
-      <LeafletMapView
-        mapId={mapId}
-        mapName={mapData.name}
-        initialNodes={mapData.nodes}
-        initialEdges={mapData.edges}
-        kumaMonitors={monitors}
-        kumaConnected={connected}
-        initialViewState={mapData.view_state ? safeJsonParse(mapData.view_state) : undefined}
-        onSave={() => {}}
-        readonly={true}
-      />
+      {/* Auto-tour controls */}
+      <KioskAutoTour mapHandle={mapHandle} monitors={monitors} mapId={mapId} />
+
+      {/* Map wrapper — KioskAutoTour applies dissolve transition (pixelate/focus) between nodes */}
+      <div id="kiosk-map-wrap" style={{ width: "100%", height: "100%", willChange: "filter, opacity" }}>
+        <LeafletMapView
+          mapId={mapId}
+          mapName={mapData.name}
+          initialNodes={mapData.nodes}
+          initialEdges={mapData.edges}
+          kumaMonitors={monitors}
+          kumaConnected={connected}
+          initialViewState={mapData.view_state ? safeJsonParse(mapData.view_state) : undefined}
+          onSave={() => {}}
+          readonly={true}
+          onMapReady={handleMapReady}
+        />
+      </div>
     </div>
   );
 }

@@ -75,7 +75,9 @@ export async function mikrotikFetch(
   user: string,
   pass: string,
   timeoutMs = 8000,
-  port?: number
+  port?: number,
+  /** Optional POST body — when provided, the request uses POST instead of GET */
+  body?: Record<string, unknown>
 ): Promise<any> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -95,11 +97,13 @@ export async function mikrotikFetch(
       const url = `${scheme}://${ip}${portSuffix}/rest${path}`;
 
       const fetchOptions: RequestInit & { dispatcher?: unknown } = {
+        method: body ? "POST" : "GET",
         headers: {
           Authorization: authHeader,
           "Content-Type": "application/json",
         },
         signal: controller.signal,
+        ...(body ? { body: JSON.stringify(body) } : {}),
       };
 
       // For HTTPS with self-signed certs: use the insecure agent
@@ -111,22 +115,13 @@ export async function mikrotikFetch(
         fetchOptions.agent = insecureAgent;
       }
 
-      // If the native fetch doesn't honour the agent, we fall back to the
-      // env-var approach but scoped as tightly as possible.
-      let res: Response;
-      if (scheme === "https") {
-        const prev = process.env.NODE_TLS_REJECT_UNAUTHORIZED;
-        process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
-        try {
-          res = await fetch(url, fetchOptions);
-        } finally {
-          if (prev === undefined)
-            delete process.env.NODE_TLS_REJECT_UNAUTHORIZED;
-          else process.env.NODE_TLS_REJECT_UNAUTHORIZED = prev;
-        }
-      } else {
-        res = await fetch(url, fetchOptions);
-      }
+      // SECURITY: we used to flip process.env.NODE_TLS_REJECT_UNAUTHORIZED="0"
+      // around this call. That switch is PROCESS-GLOBAL: for the duration of the
+      // MikroTik request, every other concurrent outbound HTTPS request in the
+      // server (camera proxy, AI calls, web-push) also ran with certificate
+      // validation disabled. The `insecureAgent` set above already scopes the
+      // relaxed TLS to this one request, so the env mutation is simply removed.
+      const res: Response = await fetch(url, fetchOptions);
 
       clearTimeout(timer);
 

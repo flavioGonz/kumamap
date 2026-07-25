@@ -3,13 +3,23 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import {
   Link2, Cable, ArrowRight, X, Plug, Tag, Network, Check, Activity, Search, ChevronDown,
+  Router, Eye, EyeOff,
 } from "lucide-react";
+
+type TrafficSource = "none" | "snmp" | "mikrotik";
 
 export interface LinkFormData {
   sourceInterface: string;
   targetInterface: string;
   label: string;
   snmpMonitorId?: number | null;
+  mikrotikTraffic?: {
+    host: string;
+    user: string;
+    pass: string;
+    interface: string;
+    port?: number;
+  } | null;
 }
 
 interface SnmpMonitorOption {
@@ -46,12 +56,37 @@ export default function LinkModal({
   const [snmpId, setSnmpId] = useState<number | null>(initial?.snmpMonitorId ?? null);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  // MikroTik traffic source state
+  const [trafficSrc, setTrafficSrc] = useState<TrafficSource>("none");
+  const [mtHost, setMtHost] = useState("");
+  const [mtUser, setMtUser] = useState("");
+  const [mtPass, setMtPass] = useState("");
+  const [mtIface, setMtIface] = useState("");
+  const [mtPort, setMtPort] = useState("");
+  const [showPass, setShowPass] = useState(false);
+
   useEffect(() => {
     if (open) {
       setSrcIf(initial?.sourceInterface || "");
       setTgtIf(initial?.targetInterface || "");
       setLabel(initial?.label || "");
       setSnmpId(initial?.snmpMonitorId ?? null);
+      // Determine traffic source
+      if (initial?.mikrotikTraffic) {
+        setTrafficSrc("mikrotik");
+        setMtHost(initial.mikrotikTraffic.host || "");
+        setMtUser(initial.mikrotikTraffic.user || "");
+        setMtPass(initial.mikrotikTraffic.pass || "");
+        setMtIface(initial.mikrotikTraffic.interface || "");
+        setMtPort(initial.mikrotikTraffic.port ? String(initial.mikrotikTraffic.port) : "");
+      } else if (initial?.snmpMonitorId) {
+        setTrafficSrc("snmp");
+        setMtHost(""); setMtUser(""); setMtPass(""); setMtIface(""); setMtPort("");
+      } else {
+        setTrafficSrc("none");
+        setMtHost(""); setMtUser(""); setMtPass(""); setMtIface(""); setMtPort("");
+      }
+      setShowPass(false);
       setTimeout(() => inputRef.current?.focus(), 100);
     }
   }, [open, initial]);
@@ -60,13 +95,23 @@ export default function LinkModal({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    onSubmit({ sourceInterface: srcIf, targetInterface: tgtIf, label, snmpMonitorId: snmpId });
+    onSubmit({
+      sourceInterface: srcIf,
+      targetInterface: tgtIf,
+      label,
+      snmpMonitorId: trafficSrc === "snmp" ? snmpId : null,
+      mikrotikTraffic: trafficSrc === "mikrotik" && mtHost && mtUser && mtPass && mtIface
+        ? { host: mtHost, user: mtUser, pass: mtPass, interface: mtIface, port: mtPort ? parseInt(mtPort) : undefined }
+        : null,
+    });
   };
 
   const presets = [
     "eth0", "eth1", "Gi0/0", "Gi0/1", "Fa0/1", "Fa0/24",
     "Te1/1", "wan", "lan", "trunk", "po1",
   ];
+
+  const mtPresets = ["ether1", "ether2", "ether3", "sfp1", "sfp-sfpplus1", "wlan1", "bridge1"];
 
   return (
     <>
@@ -82,13 +127,15 @@ export default function LinkModal({
           style={{
             background: "linear-gradient(180deg, rgba(22,22,22,0.98), rgba(14,14,14,0.99))",
             border: "1px solid rgba(255,255,255,0.08)",
+            maxHeight: "90vh",
+            overflow: "auto",
           }}
           onClick={(e) => e.stopPropagation()}
         >
           {/* Header */}
           <div
-            className="flex items-center gap-3 px-5 py-4"
-            style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}
+            className="flex items-center gap-3 px-5 py-4 sticky top-0 z-10"
+            style={{ borderBottom: "1px solid rgba(255,255,255,0.06)", background: "rgba(22,22,22,0.98)" }}
           >
             <div
               className="flex h-9 w-9 items-center justify-center rounded-xl"
@@ -236,14 +283,138 @@ export default function LinkModal({
               </div>
             </div>
 
-            {/* SNMP Monitor for traffic — custom dark dropdown with search */}
-            {snmpMonitors.length > 0 && (
-              <SnmpDropdown
-                monitors={snmpMonitors}
-                value={snmpId}
-                onChange={setSnmpId}
-              />
-            )}
+            {/* ── Traffic source ── */}
+            <div className="space-y-2">
+              <label className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-emerald-400">
+                <Activity className="h-3 w-3" />
+                Fuente de tráfico
+                <span className="normal-case tracking-normal text-[#555] font-normal">(opcional)</span>
+              </label>
+
+              {/* Source type tabs */}
+              <div className="flex gap-1 rounded-xl p-0.5" style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)" }}>
+                {(
+                  [
+                    { key: "none" as TrafficSource, lbl: "Ninguno" },
+                    ...(snmpMonitors.length > 0 ? [{ key: "snmp" as TrafficSource, lbl: "SNMP" }] : []),
+                    { key: "mikrotik" as TrafficSource, lbl: "MikroTik" },
+                  ]
+                ).map(({ key, lbl }) => (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => setTrafficSrc(key)}
+                    className="flex-1 rounded-lg px-2 py-1.5 text-[10px] font-bold transition-all"
+                    style={{
+                      background: trafficSrc === key ? "rgba(16,185,129,0.15)" : "transparent",
+                      color: trafficSrc === key ? "#34d399" : "#666",
+                      border: trafficSrc === key ? "1px solid rgba(16,185,129,0.3)" : "1px solid transparent",
+                    }}
+                  >
+                    {lbl}
+                  </button>
+                ))}
+              </div>
+
+              {/* SNMP sub-section */}
+              {trafficSrc === "snmp" && snmpMonitors.length > 0 && (
+                <SnmpDropdown monitors={snmpMonitors} value={snmpId} onChange={setSnmpId} hideLabel />
+              )}
+
+              {/* MikroTik sub-section */}
+              {trafficSrc === "mikrotik" && (
+                <div className="space-y-2 rounded-xl p-3" style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)" }}>
+                  <div className="flex items-center gap-1.5 text-[10px] font-semibold text-orange-400 mb-1">
+                    <Router className="h-3 w-3" />
+                    RouterOS REST API
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    <div className="col-span-2">
+                      <label className="text-[9px] text-[#666] font-semibold uppercase">Host / IP</label>
+                      <input
+                        type="text"
+                        value={mtHost}
+                        onChange={(e) => setMtHost(e.target.value)}
+                        placeholder="192.168.1.1"
+                        className="w-full rounded-lg px-2.5 py-1.5 text-xs text-[#ededed] placeholder:text-[#555] focus:outline-none focus:ring-1 focus:ring-orange-500/40 transition-all mt-0.5"
+                        style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(251,146,60,0.2)" }}
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[9px] text-[#666] font-semibold uppercase">Puerto</label>
+                      <input
+                        type="text"
+                        value={mtPort}
+                        onChange={(e) => setMtPort(e.target.value.replace(/\D/g, ""))}
+                        placeholder="443"
+                        className="w-full rounded-lg px-2.5 py-1.5 text-xs text-[#ededed] placeholder:text-[#555] focus:outline-none focus:ring-1 focus:ring-orange-500/40 transition-all mt-0.5"
+                        style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(251,146,60,0.2)" }}
+                      />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="text-[9px] text-[#666] font-semibold uppercase">Usuario</label>
+                      <input
+                        type="text"
+                        value={mtUser}
+                        onChange={(e) => setMtUser(e.target.value)}
+                        placeholder="admin"
+                        className="w-full rounded-lg px-2.5 py-1.5 text-xs text-[#ededed] placeholder:text-[#555] focus:outline-none focus:ring-1 focus:ring-orange-500/40 transition-all mt-0.5"
+                        style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(251,146,60,0.2)" }}
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[9px] text-[#666] font-semibold uppercase">Contraseña</label>
+                      <div className="relative mt-0.5">
+                        <input
+                          type={showPass ? "text" : "password"}
+                          value={mtPass}
+                          onChange={(e) => setMtPass(e.target.value)}
+                          placeholder="••••"
+                          className="w-full rounded-lg px-2.5 py-1.5 pr-7 text-xs text-[#ededed] placeholder:text-[#555] focus:outline-none focus:ring-1 focus:ring-orange-500/40 transition-all"
+                          style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(251,146,60,0.2)" }}
+                        />
+                        <button type="button" onClick={() => setShowPass(!showPass)} className="absolute right-1.5 top-1/2 -translate-y-1/2 text-[#555] hover:text-[#999] transition-colors">
+                          {showPass ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-[9px] text-[#666] font-semibold uppercase">Interfaz del router</label>
+                    <input
+                      type="text"
+                      value={mtIface}
+                      onChange={(e) => setMtIface(e.target.value)}
+                      placeholder="ether1"
+                      className="w-full rounded-lg px-2.5 py-1.5 text-xs text-[#ededed] placeholder:text-[#555] focus:outline-none focus:ring-1 focus:ring-orange-500/40 transition-all mt-0.5"
+                      style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(251,146,60,0.2)" }}
+                    />
+                    <div className="flex flex-wrap gap-1 mt-1">
+                      {mtPresets.map((p) => (
+                        <button
+                          key={p}
+                          type="button"
+                          onClick={() => setMtIface(p)}
+                          className="rounded-md px-2 py-0.5 text-[9px] font-semibold transition-all"
+                          style={{
+                            background: mtIface === p ? "rgba(251,146,60,0.2)" : "rgba(255,255,255,0.03)",
+                            border: `1px solid ${mtIface === p ? "rgba(251,146,60,0.4)" : "rgba(255,255,255,0.06)"}`,
+                            color: mtIface === p ? "#fb923c" : "#666",
+                          }}
+                        >
+                          {p}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <p className="text-[9px] text-[#555]">
+                    Consulta directa al router via REST API (polling cada 2s)
+                  </p>
+                </div>
+              )}
+            </div>
 
             {/* Preview */}
             <div
@@ -306,10 +477,12 @@ function SnmpDropdown({
   monitors,
   value,
   onChange,
+  hideLabel = false,
 }: {
   monitors: SnmpMonitorOption[];
   value: number | null;
   onChange: (id: number | null) => void;
+  hideLabel?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
@@ -349,11 +522,13 @@ function SnmpDropdown({
 
   return (
     <div className="space-y-1.5">
-      <label className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-emerald-400">
-        <Activity className="h-3 w-3" />
-        Monitor de tráfico
-        <span className="normal-case tracking-normal text-[#555] font-normal">(opcional)</span>
-      </label>
+      {!hideLabel && (
+        <label className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-emerald-400">
+          <Activity className="h-3 w-3" />
+          Monitor de tráfico
+          <span className="normal-case tracking-normal text-[#555] font-normal">(opcional)</span>
+        </label>
+      )}
 
       <div ref={ref} className="relative">
         {/* Trigger button */}
@@ -381,7 +556,7 @@ function SnmpDropdown({
                 </span>
               </>
             ) : (
-              "Sin monitor de tráfico"
+              "Seleccionar monitor..."
             )}
           </span>
           <ChevronDown
@@ -479,9 +654,11 @@ function SnmpDropdown({
         )}
       </div>
 
-      <p className="text-[9px] text-[#555]">
-        Asocia un monitor SNMP/Push de Kuma para ver tráfico en este link
-      </p>
+      {!hideLabel && (
+        <p className="text-[9px] text-[#555]">
+          Asocia un monitor SNMP/Push de Kuma para ver tráfico en este link
+        </p>
+      )}
     </div>
   );
 }

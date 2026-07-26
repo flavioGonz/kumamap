@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState as useReactState } from "react";
+import React, { useState as useReactState, useEffect } from "react";
 import { Pencil } from "lucide-react";
 import Tooltip from "./Tooltip";
 import MikrotikStatusPanel from "./rack/MikrotikStatusPanel";
@@ -29,6 +29,8 @@ export interface NodeEditConfig {
   labelHidden?: boolean;
   labelSize?: number;
   nodeColor?: string;
+  nodeType?: string;
+  kumaMonitorId?: number | null;
 }
 
 export interface NodeEditModalProps {
@@ -48,6 +50,7 @@ export interface NodeEditModalProps {
     labelHidden?: boolean;
     labelSize?: number;
     nodeColor?: string;
+    kumaMonitorId?: number | null;
   }) => void;
   onClose: () => void;
 }
@@ -79,6 +82,20 @@ export default function NodeEditModal({
   const editNodeColor = config.nodeColor || "";
   const setEditNodeColor = (v: string) => onConfigChange((c) => ({ ...c, nodeColor: v }));
 
+  // ── monitor-ng (nodo tipo "servidor que reporta") ──
+  const isMng = config.nodeType === "monitorng";
+  const [mngKid, setMngKid] = useReactState<number | null>(config.kumaMonitorId ?? null);
+  const [mngDevices, setMngDevices] = useReactState<any[]>([]);
+  useEffect(() => {
+    if (!isMng) return;
+    fetch((process.env.NEXT_PUBLIC_BASE_PATH || "") + "/api/monitor-ng/devices", { credentials: "include" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (d && Array.isArray(d.adopted)) setMngDevices(d.adopted); })
+      .catch(() => {});
+  }, [isMng]);
+  const mngSel = mngDevices.find((d) => d.monitorId === mngKid);
+  const MNG_COLOR: Record<string, string> = { ok: "#16a34a", warn: "#f59e0b", crit: "#dc2626", idle: "#9ca3af" };
+
   const handleSubmit = () => {
     if (editName.trim()) {
       onSubmit({
@@ -91,6 +108,7 @@ export default function NodeEditModal({
         labelHidden: editLabelHidden || undefined,
         labelSize: editLabelSize !== 12 ? editLabelSize : undefined,
         nodeColor: editNodeColor || undefined,
+        kumaMonitorId: isMng ? mngKid : undefined,
       });
     }
     onClose();
@@ -149,6 +167,54 @@ export default function NodeEditModal({
               style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.1)" }}
             />
           </div>
+
+          {/* Servidor monitor-ng (adopción) */}
+          {isMng && (
+            <div className="rounded-xl p-3 space-y-2.5" style={{ background: "rgba(225,29,72,0.05)", border: "1px solid rgba(225,29,72,0.22)" }}>
+              <div className="flex items-center gap-2">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#f43f5e" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="18" height="16" x="3" y="4" rx="2" /><path d="M3 12h4l2-5 3 9 2-4h5" /></svg>
+                <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: "#f43f5e" }}>Servidor monitor-ng (adopción)</span>
+              </div>
+              <div>
+                <label className="text-[10px] text-[#666] block mb-1">Dispositivo adoptado vinculado</label>
+                <select
+                  value={mngKid ?? ""}
+                  onChange={(e) => setMngKid(e.target.value ? Number(e.target.value) : null)}
+                  className="w-full rounded-xl px-3 py-2 text-xs text-[#ededed] focus:outline-none focus:ring-1 focus:ring-rose-500/40"
+                  style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.1)" }}
+                >
+                  <option value="">— Sin vincular —</option>
+                  {mngDevices.map((d) => (
+                    <option key={d.monitorId} value={d.monitorId}>{d.name} · #{d.deviceId}</option>
+                  ))}
+                </select>
+              </div>
+              {mngSel && (
+                <div className="flex items-center gap-3 flex-wrap pt-0.5">
+                  <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-md" style={{ color: "#fff", background: mngSel.stale ? "#9ca3af" : (MNG_COLOR[mngSel.state] || "#9ca3af") }}>
+                    {mngSel.stale ? "sin reporte" : mngSel.state}
+                  </span>
+                  <span className="font-mono text-[13px] font-bold" style={{ color: "#f43f5e" }}>#{mngSel.deviceId}</span>
+                  <span className="text-[11px]" style={{ color: "#16a34a" }}>OK {mngSel.ok}</span>
+                  <span className="text-[11px]" style={{ color: "#f59e0b" }}>Warn {mngSel.warn}</span>
+                  <span className="text-[11px]" style={{ color: "#dc2626" }}>Crit {mngSel.crit}</span>
+                </div>
+              )}
+              {mngSel && Array.isArray(mngSel.metrics) && mngSel.metrics.length > 0 && (
+                <div className="grid grid-cols-3 gap-1.5">
+                  {mngSel.metrics.map((m: any) => (
+                    <div key={m.id} title={m.label} className="rounded-lg px-2 py-1" style={{ background: "rgba(255,255,255,0.03)", borderLeft: `3px solid ${MNG_COLOR[m.state] || "#9ca3af"}` }}>
+                      <div className="text-[9px] text-[#888] truncate">{m.label || m.id}</div>
+                      <div className="text-[11px] font-bold text-[#ededed]">{m.value}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {mngDevices.length === 0 && (
+                <p className="text-[9px] text-[#888] leading-relaxed">No hay dispositivos adoptados todavía. Adoptá uno en <b>Servidores monitor-ng</b> y aparecerá acá para vincular.</p>
+              )}
+            </div>
+          )}
 
           {/* Etiqueta */}
           <div

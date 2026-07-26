@@ -2129,7 +2129,7 @@ export default function LeafletMapView({
               setAntennaConfigNodeId(node.id);
             } else {
               // Normal edit modal
-              setInputModalConfig({ nodeId: node.id, initial: node.label, mac: cd.mac || "", ip: cd.ip || "", credUser: cd.credUser || "", credPass: cd.credPass || "", credPort: cd.credPort as number | undefined, labelHidden: cd.labelHidden ?? false, labelSize: cd.labelSize ?? 12, nodeColor: cd.nodeColor || "" });
+              setInputModalConfig({ nodeId: node.id, initial: node.label, mac: cd.mac || "", ip: cd.ip || "", credUser: cd.credUser || "", credPass: cd.credPass || "", credPort: cd.credPort as number | undefined, labelHidden: cd.labelHidden ?? false, labelSize: cd.labelSize ?? 12, nodeColor: cd.nodeColor || "", nodeType: cd.type, kumaMonitorId: node?.kuma_monitor_id ?? null });
               setInputModalOpen(true);
             }
           }
@@ -3572,7 +3572,7 @@ export default function LeafletMapView({
           icon: menuIcons.Pencil,
           onClick: () => {
             const cd = safeJsonParse<NodeCustomData>(node?.custom_data);
-            setInputModalConfig({ nodeId, initial: node?.label || "", mac: cd.mac || "", ip: cd.ip || "", credUser: cd.credUser || "", credPass: cd.credPass || "", credPort: cd.credPort as number | undefined, labelHidden: cd.labelHidden ?? false, labelSize: cd.labelSize ?? 12, nodeColor: cd.nodeColor || "" });
+            setInputModalConfig({ nodeId, initial: node?.label || "", mac: cd.mac || "", ip: cd.ip || "", credUser: cd.credUser || "", credPass: cd.credPass || "", credPort: cd.credPort as number | undefined, labelHidden: cd.labelHidden ?? false, labelSize: cd.labelSize ?? 12, nodeColor: cd.nodeColor || "", nodeType: cd.type, kumaMonitorId: node?.kuma_monitor_id ?? null });
             setInputModalOpen(true);
           },
         },
@@ -3676,7 +3676,7 @@ export default function LeafletMapView({
         icon: menuIcons.Pencil,
         onClick: () => {
           const cd = safeJsonParse<NodeCustomData>(node?.custom_data);
-          setInputModalConfig({ nodeId, initial: node?.label || "", mac: cd.mac || "", ip: cd.ip || "", credUser: cd.credUser || "", credPass: cd.credPass || "", credPort: cd.credPort as number | undefined, labelHidden: cd.labelHidden ?? false, labelSize: cd.labelSize ?? 12, nodeColor: cd.nodeColor || "" });
+          setInputModalConfig({ nodeId, initial: node?.label || "", mac: cd.mac || "", ip: cd.ip || "", credUser: cd.credUser || "", credPass: cd.credPass || "", credPort: cd.credPort as number | undefined, labelHidden: cd.labelHidden ?? false, labelSize: cd.labelSize ?? 12, nodeColor: cd.nodeColor || "", nodeType: cd.type, kumaMonitorId: node?.kuma_monitor_id ?? null });
           setInputModalOpen(true);
         },
       },
@@ -4545,6 +4545,22 @@ export default function LeafletMapView({
               }}
             />
             <DropdownItem
+              icon={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="18" height="16" x="3" y="4" rx="2"/><path d="M3 12h4l2-5 3 9 2-4h5"/></svg>}
+              label="Servidor (monitor-ng)"
+              onClick={() => {
+                setActiveDropdown(null);
+                if (!mapRef.current) return;
+                const center = mapRef.current.getCenter();
+                const id = `mng-${Date.now()}`;
+                nodesRef.current = [...nodesRef.current, {
+                  id, kuma_monitor_id: null, label: "Servidor", x: center.lat, y: center.lng, icon: "server",
+                  custom_data: JSON.stringify({ type: "monitorng" }),
+                }];
+                if (LRef.current) renderNodes(LRef.current, mapRef.current);
+                toast.success("Servidor monitor-ng agregado — doble clic para vincularlo a un dispositivo adoptado");
+              }}
+            />
+            <DropdownItem
               icon={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m16.24 7.76-1.804 5.412a2 2 0 0 1-1.265 1.265L7.76 16.24l1.804-5.412a2 2 0 0 1 1.265-1.265z"/><circle cx="12" cy="12" r="10"/></svg>}
               label="Cámara"
               onClick={() => {
@@ -5118,7 +5134,9 @@ export default function LeafletMapView({
               ncd.credUser = values.credUser; ncd.credPass = values.credPass; ncd.credPort = values.credPort;
               ncd.labelHidden = values.labelHidden; ncd.labelSize = values.labelSize;
               ncd.nodeColor = values.nodeColor;
-              nodesRef.current[idx] = { ...nodesRef.current[idx], label: values.name, custom_data: JSON.stringify(ncd) };
+              const patch: Partial<typeof nodesRef.current[number]> = { label: values.name, custom_data: JSON.stringify(ncd) };
+              if (values.kumaMonitorId !== undefined) patch.kuma_monitor_id = values.kumaMonitorId;
+              nodesRef.current[idx] = { ...nodesRef.current[idx], ...patch };
               if (LRef.current && mapRef.current) { renderNodes(LRef.current, mapRef.current); renderEdges(LRef.current, mapRef.current); }
             }
           }}

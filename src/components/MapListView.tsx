@@ -434,6 +434,19 @@ export default function MapListView({
           </a>
           </Tooltip>
 
+          {/* ── Servidores monitor-ng ── */}
+          <Tooltip content="Servidores monitor-ng (adopción)" placement="bottom">
+          <a
+            href={`${process.env.NEXT_PUBLIC_BASE_PATH || ""}/monitor-ng`}
+            className="flex h-8 w-8 items-center justify-center rounded-lg transition-all"
+            style={{ color: "var(--text-tertiary)", border: "1px solid transparent" }}
+            onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = "#e11d48"; (e.currentTarget as HTMLElement).style.borderColor = "rgba(225,29,72,0.25)"; (e.currentTarget as HTMLElement).style.background = "rgba(225,29,72,0.08)"; }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = "var(--text-tertiary)"; (e.currentTarget as HTMLElement).style.borderColor = "transparent"; (e.currentTarget as HTMLElement).style.background = "transparent"; }}
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="18" height="16" x="3" y="4" rx="2"/><path d="M3 12h4l2-5 3 9 2-4h5"/></svg>
+          </a>
+          </Tooltip>
+
           {/* ── Alert Manager ── */}
           <Tooltip content="Centro de Alertas" placement="bottom">
           <a

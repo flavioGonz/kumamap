@@ -19,6 +19,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { toast } from "@/components/ui/SileoToast";
+import { separationStyle } from "@/lib/separation";
 
 import KumaMonitorNode, { type KumaNodeData } from "./KumaMonitorNode";
 import TextLabelNode, { type TextLabelData } from "./TextLabelNode";
@@ -155,18 +156,19 @@ function CanvasInner({
         const rfEdges: Edge[] = (data.edges || []).map((e: any) => {
           const cd = e.custom_data ? JSON.parse(e.custom_data) : {};
           const lt = cd.linkType || "copper";
+          const sep = lt === "separation" ? separationStyle(cd.sepType) : null;
           const linkColors: Record<string, string> = { fiber: "#3b82f6", copper: "#22c55e", wireless: "#f97316", vpn: "#3b82f6" };
-          const edgeColor = linkColors[lt] || e.color || "#4b5563";
+          const edgeColor = sep ? sep.color : (linkColors[lt] || e.color || "#4b5563");
           return {
             id: e.id, source: e.source_node_id, target: e.target_node_id, type: "interface",
-            data: { label: e.label || undefined, sourceInterface: cd.sourceInterface || "", targetInterface: cd.targetInterface || "", linkType: lt },
+            data: { label: e.label || undefined, sourceInterface: cd.sourceInterface || "", targetInterface: cd.targetInterface || "", linkType: lt, sepKind: cd.sepKind, sepType: cd.sepType },
             style: {
               stroke: edgeColor,
-              strokeWidth: lt === "vpn" ? 4 : 2,
-              strokeDasharray: lt === "vpn" ? "2,10" : lt === "wireless" ? "6,4" : undefined,
-              strokeLinecap: lt === "vpn" ? "round" : undefined,
+              strokeWidth: sep ? sep.weight : lt === "vpn" ? 4 : 2,
+              strokeDasharray: sep ? sep.dash : lt === "vpn" ? "2,10" : lt === "wireless" ? "6,4" : undefined,
+              strokeLinecap: sep ? "butt" : lt === "vpn" ? "round" : undefined,
             } as any,
-            animated: !!e.animated,
+            animated: !sep && !!e.animated,
           };
         });
         setNodes(rfNodes);
@@ -218,6 +220,8 @@ function CanvasInner({
         const srcStatus = srcNode?.data?.status as number | undefined;
         const tgtStatus = tgtNode?.data?.status as number | undefined;
         const lt = (edge.data as any)?.linkType || "copper";
+        // Separación (paredes/canalización): anotaciones estáticas, no se recolorean por estado.
+        if (lt === "separation") return edge;
         const linkColors: Record<string, string> = { fiber: "#3b82f6", copper: "#22c55e", wireless: "#f97316", vpn: "#3b82f6" };
 
         const isDown = srcStatus === 0 || tgtStatus === 0;

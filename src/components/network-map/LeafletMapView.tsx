@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import dynamic from "next/dynamic";
 import Tooltip from "./Tooltip";
+import { SEPARATION_TYPES, separationStyle } from "@/lib/separation";
 
 // ── Heavy / conditional components — lazy loaded ──────────────────
 const TimeMachine = dynamic(() => import("./TimeMachine"), { ssr: false });
@@ -2407,16 +2408,18 @@ export default function LeafletMapView({
       const isFiber = cd.linkType === "fiber";
       const isWireless = cd.linkType === "wireless";
       const isVPN = cd.linkType === "vpn";
-      const isDown = srcStatus === 0 || tgtStatus === 0;
-      const isBothDown = srcStatus === 0 && tgtStatus === 0;
-      const isMaint = (srcStatus === 3 || tgtStatus === 3) && !isDown;
-      const isPending = (srcStatus === 2 || tgtStatus === 2) && !isDown && !isMaint;
+      const isSeparation = cd.linkType === "separation";
+      const sepStyle = isSeparation ? separationStyle(cd.sepType) : null;
+      const isDown = !isSeparation && (srcStatus === 0 || tgtStatus === 0);
+      const isBothDown = !isSeparation && srcStatus === 0 && tgtStatus === 0;
+      const isMaint = !isSeparation && (srcStatus === 3 || tgtStatus === 3) && !isDown;
+      const isPending = !isSeparation && (srcStatus === 2 || tgtStatus === 2) && !isDown && !isMaint;
 
-      let lineColor = isBothDown ? "#991b1b" : isDown ? "#ef4444" : isMaint ? "#8b5cf6" : isPending ? "#f59e0b" : isVPN ? "#3b82f6" : isFiber ? "#3b82f6" : isWireless ? "#f97316" : "#22c55e";
-      let dashArray = isDown ? "8,6" : isVPN ? "1,14" : isWireless ? "6,8" : undefined;
-      let lineCap: "round" | "butt" | "square" | undefined = isVPN ? "round" : undefined;
-      let lineWeight = isDown ? 4 : isVPN ? 5 : 3;
-      const lineOpacity = isBothDown ? 0.4 : isDown ? 0.9 : 0.9;
+      let lineColor = sepStyle ? sepStyle.color : isBothDown ? "#991b1b" : isDown ? "#ef4444" : isMaint ? "#8b5cf6" : isPending ? "#f59e0b" : isVPN ? "#3b82f6" : isFiber ? "#3b82f6" : isWireless ? "#f97316" : "#22c55e";
+      let dashArray = sepStyle ? sepStyle.dash : isDown ? "8,6" : isVPN ? "1,14" : isWireless ? "6,8" : undefined;
+      let lineCap: "round" | "butt" | "square" | undefined = sepStyle ? "butt" : isVPN ? "round" : undefined;
+      let lineWeight = sepStyle ? sepStyle.weight : isDown ? 4 : isVPN ? 5 : 3;
+      const lineOpacity = isSeparation ? 0.9 : isBothDown ? 0.4 : isDown ? 0.9 : 0.9;
 
       // Build line points — straight or bezier curve
       let linePoints: [number, number][];
@@ -2451,8 +2454,8 @@ export default function LeafletMapView({
       // ── Link click popup — shows full link details ──
       const statusLabel = (s: number | undefined) => s === -1 ? "⏸️ PAUSADO" : s === 0 ? "🔴 DOWN" : s === 1 ? "🟢 UP" : s === 2 ? "🟡 PENDING" : s === 3 ? "🟣 MAINT" : "⚪ N/A";
       const statusDot = (s: number | undefined) => s === -1 ? "#6b7280" : s === 0 ? "#ef4444" : s === 1 ? "#22c55e" : s === 2 ? "#f59e0b" : s === 3 ? "#8b5cf6" : "#666";
-      const linkTypeLabel = isFiber ? "Fibra óptica" : isWireless ? "Wireless" : isVPN ? "VPN" : "Cobre/UTP";
-      const linkTypeIcon = isFiber ? "🔵" : isWireless ? "📡" : isVPN ? "🔒" : "🟠";
+      const linkTypeLabel = isSeparation ? (sepStyle?.label || "Separación") : isFiber ? "Fibra óptica" : isWireless ? "Wireless" : isVPN ? "VPN" : "Cobre/UTP";
+      const linkTypeIcon = isSeparation ? (cd.sepKind === "canalizacion" ? "🛢️" : "🧱") : isFiber ? "🔵" : isWireless ? "📡" : isVPN ? "🔒" : "🟠";
 
       const buildPopupHtml = () => {
         const srcName = srcNode.label || "?";
@@ -4092,6 +4095,29 @@ export default function LeafletMapView({
           }
         },
       })),
+      {
+        label: "Separación (pared / canalización)",
+        icon: menuIcons.Link2,
+        divider: true,
+        onClick: () => {},
+        children: Object.entries(SEPARATION_TYPES).map(([key, s]) => ({
+          label: s.label,
+          icon: menuIcons.Link2,
+          active: cd.linkType === "separation" && cd.sepType === key,
+          onClick: () => {
+            const idx = edgesRef.current.findIndex((e) => e.id === edgeId);
+            if (idx >= 0) {
+              const oldCd = safeJsonParse<EdgeCustomData>(edgesRef.current[idx].custom_data);
+              oldCd.linkType = "separation";
+              oldCd.sepKind = s.kind;
+              oldCd.sepType = key;
+              edgesRef.current[idx] = { ...edgesRef.current[idx], custom_data: JSON.stringify(oldCd) };
+              if (LRef.current && mapRef.current) renderEdges(LRef.current, mapRef.current);
+              toast.success(s.label);
+            }
+          },
+        })),
+      },
       // Toggle traffic widget visibility
       ...(cd.snmpMonitorId ? [{
         label: cd.hideTraffic ? "Mostrar tráfico" : "Ocultar tráfico",

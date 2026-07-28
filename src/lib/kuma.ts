@@ -3,6 +3,7 @@ import type { KumaMonitor, KumaHeartbeat } from "./types";
 import { onHeartbeat as pushOnHeartbeat } from "./push-sender";
 import { onHeartbeat as whatsappOnHeartbeat } from "./whatsapp-sender";
 import { getMonitorNgVirtualMonitors } from './monitorng';
+import { fetchMonitorsFromDb, isKumaDbConfigured } from "./kuma-db";
 
 // Re-export types for backward compatibility
 export type { KumaMonitor, KumaHeartbeat } from "./types";
@@ -32,8 +33,28 @@ class KumaClient {
   /** When the socket came up but auth hasn't completed. Drives the watchdog. */
   private connectedSince: number | null = null;
 
+  /** DB fallback: when Socket.IO can't authenticate (e.g. Uptime Kuma v2), read
+   *  the monitor list + last status directly from Kuma's database. */
+  private dbConfigured = false;
+  private dbSyncId: ReturnType<typeof setInterval> | null = null;
+  private lastDbSyncAt: number | null = null;
+  private dbSyncInFlight = false;
+  private static readonly DB_SYNC_INTERVAL_MS = 20_000;
+  private static readonly DB_FRESH_MS = 90_000;
+
+  /** True when we have a live socket session OR a fresh DB snapshot. CRUD still
+   *  requires the socket (those methods check `authenticated` directly). */
   get isConnected() {
-    return this.connected && this.authenticated;
+    if (this.connected && this.authenticated) return true;
+    return this.isDbFresh();
+  }
+
+  private isDbFresh(): boolean {
+    return (
+      this.dbConfigured &&
+      this.lastDbSyncAt !== null &&
+      Date.now() - this.lastDbSyncAt < KumaClient.DB_FRESH_MS
+    );
   }
 
   /**
@@ -117,6 +138,9 @@ class KumaClient {
       lastError: this.lastError,
       pollingActive: this.pollIntervalId !== null,
       hasInitPromise: this.initPromise !== null,
+      source: this.authenticated ? "socket" : this.isDbFresh() ? "db" : "none",
+      dbConfigured: this.dbConfigured,
+      lastDbSyncAt: this.lastDbSyncAt ? new Date(this.lastDbSyncAt).toISOString() : null,
     };
   }
 
@@ -156,6 +180,7 @@ class KumaClient {
   connect(url: string, username: string, password: string): Promise<void> {
     if (this.initPromise) return this.initPromise;
     this.kumaUrl = url;
+    this.startDbSync();
 
     this.initPromise = new Promise((resolve) => {
       console.log(`[Kuma] Connecting to ${url}...`);
@@ -397,6 +422,93 @@ class KumaClient {
     return this.initPromise;
   }
 
+  /**
+   * Start the DB-fallback poller. Idempotent. When the socket can't authenticate
+   * (Uptime Kuma v2 changed the login protocol) but a Kuma DB is configured, this
+   * keeps the monitor list + statuses fresh straight from the database.
+   */
+  startDbSync(): void {
+    if (this.dbSyncId) return;
+    try {
+      this.dbConfigured = isKumaDbConfigured();
+    } catch {
+      this.dbConfigured = false;
+    }
+    if (!this.dbConfigured) return;
+    console.log("[Kuma] DB fallback enabled - syncing monitor list from Kuma DB");
+    void this.syncFromDb();
+    this.dbSyncId = setInterval(() => {
+      if (!this.authenticated) void this.syncFromDb();
+    }, KumaClient.DB_SYNC_INTERVAL_MS);
+  }
+
+  private async syncFromDb(): Promise<void> {
+    if (!this.dbConfigured || this.dbSyncInFlight) return;
+    this.dbSyncInFlight = true;
+    try {
+      const dbMons = await fetchMonitorsFromDb();
+      if (this.authenticated) return; // socket won the race; discard DB snapshot
+      if (dbMons.length === 0) return;
+
+      const liveIds = new Set<number>(dbMons.map((m) => m.id));
+      this.pruneDeleted(liveIds);
+
+      for (const m of dbMons) {
+        const monitor: KumaMonitor = {
+          id: m.id,
+          name: m.name,
+          type: m.type,
+          url: m.url,
+          hostname: m.hostname,
+          port: m.port,
+          interval: m.interval,
+          active: m.active,
+          parent: m.parent,
+          tags: m.tags,
+          status: (m.status ?? undefined) as any,
+          ping: m.ping,
+          msg: m.msg,
+          downTime: m.status === 0 ? m.downSince ?? undefined : undefined,
+          uptime24: undefined,
+          uptime: undefined,
+          avgPing: undefined,
+          certExpiryDays: undefined,
+          certValid: undefined,
+          maintenance: m.status === 3,
+        };
+        this.monitors.set(m.id, monitor);
+
+        if (m.status !== null && m.lastBeatTime) {
+          const beat: KumaHeartbeat = {
+            monitorID: m.id,
+            status: m.status,
+            time: m.lastBeatTime,
+            msg: m.msg,
+            ping: m.ping,
+            duration: 0,
+          };
+          this.heartbeats.set(m.id, beat);
+          const hist = this.heartbeatHistory.get(m.id) || [];
+          const last = hist[hist.length - 1];
+          if (!last || last.time !== beat.time) {
+            hist.push(beat);
+            if (hist.length > MAX_HISTORY) hist.shift();
+            this.heartbeatHistory.set(m.id, hist);
+          }
+        }
+      }
+
+      this.lastDbSyncAt = Date.now();
+      if (this.lastError && this.lastError.startsWith("Login timeout")) {
+        this.lastError = null;
+      }
+    } catch (err) {
+      console.error("[Kuma] DB sync failed:", err instanceof Error ? err.message : err);
+    } finally {
+      this.dbSyncInFlight = false;
+    }
+  }
+
   getMonitors(): KumaMonitor[] {
     return [...Array.from(this.monitors.values()), ...getMonitorNgVirtualMonitors()];
   }
@@ -587,6 +699,7 @@ export function getKumaClient(): KumaClient {
   if (!(process as any)[KUMA_KEY]) {
     const instance = new KumaClient();
     (process as any)[KUMA_KEY] = instance;
+    instance.startDbSync();
     const url = process.env.KUMA_URL;
     const user = process.env.KUMA_USER;
     const pass = process.env.KUMA_PASS;

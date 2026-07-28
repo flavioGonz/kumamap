@@ -352,3 +352,161 @@ export function getDbMode(): { mode: DbMode; detail: string } {
   }
   return { mode: "disabled", detail: "No DB configured — using Socket.IO only" };
 }
+
+
+// ---------------------------------------------------------------
+// Monitor list from DB (fallback when Socket.IO can't authenticate,
+// e.g. Uptime Kuma v2 changed the login protocol). Read-only snapshot.
+// ---------------------------------------------------------------
+
+export interface KumaDbMonitor {
+  id: number;
+  name: string;
+  type: string;
+  url: string;
+  hostname: string;
+  port: number;
+  interval: number;
+  active: boolean;
+  parent: number | null;
+  tags: { name: string; color: string }[];
+  status: number | null;
+  ping: number | null;
+  msg: string;
+  lastBeatTime: string | null;
+  downSince: string | null;
+}
+
+/** True when a Kuma DB (SQLite or MySQL) is configured via env. */
+export function isKumaDbConfigured(): boolean {
+  return detectMode() !== "disabled";
+}
+
+export async function fetchMonitorsFromDb(): Promise<KumaDbMonitor[]> {
+  const mode = detectMode();
+  if (mode === "mysql") return fetchMonitorsFromMysql();
+  if (mode === "sqlite") return fetchMonitorsFromSqlite();
+  return [];
+}
+
+async function fetchMonitorsFromMysql(): Promise<KumaDbMonitor[]> {
+  const db = getKumaDb();
+
+  const [monRows] = await db.query(
+    "SELECT id, name, active, `interval` AS iv, url, type, hostname, port, parent FROM monitor"
+  );
+  const [beatRows] = await db.query(
+    `SELECT h.monitor_id AS mid, h.status AS status,
+            DATE_FORMAT(h.time, '%Y-%m-%dT%H:%i:%sZ') AS t,
+            h.ping AS ping, h.msg AS msg
+     FROM heartbeat h
+     JOIN (SELECT monitor_id, MAX(id) AS mx FROM heartbeat GROUP BY monitor_id) l
+       ON h.id = l.mx`
+  );
+  const [tagRows] = await db.query(
+    `SELECT mt.monitor_id AS mid, t.name AS name, t.color AS color
+     FROM monitor_tag mt JOIN tag t ON t.id = mt.tag_id`
+  );
+
+  const beats = new Map<number, any>();
+  for (const b of beatRows as any[]) beats.set(b.mid, b);
+
+  const tags = new Map<number, { name: string; color: string }[]>();
+  for (const tg of tagRows as any[]) {
+    if (!tags.has(tg.mid)) tags.set(tg.mid, []);
+    tags.get(tg.mid)!.push({ name: tg.name, color: tg.color });
+  }
+
+  const downIds: number[] = [];
+  const result: KumaDbMonitor[] = (monRows as any[]).map((m) => {
+    const b = beats.get(m.id);
+    const status = b ? Number(b.status) : null;
+    if (status === 0) downIds.push(Number(m.id));
+    return {
+      id: Number(m.id),
+      name: m.name,
+      type: m.type,
+      url: m.url || "",
+      hostname: m.hostname || "",
+      port: Number(m.port) || 0,
+      interval: Number(m.iv) || 60,
+      active: m.active === 1 || m.active === true,
+      parent: m.parent != null ? Number(m.parent) : null,
+      tags: tags.get(m.id) || [],
+      status,
+      ping: b && b.ping != null ? Number(b.ping) : null,
+      msg: (b && b.msg) || "",
+      lastBeatTime: b ? b.t : null,
+      downSince: null,
+    };
+  });
+
+  if (downIds.length > 0) {
+    try {
+      const ds = await fetchDownSinceTimes(downIds);
+      for (const r of result) {
+        if (r.status === 0) r.downSince = ds.get(r.id) || null;
+      }
+    } catch {
+      // down-since is a nice-to-have; ignore failures
+    }
+  }
+
+  return result;
+}
+
+function fetchMonitorsFromSqlite(): KumaDbMonitor[] {
+  const db = getSqliteDb();
+  const monRows = db
+    .prepare("SELECT id, name, active, `interval` AS iv, url, type, hostname, port, parent FROM monitor")
+    .all() as any[];
+  const beatRows = db
+    .prepare(
+      `SELECT h.monitor_id AS mid, h.status AS status, h.time AS t, h.ping AS ping, h.msg AS msg
+       FROM heartbeat h
+       JOIN (SELECT monitor_id, MAX(id) AS mx FROM heartbeat GROUP BY monitor_id) l
+         ON h.id = l.mx`
+    )
+    .all() as any[];
+  const tagRows = db
+    .prepare(
+      `SELECT mt.monitor_id AS mid, t.name AS name, t.color AS color
+       FROM monitor_tag mt JOIN tag t ON t.id = mt.tag_id`
+    )
+    .all() as any[];
+
+  const beats = new Map<number, any>();
+  for (const b of beatRows) beats.set(b.mid, b);
+  const tags = new Map<number, { name: string; color: string }[]>();
+  for (const tg of tagRows) {
+    if (!tags.has(tg.mid)) tags.set(tg.mid, []);
+    tags.get(tg.mid)!.push({ name: tg.name, color: tg.color });
+  }
+
+  return monRows.map((m) => {
+    const b = beats.get(m.id);
+    const status = b ? Number(b.status) : null;
+    let lastBeatTime: string | null = null;
+    if (b && b.t) {
+      const s = String(b.t);
+      lastBeatTime = s.includes("T") ? s : s.replace(" ", "T") + "Z";
+    }
+    return {
+      id: Number(m.id),
+      name: m.name,
+      type: m.type,
+      url: m.url || "",
+      hostname: m.hostname || "",
+      port: Number(m.port) || 0,
+      interval: Number(m.iv) || 60,
+      active: m.active === 1 || m.active === true,
+      parent: m.parent != null ? Number(m.parent) : null,
+      tags: tags.get(m.id) || [],
+      status,
+      ping: b && b.ping != null ? Number(b.ping) : null,
+      msg: (b && b.msg) || "",
+      lastBeatTime,
+      downSince: null,
+    };
+  });
+}

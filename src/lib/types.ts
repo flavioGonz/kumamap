@@ -166,7 +166,11 @@ export interface RackDeviceSummary {
 
 /** Parsed shape of `edge.custom_data` for link/edge metadata. */
 export interface EdgeCustomData {
-  linkType?: "ethernet" | "fiber" | "wireless" | "vpn" | string;
+  linkType?: "ethernet" | "fiber" | "copper" | "wireless" | "vpn" | "separation" | string;
+  /** For linkType "separation": wall vs conduit/tray. Static annotation, never status-colored. */
+  sepKind?: "pared" | "canalizacion";
+  /** For linkType "separation": specific material/conduit subtype (key into SEPARATION_TYPES). */
+  sepType?: string;
   sourceInterface?: string;
   targetInterface?: string;
   snmpMonitorId?: number;

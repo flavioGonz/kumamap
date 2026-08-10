@@ -274,16 +274,13 @@ export default function LeafletMapView({
   const isImageMode = !!imageBackground;
   // ── Láser / medición / calibración ──
   const [laserActive, setLaserActive] = useState(false);
-  const [measureActive, setMeasureActive] = useState(false);
   const [rulerPts, setRulerPts] = useState<[number, number][]>([]);
   const [calibrateMode, setCalibrateMode] = useState(false);
   const [calibMeters, setCalibMeters] = useState("");
   const backgroundTypeRef = useRef<MapBackgroundType>(backgroundType);
   const scaleMPerUnitRef = useRef<number | null>(scaleMPerUnit);
-  const measureActiveRef = useRef(false);
   useEffect(() => { backgroundTypeRef.current = backgroundType; }, [backgroundType]);
   useEffect(() => { scaleMPerUnitRef.current = scaleMPerUnit; }, [scaleMPerUnit]);
-  useEffect(() => { measureActiveRef.current = measureActive; }, [measureActive]);
   // Auto-refresh after 20 min idle to prevent memory leaks from Leaflet markers
   useAutoRefresh(20);
 
@@ -3240,8 +3237,10 @@ export default function LeafletMapView({
     const map = mapRef.current;
     if (!map) return 0;
     if (isImageMode) {
-      // Image mode: Euclidean pixel distance
-      return Math.sqrt((p2[0] - p1[0]) ** 2 + (p2[1] - p1[1]) ** 2);
+      // Image mode: Euclidean pixel distance, convertida a metros si el plano está calibrado
+      const px = Math.sqrt((p2[0] - p1[0]) ** 2 + (p2[1] - p1[1]) ** 2);
+      const mpu = scaleMPerUnitRef.current;
+      return (mpu != null && mpu > 0) ? px * mpu : px;
     }
     // Geo mode: use Leaflet's haversine distance → meters
     return map.distance(p1, p2);
@@ -3279,7 +3278,8 @@ export default function LeafletMapView({
       const segDist = calcDistance(prev, curr);
       const midLat = (prev[0] + curr[0]) / 2;
       const midLng = (prev[1] + curr[1]) / 2;
-      const labelText = isImageMode ? `${segDist.toFixed(0)} px` : formatDistance(segDist);
+      const uncal = isImageMode && !(scaleMPerUnitRef.current != null && scaleMPerUnitRef.current > 0);
+      const labelText = uncal ? `${segDist.toFixed(0)} px` : formatDistance(segDist);
       const label = L.marker([midLat, midLng], {
         icon: L.divIcon({
           className: "measure-label",
@@ -3303,7 +3303,8 @@ export default function LeafletMapView({
       let totalDist = 0;
       for (let i = 1; i < pts.length; i++) totalDist += calcDistance(pts[i - 1], pts[i]);
       if (pts.length >= 3) {
-        const totalText = isImageMode ? `Total: ${totalDist.toFixed(0)} px` : `Total: ${formatDistance(totalDist)}`;
+        const uncalT = isImageMode && !(scaleMPerUnitRef.current != null && scaleMPerUnitRef.current > 0);
+        const totalText = uncalT ? `Total: ${totalDist.toFixed(0)} px` : `Total: ${formatDistance(totalDist)}`;
         const totalLabel = L.marker(curr, {
           icon: L.divIcon({
             className: "measure-total-label",
@@ -3324,7 +3325,8 @@ export default function LeafletMapView({
     if (pts.length >= 2) {
       let totalDist = 0;
       for (let i = 1; i < pts.length; i++) totalDist += calcDistance(pts[i - 1], pts[i]);
-      const totalText = isImageMode ? `${totalDist.toFixed(0)} px` : formatDistance(totalDist);
+      const uncalF = isImageMode && !(scaleMPerUnitRef.current != null && scaleMPerUnitRef.current > 0);
+      const totalText = uncalF ? `${totalDist.toFixed(0)} px` : formatDistance(totalDist);
       toast.success(`Distancia total: ${totalText}`, { duration: 8000 });
     }
     setMeasureMode(false);
@@ -4337,8 +4339,8 @@ export default function LeafletMapView({
       {/* ── Puntero láser (editor + kiosko) ── */}
       <LaserPointer containerRef={containerRef} active={laserActive} onToggle={setLaserActive} />
 
-      {/* ── Regla / Calibración: overlay que captura clicks por encima de Leaflet ── */}
-      {(measureActive || calibrateMode) && (
+      {/* ── Calibración: overlay que captura clicks para dibujar la referencia ── */}
+      {calibrateMode && (
         <div
           className="absolute inset-0 cursor-crosshair"
           style={{ zIndex: 1200 }}
@@ -4371,79 +4373,36 @@ export default function LeafletMapView({
         </div>
       )}
 
-      {/* ── Cluster de herramientas: láser / regla / calibración ── */}
-      <div className="absolute left-3 bottom-3 flex flex-col gap-1.5" style={{ zIndex: 1300 }}>
-        <button
-          title="Puntero láser (tecla L)"
-          onClick={() => setLaserActive((v) => !v)}
-          className="flex items-center justify-center rounded-lg"
-          style={{ width: 34, height: 34, fontSize: 15, background: laserActive ? "rgba(239,68,68,0.92)" : "rgba(17,24,39,0.9)", border: "1px solid rgba(255,255,255,0.12)", boxShadow: "0 2px 8px rgba(0,0,0,0.4)" }}
-        >🔴</button>
-        <button
-          title="Medir distancia"
-          onClick={() => { setCalibrateMode(false); setRulerPts([]); setMeasureActive((v) => !v); }}
-          className="flex items-center justify-center rounded-lg"
-          style={{ width: 34, height: 34, fontSize: 15, background: measureActive ? "rgba(245,158,11,0.92)" : "rgba(17,24,39,0.9)", border: "1px solid rgba(255,255,255,0.12)", boxShadow: "0 2px 8px rgba(0,0,0,0.4)" }}
-        >📏</button>
-        {!readonly && onSaveScale && backgroundType !== "livemap" && (
-          <button
-            title="Calibrar escala del plano"
-            onClick={() => { setMeasureActive(false); setRulerPts([]); setCalibrateMode((v) => !v); }}
-            className="flex items-center justify-center rounded-lg"
-            style={{ width: 34, height: 34, fontSize: 15, background: calibrateMode ? "rgba(56,189,248,0.92)" : "rgba(17,24,39,0.9)", border: "1px solid rgba(255,255,255,0.12)", boxShadow: "0 2px 8px rgba(0,0,0,0.4)" }}
-          >🎯</button>
-        )}
-      </div>
-
-      {/* ── Badge de medición / calibración ── */}
-      {(measureActive || calibrateMode) && (
-        <div className="absolute left-16 bottom-3 rounded-lg px-3 py-2" style={{ zIndex: 1300, background: "rgba(17,24,39,0.94)", color: "#e5e7eb", border: "1px solid rgba(255,255,255,0.12)", boxShadow: "0 4px 16px rgba(0,0,0,0.5)", maxWidth: 260 }}>
+      {/* ── Badge de calibración (los controles viven en el menú Dibujar) ── */}
+      {calibrateMode && (
+        <div className="absolute left-3 bottom-16 rounded-lg px-3 py-2" style={{ zIndex: 1300, background: "rgba(17,24,39,0.94)", color: "#e5e7eb", border: "1px solid rgba(255,255,255,0.12)", boxShadow: "0 4px 16px rgba(0,0,0,0.5)", maxWidth: 260 }}>
           {(() => {
             const m = mapRef.current;
-            let total: number | null = null;
             let firstRaw: number | null = null;
-            if (m && rulerPts.length >= 2) {
-              total = 0;
-              for (let i = 1; i < rulerPts.length; i++) {
-                const d = measure(m, rulerPts[i - 1], rulerPts[i], backgroundTypeRef.current, scaleMPerUnitRef.current);
-                if (d.meters == null) { total = null; break; }
-                total += d.meters;
-              }
-              firstRaw = m.distance(rulerPts[0] as any, rulerPts[1] as any);
-            }
-            if (calibrateMode) {
-              if (rulerPts.length < 2) {
-                return <div style={{ fontSize: 11 }}>🎯 Dibujá una referencia de <b>largo conocido</b> — 2 clics sobre el plano.</div>;
-              }
-              return (
-                <div style={{ fontSize: 11 }}>
-                  <div style={{ marginBottom: 6 }}>Largo real de la referencia:</div>
-                  <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                    <input value={calibMeters} onChange={(e) => setCalibMeters(e.target.value)} placeholder="metros" inputMode="decimal"
-                      style={{ width: 70, padding: "3px 6px", borderRadius: 6, background: "rgba(0,0,0,0.4)", border: "1px solid rgba(255,255,255,0.15)", color: "#fff", fontSize: 12 }} />
-                    <span style={{ fontSize: 11, color: "#9ca3af" }}>m</span>
-                    <button
-                      onClick={() => {
-                        const meters = parseFloat(calibMeters.replace(",", "."));
-                        const mpu = firstRaw != null ? calibrationFromReference(firstRaw, meters) : null;
-                        if (mpu == null) { toast.error("Valor inválido"); return; }
-                        onSaveScale?.(mpu);
-                        setCalibrateMode(false); setRulerPts([]); setCalibMeters("");
-                      }}
-                      style={{ padding: "3px 10px", borderRadius: 6, background: "#38bdf8", color: "#04283a", fontWeight: 700, fontSize: 11 }}
-                    >Guardar</button>
-                  </div>
-                  <button onClick={() => setRulerPts([])} style={{ marginTop: 6, fontSize: 10, color: "#9ca3af" }}>↺ rehacer</button>
-                </div>
-              );
+            if (m && rulerPts.length >= 2) firstRaw = m.distance(rulerPts[0] as any, rulerPts[1] as any);
+            if (rulerPts.length < 2) {
+              return <div style={{ fontSize: 11 }}>🎯 Dibujá una referencia de <b>largo conocido</b> — 2 clics sobre el plano.</div>;
             }
             return (
               <div style={{ fontSize: 11 }}>
-                <div style={{ fontWeight: 700, fontSize: 13 }}>📏 {total != null ? formatMeters(total) : "Clic para medir…"}</div>
-                {total == null && backgroundType !== "livemap" && scaleMPerUnit == null && rulerPts.length >= 2 && (
-                  <div style={{ color: "#f59e0b", marginTop: 3 }}>Sin calibrar — usá 🎯 para fijar la escala.</div>
-                )}
-                <div style={{ color: "#9ca3af", marginTop: 4, fontSize: 10 }}>Clic: agregar punto · Clic derecho: limpiar</div>
+                <div style={{ marginBottom: 6 }}>Largo real de la referencia:</div>
+                <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                  <input value={calibMeters} onChange={(e) => setCalibMeters(e.target.value)} placeholder="metros" inputMode="decimal"
+                    style={{ width: 70, padding: "3px 6px", borderRadius: 6, background: "rgba(0,0,0,0.4)", border: "1px solid rgba(255,255,255,0.15)", color: "#fff", fontSize: 12 }} />
+                  <span style={{ fontSize: 11, color: "#9ca3af" }}>m</span>
+                  <button
+                    onClick={() => {
+                      const meters = parseFloat(calibMeters.replace(",", "."));
+                      const mpu = firstRaw != null ? calibrationFromReference(firstRaw, meters) : null;
+                      if (mpu == null) { toast.error("Valor inválido"); return; }
+                      onSaveScale?.(mpu);
+                      setCalibrateMode(false); setRulerPts([]); setCalibMeters("");
+                    }}
+                    style={{ padding: "3px 10px", borderRadius: 6, background: "#38bdf8", color: "#04283a", fontWeight: 700, fontSize: 11 }}
+                  >Guardar</button>
+                  <button onClick={() => { setCalibrateMode(false); setRulerPts([]); }} title="Cancelar" style={{ fontSize: 12, color: "#9ca3af" }}>✕</button>
+                </div>
+                <button onClick={() => setRulerPts([])} style={{ marginTop: 6, fontSize: 10, color: "#9ca3af" }}>↺ rehacer</button>
               </div>
             );
           })()}
@@ -4895,6 +4854,26 @@ export default function LeafletMapView({
                 }
               }}
             />
+            <DropdownItem
+              icon={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="2.5"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>}
+              label={laserActive ? "Apagar láser" : "Puntero láser (L)"}
+              active={laserActive}
+              onClick={() => { setActiveDropdown(null); setLaserActive(v => !v); }}
+            />
+            {!readonly && onSaveScale && backgroundType !== "livemap" && (
+              <DropdownItem
+                icon={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="8"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg>}
+                label={calibrateMode ? "Cancelar calibración" : (scaleMPerUnit ? "Recalibrar escala" : "Calibrar escala")}
+                active={calibrateMode}
+                onClick={() => {
+                  setActiveDropdown(null);
+                  if (calibrateMode) { setCalibrateMode(false); setRulerPts([]); return; }
+                  if (measureMode) finishMeasurement();
+                  setRulerPts([]); setCalibrateMode(true);
+                  toast.info("Dibujá una referencia de largo conocido (2 clics) y poné los metros.", { duration: 5000 });
+                }}
+              />
+            )}
           </ToolbarDropdown>
 
           {/* ── "Mapa" dropdown ── */}

@@ -68,6 +68,7 @@ try { db.exec(`ALTER TABLE network_maps ADD COLUMN view_state TEXT`); } catch { 
 try { db.exec(`ALTER TABLE network_maps ADD COLUMN parent_id TEXT REFERENCES network_maps(id) ON DELETE SET NULL`); } catch { /* already exists */ }
 try { db.exec(`ALTER TABLE network_maps ADD COLUMN background_blob BLOB`); } catch { /* already exists */ }
 try { db.exec(`ALTER TABLE network_maps ADD COLUMN background_mime TEXT`); } catch { /* already exists */ }
+try { db.exec(`ALTER TABLE network_maps ADD COLUMN scale_m_per_unit REAL`); } catch { /* already exists */ }
 
 // Auto-migrate: import existing file-based backgrounds into DB blobs
 (() => {
@@ -102,6 +103,8 @@ export interface NetworkMap {
   background_scale: number;
   background_offset_x: number;
   background_offset_y: number;
+  /** Metros por unidad de mapa (CRS.Simple) para mapas image/grid; null = sin calibrar. */
+  scale_m_per_unit: number | null;
   kuma_group_id: number | null;
   parent_id: string | null;
   width: number;
@@ -136,7 +139,7 @@ export interface MapEdge {
 }
 
 // Columns to select in normal queries (excludes heavy background_blob)
-const MAP_COLS = `id, name, background_type, background_image, background_mime, background_scale, background_offset_x, background_offset_y, kuma_group_id, parent_id, view_state, width, height, created_at, updated_at`;
+const MAP_COLS = `id, name, background_type, background_image, background_mime, background_scale, background_offset_x, background_offset_y, scale_m_per_unit, kuma_group_id, parent_id, view_state, width, height, created_at, updated_at`;
 
 export const mapsDb = {
   getAll(): NetworkMap[] {
@@ -191,7 +194,7 @@ export const mapsDb = {
     data: Partial<
       Pick<
         NetworkMap,
-        "name" | "background_type" | "background_image" | "width" | "height" | "parent_id"
+        "name" | "background_type" | "background_image" | "width" | "height" | "parent_id" | "scale_m_per_unit"
       >
     >
   ): NetworkMap | undefined {

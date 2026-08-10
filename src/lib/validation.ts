@@ -19,6 +19,7 @@ export const updateMapSchema = z
     parent_id: z.union([z.string(), z.null()]).optional(),
     width: z.number().positive().optional(),
     height: z.number().positive().optional(),
+    scale_m_per_unit: z.union([z.number().positive(), z.null()]).optional(),
   })
   .strict();
 

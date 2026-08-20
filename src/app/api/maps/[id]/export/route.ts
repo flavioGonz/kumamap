@@ -12,12 +12,38 @@ export async function GET(
   const nodes = mapsDb.getNodes(id);
   const edges = mapsDb.getEdges(id);
 
+  // ── Imagen de fondo (mapas tipo foto/plano) ──
+  // Se embebe en base64 para que el JSON exportado sea autocontenido y el
+  // importado NO quede en blanco. Se omite si supera el limite razonable.
+  const MAX_EMBED_BYTES = 12 * 1024 * 1024; // 12 MB
+  let backgroundData: string | null = null;
+  let backgroundTruncated = false;
+  if (map.background_type === "image") {
+    const bg = mapsDb.getBackgroundBlob(id);
+    if (bg?.blob) {
+      if (bg.blob.length <= MAX_EMBED_BYTES) {
+        backgroundData = bg.blob.toString("base64");
+      } else {
+        backgroundTruncated = true;
+      }
+    }
+  }
+
   const exportData = {
     _format: "kumamap-v1",
     _exportedAt: new Date().toISOString(),
     map: {
       name: map.name,
       background_type: map.background_type,
+      background_image: map.background_image,
+      background_mime: (map as any).background_mime || null,
+      background_scale: map.background_scale ?? 1,
+      background_offset_x: map.background_offset_x ?? 0,
+      background_offset_y: map.background_offset_y ?? 0,
+      scale_m_per_unit: (map as any).scale_m_per_unit ?? null,
+      /** Imagen de fondo embebida (base64, sin prefijo data:) */
+      background_data: backgroundData,
+      background_omitted: backgroundTruncated || undefined,
       kuma_group_id: map.kuma_group_id,
       width: map.width,
       height: map.height,

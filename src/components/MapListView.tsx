@@ -191,8 +191,30 @@ export default function MapListView({
   };
 
   // ── Clone map ──
+  // Usa el endpoint server-side /clone, que copia el mapa entero incluida la
+  // imagen de fondo (blob en DB). El camino viejo (export → import) sólo
+  // serializaba `background_type`, por lo que los mapas tipo foto se clonaban
+  // en blanco. Se mantiene como fallback para backends sin el endpoint nuevo.
   const cloneMap = async (map: MapSummary) => {
     try {
+      const res = await fetch(apiUrl(`/api/maps/${map.id}/clone`), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: `${map.name} (copia)` }),
+      });
+
+      if (res.ok) {
+        toast.success("Mapa clonado", { description: `${map.name} (copia)` });
+        fetchMaps();
+        return;
+      }
+
+      if (res.status !== 404 && res.status !== 405) {
+        toast.error("Error al clonar mapa", { description: `HTTP ${res.status}` });
+        return;
+      }
+
+      // ── Fallback legacy: export → import ──
       const data = await safeFetch<Record<string, unknown>>(apiUrl(`/api/maps/${map.id}/export`), undefined, "CloneExport");
       if (!data) { toast.error("Error al clonar mapa"); return; }
       const imported = await safeFetch(apiUrl("/api/maps/import"), {

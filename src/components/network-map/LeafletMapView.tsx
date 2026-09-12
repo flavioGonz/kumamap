@@ -580,7 +580,22 @@ export default function LeafletMapView({
   // Antenna config modal + SNMP wireless panel
   const [antennaConfigNodeId, setAntennaConfigNodeId] = useState<string | null>(null);
   const [antennaSnmpNodeId, setAntennaSnmpNodeId] = useState<string | null>(null);
-  const [upsPanelState, setUpsPanelState] = useState<{ nodeId: string; x: number; y: number } | null>(null);
+  /** Varios paneles de UPS a la vez. Los fijados vuelven solos al entrar al mapa. */
+  const [upsPaneles, setUpsPaneles] = useState<Array<{ nodeId: string; x: number; y: number }>>([]);
+  useEffect(() => {
+    const fijados = initialNodes
+      .filter((n) => n.icon === "ups")
+      .map((n) => ({ n, cd: safeJsonParse<NodeCustomData>(n.custom_data) }))
+      .filter(({ cd }) => cd.upsPanelFijo && cd.ip)
+      .map(({ n, cd }) => ({
+        nodeId: n.id,
+        x: Array.isArray(cd.upsPanelPos) ? cd.upsPanelPos[0] : 0,
+        y: Array.isArray(cd.upsPanelPos) ? cd.upsPanelPos[1] : 0,
+      }));
+    if (fijados.length) setUpsPaneles(fijados);
+    // Solo al montar: a partir de ahi los abre y cierra el usuario.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [upsConfigNodeId, setUpsConfigNodeId] = useState<string | null>(null);
   const [streamViewers, setStreamViewers] = useState<{ nodeId: string; mode: "tooltip" | "pip" }[]>([]);
   const [focusedViewer, setFocusedViewer] = useState<string | null>(null);
@@ -4029,7 +4044,7 @@ export default function LeafletMapView({
             if (upsCd.ip) {
               const cx = ctxMenu?.x ?? 400;
               const cy = ctxMenu?.y ?? 200;
-              setUpsPanelState({ nodeId, x: cx, y: cy });
+              setUpsPaneles((ps) => ps.some((p) => p.nodeId === nodeId) ? ps : [...ps, { nodeId, x: cx, y: cy }]);
             } else {
               toast.info("Configura la UPS (IP o host NUT) para monitorearla", { id: "ups-noip" });
               setUpsConfigNodeId(nodeId);
@@ -5606,23 +5621,44 @@ export default function LeafletMapView({
         );
       })()}
 
-      {/* ── UPS Panel ── */}
-      {upsPanelState && (() => {
-        const upsNode = nodesRef.current.find((n) => n.id === upsPanelState.nodeId);
+      {/* ── Paneles de UPS ── */}
+      {upsPaneles.map((pan) => {
+        const upsNode = nodesRef.current.find((n) => n.id === pan.nodeId);
         const upsCd = safeJsonParse<NodeCustomData>(upsNode?.custom_data);
         if (!upsCd.ip) return null;
+        const guardada = Array.isArray(upsCd.upsPanelPos)
+          ? { left: upsCd.upsPanelPos[0], top: upsCd.upsPanelPos[1] }
+          : null;
+        // Fijar y mover escriben en el nodo y guardan: si no se guarda, al
+        // recargar el mapa el panel no vuelve y la promesa del pin se rompe.
+        const anotar = (cambios: Partial<NodeCustomData>) => {
+          const idx = nodesRef.current.findIndex((n) => n.id === pan.nodeId);
+          if (idx < 0) return;
+          const cd = safeJsonParse<NodeCustomData>(nodesRef.current[idx].custom_data);
+          nodesRef.current[idx] = {
+            ...nodesRef.current[idx],
+            custom_data: JSON.stringify({ ...cd, ...cambios }),
+          };
+          if (!readonly) handleSave();
+          setUpsPaneles((ps) => [...ps]);
+        };
         return (
           <UpsPanel
-            nodeId={upsPanelState.nodeId}
+            key={pan.nodeId}
+            nodeId={pan.nodeId}
             ip={upsCd.ip as string}
             upsName={upsNode?.label || "UPS"}
-            anchorX={upsPanelState.x}
-            anchorY={upsPanelState.y}
-            onClose={() => setUpsPanelState(null)}
-            onConfigure={() => setUpsConfigNodeId(upsPanelState.nodeId)}
+            anchorX={pan.x || undefined}
+            anchorY={pan.y || undefined}
+            posGuardada={guardada}
+            fijado={!!upsCd.upsPanelFijo}
+            onFijar={(v, pos) => anotar({ upsPanelFijo: v, upsPanelPos: [pos.left, pos.top] })}
+            onMover={(pos) => { if (upsCd.upsPanelFijo) anotar({ upsPanelPos: [pos.left, pos.top] }); }}
+            onClose={() => setUpsPaneles((ps) => ps.filter((p) => p.nodeId !== pan.nodeId))}
+            onConfigure={() => setUpsConfigNodeId(pan.nodeId)}
           />
         );
-      })()}
+      })}
 
       {/* ── UPS Config Modal ── */}
       {upsConfigNodeId && (() => {

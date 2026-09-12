@@ -5,6 +5,7 @@ import { Server as SocketIOServer } from "socket.io";
 import { getKumaClient, type KumaMonitor, type KumaHeartbeat } from "./src/lib/kuma";
 import webpush from "web-push";
 import { getAllSubscriptions, removeSubscription } from "./src/lib/push-store";
+import { iniciarReceptorDeTraps } from "./src/lib/traps";
 
 const dev = process.env.NODE_ENV !== "production";
 const port = parseInt(process.env.PORT || "3000", 10);
@@ -111,6 +112,11 @@ app.prepare().then(() => {
       });
     }
   }
+
+  // Receptor de traps SNMP: el equipo avisa solo, sin que nadie le pregunte.
+  iniciarReceptorDeTraps((trap) => {
+    io.emit("trap:nuevo", trap);
+  });
 
   io.on("connection", (socket) => {
     console.log(`[Socket.IO] Client connected: ${socket.id}`);

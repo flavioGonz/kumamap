@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useSinMarco } from "@/components/AppShell";
 import Link from "next/link";
 import { apiUrl } from "@/lib/api";
-import { snapshotSrc, streamSrc } from "@/lib/camera-url";
+import { snapshotSrc, streamSrc, streamSrcVivo, tieneVideo } from "@/lib/camera-url";
 
 // ─── Types ─────────────────────────────────────
 interface CameraInfo {
@@ -488,7 +488,8 @@ function FullscreenViewer({ camera, onClose, onPrev, onNext, label, rackNvrs }: 
   const loadingRef = useRef(false);
   const recording = findRecordingNvr(camera, rackNvrs);
 
-  const getStreamSrc = useCallback((): string => streamSrc(camera), [camera]);
+  // En grande se mira de verdad: mas cuadros y mas resolucion que en el muro.
+  const getStreamSrc = useCallback((): string => streamSrcVivo(camera), [camera]);
 
   useEffect(() => {
     if (camera.streamType !== "snapshot") return;
@@ -841,6 +842,8 @@ export default function CamerasPage() {
 
   // Drag & drop
   const [cameraOrder, setCameraOrder] = useState<CameraInfo[]>([]);
+  /** Nodos de camara del mapa que nunca se configuraron para video. */
+  const [sinVideo, setSinVideo] = useState<CameraInfo[]>([]);
   const [dragIdx, setDragIdx] = useState<number | null>(null);
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
 
@@ -870,7 +873,10 @@ export default function CamerasPage() {
         const bHas = b.streamUrl && b.streamType && b.streamType !== "nvr" ? 0 : 1;
         return aHas - bHas;
       });
-      setCameraOrder(sorted);
+      // Las que no tienen video no van al muro: serian recuadros negros para
+      // siempre. Se cuentan aparte para que se sepa que estan y falta configurarlas.
+      setCameraOrder(sorted.filter((c) => tieneVideo(c) || c.streamType === "nvr"));
+      setSinVideo(sorted.filter((c) => !tieneVideo(c) && c.streamType !== "nvr"));
       setCurrentPage(0);
     }
   }, [selectedMap]);
@@ -1143,6 +1149,13 @@ export default function CamerasPage() {
       <footer className="shrink-0 flex items-center justify-between px-3 py-0.5" style={{ background: "linear-gradient(180deg, #0f0f1a 0%, #1a1a2e 100%)", borderTop: "1px solid #2a2a3e" }}>
         <div className="flex items-center gap-3">
           <span className="text-[9px] font-mono text-white/20">{cameraOrder.length} CH</span>
+          {sinVideo.length > 0 && (
+            <span className="text-[9px] font-mono" style={{ color: "#f59e0b" }}
+              title={sinVideo.map((c) => c.label + (c.ip ? ` (${c.ip})` : "")).join(", ") +
+                     " — son nodos de camara del mapa sin stream configurado"}>
+              {sinVideo.length} SIN VIDEO
+            </span>
+          )}
           <div className="h-2.5 w-px" style={{ background: "#2a2a3e" }} />
           <span className="text-[9px] font-mono text-white/20">
             CH{String(pageStart + 1).padStart(2, "0")}–CH{String(Math.min(pageStart + perPage, cameraOrder.length)).padStart(2, "0")}

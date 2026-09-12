@@ -5784,6 +5784,8 @@ export default function LeafletMapView({
             anchorY={pan.y || undefined}
             posGuardada={guardada}
             fijado={!!upsCd.upsPanelFijo}
+            mini={!!upsCd.upsPanelMini}
+            onMini={(v) => anotar({ upsPanelMini: v })}
             onFijar={(v, pos) => anotar({ upsPanelFijo: v, upsPanelPos: [pos.left, pos.top] })}
             onMover={(pos) => { if (upsCd.upsPanelFijo) anotar({ upsPanelPos: [pos.left, pos.top] }); }}
             onClose={() => setUpsPaneles((ps) => ps.filter((p) => p.nodeId !== pan.nodeId))}

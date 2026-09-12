@@ -28,6 +28,8 @@ interface CameraInfo {
    * credentials never leave the server. See src/lib/stream-token.ts.
    */
   streamRef?: string;
+  /** Igual que streamRef pero apuntando al sub-stream, cuando el equipo tiene uno. */
+  streamRefBaja?: string;
 }
 
 interface NvrChannelApi {
@@ -69,6 +71,21 @@ interface MapInfo {
 }
 
 // ─── Helpers ───────────────────────────────────
+/**
+ * El sub-stream, cuando se puede deducir con certeza. No se adivina: si el
+ * formato no es uno conocido se devuelve null y se usa el principal, que igual
+ * sale escalado por ffmpeg.
+ *   Hikvision  /Streaming/Channels/101  ->  102
+ *   Dahua      ...subtype=0             ->  subtype=1
+ */
+function urlDeSubStream(url: string): string | null {
+  if (!url) return null;
+  const hik = url.match(/(\/Streaming\/Channels\/)(\d)0?1(\b|$|\?)/);
+  if (hik) return url.replace(/(\/Streaming\/Channels\/)(\d)0?1(\b|$|\?)/, "$1$202$3");
+  if (/[?&]subtype=0(\b|&|$)/.test(url)) return url.replace(/([?&]subtype=)0(\b|&|$)/, "$11$2");
+  return null;
+}
+
 function extractIpFromUrl(url: string): string {
   try {
     const match = url.match(/:\/\/(?:[^:@]+(?::[^@]+)?@)?([^:/\s]+)/);
@@ -131,6 +148,7 @@ export async function GET(req: NextRequest) {
             mgmtUser: data.mgmtUser,
             mgmtPassword: data.mgmtPassword,
             streamRef: mintStreamRef(streamUrl),
+            streamRefBaja: (() => { const b = urlDeSubStream(streamUrl); return b ? mintStreamRef(b) : undefined; })(),
           });
           mapCameraCount++;
         }
@@ -162,6 +180,7 @@ export async function GET(req: NextRequest) {
                 nvrNodeId: node.id,
                 nvrChannel: chId,
                 streamRef: mintStreamRef(rtspUrl),
+                streamRefBaja: (() => { const b = urlDeSubStream(rtspUrl); return b ? mintStreamRef(b) : undefined; })(),
               });
             }
           } else {

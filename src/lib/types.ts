@@ -128,6 +128,8 @@ export interface NodeCustomData {
 
   // Panel de UPS fijado al mapa: vuelve a abrirse solo al entrar
   upsPanelFijo?: boolean;
+  /** Contraído: sólo el renglón de resumen, para poder fijar varias UPS. */
+  upsPanelMini?: boolean;
   upsPanelPos?: [number, number];
 
   // Credentials (stored locally)

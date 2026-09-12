@@ -16,7 +16,7 @@
 import { useState, useEffect, useCallback, useRef, memo } from "react";
 import {
   X, RefreshCw, Zap, Thermometer, Clock, Activity, AlertTriangle,
-  Plug, Gauge, Settings, Pin, PinOff,
+  Plug, Gauge, Settings, Pin, PinOff, ChevronDown, ChevronUp,
 } from "lucide-react";
 import { apiUrl } from "@/lib/api";
 import { getSocket } from "@/lib/socket";
@@ -36,6 +36,7 @@ const AMBAR = "#f59e0b";
 const ROJO = "#ef4444";
 
 const ANCHO = 344;
+const ANCHO_MINI = 238;
 const GRAF_W = ANCHO - 26;   // ancho útil dentro del panel
 const GRAF_H = 52;
 
@@ -177,6 +178,8 @@ function inyectar() {
       color:rgba(255,255,255,.5);cursor:pointer;transition:color .12s,background .12s}
     .ups-btn:hover{color:#e7edf6;background:rgba(255,255,255,.09)}
     .ups-btn.act{color:${AZUL};border-color:${AZUL}55;background:${AZUL}1c}
+    .ups-mini b{font-size:13px;font-weight:700;font-variant-numeric:tabular-nums;color:#e7edf6}
+    .ups-mini small{font-size:9px;opacity:.6;margin-left:1px}
     @media (prefers-reduced-motion:reduce){ .ups-late,[style*="upsLate"]{animation:none!important} }
   `;
   document.head.appendChild(s);
@@ -186,7 +189,7 @@ function inyectar() {
 
 export default function UpsPanel({
   nodeId, ip, upsName, onClose, onConfigure, anchorX, anchorY,
-  fijado, onFijar, posGuardada, onMover,
+  fijado, onFijar, posGuardada, onMover, mini, onMini,
 }: {
   nodeId: string; ip?: string; upsName: string; onClose: () => void;
   onConfigure?: () => void; anchorX?: number; anchorY?: number;
@@ -195,6 +198,9 @@ export default function UpsPanel({
   onFijar?: (v: boolean, pos: { left: number; top: number }) => void;
   posGuardada?: { left: number; top: number } | null;
   onMover?: (pos: { left: number; top: number }) => void;
+  /** Contraído: sólo el renglón de resumen, para poder fijar varias UPS. */
+  mini?: boolean;
+  onMini?: (v: boolean) => void;
 }) {
   const [data, setData] = useState<UpsResult | null>(null);
   const [history, setHistory] = useState<UpsHistoryPoint[]>([]);
@@ -204,12 +210,13 @@ export default function UpsPanel({
   const vivoRef = useRef(true);
 
   /* ── posición ── */
+  const ancho = mini ? ANCHO_MINI : ANCHO;
   const anchoVentana = typeof window !== "undefined" ? window.innerWidth : 1280;
   const altoVentana = typeof window !== "undefined" ? window.innerHeight : 800;
   const inicial = posGuardada
     ? posGuardada
     : {
-        left: Math.max(8, Math.min((anchorX ?? anchoVentana - ANCHO - 60) - ANCHO / 2, anchoVentana - ANCHO - 8)),
+        left: Math.max(8, Math.min((anchorX ?? anchoVentana - ancho - 60) - ancho / 2, anchoVentana - ancho - 8)),
         top: Math.max(8, Math.min((anchorY ?? 80) + 20, altoVentana - 340)),
       };
   const [pos, setPos] = useState(inicial);
@@ -342,7 +349,7 @@ export default function UpsPanel({
     <div
       className="fixed z-50 flex flex-col"
       style={{
-        left: pos.left, top: pos.top, width: ANCHO,
+        left: pos.left, top: pos.top, width: ancho,
         maxHeight: "calc(100vh - 40px)",
         background: "rgba(11,14,20,.97)",
         border: `1px solid ${enBateria ? AMBAR + "44" : "rgba(255,255,255,.08)"}`,
@@ -371,16 +378,24 @@ export default function UpsPanel({
           <div style={{ fontSize: 13, fontWeight: 700, color: "#eef2f8", lineHeight: 1.2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
             {upsName}
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 2, fontSize: 10, color: "rgba(255,255,255,.32)" }}>
-            <span style={{ fontFamily: "ui-monospace,monospace" }}>{ipVisible}</span>
-            <span>·</span>
-            <span>{transporte}{marca ? ` · ${marca}` : ""}</span>
-          </div>
+          {!mini && (
+            <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 2, fontSize: 10, color: "rgba(255,255,255,.32)" }}>
+              <span style={{ fontFamily: "ui-monospace,monospace" }}>{ipVisible}</span>
+              <span>·</span>
+              <span>{transporte}{marca ? ` · ${marca}` : ""}</span>
+            </div>
+          )}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
           <button className="ups-btn" onClick={consultar} disabled={loading} title="Volver a consultar">
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
           </button>
+          {onMini && (
+            <button className="ups-btn" onClick={() => onMini(!mini)}
+              title={mini ? "Ver todo" : "Contraer: deja sólo el resumen, para poder fijar varias"}>
+              {mini ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronUp className="w-3.5 h-3.5" />}
+            </button>
+          )}
           {onFijar && (
             <button className={"ups-btn" + (fijado ? " act" : "")} onClick={() => onFijar(!fijado, pos)}
               title={fijado ? "Dejar de mostrarlo al abrir el mapa" : "Dejarlo abierto: vuelve solo al entrar al mapa"}>
@@ -396,6 +411,43 @@ export default function UpsPanel({
         </div>
       </div>
 
+      {mini ? (
+        /* Resumen: lo minimo para saber si hay que mirar. El resto esta a un clic. */
+        <div className="ups-mini" style={{ padding: "7px 11px 9px", display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap" }}>
+          <span style={{
+            display: "inline-flex", alignItems: "center", gap: 5,
+            padding: "2px 8px", borderRadius: 99, fontSize: 10.5, fontWeight: 700,
+            color: cEstado, background: `${cEstado}18`, border: `1px solid ${cEstado}45`, whiteSpace: "nowrap",
+          }}>
+            <span style={{ width: 5, height: 5, borderRadius: 99, background: cEstado }} />
+            {data?.reachable ? tEstado : "sin respuesta"}
+          </span>
+
+          {bat && (
+            <span style={miniCifra} title="Carga de la batería">
+              <b style={{ color: batteryColor(bat.charge) }}>{Math.round(bat.charge)}<small>%</small></b>
+              <span>bat</span>
+            </span>
+          )}
+          {sal?.loadPercent != null && (
+            <span style={miniCifra} title="Carga del equipo conectado">
+              <b style={{ color: loadColor(sal.loadPercent) }}>{Math.round(sal.loadPercent)}<small>%</small></b>
+              <span>carga</span>
+            </span>
+          )}
+          {bat?.runtimeMinutes != null && (
+            <span style={miniCifra} title="Autonomía restante">
+              <b style={{ color: bat.runtimeMinutes < 10 ? ROJO : "#e7edf6" }}>{runtimeStr(bat.runtimeMinutes)}</b>
+            </span>
+          )}
+          {bat && bat.health !== "normal" && bat.health !== "unknown" && (
+            <span style={{ ...miniCifra, color: ROJO }} title="La batería necesita atención">
+              <AlertTriangle className="w-3 h-3" />
+            </span>
+          )}
+          {!data && <span style={{ fontSize: 11, color: "rgba(255,255,255,.4)" }}>consultando…</span>}
+        </div>
+      ) : (
       <div style={{ flex: 1, overflowY: "auto", padding: "11px 13px 13px", display: "flex", flexDirection: "column", gap: 11 }}>
 
         {loading && !data && (
@@ -541,8 +593,9 @@ export default function UpsPanel({
           </div>
         )}
       </div>
+      )}
 
-      <div style={{
+      {!mini && <div style={{
         padding: "6px 12px", borderTop: "1px solid rgba(255,255,255,.07)",
         display: "flex", alignItems: "center", justifyContent: "space-between",
         fontSize: 9.5, color: "rgba(255,255,255,.25)",
@@ -552,10 +605,15 @@ export default function UpsPanel({
           {data?.cached ? " · de caché" : ""}
         </span>
         {fijado && <span style={{ color: AZUL }}>fijado al mapa</span>}
-      </div>
+      </div>}
     </div>
   );
 }
+
+const miniCifra: React.CSSProperties = {
+  display: "inline-flex", alignItems: "baseline", gap: 3,
+  fontSize: 10, color: "rgba(255,255,255,.42)", whiteSpace: "nowrap",
+};
 
 const botonChico: React.CSSProperties = {
   padding: "5px 12px", borderRadius: 8, fontSize: 11, fontWeight: 600,

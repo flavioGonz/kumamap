@@ -27,6 +27,7 @@ interface Resumen {
   mapas: Array<{ mapaId: string; mapa: string; n: number }>;
 }
 interface EstadoIndice { direcciones: number; armadoEn: number }
+interface ConfigTraps { comunidades: string[]; abierto: boolean }
 interface EstadoReceptor {
   puerto: number; ok: boolean; detalle: string; desde: number;
   comunidades?: string[]; abierto?: boolean;
@@ -81,6 +82,8 @@ export default function TrapsPage() {
   const [resumen, setResumen] = useState<Resumen | null>(null);
   const [receptor, setReceptor] = useState<EstadoReceptor | null>(null);
   const [indice, setIndice] = useState<EstadoIndice | null>(null);
+  const [config, setConfig] = useState<ConfigTraps | null>(null);
+  const [editando, setEditando] = useState(false);
   const [reubicando, setReubicando] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [cargando, setCargando] = useState(true);
@@ -110,6 +113,7 @@ export default function TrapsPage() {
       if (!r.ok) { setError(b?.error || `HTTP ${r.status}`); setCargando(false); return; }
       setTraps(b.traps || []); setResumen(b.resumen || null); setReceptor(b.receptor || null);
       setIndice(b.indice || null);
+      setConfig(b.config || null);
       setError(null);
     } catch (e: any) {
       setError(e?.message || "Error de red");
@@ -206,6 +210,16 @@ export default function TrapsPage() {
       </div>
 
       {error && <div className="trp-error">{error}</div>}
+
+      {config && (
+        <Comunidades
+          config={config}
+          abierto={editando}
+          onAbrir={() => setEditando(!editando)}
+          onGuardado={(c) => { setConfig(c); setEditando(false); cargar(); }}
+          onError={setError}
+        />
+      )}
 
       {(resumen?.sinUbicar ?? 0) > 0 && (
         <div className="trp-sinubicar">
@@ -361,6 +375,107 @@ export default function TrapsPage() {
   );
 }
 
+/* ───────────────────────────────── comunidades ── */
+
+/**
+ * Quién puede mandarnos avisos. Vive en la base, no en el `.env`: cambiarlo no
+ * puede exigir entrar por SSH y reiniciar. El receptor mira la configuración cada
+ * diez segundos, así que el cambio entra solo.
+ */
+function Comunidades({ config, abierto, onAbrir, onGuardado, onError }: {
+  config: ConfigTraps; abierto: boolean;
+  onAbrir: () => void; onGuardado: (c: ConfigTraps) => void; onError: (e: string | null) => void;
+}) {
+  const [lista, setLista] = useState<string[]>(config.comunidades);
+  const [suelta, setSuelta] = useState(false);
+  const [nueva, setNueva] = useState("");
+  const [guardando, setGuardando] = useState(false);
+
+  useEffect(() => { setLista(config.comunidades); setSuelta(config.abierto); }, [config]);
+
+  const agregar = () => {
+    const c = nueva.trim();
+    if (!c) return;
+    if (lista.includes(c)) { setNueva(""); return; }
+    setLista([...lista, c]);
+    setNueva("");
+  };
+
+  const guardar = async () => {
+    setGuardando(true);
+    onError(null);
+    const r = await fetch(apiUrl("/api/traps"), {
+      method: "POST", credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ accion: "comunidades", comunidades: lista, abierto: suelta }),
+    });
+    const b = await r.json().catch(() => null);
+    setGuardando(false);
+    if (!r.ok) { onError(b?.error || "No se pudo guardar"); return; }
+    onGuardado(b.config);
+  };
+
+  const cambio =
+    suelta !== config.abierto ||
+    lista.length !== config.comunidades.length ||
+    lista.some((c, i) => c !== config.comunidades[i]);
+
+  return (
+    <div className="trp-comunidades">
+      <div className="trp-com-cab">
+        <span className="trp-com-titulo">Comunidades aceptadas</span>
+        <div className="trp-chips">
+          {config.abierto
+            ? <span className="trp-nivel" style={{ color: AMBAR, borderColor: AMBAR + "66", background: AMBAR + "14" }}>cualquiera</span>
+            : config.comunidades.map((c) => <code key={c} className="trp-com-chip">{c}</code>)}
+        </div>
+        <div style={{ flex: 1 }} />
+        <button className="trp-btn-fantasma" onClick={onAbrir}>{abierto ? "Cerrar" : "Editar"}</button>
+      </div>
+
+      {abierto && (
+        <div className="trp-com-editor">
+          <div className="trp-chips">
+            {lista.map((c) => (
+              <span key={c} className="trp-com-chip trp-com-quitar">
+                {c}
+                <button onClick={() => setLista(lista.filter((x) => x !== c))} title={`Quitar ${c}`}>{I.x()}</button>
+              </span>
+            ))}
+            {lista.length === 0 && <span className="trp-gris" style={{ fontSize: 12 }}>ninguna</span>}
+          </div>
+
+          <div className="trp-com-alta">
+            <input className="trp-input" placeholder="comunidad nueva" value={nueva} maxLength={64}
+              onChange={(e) => setNueva(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); agregar(); } }} />
+            <button className="trp-btn-fantasma" onClick={agregar} disabled={!nueva.trim()}>Agregar</button>
+          </div>
+
+          <label className="trp-envivo" style={{ gap: 8 }}>
+            <input type="checkbox" checked={suelta} onChange={(e) => setSuelta(e.target.checked)} />
+            <span>Aceptar cualquier comunidad</span>
+          </label>
+          <p className="trp-nota" style={{ margin: 0 }}>
+            Dejarlo abierto sirve para descubrir qué manda un equipo nuevo: el aviso entra igual y
+            la pantalla muestra con qué comunidad llegó. Para el día a día conviene cerrarlo —
+            y lo que se descarte queda contado arriba, con el motivo, así no se pierde en silencio.
+          </p>
+
+          <div className="trp-com-pie">
+            <button className="trp-btn-primario" onClick={guardar} disabled={!cambio || guardando}>
+              {guardando ? "Guardando…" : "Guardar"}
+            </button>
+            <span className="trp-nota" style={{ margin: 0 }}>
+              Se aplica solo, en unos segundos. No hace falta reiniciar nada.
+            </span>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 const CSS = `
 .trp-envoltura{max-width:1200px;margin:0 auto;padding:26px 20px 70px;color:var(--foreground)}
 .trp-cab{display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:14px}
@@ -407,6 +522,19 @@ const CSS = `
 .trp-nombre{font-weight:600;font-size:13px}
 .trp-resumen{font-size:12px;color:var(--muted-foreground);line-height:1.5;margin-top:3px;max-width:72ch}
 .trp-gris{color:var(--muted-foreground)}
+.trp-comunidades{border:1px solid var(--border);border-radius:11px;background:var(--surface-card);margin-bottom:12px;overflow:hidden}
+.trp-com-cab{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:9px 13px}
+.trp-com-titulo{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.6px;color:var(--muted-foreground);white-space:nowrap}
+.trp-com-chip{display:inline-flex;align-items:center;gap:5px;font-family:ui-monospace,monospace;font-size:11.5px;border:1px solid var(--border);background:var(--card);border-radius:6px;padding:2px 7px}
+.trp-com-quitar button{display:inline-flex;background:none;border:none;color:var(--muted-foreground);cursor:pointer;padding:0;margin-left:1px}
+.trp-com-quitar button:hover{color:${ROJO}}
+.trp-com-editor{display:flex;flex-direction:column;gap:10px;padding:0 13px 13px;border-top:1px solid var(--border);padding-top:12px}
+.trp-com-alta{display:flex;gap:7px;align-items:center}
+.trp-com-alta .trp-input{max-width:240px}
+.trp-com-pie{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.trp-btn-primario{display:inline-flex;align-items:center;gap:7px;background:${AZUL};color:#fff;border:none;border-radius:9px;padding:8px 16px;font:inherit;font-size:13px;font-weight:600;cursor:pointer}
+.trp-btn-primario:hover:not(:disabled){background:#1550bd}
+.trp-btn-primario:disabled{opacity:.5;cursor:default}
 .trp-sinubicar{display:flex;align-items:flex-start;gap:9px;border:1px solid ${AMBAR}55;background:${AMBAR}0e;border-radius:11px;padding:10px 13px;margin-bottom:12px;font-size:12.5px;line-height:1.55;color:var(--text-secondary)}
 .trp-equipo{display:flex;flex-direction:column;gap:1px;min-width:150px}
 .trp-equipo-sub{font-size:10.5px;color:var(--muted-foreground);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:230px}

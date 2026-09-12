@@ -271,12 +271,124 @@ function nombreDeTipo(t: any): string {
 }
 
 let receptor: any = null;
+let vigilante: ReturnType<typeof setInterval> | null = null;
+let alLlegarGuardado: ((t: Trap) => void) | undefined;
+
+/** Deja el autorizador con exactamente las comunidades configuradas. */
+function sincronizarComunidades(): string[] {
+  const { comunidades } = configTraps();
+  try {
+    const aut = receptor?.getAuthorizer?.();
+    if (!aut) return comunidades;
+    const tiene: string[] = aut.getCommunities?.() || [];
+    for (const c of tiene) if (!comunidades.includes(c)) aut.deleteCommunity?.(c);
+    for (const c of comunidades) if (!tiene.includes(c)) aut.addCommunity?.(c);
+  } catch { /* si el autorizador cambia de forma, no vale tirar el receptor abajo */ }
+  return comunidades;
+}
+
+/**
+ * Mira si cambió la configuración. Las comunidades se aplican en caliente; abrir
+ * o cerrar el receptor obliga a rehacerlo, porque eso se decide al crearlo.
+ */
+function revisarConfig(): void {
+  try {
+    const cfg = configTraps();
+    const est = estadoReceptor();
+    if (!est || !est.ok) return;
+    if (!!est.abierto !== cfg.abierto) {
+      console.log(`[Traps] cambio el modo de autorizacion, rehago el receptor`);
+      cerrarReceptor();
+      iniciarReceptorDeTraps(alLlegarGuardado);
+      return;
+    }
+    const mismas =
+      est.comunidades?.length === cfg.comunidades.length &&
+      cfg.comunidades.every((c) => est.comunidades!.includes(c));
+    if (!mismas) {
+      sincronizarComunidades();
+      guardarEstado({ ...est, comunidades: cfg.comunidades, detalle: detalleDe(cfg) });
+      console.log(`[Traps] comunidades ahora: ${cfg.comunidades.join(", ") || "(ninguna)"}`);
+    }
+  } catch { /* es mantenimiento de fondo */ }
+}
+
+function detalleDe(cfg: ConfigTraps): string {
+  return cfg.abierto ? "acepta cualquier comunidad" : `comunidades: ${cfg.comunidades.join(", ")}`;
+}
+
+function cerrarReceptor(): void {
+  try { receptor?.close?.(); } catch { /* ya estaba cerrado */ }
+  receptor = null;
+}
 
 /**
  * El receptor vive en el proceso del servidor, no en los chunks de las rutas de
  * Next: cada uno tiene su propia instancia de este módulo. Por eso el estado se
  * anota en la base, que es lo único que comparten.
  */
+/* ─────────────────────────────────────── configuración ── */
+
+export interface ConfigTraps {
+  comunidades: string[];
+  /** Acepta cualquier comunidad: sirve para descubrir qué manda un equipo nuevo. */
+  abierto: boolean;
+}
+
+/** Una comunidad es un texto imprimible sin comas ni espacios. */
+export function comunidadValida(c: string): boolean {
+  return /^[\x21-\x7e]{1,64}$/.test(c) && !c.includes(",");
+}
+
+function configPorDefecto(): ConfigTraps {
+  const delEntorno = (process.env.TRAP_COMMUNITIES || "public")
+    .split(",").map((x) => x.trim()).filter(comunidadValida);
+  return {
+    comunidades: delEntorno.length ? delEntorno : ["public"],
+    abierto: process.env.TRAP_ANY_COMMUNITY === "1",
+  };
+}
+
+/**
+ * La configuración vive en la base y no en el entorno: cambiarla no puede exigir
+ * entrar al servidor por SSH y reiniciar. El entorno queda como semilla, para el
+ * primer arranque.
+ */
+export function configTraps(): ConfigTraps {
+  try {
+    const f: any = conn().prepare("SELECT valor FROM traps_meta WHERE clave = 'config'").get();
+    if (!f) return configPorDefecto();
+    const g = JSON.parse(f.valor);
+    const comunidades = Array.isArray(g?.comunidades) ? g.comunidades.filter(comunidadValida) : [];
+    return {
+      comunidades: comunidades.length ? comunidades : configPorDefecto().comunidades,
+      abierto: !!g?.abierto,
+    };
+  } catch {
+    return configPorDefecto();
+  }
+}
+
+export function guardarConfigTraps(entrada: { comunidades?: unknown; abierto?: unknown }): ConfigTraps {
+  const actual = configTraps();
+  let comunidades = actual.comunidades;
+  if (Array.isArray(entrada.comunidades)) {
+    const limpias = [...new Set(entrada.comunidades.map((x) => String(x).trim()))].filter(Boolean);
+    const mala = limpias.find((c) => !comunidadValida(c));
+    if (mala) throw new Error(`«${mala}» no sirve como comunidad: sin comas, sin espacios, hasta 64 caracteres.`);
+    comunidades = limpias;
+  }
+  const abierto = entrada.abierto === undefined ? actual.abierto : !!entrada.abierto;
+  if (!comunidades.length && !abierto) {
+    throw new Error("Hace falta al menos una comunidad, o marcar que acepte cualquiera.");
+  }
+  const nueva: ConfigTraps = { comunidades, abierto };
+  conn().prepare(
+    "INSERT INTO traps_meta (clave, valor) VALUES ('config', ?) ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor"
+  ).run(JSON.stringify(nueva));
+  return nueva;
+}
+
 interface EstadoReceptor {
   puerto: number; ok: boolean; detalle: string; desde: number;
   comunidades: string[]; abierto: boolean;
@@ -321,13 +433,10 @@ export function receptorActivo(): boolean {
  * está tomado o no hay permiso, no se cae la aplicación: se registra y sigue.
  */
 export function iniciarReceptorDeTraps(alLlegar?: (t: Trap) => void): void {
+  if (alLlegar) alLlegarGuardado = alLlegar;
   if (receptor) return;
   const puerto = parseInt(process.env.TRAP_PORT || "162", 10);
-  const comunidades = (process.env.TRAP_COMMUNITIES || "public")
-    .split(",").map((x) => x.trim()).filter(Boolean);
-  // Por defecto sólo entran las comunidades configuradas. TRAP_ANY_COMMUNITY=1 lo
-  // vuelve a abrir, que es lo que sirve para descubrir qué manda un equipo nuevo.
-  const abierto = process.env.TRAP_ANY_COMMUNITY === "1";
+  const { comunidades, abierto } = configTraps();
 
   try {
     receptor = snmp.createReceiver(
@@ -348,14 +457,15 @@ export function iniciarReceptorDeTraps(alLlegar?: (t: Trap) => void): void {
         }
       }
     );
-    try {
-      const aut = receptor.getAuthorizer?.();
-      for (const c of comunidades) aut?.addCommunity?.(c);
-    } catch { /* con disableAuthorization alcanza */ }
+    sincronizarComunidades();
+    // La configuración se puede cambiar desde la pantalla, y eso ocurre en otro
+    // proceso: el receptor mira la base cada diez segundos en vez de enterarse
+    // por un evento que no le llega.
+    if (!vigilante) vigilante = setInterval(revisarConfig, 10_000);
     const anterior = estadoReceptor();
     guardarEstado({
       puerto, ok: true, desde: Date.now(), comunidades, abierto,
-      detalle: abierto ? "acepta cualquier comunidad" : `comunidades: ${comunidades.join(", ")}`,
+      detalle: detalleDe({ comunidades, abierto }),
       rechazados: anterior?.rechazados || 0,
       ultimoRechazo: anterior?.ultimoRechazo || null,
       ultimoRechazoEn: anterior?.ultimoRechazoEn || null,

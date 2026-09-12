@@ -55,25 +55,85 @@ app.prepare().then(() => {
   let lastMonitors: KumaMonitor[] = [];
   let lastConnected: boolean = false;
 
-  // Poll kuma monitors and emit to clients — uses lightweight hash instead of JSON.stringify
-  let lastHash = "";
+  // Se emite lo que cambio, no la lista entera: ver el comentario del bucle.
   const prevStatus = new Map<number, number>(); // track per-monitor status for push
+
+  /**
+   * Lo volatil de un monitor: lo unico que puede cambiar entre latidos. El
+   * nombre, la url, el tipo y las etiquetas ya viajaron en la foto y no se
+   * repiten. Cada campo va siempre, con null si no hay valor: omitirlo dejaria
+   * pegado el valor anterior del lado del cliente.
+   */
+  const parteVolatil = (m: KumaMonitor) => ({
+    id: m.id,
+    status: m.status ?? null,
+    ping: m.ping ?? null,
+    msg: m.msg ?? "",
+    active: m.active,
+    maintenance: (m as any).maintenance ?? false,
+    uptime: (m as any).uptime ?? null,
+    uptime24: (m as any).uptime24 ?? null,
+    avgPing: (m as any).avgPing ?? null,
+    downTime: (m as any).downTime ?? null,
+    certExpiryDays: (m as any).certExpiryDays ?? null,
+    mng: (m as any).mng ?? null,
+  });
+
+  /** Lo que hace distinto a un monitor de como estaba la vez anterior. */
+  const firmaDe = (m: KumaMonitor) =>
+    `${m.status}|${m.ping ?? ""}|${m.msg ?? ""}|${m.active}|${(m as any).maintenance ?? ""}`;
+  const firmas = new Map<number, string>();
+  let ultimaFotoCompleta = 0;
+  /** Cada tanto va la lista entera igual: es la red por si alguien se perdio un delta. */
+  const FOTO_CADA_MS = 5 * 60_000;
 
   setInterval(() => {
     const monitors = kuma.getMonitors();
     const isConnected = kuma.isConnected;
-    // Build a fast hash from id:status:ping for change detection
-    const hash = `${isConnected}|${monitors.map(m => `${m.id}:${m.status}:${m.ping ?? ""}`).join(",")}`;
 
-    if (hash !== lastHash) {
-      lastHash = hash;
+    // Que cambio desde la vez pasada
+    const cambiados: KumaMonitor[] = [];
+    const vistos = new Set<number>();
+    for (const m of monitors) {
+      vistos.add(m.id);
+      const f = firmaDe(m);
+      if (firmas.get(m.id) !== f) { firmas.set(m.id, f); cambiados.push(m); }
+    }
+    const quitados: number[] = [];
+    for (const id of firmas.keys()) if (!vistos.has(id)) quitados.push(id);
+    for (const id of quitados) firmas.delete(id);
+
+    const cambioConexion = isConnected !== lastConnected;
+    const hayCambios = cambiados.length > 0 || quitados.length > 0 || cambioConexion;
+
+    // La foto entera se manda cuando cambio la lista de monitores, cuando cambio
+    // casi todo (no ahorra nada mandarlo partido) o cada cinco minutos.
+    const tocaFoto =
+      quitados.length > 0 ||
+      cambiados.length > Math.max(6, monitors.length / 2) ||
+      Date.now() - ultimaFotoCompleta > FOTO_CADA_MS;
+
+    if (!hayCambios && !tocaFoto) return;
+
+    if (tocaFoto) {
+      ultimaFotoCompleta = Date.now();
       lastConnected = isConnected;
       lastMonitors = monitors;
       io.emit("kuma:monitors", { connected: isConnected, monitors });
+    } else {
+      lastConnected = isConnected;
+      lastMonitors = monitors;
+      io.emit("kuma:delta", {
+        connected: isConnected,
+        cambiados: cambiados.map(parteVolatil),
+        quitados,
+      });
+    }
 
+    {
       // ── Push notifications for DOWN/UP transitions ──────────────────────
       if (VAPID_PUBLIC && VAPID_PRIVATE) {
-        for (const m of monitors) {
+        for (const m of cambiados) {
           const prev = prevStatus.get(m.id);
           if (prev !== undefined && prev !== m.status) {
             if (m.status === 0) {

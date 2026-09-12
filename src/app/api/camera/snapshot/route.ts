@@ -75,9 +75,22 @@ function buildDigestHeader(
 // replaced by `assertSafeDeviceUrl`, which resolves DNS and allowlists private
 // LAN ranges only. See src/lib/ssrf-guard.ts.
 
+/** Escala y calidad pedidas por quien llama; sin ellas, cuadro completo. */
+function escalaPedida(req: NextRequest): number | undefined {
+  const v = parseInt(req.nextUrl.searchParams.get("scale") || "", 10);
+  return v >= 160 && v <= 3840 ? v : undefined;
+}
+function calidadPedida(req: NextRequest): number | undefined {
+  const v = parseInt(req.nextUrl.searchParams.get("quality") || "", 10);
+  return v >= 1 && v <= 31 ? v : undefined;
+}
+
 // ── RTSP snapshot via ffmpeg ──────────────────────────────────────────────────
 
-async function captureRtspSnapshot(rtspUrl: string): Promise<Buffer> {
+async function captureRtspSnapshot(
+  rtspUrl: string,
+  opts: { scale?: number; quality?: number } = {}
+): Promise<Buffer> {
   const tmpFile = join(tmpdir(), `kumamap-snap-${randomBytes(8).toString("hex")}.jpg`);
 
   return new Promise<Buffer>((resolve, reject) => {
@@ -87,7 +100,10 @@ async function captureRtspSnapshot(rtspUrl: string): Promise<Buffer> {
       "-rtsp_transport", "tcp",     // use TCP for RTSP (more reliable)
       "-i", rtspUrl,                // input RTSP URL (with credentials)
       "-frames:v", "1",            // capture only 1 frame
-      "-q:v", "3",                 // JPEG quality (2-5, lower = better)
+      // Un recuadro de muro no necesita 4K: escalar antes de comprimir baja el
+      // cuadro de ~750 KB a unas decenas.
+      ...(opts.scale ? ["-vf", `scale=${opts.scale}:-1`] : []),
+      "-q:v", String(opts.quality && opts.quality >= 1 && opts.quality <= 31 ? opts.quality : 3),
       "-f", "image2",              // output format
       tmpFile,                      // output file
     ];
@@ -144,7 +160,7 @@ export async function GET(req: NextRequest) {
     // ── RTSP: use ffmpeg to capture a frame ─────────────────────────────────
     if (parsed.protocol === "rtsp:") {
       try {
-        const jpegBuffer = await captureRtspSnapshot(rawUrl);
+        const jpegBuffer = await captureRtspSnapshot(rawUrl, { scale: escalaPedida(req), quality: calidadPedida(req) });
         return new Response(new Uint8Array(jpegBuffer), {
           status: 200,
           headers: {

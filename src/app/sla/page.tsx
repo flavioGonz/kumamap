@@ -28,6 +28,7 @@ interface FilaMapa {
 }
 interface Alcance { desde: string | null; horas: number }
 interface VentanaMant { id: number; titulo: string; monitores: number }
+interface NodoHuerfano { nodoId: string; mapaId: string; mapa: string; etiqueta: string; monitorId: number }
 
 const AZUL = "#1b5fd9";
 const AZUL_CLARO = "#4f8cf5";
@@ -114,6 +115,8 @@ export default function SlaPage() {
   const [conDato, setConDato] = useState(0);
   const [huerfanos, setHuerfanos] = useState(0);
   const [mantenimiento, setMantenimiento] = useState<VentanaMant[]>([]);
+  const [listaHuerfanos, setListaHuerfanos] = useState<NodoHuerfano[] | null>(null);
+  const [soltando, setSoltando] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [cargando, setCargando] = useState(true);
 
@@ -141,6 +144,32 @@ export default function SlaPage() {
   }, []);
 
   useEffect(() => { cargar(); }, [cargar]);
+
+  const verHuerfanos = useCallback(async () => {
+    if (listaHuerfanos) { setListaHuerfanos(null); return; }
+    try {
+      const r = await fetch(apiUrl("/api/maps/huerfanos"), { credentials: "include" });
+      const b = await r.json();
+      setListaHuerfanos(b.huerfanos || []);
+    } catch { setListaHuerfanos([]); }
+  }, [listaHuerfanos]);
+
+  const desvincular = useCallback(async (nodos: string[]) => {
+    if (nodos.length === 0) return;
+    setSoltando(true);
+    try {
+      await fetch(apiUrl("/api/maps/huerfanos"), {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ nodos }),
+      });
+      const r = await fetch(apiUrl("/api/maps/huerfanos"), { credentials: "include" });
+      const b = await r.json();
+      setListaHuerfanos(b.huerfanos || []);
+      await cargar();
+    } catch { /* el cartel se recalcula al recargar */ }
+    setSoltando(false);
+  }, [cargar]);
 
   const abrir = useCallback(async (id: string) => {
     if (abierto === id) { setAbierto(null); return; }
@@ -218,8 +247,45 @@ export default function SlaPage() {
           <span>
             <b>{huerfanos} {huerfanos === 1 ? "nodo está vinculado" : "nodos están vinculados"} a monitores
             que ya no existen en Uptime Kuma.</b> No pintan estado ni suman a ninguna disponibilidad, y por
-            eso pasan desapercibidos. Abrí el cliente para ver cuáles y volvelos a vincular o desvinculalos.
+            eso pasan desapercibidos.
+            <button className="sla-ver-h" onClick={verHuerfanos}>
+              {listaHuerfanos ? "Ocultar" : "Ver cuáles"}
+            </button>
           </span>
+        </div>
+      )}
+
+      {listaHuerfanos && listaHuerfanos.length > 0 && (
+        <div className="sla-huerfanos">
+          <div className="sla-huerfanos-cab">
+            <span>Nodos vinculados a monitores inexistentes</span>
+            <button className="sla-btn-h" disabled={soltando}
+                    onClick={() => desvincular(listaHuerfanos.map((h) => h.nodoId))}>
+              {soltando ? "Desvinculando…" : `Desvincular los ${listaHuerfanos.length}`}
+            </button>
+          </div>
+          <table className="sla-sub">
+            <thead>
+              <tr><th>Cliente</th><th>Nodo</th><th>Monitor</th><th></th></tr>
+            </thead>
+            <tbody>
+              {listaHuerfanos.map((h) => (
+                <tr key={h.nodoId}>
+                  <td>{h.mapa}</td>
+                  <td>{h.etiqueta}</td>
+                  <td className="sla-num sla-gris">#{h.monitorId}</td>
+                  <td style={{ textAlign: "right" }}>
+                    <button className="sla-btn-h" disabled={soltando}
+                            onClick={() => desvincular([h.nodoId])}>Desvincular</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="sla-nota">
+            Desvincular no borra el nodo: lo deja como un nodo sin sensor, en el mismo
+            lugar del mapa, listo para volver a vincularlo al monitor correcto.
+          </p>
         </div>
       )}
 
@@ -450,6 +516,13 @@ const CSS = `
 .sla-enlace>span:nth-child(2){white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:230px}
 .sla-aviso{display:flex;align-items:flex-start;gap:9px;border:1px solid ${AMBAR}55;background:${AMBAR}0e;border-radius:11px;padding:10px 13px;margin-bottom:12px;font-size:12.5px;line-height:1.55;color:var(--text-secondary)}
 .sla-aviso .sla-punto{margin-top:6px}
+.sla-ver-h{margin-left:8px;background:transparent;border:1px solid ${AMBAR}66;color:${AMBAR};font:inherit;font-size:11.5px;font-weight:700;padding:2px 9px;border-radius:7px;cursor:pointer}
+.sla-ver-h:hover{background:${AMBAR}1a}
+.sla-huerfanos{border:1px solid var(--border);border-radius:12px;background:var(--card);padding:10px 12px;margin-bottom:12px}
+.sla-huerfanos-cab{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:6px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--muted-foreground)}
+.sla-btn-h{background:var(--surface-card);border:1px solid var(--border);color:var(--foreground);font:inherit;font-size:11.5px;font-weight:600;padding:4px 10px;border-radius:7px;cursor:pointer;white-space:nowrap}
+.sla-btn-h:hover{background:var(--surface-hover);border-color:${AMBAR}66;color:${AMBAR}}
+.sla-btn-h:disabled{opacity:.55;cursor:default}
 .sla-aviso-mant{border-color:${VIOLETA}55;background:${VIOLETA}0e}
 .sla-mant{display:inline-block;margin-left:6px;font-size:10px;font-weight:700;color:${VIOLETA};border:1px solid ${VIOLETA}55;border-radius:4px;padding:0 5px;white-space:nowrap}
 .sla-nota-aviso{color:${AMBAR}}

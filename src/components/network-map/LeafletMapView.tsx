@@ -497,22 +497,12 @@ export default function LeafletMapView({
               }
             }
           }
-          // For any DOWN monitor that the DB didn't return a time for
-          // (DB not configured or no heartbeat history), seed with Date.now()
-          // so the badge at least starts counting from this moment.
-          for (const id of downIds) {
-            if (!downSinceRef.current.has(id)) {
-              downSinceRef.current.set(id, Date.now());
-            }
-          }
+          // Nada de sembrar con Date.now(): si la base no sabe cuando empezo la caida, el
+          // cartel no se dibuja. Un contador que arranca de cero en cada recarga dice
+          // algo falso, y eso es peor que no decir nada.
         })
         .catch(() => {
-          // DB not configured — seed all DOWN monitors with Date.now()
-          for (const id of downIds) {
-            if (!downSinceRef.current.has(id)) {
-              downSinceRef.current.set(id, Date.now());
-            }
-          }
+          /* sin respuesta del servidor: se mantiene lo que ya se sabia */
         });
     }
   }, [kumaMonitors]);
@@ -2552,101 +2542,125 @@ export default function LeafletMapView({
       };
       line.on("click", openLinkPopup);
 
-      // SNMP traffic widget — draggable with mini sparkline
+      // ── Trafico del enlace ────────────────────────────────────────────────
+      // El calculo ya no se hace aca: lo devuelve /api/kuma/traffic con el tiempo
+      // real entre lecturas y, si existe, el sentido contrario. Este bloque solo
+      // dibuja. Area para la entrada, linea para la salida: es el lenguaje que
+      // cualquiera que haya mirado un grafico de red reconoce de un vistazo.
       if (cd.snmpMonitorId && !cd.hideTraffic) {
         const snmpMon = kumaMonitors.find((m) => m.id === cd.snmpMonitorId);
         if (snmpMon) {
           const savedPos = cd.trafficLabelPos;
           const posLat = savedPos ? savedPos[0] : (srcNode.x + tgtNode.x) / 2;
           const posLng = savedPos ? savedPos[1] : (srcNode.y + tgtNode.y) / 2;
-          const statusColor = !snmpMon.active ? "#6b7280" : snmpMon.status === 1 ? "#22c55e" : snmpMon.status === 0 ? "#ef4444" : "#f59e0b";
 
-          // Extract SNMP counter value from msg: "comparing NNNN >= YYYY"
-          const extractCounter = (msg: string): number | null => {
-            const m = msg.match(/comparing\s+(\d+)/);
-            return m ? parseInt(m[1]) : null;
-          };
+          const AZUL = "#3987e5";   // entrada  · par validado contra fondo oscuro
+          const AQUA = "#199e70";   // salida
+          const estado = !snmpMon.active ? "#8493a8" : snmpMon.status === 1 ? "#22c55e" : snmpMon.status === 0 ? "#ef4444" : "#f59e0b";
 
-          // Use cached throughput data (computed from SNMP counter deltas)
-          const hbKey = `traffic-hb-${cd.snmpMonitorId}`;
-          const cachedData: { throughputs: number[]; lastValue: string } = (window as any)[hbKey] || { throughputs: [], lastValue: "" };
-          const monInterval = snmpMon.interval || 60; // monitor polling interval in seconds
+          const clave = `traf-${cd.snmpMonitorId}`;
+          const cache: any = (window as any)[clave] || null;
 
-          // Compute current throughput from cached data
-          let currentThroughput = cachedData.throughputs.length > 0
-            ? cachedData.throughputs[cachedData.throughputs.length - 1]
-            : null;
-          const formattedValue = currentThroughput != null ? formatTraffic(currentThroughput) : "N/A";
-
-          // Build a mini SVG sparkline from throughput history
-          let sparkSvg = "";
-          if (cachedData.throughputs.length >= 2) {
-            const pts = cachedData.throughputs.slice(-30);
-            const maxV = Math.max(...pts, 1);
-            const w = 80, h = 22;
-            const pathParts = pts.map((v, i) => {
-              const x = (i / (pts.length - 1)) * w;
-              const y = h - (v / maxV) * (h - 2);
-              return `${i === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`;
-            });
-            const fillParts = [...pathParts, `L${w},${h}`, `L0,${h}`, "Z"];
-            sparkSvg = `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" style="display:block;margin-top:2px">
-              <path d="${fillParts.join(" ")}" fill="${statusColor}15" />
-              <path d="${pathParts.join(" ")}" fill="none" stroke="${statusColor}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>`;
-          }
-
-          // Fetch heartbeat data and compute throughput from SNMP counter deltas
-          if (!cachedData.throughputs.length || cachedData.lastValue !== snmpMon.msg) {
-            safeFetch<{ msg?: string }[]>(apiUrl(`/api/kuma/history/${cd.snmpMonitorId}`), undefined, "SNMPHistory")
-              .then((beats) => {
-                if (!beats) return;
-                // Extract counter values from each heartbeat msg
-                const counters: number[] = [];
-                for (const b of beats) {
-                  const val = extractCounter(b.msg || "");
-                  if (val !== null) counters.push(val);
-                }
-                // Compute throughput deltas (bytes/s → bits/s) between consecutive readings
-                const throughputs: number[] = [];
-                for (let i = 1; i < counters.length; i++) {
-                  let delta = counters[i] - counters[i - 1];
-                  // Handle 32-bit counter wrap (4294967296 = 2^32)
-                  if (delta < 0) delta += 4294967296;
-                  const bps = (delta * 8) / monInterval; // bits per second
-                  if (bps >= 0 && bps < 100_000_000_000) throughputs.push(bps); // sanity: < 100Gbps
-                }
-                if (throughputs.length > 0) {
-                  (window as any)[hbKey] = {
-                    throughputs: throughputs.slice(-30),
-                    lastValue: snmpMon.msg || "",
-                  };
-                }
-              })
+          // Se refresca cuando llega un latido nuevo, o si nunca se pidio.
+          if (!cache || cache.sello !== snmpMon.msg) {
+            safeFetch<any>(apiUrl(`/api/kuma/traffic/${cd.snmpMonitorId}?minutos=60`), undefined, "Trafico")
+              .then((d) => { if (d) (window as any)[clave] = { ...d, sello: snmpMon.msg || "" }; })
               .catch(() => {});
           }
 
+          const ent = cache?.entrada || null;
+          const sal = cache?.salida || null;
+          const cap: number | null = cache?.capacidadBps ?? null;
+          const ifaz = cache?.interfaz || null;
+
+          const pico = Math.max(ent?.pico || 0, sal?.pico || 0);
+          const techo = pico > 0 ? pico * 1.15 : 1;
+
+          const W = 148, H = 34;
+          const serieAPuntos = (s: any) => {
+            const p: Array<{ t: number; bps: number }> = (s?.puntos || []).slice(-60);
+            if (p.length < 2) return null;
+            return p.map((v, i) => ({ x: (i / (p.length - 1)) * W, y: H - (v.bps / techo) * (H - 3), ...v }));
+          };
+          const pEnt = serieAPuntos(ent);
+          const pSal = serieAPuntos(sal);
+          const camino = (pts: any[] | null) => (pts ? pts.map((q, i) => `${i === 0 ? "M" : "L"}${q.x.toFixed(1)},${q.y.toFixed(1)}`).join(" ") : "");
+
+          // Bandas invisibles con <title>: dan el dato exacto de cada lectura al
+          // pasar el mouse, sin agregar una capa de tooltip propia.
+          let bandas = "";
+          const base = pEnt || pSal;
+          if (base && base.length > 1) {
+            const ancho = W / base.length;
+            bandas = base.map((q: any, i: number) => {
+              const hora = new Date(q.t).toLocaleTimeString("es-UY", { hour: "2-digit", minute: "2-digit" });
+              const a = pEnt?.[i] ? formatTraffic(pEnt[i].bps) : "—";
+              const b = pSal?.[i] ? formatTraffic(pSal[i].bps) : "—";
+              return `<rect x="${(q.x - ancho / 2).toFixed(1)}" y="0" width="${ancho.toFixed(1)}" height="${H}" fill="transparent"><title>${hora}  ▼ ${a}   ▲ ${b}</title></rect>`;
+            }).join("");
+          }
+
+          const lineaCap = cap && pico > 0 && cap < techo
+            ? `<line x1="0" y1="${(H - (cap / techo) * (H - 3)).toFixed(1)}" x2="${W}" y2="${(H - (cap / techo) * (H - 3)).toFixed(1)}" stroke="#8493a8" stroke-width="1" stroke-dasharray="3 3" opacity="0.5"/>`
+            : "";
+
+          const grafico = (pEnt || pSal) ? `
+            <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" style="display:block;overflow:visible">
+              <line x1="0" y1="${H}" x2="${W}" y2="${H}" stroke="#ffffff" stroke-width="1" opacity="0.12"/>
+              ${lineaCap}
+              ${pEnt ? `<path d="${camino(pEnt)} L${W},${H} L0,${H} Z" fill="${AZUL}" opacity="0.22"/>
+                        <path d="${camino(pEnt)}" fill="none" stroke="${AZUL}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>` : ""}
+              ${pSal ? `<path d="${camino(pSal)}" fill="none" stroke="${AQUA}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>` : ""}
+              ${bandas}
+            </svg>` : "";
+
+          const fila = (color: string, flecha: string, etiqueta: string, s: any) => `
+            <div style="display:flex;align-items:baseline;gap:5px;min-width:0">
+              <span style="width:7px;height:7px;border-radius:2px;background:${color};flex:none;transform:translateY(-1px)"></span>
+              <span style="font-size:9px;color:#93a3b8;letter-spacing:.04em">${flecha}</span>
+              <span style="font-size:12.5px;font-weight:700;color:#e8eef7;font-variant-numeric:tabular-nums;white-space:nowrap"
+                    title="${etiqueta}">${s?.actual != null ? formatTraffic(s.actual) : "—"}</span>
+            </div>`;
+
+          const pctCap = cap && pico > 0 ? Math.round((pico / cap) * 100) : null;
+          const pie = pico > 0
+            ? `pico ${formatTraffic(pico)}${pctCap != null ? ` · ${pctCap}% de ${formatTraffic(cap!)}` : ""}`
+            : (cache?.aviso || "esperando lecturas");
+
+          const titulo = ifaz?.nombre
+            ? `${ifaz.nombre}${ifaz.alias ? ` · ${ifaz.alias}` : ""}`
+            : (snmpMon.name || "tráfico");
+
           const trafficLabel = L.marker([posLat, posLng], {
-            draggable: !isLocked,
+            // Siempre arrastrable: moverla no cambia la topologia, es una anotacion.
+            draggable: true,
             icon: L.divIcon({
               className: "traffic-label",
               html: `<div style="
-                background:rgba(6,6,10,0.92);
-                border:1px solid ${statusColor}44;
-                color:${statusColor};
-                font-size:10px;font-weight:800;
-                font-family:ui-monospace,monospace;
-                padding:4px 8px;border-radius:8px;
-                white-space:nowrap;
-                box-shadow:0 4px 16px rgba(0,0,0,0.6), 0 0 12px ${statusColor}15;
-                cursor:${isLockedRef.current ? "default" : "grab"};
-                min-width:80px;
+                background:rgba(8,12,20,0.93);
+                border:1px solid rgba(255,255,255,0.10);
+                border-radius:11px;
+                padding:8px 10px 7px;
+                min-width:166px;
+                box-shadow:0 8px 26px rgba(0,0,0,0.62);
+                backdrop-filter:blur(8px);
+                font-family:ui-sans-serif,system-ui,sans-serif;
+                cursor:grab;
               ">
-                <div style="display:flex;align-items:center;gap:4px;">
-                  <span style="font-size:7px;opacity:0.6">▲▼</span>
-                  <span>${formattedValue}</span>
+                <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">
+                  <span style="width:6px;height:6px;border-radius:99px;background:${estado};flex:none;
+                               box-shadow:0 0 6px ${estado}"></span>
+                  <span style="font-size:10px;font-weight:600;color:#c4d0e0;letter-spacing:.02em;
+                               white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:150px"
+                        title="${snmpMon.name || ""}">${titulo}</span>
                 </div>
-                ${sparkSvg}
+                <div style="display:flex;gap:12px;margin-bottom:5px">
+                  ${fila(AZUL, "▼", "entrada", ent)}
+                  ${sal ? fila(AQUA, "▲", "salida", sal) : ""}
+                </div>
+                ${grafico}
+                <div style="margin-top:5px;font-size:9px;color:#7d8da0;letter-spacing:.02em;
+                            white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:160px">${pie}</div>
               </div>`,
               iconSize: [0, 0],
               iconAnchor: [0, 14],
@@ -2654,8 +2668,16 @@ export default function LeafletMapView({
             interactive: true,
           });
 
-          // Save position after drag
+          trafficLabel.on("dragstart", () => {
+            const el = trafficLabel.getElement();
+            if (el) { (el.firstElementChild as HTMLElement)?.style.setProperty("cursor", "grabbing");
+                      el.style.opacity = "0.85"; }
+          });
+
           trafficLabel.on("dragend", () => {
+            const el = trafficLabel.getElement();
+            if (el) { (el.firstElementChild as HTMLElement)?.style.setProperty("cursor", "grab");
+                      el.style.opacity = "1"; }
             const pos = trafficLabel.getLatLng();
             const idx = edgesRef.current.findIndex((e) => e.id === edge.id);
             if (idx >= 0) {
@@ -2665,16 +2687,11 @@ export default function LeafletMapView({
             }
           });
 
-          // Right-click to hide
           trafficLabel.on("contextmenu", (e: any) => {
             e.originalEvent.preventDefault();
             e.originalEvent.stopPropagation();
             ctxHandledRef.current = true;
-            setCtxMenu({
-              x: e.originalEvent.clientX,
-              y: e.originalEvent.clientY,
-              edgeId: edge.id,
-            });
+            setCtxMenu({ x: e.originalEvent.clientX, y: e.originalEvent.clientY, edgeId: edge.id });
           });
 
           trafficLabel.addTo(map);
@@ -2682,7 +2699,7 @@ export default function LeafletMapView({
         }
       }
 
-      // MikroTik direct traffic widget — polls router REST API for live TX/RX
+      // MikroTik direct traffic widget - polls router REST API for live TX/RX
       if (cd.mikrotikTraffic && !cd.hideTraffic && !cd.snmpMonitorId) {
         const savedPos = cd.trafficLabelPos;
         const posLat = savedPos ? savedPos[0] : (srcNode.x + tgtNode.x) / 2;
@@ -2887,6 +2904,13 @@ export default function LeafletMapView({
         if (el) {
           const span = el.querySelector(".dt-elapsed");
           if (span) span.textContent = elapsedStr;
+          // Si Kuma abrio una racha nueva, el "desde" tiene que moverse con el
+          // contador. Si no, el cartel muestra dos tiempos que no se corresponden.
+          const desde = el.querySelector(".dt-since") as HTMLElement | null;
+          if (desde && desde.dataset.ts !== String(downTimestamp)) {
+            desde.textContent = `desde ${sinceStr}`;
+            desde.dataset.ts = String(downTimestamp);
+          }
         }
       } else {
         // ── Tooltip bubble: timer (big) + since (small) + bottom arrow ─────────
@@ -2929,7 +2953,7 @@ export default function LeafletMapView({
               ">${elapsedStr}</span>
             </div>
             <!-- Row 2: since date -->
-            <div style="
+            <div class="dt-since" data-ts="${downTimestamp}" style="
               margin-top:4px;padding-left:21px;
               font-size:9px;color:rgba(252,165,165,0.5);
               font-family:monospace;letter-spacing:0.5px;line-height:1;

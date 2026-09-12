@@ -55,6 +55,16 @@ export const createMonitorSchema = z.object({
   parent: z.number().int().nullable().optional(),
   notificationIDList: z.record(z.string(), z.boolean()).optional(),
   description: z.string().optional(),
+  timeout: z.number().int().min(1).max(300).optional(),
+  retryInterval: z.number().int().min(20).max(86400).optional(),
+  // --- SNMP ---
+  snmpOid: z.string().regex(/^\d+(\.\d+)+$/, "OID invalido").optional(),
+  snmpVersion: z.enum(["1", "2c", "3"]).optional(),
+  /** Kuma guarda la comunidad SNMP en esta columna. */
+  radiusPassword: z.string().max(200).optional(),
+  jsonPath: z.string().max(200).optional(),
+  jsonPathOperator: z.enum(["==", "!=", "<", "<=", ">", ">=", "contains", "not contains"]).optional(),
+  expectedValue: z.string().max(200).optional(),
 });
 
 // POST /api/auth

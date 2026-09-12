@@ -101,30 +101,19 @@ export default function MetricsPage() {
   }, [fetchMetrics]);
 
   return (
-    <div className="min-h-screen bg-[#0a0a0a] text-[#ededed]">
-      {/* Header */}
-      <header className="sticky top-0 z-50 px-6 py-3" style={{ background: "rgba(10,10,10,0.95)", backdropFilter: "blur(12px)", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
-        <div className="flex items-center justify-between max-w-6xl mx-auto">
-          <div className="flex items-center gap-3">
-            <Link href="/" className="h-8 w-8 rounded-xl flex items-center justify-center text-[#888] hover:text-[#ededed] active:scale-95 transition-all" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polyline points="15 18 9 12 15 6" /></svg>
-            </Link>
-            <div>
-              <h1 className="text-sm font-bold">Métricas del Servidor</h1>
-              <p className="text-[9px] text-[#555]">
-                {metrics ? `${metrics.system.hostname} · Actualizado cada 5s` : "Cargando..."}
-              </p>
-            </div>
-          </div>
-          {metrics && (
-            <div className="flex items-center gap-3 text-[10px] text-[#555]">
-              <span>PID {metrics.system.pid}</span>
-              <span>{metrics.system.nodeVersion}</span>
-              <span>Uptime {metrics.system.uptimeHuman}</span>
-            </div>
-          )}
+    <div className="min-h-full" style={{ background: "var(--background)", color: "var(--foreground)" }}>
+      {/* El titulo y el volver los pone el marco de la app. Aca queda solo
+          lo que es propio de esta pantalla: de que proceso estamos hablando. */}
+      {metrics && (
+        <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-4 gap-y-1 px-6 pt-5 text-[11px]"
+          style={{ color: "var(--muted-foreground)" }}>
+          <span><b style={{ color: "var(--foreground)" }}>{metrics.system.hostname}</b></span>
+          <span>PID {metrics.system.pid}</span>
+          <span>{metrics.system.nodeVersion}</span>
+          <span>en marcha {metrics.system.uptimeHuman}</span>
+          <span>se actualiza cada 5 s</span>
         </div>
-      </header>
+      )}
 
       {loading && (
         <div className="flex items-center justify-center py-20">

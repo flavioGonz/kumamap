@@ -338,6 +338,47 @@ export async function fetchDownSinceTimes(monitorIds: number[]): Promise<Map<num
  * Returns a human-readable description of the current DB mode.
  * Useful for status/health endpoints.
  */
+/**
+ * Momento del ultimo latido registrado de cada monitor.
+ *
+ * Se usa como respaldo del calculo de la racha: si un monitor figura caido pero la
+ * consulta de racha no devolvio nada, su ultimo latido es el momento en que se cayo.
+ * Mas honesto que dejar que el navegador ponga la hora actual.
+ */
+export async function fetchUltimoLatido(monitorIds: number[]): Promise<Map<number, string>> {
+  if (!monitorIds || monitorIds.length === 0) return new Map();
+  const mode = detectMode();
+  if (mode === "disabled") return new Map();
+
+  const result = new Map<number, string>();
+
+  if (mode === "sqlite") {
+    const db = getSqliteDb();
+    const placeholders = monitorIds.map(() => "?").join(",");
+    const rows = db.prepare(`
+      SELECT monitor_id AS monitorID, MAX(time) AS ultimo
+      FROM heartbeat WHERE monitor_id IN (${placeholders}) GROUP BY monitor_id
+    `).all(...monitorIds) as { monitorID: number; ultimo: string }[];
+    for (const r of rows) {
+      if (!r.ultimo) continue;
+      result.set(r.monitorID, r.ultimo.includes("T") ? r.ultimo : r.ultimo.replace(" ", "T") + "Z");
+    }
+    return result;
+  }
+
+  const db = getKumaDb();
+  const [rows] = await db.query(
+    `SELECT monitor_id AS monitorID, MAX(time) AS ultimo
+     FROM heartbeat WHERE monitor_id IN (?) GROUP BY monitor_id`,
+    [monitorIds]
+  ) as any[];
+  for (const r of (rows as { monitorID: number; ultimo: Date | string }[])) {
+    if (!r.ultimo) continue;
+    result.set(r.monitorID, r.ultimo instanceof Date ? r.ultimo.toISOString() : String(r.ultimo));
+  }
+  return result;
+}
+
 export function getDbMode(): { mode: DbMode; detail: string } {
   const mode = detectMode();
   if (mode === "sqlite") return { mode, detail: `SQLite: ${process.env.KUMA_DB_PATH}` };

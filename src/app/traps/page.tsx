@@ -18,12 +18,20 @@ interface Trap {
   id: number; ts: number; origen: string; version: string; comunidad: string;
   tipo: string; oid: string; nombre: string; gravedad: "alarma" | "aviso" | "info";
   resumen: string; varbinds: Varbind[];
+  /** Equipo del mapa del que vino, cuando la IP se pudo ubicar. */
+  nodoId: string | null; mapaId: string | null; etiqueta: string | null; mapa: string | null;
 }
 interface Resumen {
-  total: number; alarmas24h: number;
-  origenes: Array<{ origen: string; n: number; ultimo: number }>;
+  total: number; alarmas24h: number; sinUbicar: number;
+  origenes: Array<{ origen: string; etiqueta: string | null; mapa: string | null; mapaId: string | null; n: number; ultimo: number }>;
+  mapas: Array<{ mapaId: string; mapa: string; n: number }>;
 }
-interface EstadoReceptor { puerto: number; ok: boolean; detalle: string; desde: number }
+interface EstadoIndice { direcciones: number; armadoEn: number }
+interface EstadoReceptor {
+  puerto: number; ok: boolean; detalle: string; desde: number;
+  comunidades?: string[]; abierto?: boolean;
+  rechazados?: number; ultimoRechazo?: string | null; ultimoRechazoEn?: number | null;
+}
 
 const AZUL = "#1b5fd9";
 const AZUL_CLARO = "#4f8cf5";
@@ -72,6 +80,8 @@ export default function TrapsPage() {
   const [traps, setTraps] = useState<Trap[]>([]);
   const [resumen, setResumen] = useState<Resumen | null>(null);
   const [receptor, setReceptor] = useState<EstadoReceptor | null>(null);
+  const [indice, setIndice] = useState<EstadoIndice | null>(null);
+  const [reubicando, setReubicando] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [cargando, setCargando] = useState(true);
   const [envivo, setEnvivo] = useState(true);
@@ -79,10 +89,11 @@ export default function TrapsPage() {
   const [rango, setRango] = useState("24");
   const [gravedad, setGravedad] = useState("todas");
   const [origen, setOrigen] = useState("");
+  const [mapaId, setMapaId] = useState("");
   const [q, setQ] = useState("");
   const [abierto, setAbierto] = useState<number | null>(null);
-  const filtroRef = useRef({ rango, gravedad, origen });
-  filtroRef.current = { rango, gravedad, origen };
+  const filtroRef = useRef({ rango, gravedad, origen, mapaId });
+  filtroRef.current = { rango, gravedad, origen, mapaId };
 
   const cargar = useCallback(async () => {
     const p = new URLSearchParams();
@@ -90,6 +101,7 @@ export default function TrapsPage() {
     if (h > 0) p.set("horas", String(h));
     if (gravedad !== "todas") p.set("gravedad", gravedad);
     if (origen) p.set("origen", origen);
+    if (mapaId) p.set("mapaId", mapaId);
     if (q.trim()) p.set("q", q.trim());
     p.set("limite", "500");
     try {
@@ -97,12 +109,13 @@ export default function TrapsPage() {
       const b = await r.json();
       if (!r.ok) { setError(b?.error || `HTTP ${r.status}`); setCargando(false); return; }
       setTraps(b.traps || []); setResumen(b.resumen || null); setReceptor(b.receptor || null);
+      setIndice(b.indice || null);
       setError(null);
     } catch (e: any) {
       setError(e?.message || "Error de red");
     }
     setCargando(false);
-  }, [rango, gravedad, origen, q]);
+  }, [rango, gravedad, origen, mapaId, q]);
 
   useEffect(() => { cargar(); }, [cargar]);
 
@@ -114,6 +127,7 @@ export default function TrapsPage() {
       const f = filtroRef.current;
       if (f.gravedad !== "todas" && t.gravedad !== f.gravedad) return;
       if (f.origen && t.origen !== f.origen) return;
+      if (f.mapaId && t.mapaId !== f.mapaId) return;
       setTraps((xs) => [t, ...xs].slice(0, 500));
     };
     socket.on("trap:nuevo", nuevo);
@@ -126,7 +140,20 @@ export default function TrapsPage() {
     info: traps.filter((t) => t.gravedad === "info").length,
   }), [traps]);
 
-  const hayFiltro = gravedad !== "todas" || !!origen || !!q.trim();
+  const hayFiltro = gravedad !== "todas" || !!origen || !!mapaId || !!q.trim();
+
+  const reubicar = async () => {
+    setReubicando(true);
+    const r = await fetch(apiUrl("/api/traps"), {
+      method: "POST", credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ accion: "reubicar" }),
+    });
+    const b = await r.json().catch(() => null);
+    setReubicando(false);
+    if (!r.ok) { setError(b?.error || "No se pudo reubicar"); return; }
+    cargar();
+  };
 
   const limpiarViejos = async () => {
     if (!window.confirm("¿Borrar los traps de más de 7 días?")) return;
@@ -151,6 +178,7 @@ export default function TrapsPage() {
           <div className="trp-kpi"><b style={{ color: porGravedad.aviso ? AMBAR : "var(--foreground)" }}>{porGravedad.aviso}</b><span>avisos</span></div>
           <div className="trp-kpi"><b>{traps.length}</b><span>en pantalla</span></div>
           <div className="trp-kpi"><b>{resumen?.origenes.length ?? 0}</b><span>equipos</span></div>
+          <div className="trp-kpi"><b style={{ color: resumen?.sinUbicar ? AMBAR : "var(--foreground)" }}>{resumen?.sinUbicar ?? 0}</b><span>sin ubicar</span></div>
         </div>
       </header>
 
@@ -161,6 +189,14 @@ export default function TrapsPage() {
           <span>
             Escuchando en <b>{receptor.puerto}/udp</b> desde {reloj(receptor.desde)} · {receptor.detalle}.
             Apuntá los equipos a la IP de este controlador, puerto {receptor.puerto}.
+            {receptor.abierto && " Está aceptando cualquier comunidad (TRAP_ANY_COMMUNITY=1)."}
+            {(receptor.rechazados ?? 0) > 0 && (
+              <>
+                {" "}<b style={{ color: AMBAR }}>{receptor.rechazados} paquetes descartados</b>
+                {receptor.ultimoRechazo ? ` — el último decía «${receptor.ultimoRechazo}»` : ""}.
+                {!receptor.abierto && " Si es un equipo que manda con otra comunidad, agregala a TRAP_COMMUNITIES."}
+              </>
+            )}
           </span>
         ) : receptor ? (
           <span>El receptor no pudo levantar en <b>{receptor.puerto}/udp</b>: {receptor.detalle}. Por debajo de 1024 hace falta root, o se puede elegir otro puerto con <code>TRAP_PORT</code>.</span>
@@ -170,6 +206,22 @@ export default function TrapsPage() {
       </div>
 
       {error && <div className="trp-error">{error}</div>}
+
+      {(resumen?.sinUbicar ?? 0) > 0 && (
+        <div className="trp-sinubicar">
+          <span className="trp-punto" style={{ background: AMBAR, marginTop: 5 }} />
+          <span style={{ flex: 1 }}>
+            <b>{resumen!.sinUbicar} {resumen!.sinUbicar === 1 ? "aviso llegó" : "avisos llegaron"} de una IP
+            que no está en ningún mapa.</b> El equipo puede no estar dibujado, o estar monitoreado por un
+            nombre que sale a internet por otra dirección. El índice tiene {indice?.direcciones ?? 0}{" "}
+            direcciones: las que están cargadas en los nodos, las de los monitores de Kuma y las que se
+            resuelven por DNS.
+          </span>
+          <button className="trp-btn-fantasma" onClick={reubicar} disabled={reubicando}>
+            {reubicando ? "Buscando…" : "Volver a ubicar"}
+          </button>
+        </div>
+      )}
 
       {/* filtros */}
       <div className="trp-filtros">
@@ -184,16 +236,22 @@ export default function TrapsPage() {
           <option value="aviso">Sólo avisos</option>
           <option value="info">Sólo informativos</option>
         </select>
+        <select className="trp-input trp-select" value={mapaId} onChange={(e) => setMapaId(e.target.value)} aria-label="Cliente">
+          <option value="">Todos los clientes</option>
+          {resumen?.mapas.map((m) => <option key={m.mapaId} value={m.mapaId}>{m.mapa} ({m.n})</option>)}
+        </select>
         <select className="trp-input trp-select" value={origen} onChange={(e) => setOrigen(e.target.value)} aria-label="Equipo">
           <option value="">Todos los equipos</option>
-          {resumen?.origenes.map((o) => <option key={o.origen} value={o.origen}>{o.origen} ({o.n})</option>)}
+          {resumen?.origenes.map((o) => (
+            <option key={o.origen} value={o.origen}>{o.etiqueta ? `${o.etiqueta} · ${o.origen}` : o.origen} ({o.n})</option>
+          ))}
         </select>
         <div className="trp-buscador">
           {I.lupa("var(--muted-foreground)")}
           <input className="trp-input trp-limpio" placeholder="Buscar por texto, OID o valor…" value={q} onChange={(e) => setQ(e.target.value)} />
         </div>
         {hayFiltro && (
-          <button className="trp-btn-fantasma" onClick={() => { setGravedad("todas"); setOrigen(""); setQ(""); }}>{I.x()} Limpiar</button>
+          <button className="trp-btn-fantasma" onClick={() => { setGravedad("todas"); setOrigen(""); setMapaId(""); setQ(""); }}>{I.x()} Limpiar</button>
         )}
         <label className="trp-envivo" title="Los traps nuevos aparecen arriba sin recargar">
           <input type="checkbox" checked={envivo} onChange={(e) => setEnvivo(e.target.checked)} />
@@ -220,7 +278,20 @@ export default function TrapsPage() {
                       tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter") setAbierto(ab ? null : t.id); }}>
                     <td className="trp-td-p"><span className="trp-punto" style={{ background: g.c }} /></td>
                     <td className="trp-hora" title={reloj(t.ts)}>{reloj(t.ts).slice(6)}<div className="trp-ago">{ago(t.ts)}</div></td>
-                    <td><code>{t.origen}</code></td>
+                    <td>
+                      {t.etiqueta ? (
+                        <div className="trp-equipo">
+                          <a className="trp-enlace-mapa" href={`/map/${t.mapaId}`} onClick={(e) => e.stopPropagation()}
+                             title={`Abrir ${t.mapa}`}>{t.etiqueta}</a>
+                          <span className="trp-equipo-sub">{t.mapa} · <code>{t.origen}</code></span>
+                        </div>
+                      ) : (
+                        <div className="trp-equipo">
+                          <code>{t.origen}</code>
+                          <span className="trp-equipo-sub trp-gris">sin ubicar en el mapa</span>
+                        </div>
+                      )}
+                    </td>
                     <td>
                       <div className="trp-evento">
                         <span className="trp-nivel" style={{ color: g.c, borderColor: g.c + "55", background: g.c + "12" }}>{g.t}</span>
@@ -240,6 +311,8 @@ export default function TrapsPage() {
                             <span><em>OID del trap</em> <code>{t.oid || "—"}</code></span>
                             <span><em>comunidad</em> <code>{t.comunidad || "—"}</code></span>
                             <span><em>recibido</em> {reloj(t.ts)}</span>
+                            <span><em>origen</em> <code>{t.origen}</code></span>
+                            {t.etiqueta && <span><em>equipo</em> {t.etiqueta} <em>en</em> {t.mapa}</span>}
                           </div>
                           {t.varbinds.length > 0 ? (
                             <table className="trp-vb">
@@ -334,6 +407,11 @@ const CSS = `
 .trp-nombre{font-weight:600;font-size:13px}
 .trp-resumen{font-size:12px;color:var(--muted-foreground);line-height:1.5;margin-top:3px;max-width:72ch}
 .trp-gris{color:var(--muted-foreground)}
+.trp-sinubicar{display:flex;align-items:flex-start;gap:9px;border:1px solid ${AMBAR}55;background:${AMBAR}0e;border-radius:11px;padding:10px 13px;margin-bottom:12px;font-size:12.5px;line-height:1.55;color:var(--text-secondary)}
+.trp-equipo{display:flex;flex-direction:column;gap:1px;min-width:150px}
+.trp-equipo-sub{font-size:10.5px;color:var(--muted-foreground);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:230px}
+.trp-enlace-mapa{font-weight:600;font-size:13px;color:inherit;text-decoration:none;border-bottom:1px dotted var(--muted-foreground)}
+.trp-enlace-mapa:hover{color:${AZUL_CLARO};border-bottom-color:${AZUL_CLARO}}
 .trp-chevron{display:inline-flex;color:var(--muted-foreground);opacity:.5}
 .trp-chevron.abajo{transform:rotate(90deg)}
 .trp-detalle td{background:var(--surface-card);border-top:none}

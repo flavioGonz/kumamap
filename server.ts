@@ -5,7 +5,7 @@ import { Server as SocketIOServer } from "socket.io";
 import { getKumaClient, type KumaMonitor, type KumaHeartbeat } from "./src/lib/kuma";
 import webpush from "web-push";
 import { getAllSubscriptions, removeSubscription } from "./src/lib/push-store";
-import { iniciarReceptorDeTraps } from "./src/lib/traps";
+import { iniciarReceptorDeTraps, reubicarPendientes } from "./src/lib/traps";
 
 const dev = process.env.NODE_ENV !== "production";
 const port = parseInt(process.env.PORT || "3000", 10);
@@ -117,6 +117,13 @@ app.prepare().then(() => {
   iniciarReceptorDeTraps((trap) => {
     io.emit("trap:nuevo", trap);
   });
+
+  // El indice de IPs del mapa se rearma solo cada cinco minutos; los avisos que
+  // quedaron sin equipo se vuelven a intentar cada diez. Es barato y evita tener
+  // que apretar el boton despues de cargarle la IP a un nodo.
+  setInterval(() => {
+    try { reubicarPendientes(200); } catch { /* es informacion de apoyo */ }
+  }, 10 * 60_000);
 
   io.on("connection", (socket) => {
     console.log(`[Socket.IO] Client connected: ${socket.id}`);

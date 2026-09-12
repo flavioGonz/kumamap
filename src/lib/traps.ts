@@ -12,6 +12,7 @@
 import Database from "better-sqlite3";
 import path from "path";
 import snmp from "net-snmp";
+import { buscarPorIp, refrescarSiHaceFalta } from "./mapa-ips";
 
 export interface Varbind { oid: string; tipo: string; valor: string }
 
@@ -19,6 +20,11 @@ export interface Trap {
   id: number;
   ts: number;
   origen: string;
+  /** De qué equipo del mapa vino, cuando la IP se pudo ubicar. */
+  nodoId: string | null;
+  mapaId: string | null;
+  etiqueta: string | null;
+  mapa: string | null;
   version: string;
   comunidad: string;
   tipo: string;
@@ -56,6 +62,13 @@ function conn(): any {
     CREATE INDEX IF NOT EXISTS traps_origen ON traps(origen);
     CREATE TABLE IF NOT EXISTS traps_meta (clave TEXT PRIMARY KEY, valor TEXT NOT NULL);
   `);
+
+  // Columnas agregadas después: el trap ahora sabe de qué equipo del mapa vino.
+  const cols = new Set((db.prepare("PRAGMA table_info(traps)").all() as any[]).map((c: any) => c.name));
+  for (const col of ["nodo_id", "mapa_id", "etiqueta", "mapa"]) {
+    if (!cols.has(col)) db.exec(`ALTER TABLE traps ADD COLUMN ${col} TEXT`);
+  }
+  db.exec("CREATE INDEX IF NOT EXISTS traps_mapa ON traps(mapa_id)");
   return db;
 }
 
@@ -101,11 +114,17 @@ export function explicar(oid: string): { n: string; g: Trap["gravedad"]; q: stri
 function aTrap(f: any): Trap {
   let vb: Varbind[] = [];
   try { vb = JSON.parse(f.varbinds); } catch { vb = []; }
-  return { ...f, varbinds: vb };
+  return {
+    id: f.id, ts: f.ts, origen: f.origen, version: f.version, comunidad: f.comunidad,
+    tipo: f.tipo, oid: f.oid, nombre: f.nombre, gravedad: f.gravedad, resumen: f.resumen,
+    nodoId: f.nodo_id ?? null, mapaId: f.mapa_id ?? null,
+    etiqueta: f.etiqueta ?? null, mapa: f.mapa ?? null,
+    varbinds: vb,
+  };
 }
 
 export function listarTraps(opciones: {
-  limite?: number; desde?: number; origen?: string; gravedad?: string; texto?: string;
+  limite?: number; desde?: number; origen?: string; gravedad?: string; texto?: string; mapaId?: string;
 } = {}): Trap[] {
   const limite = Math.min(Math.max(opciones.limite || 300, 1), 2000);
   const cond: string[] = [];
@@ -113,22 +132,41 @@ export function listarTraps(opciones: {
   if (opciones.desde) { cond.push("ts >= ?"); args.push(opciones.desde); }
   if (opciones.origen) { cond.push("origen = ?"); args.push(opciones.origen); }
   if (opciones.gravedad) { cond.push("gravedad = ?"); args.push(opciones.gravedad); }
+  if (opciones.mapaId) { cond.push("mapa_id = ?"); args.push(opciones.mapaId); }
   if (opciones.texto) {
-    cond.push("(nombre LIKE ? OR resumen LIKE ? OR oid LIKE ? OR origen LIKE ? OR varbinds LIKE ?)");
+    cond.push("(nombre LIKE ? OR resumen LIKE ? OR oid LIKE ? OR origen LIKE ? OR varbinds LIKE ? " +
+              "OR etiqueta LIKE ? OR mapa LIKE ?)");
     const t = `%${opciones.texto}%`;
-    args.push(t, t, t, t, t);
+    args.push(t, t, t, t, t, t, t);
   }
   const donde = cond.length ? "WHERE " + cond.join(" AND ") : "";
   args.push(limite);
   return conn().prepare(`SELECT * FROM traps ${donde} ORDER BY ts DESC, id DESC LIMIT ?`).all(...args).map(aTrap);
 }
 
-export function resumenTraps(): { total: number; alarmas24h: number; origenes: Array<{ origen: string; n: number; ultimo: number }> } {
+export interface Origen { origen: string; etiqueta: string | null; mapa: string | null; mapaId: string | null; n: number; ultimo: number }
+
+export function resumenTraps(): {
+  total: number; alarmas24h: number; sinUbicar: number;
+  origenes: Origen[]; mapas: Array<{ mapaId: string; mapa: string; n: number }>;
+} {
   const c = conn();
   const t: any = c.prepare("SELECT COUNT(*) n FROM traps").get();
   const a: any = c.prepare("SELECT COUNT(*) n FROM traps WHERE gravedad = 'alarma' AND ts >= ?").get(Date.now() - 86400000);
-  const o: any[] = c.prepare("SELECT origen, COUNT(*) n, MAX(ts) ultimo FROM traps GROUP BY origen ORDER BY n DESC LIMIT 40").all();
-  return { total: t?.n || 0, alarmas24h: a?.n || 0, origenes: o.map((x) => ({ origen: x.origen, n: x.n, ultimo: x.ultimo })) };
+  const su: any = c.prepare("SELECT COUNT(*) n FROM traps WHERE nodo_id IS NULL").get();
+  const o: any[] = c.prepare(
+    `SELECT origen, MAX(etiqueta) etiqueta, MAX(mapa) mapa, MAX(mapa_id) mapa_id,
+            COUNT(*) n, MAX(ts) ultimo
+     FROM traps GROUP BY origen ORDER BY n DESC LIMIT 40`
+  ).all();
+  const m: any[] = c.prepare(
+    "SELECT mapa_id, MAX(mapa) mapa, COUNT(*) n FROM traps WHERE mapa_id IS NOT NULL GROUP BY mapa_id ORDER BY n DESC LIMIT 40"
+  ).all();
+  return {
+    total: t?.n || 0, alarmas24h: a?.n || 0, sinUbicar: su?.n || 0,
+    origenes: o.map((x) => ({ origen: x.origen, etiqueta: x.etiqueta ?? null, mapa: x.mapa ?? null, mapaId: x.mapa_id ?? null, n: x.n, ultimo: x.ultimo })),
+    mapas: m.map((x) => ({ mapaId: x.mapa_id, mapa: x.mapa, n: x.n })),
+  };
 }
 
 export function borrarTraps(antesDe?: number): number {
@@ -146,8 +184,11 @@ let desdeElUltimoPodado = 0;
 export function guardarTrap(t: Omit<Trap, "id">): Trap {
   const c = conn();
   const r = c.prepare(
-    "INSERT INTO traps (ts, origen, version, comunidad, tipo, oid, nombre, gravedad, resumen, varbinds) VALUES (?,?,?,?,?,?,?,?,?,?)"
-  ).run(t.ts, t.origen, t.version, t.comunidad, t.tipo, t.oid, t.nombre, t.gravedad, t.resumen, JSON.stringify(t.varbinds));
+    `INSERT INTO traps (ts, origen, version, comunidad, tipo, oid, nombre, gravedad, resumen, varbinds,
+                        nodo_id, mapa_id, etiqueta, mapa)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+  ).run(t.ts, t.origen, t.version, t.comunidad, t.tipo, t.oid, t.nombre, t.gravedad, t.resumen,
+        JSON.stringify(t.varbinds), t.nodoId, t.mapaId, t.etiqueta, t.mapa);
 
   // Podado cada tanto: un equipo con un puerto que aletea manda miles por hora.
   if (++desdeElUltimoPodado >= 100) {
@@ -155,6 +196,50 @@ export function guardarTrap(t: Omit<Trap, "id">): Trap {
     c.prepare("DELETE FROM traps WHERE id NOT IN (SELECT id FROM traps ORDER BY ts DESC, id DESC LIMIT ?)").run(TOPE);
   }
   return { ...t, id: Number(r.lastInsertRowid) } as Trap;
+}
+
+/* ──────────────────────────────────────────── ubicación ── */
+
+/**
+ * Le pone nombre y cliente al aviso. Si la IP no está en el índice queda sin
+ * ubicar, que no es un error: puede ser un equipo que todavía no está en ningún
+ * mapa, o que sale por una IP distinta a la que se monitorea.
+ */
+export function ubicar<T extends { origen: string }>(t: T): T & {
+  nodoId: string | null; mapaId: string | null; etiqueta: string | null; mapa: string | null;
+} {
+  const n = buscarPorIp(t.origen);
+  return {
+    ...t,
+    nodoId: n?.nodeId ?? null,
+    mapaId: n?.mapId ?? null,
+    etiqueta: n?.etiqueta ?? null,
+    mapa: n?.mapa ?? null,
+  };
+}
+
+/**
+ * Vuelve a intentar ubicar los avisos que quedaron sin equipo. Sirve cuando llega
+ * un trap antes de que el índice esté armado, o cuando recién ahora se cargó la IP
+ * en el nodo del mapa.
+ */
+export function reubicarPendientes(limite = 500): number {
+  const c = conn();
+  const filas: any[] = c.prepare(
+    "SELECT id, origen FROM traps WHERE nodo_id IS NULL ORDER BY ts DESC LIMIT ?"
+  ).all(limite);
+  const act = c.prepare("UPDATE traps SET nodo_id=?, mapa_id=?, etiqueta=?, mapa=? WHERE id=?");
+  let n = 0;
+  const tx = c.transaction((xs: any[]) => {
+    for (const f of xs) {
+      const u = buscarPorIp(f.origen);
+      if (!u) continue;
+      act.run(u.nodeId, u.mapId, u.etiqueta, u.mapa, f.id);
+      n++;
+    }
+  });
+  tx(filas);
+  return n;
 }
 
 /* ──────────────────────────────────────────── receptor ── */
@@ -192,18 +277,39 @@ let receptor: any = null;
  * Next: cada uno tiene su propia instancia de este módulo. Por eso el estado se
  * anota en la base, que es lo único que comparten.
  */
-function anotarEstado(puerto: number, ok: boolean, detalle: string): void {
+interface EstadoReceptor {
+  puerto: number; ok: boolean; detalle: string; desde: number;
+  comunidades: string[]; abierto: boolean;
+  /** Paquetes que llegaron y se descartaron: casi siempre, comunidad equivocada. */
+  rechazados: number; ultimoRechazo: string | null; ultimoRechazoEn: number | null;
+}
+
+function guardarEstado(e: EstadoReceptor): void {
   try {
     conn().prepare("INSERT INTO traps_meta (clave, valor) VALUES ('receptor', ?) ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor")
-      .run(JSON.stringify({ puerto, ok, detalle, desde: Date.now() }));
+      .run(JSON.stringify(e));
   } catch { /* si falla, el panel muestra "desconocido" */ }
 }
 
-export function estadoReceptor(): { puerto: number; ok: boolean; detalle: string; desde: number } | null {
+export function estadoReceptor(): EstadoReceptor | null {
   try {
     const f: any = conn().prepare("SELECT valor FROM traps_meta WHERE clave = 'receptor'").get();
     return f ? JSON.parse(f.valor) : null;
   } catch { return null; }
+}
+
+/**
+ * Un paquete descartado no se pierde en silencio: se cuenta y se guarda el motivo.
+ * Sin esto, cerrar el receptor por comunidad sería una forma elegante de dejar de
+ * recibir avisos sin que nadie se entere.
+ */
+function anotarRechazo(motivo: string): void {
+  const e = estadoReceptor();
+  if (!e) return;
+  e.rechazados = (e.rechazados || 0) + 1;
+  e.ultimoRechazo = motivo.slice(0, 200);
+  e.ultimoRechazoEn = Date.now();
+  guardarEstado(e);
 }
 
 export function receptorActivo(): boolean {
@@ -219,14 +325,22 @@ export function iniciarReceptorDeTraps(alLlegar?: (t: Trap) => void): void {
   const puerto = parseInt(process.env.TRAP_PORT || "162", 10);
   const comunidades = (process.env.TRAP_COMMUNITIES || "public")
     .split(",").map((x) => x.trim()).filter(Boolean);
+  // Por defecto sólo entran las comunidades configuradas. TRAP_ANY_COMMUNITY=1 lo
+  // vuelve a abrir, que es lo que sirve para descubrir qué manda un equipo nuevo.
+  const abierto = process.env.TRAP_ANY_COMMUNITY === "1";
 
   try {
     receptor = snmp.createReceiver(
-      { port: puerto, disableAuthorization: true, includeAuthentication: true, transport: "udp4" },
+      { port: puerto, disableAuthorization: abierto, includeAuthentication: true, transport: "udp4" },
       (error: any, notificacion: any) => {
-        if (error) { console.error("[Traps] error recibiendo:", error?.message || error); return; }
+        if (error) {
+          const motivo = String(error?.message || error);
+          console.error("[Traps] paquete descartado:", motivo);
+          anotarRechazo(motivo);
+          return;
+        }
         try {
-          const t = interpretar(notificacion);
+          const t = ubicar(interpretar(notificacion));
           const guardado = guardarTrap(t);
           alLlegar?.(guardado);
         } catch (e: any) {
@@ -238,18 +352,31 @@ export function iniciarReceptorDeTraps(alLlegar?: (t: Trap) => void): void {
       const aut = receptor.getAuthorizer?.();
       for (const c of comunidades) aut?.addCommunity?.(c);
     } catch { /* con disableAuthorization alcanza */ }
-    anotarEstado(puerto, true, `comunidades: ${comunidades.join(", ")}`);
-    console.log(`[Traps] escuchando en ${puerto}/udp (comunidades: ${comunidades.join(", ")})`);
+    const anterior = estadoReceptor();
+    guardarEstado({
+      puerto, ok: true, desde: Date.now(), comunidades, abierto,
+      detalle: abierto ? "acepta cualquier comunidad" : `comunidades: ${comunidades.join(", ")}`,
+      rechazados: anterior?.rechazados || 0,
+      ultimoRechazo: anterior?.ultimoRechazo || null,
+      ultimoRechazoEn: anterior?.ultimoRechazoEn || null,
+    });
+    // El índice de IPs se arma en segundo plano: cuando llegue el primer trap ya
+    // tiene con qué contestar de qué equipo vino.
+    refrescarSiHaceFalta();
+    console.log(`[Traps] escuchando en ${puerto}/udp — ${abierto ? "abierto a cualquier comunidad" : "comunidades: " + comunidades.join(", ")}`);
   } catch (e: any) {
     receptor = null;
-    anotarEstado(puerto, false, String(e?.message || e));
+    guardarEstado({
+      puerto, ok: false, desde: Date.now(), comunidades, abierto,
+      detalle: String(e?.message || e), rechazados: 0, ultimoRechazo: null, ultimoRechazoEn: null,
+    });
     console.error(`[Traps] no pude escuchar en ${puerto}/udp: ${e?.message || e}. ` +
       `Por debajo de 1024 hace falta root, o se puede usar otro puerto con TRAP_PORT.`);
   }
 }
 
 /** Convierte lo que entrega net-snmp en algo que se pueda leer y guardar. */
-export function interpretar(n: any): Omit<Trap, "id"> {
+export function interpretar(n: any): Omit<Trap, "id" | "nodoId" | "mapaId" | "etiqueta" | "mapa"> {
   const pdu = n?.pdu || {};
   const origen = n?.rinfo?.address || "desconocido";
   const comunidad = n?.community || pdu?.community || "";

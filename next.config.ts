@@ -5,6 +5,10 @@ import type { NextConfig } from "next";
 const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
 
 const nextConfig: NextConfig = {
+  // Se construye en .next-build y despues se mueve, para no servir nunca una
+  // carpeta a medio reemplazar. En tiempo de ejecucion la variable no esta, asi
+  // que el servidor siempre lee `.next`.
+  distDir: process.env.NEXT_DIST_DIR || ".next",
   ...(basePath ? { basePath } : {}),
   serverExternalPackages: ["better-sqlite3", "mysql2", "net-snmp", "onvif"],
   // Permite conexiones de desarrollo desde tu red local

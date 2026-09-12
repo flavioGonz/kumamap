@@ -33,11 +33,15 @@
     "**/*.ts",
     "**/*.tsx",
     ".next/types/**/*.ts",
-    ".next/dev/types/**/*.ts"
+    ".next/dev/types/**/*.ts",
+    ".next-build/types/**/*.ts",
+    ".next-build/dev/types/**/*.ts"
   ],
   "exclude": [
     "node_modules",
     "_up",
+    ".next-build",
+    ".next-prev",
     ".next.bak",
     "_bak-*"
   ]

@@ -26,3 +26,7 @@ _up/
 
 # instaladores del agente monitor-ng: 234 MB, van al release de GitHub
 public/downloads/
+
+# R4: construccion al costado
+.next-build/
+.next-prev/

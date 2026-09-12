@@ -84,6 +84,10 @@ export function onHeartbeat(
   // No change → no notification
   if (prev === status) return;
 
+  // Salir de una ventana de mantenimiento no es una recuperación: el servicio
+  // no falló, lo bajamos nosotros. Avisar "recuperado" ahí es una falsa alarma.
+  if (prev === 3) return;
+
   // Only notify on DOWN (0) or recovery to UP (1)
   if (status !== 0 && status !== 1) return;
 

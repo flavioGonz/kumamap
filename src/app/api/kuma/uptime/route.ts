@@ -6,6 +6,7 @@ import {
   ventanasDe, ventanasVacias, serieDiaria, sumarTramos, alcance, hayEstadisticas,
   type Ventanas, type Tramo,
 } from "@/lib/kuma-stats";
+import { latidosEnMantenimiento, listarVentanas } from "@/lib/mantenimiento";
 
 export const dynamic = "force-dynamic";
 
@@ -14,6 +15,8 @@ interface FilaMonitor {
   /** Segundos entre latidos: con eso el conteo de caídos se convierte en tiempo. */
   intervalo: number;
   ventanas: Ventanas; serie?: any[];
+  /** Latidos que Kuma marcó como mantenimiento en los últimos 30 días. */
+  mant?: number;
 }
 
 /** Los monitores que cada mapa tiene colgados de sus nodos. */
@@ -62,6 +65,7 @@ function separarHuerfanos(ids: number[], conocidos: Map<number, unknown>): { viv
 async function armarFilas(ids: number[], dias: number | null): Promise<FilaMonitor[]> {
   const ventanas = await ventanasDe(ids);
   const series = dias ? await serieDiaria(ids, dias) : null;
+  const mant = await latidosEnMantenimiento(ids, 24 * 30);
   const nombres = nombresDeMonitores();
   return ids.map((id) => {
     const n = nombres.get(id);
@@ -73,6 +77,7 @@ async function armarFilas(ids: number[], dias: number | null): Promise<FilaMonit
       estado: n?.estado ?? null,
       intervalo: n?.intervalo ?? 60,
       ventanas: ventanas.get(id) || ventanasVacias(),
+      mant: mant.get(id) || 0,
       ...(series ? { serie: series.get(id) || [] } : {}),
     };
   }).sort((a, b) => {
@@ -170,6 +175,9 @@ export async function GET(req: NextRequest) {
       global,
       monitoresConDato: [...ventanas.keys()].length,
       huerfanosTotal: filas.reduce((a, f) => a + f.huerfanos, 0),
+      mantenimiento: (await listarVentanas())
+        .filter((v) => v.estado === "activa")
+        .map((v) => ({ id: v.id, titulo: v.titulo, monitores: v.monitores.length })),
       mapas: filas,
     });
   } catch (err: any) {

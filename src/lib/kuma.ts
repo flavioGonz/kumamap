@@ -595,6 +595,68 @@ class KumaClient {
     });
   }
 
+  // ── Ventanas de mantenimiento (K2) ────────────────────────────────────────
+  // Kuma las maneja del todo: durante la ventana marca los latidos como
+  // MAINTENANCE (3), no los cuenta ni como up ni como down en sus agregados y
+  // no dispara notificaciones. Desde acá sólo se dan de alta y de baja; leerlas
+  // se hace contra su base (src/lib/mantenimiento.ts), que no depende del socket.
+
+  private pedirKuma(
+    evento: string,
+    args: unknown[],
+    ms = 10000
+  ): Promise<{ ok: boolean; msg?: string; res?: any }> {
+    if (!this.socket || !this.authenticated) {
+      return Promise.resolve({ ok: false, msg: "Sin sesión en Uptime Kuma" });
+    }
+    return new Promise((resolve) => {
+      const t = setTimeout(
+        () => resolve({ ok: false, msg: `Tiempo agotado en ${evento}` }),
+        ms
+      );
+      this.socket!.emit(evento, ...args, (res: any) => {
+        clearTimeout(t);
+        resolve({ ok: !!res?.ok, msg: res?.msg, res });
+      });
+    });
+  }
+
+  /** Alta. Devuelve el id que asignó Kuma para poder colgarle los monitores. */
+  async crearMantenimiento(
+    datos: Record<string, unknown>
+  ): Promise<{ ok: boolean; msg?: string; id?: number }> {
+    const r = await this.pedirKuma("addMaintenance", [datos]);
+    return { ok: r.ok, msg: r.msg, id: r.res?.maintenanceID };
+  }
+
+  editarMantenimiento(datos: Record<string, unknown>) {
+    return this.pedirKuma("editMaintenance", [datos]);
+  }
+
+  borrarMantenimiento(id: number) {
+    return this.pedirKuma("deleteMaintenance", [id]);
+  }
+
+  /** Pausar una ventana la saca de servicio: los monitores vuelven a contar. */
+  pausarMantenimiento(id: number) {
+    return this.pedirKuma("pauseMaintenance", [id]);
+  }
+
+  reanudarMantenimiento(id: number) {
+    return this.pedirKuma("resumeMaintenance", [id]);
+  }
+
+  /** Reemplaza la lista completa de monitores de la ventana. */
+  asignarMonitores(id: number, ids: number[]) {
+    return this.pedirKuma("addMonitorMaintenance", [id, ids.map((x) => ({ id: x }))]);
+  }
+
+  async monitoresDeMantenimiento(id: number): Promise<number[]> {
+    const r = await this.pedirKuma("getMonitorMaintenance", [id]);
+    const lista = r.res?.monitors;
+    return Array.isArray(lista) ? lista.map((m: any) => Number(m.id)) : [];
+  }
+
   /** Pause (disable) a monitor */
   pauseMonitor(monitorId: number): Promise<{ ok: boolean; msg?: string }> {
     if (!this.socket || !this.authenticated) {

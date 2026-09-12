@@ -1,1203 +1,648 @@
 "use client";
 
-import React, { useState, useEffect, useCallback, useRef } from "react";
-import { useSinMarco } from "@/components/AppShell";
-import Link from "next/link";
+/**
+ * Cámaras y grabadores.
+ *
+ * Lo que estaba roto: no se podía abrir la grilla de canales de ningún grabador.
+ * La pantalla ofrecía "asociar una cámara a un canal" pero no había forma de
+ * mirar ese canal, porque el video sólo se generaba para nodos NVR del mapa y en
+ * producción los nueve grabadores están documentados dentro de racks.
+ *
+ * Ahora la pantalla tiene tres partes, que son las tres preguntas que uno le
+ * hace: qué estoy viendo (el muro), qué graba cada equipo (los grabadores, con
+ * su grilla de canales), y qué falta configurar.
+ *
+ * Cuando un canal no se puede mirar, lo dice y dice por qué. Un recuadro negro
+ * girando para siempre es peor que un cartel que explica que al grabador no se
+ * llega desde el servidor.
+ */
+
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { apiUrl } from "@/lib/api";
-import { snapshotSrc, streamSrc, streamSrcVivo, tieneVideo } from "@/lib/camera-url";
+import { useMjpegStream } from "@/hooks/useMjpegStream";
 
-// ─── Types ─────────────────────────────────────
-interface CameraInfo {
-  nodeId: string;
-  mapId: string;
-  mapName: string;
-  label: string;
-  ip: string;
-  streamType: string;
-  streamUrl: string;
-  streamRef?: string;
-  snapshotInterval?: number;
-  rtspFps?: number;
-  manufacturer: string;
-  source?: "camera" | "nvr";
-  nvrNodeId?: string;
-  nvrChannel?: number;
+/* ───────────────────────────────────────────── tipos ── */
+
+interface Camara {
+  nodeId: string; mapId: string; mapName: string; label: string; ip: string;
+  streamType: string; streamUrl: string; streamRef?: string; streamRefBaja?: string;
+  manufacturer: string; source: "camera" | "nvr";
+}
+interface Canal {
+  canal: number; etiqueta: string; documentado: boolean;
+  camara: string; camaraIp: string; grabacion: string; resolucion: string; codec: string;
+  streamRef?: string; streamRefBaja?: string;
+}
+interface Grabador {
+  id: string; origen: "rack" | "nodo"; etiqueta: string; rack: string;
+  mapaId: string; mapa: string; ip: string; modelo: string;
+  usuario: string; tieneClave: boolean; patron: "hikvision" | "dahua";
+  motivo: "sin-ip" | "sin-credenciales" | null;
+  canales: Canal[]; totalCanales: number; documentados: number;
+}
+interface Prueba {
+  ok: boolean; ip?: string; motivo?: string;
+  rtsp?: { abierto: boolean; codigo: string; ms: number };
+  web?: { abierto: boolean; codigo: string; ms: number };
+  diagnostico?: string;
 }
 
-interface MapInfo { mapId: string; mapName: string; cameraCount: number; nvrCount: number; totalNodes: number; }
+/* ─────────────────────────────────────────── paleta ── */
 
-interface MapWithCameras { mapId: string; mapName: string; cameras: CameraInfo[]; cameraCount: number; nvrCount: number; totalNodes: number; }
+const AZUL = "#1b5fd9";
+const AZUL_CLARO = "#4f8cf5";
+const VERDE = "#16a34a";
+const AMBAR = "#f59e0b";
+const ROJO = "#dc2626";
+const GRIS = "#8493a8";
 
-interface RackNvrChannel { channel: number; label: string; enabled: boolean; connectedCamera?: string; cameraIp?: string; recording?: string; }
+const MOTIVO: Record<string, string> = {
+  "sin-ip": "Sin IP de gestión",
+  "sin-credenciales": "Sin usuario o clave",
+};
 
-interface RackNvrInfo { rackNodeId: string; rackLabel: string; deviceId: string; deviceLabel: string; deviceIp: string; mapId: string; mapName: string; channels: RackNvrChannel[]; }
+const sv = (d: React.ReactNode, s = 16, w = 2) => (c = "currentColor") => (
+  <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth={w} strokeLinecap="round" strokeLinejoin="round">{d}</svg>
+);
+const I = {
+  camara: sv(<><path d="M23 7l-7 5 7 5V7z" /><rect x="1" y="5" width="15" height="14" rx="2" /></>, 22),
+  disco: sv(<><rect x="2" y="4" width="20" height="7" rx="2" /><rect x="2" y="13" width="20" height="7" rx="2" /><path d="M6 7.5h.01M6 16.5h.01" /></>, 15),
+  play: sv(<path d="m6 3 14 9-14 9z" />, 13),
+  stop: sv(<rect x="5" y="5" width="14" height="14" rx="2" />, 13),
+  ampliar: sv(<><path d="M8 3H5a2 2 0 0 0-2 2v3" /><path d="M21 8V5a2 2 0 0 0-2-2h-3" /><path d="M3 16v3a2 2 0 0 0 2 2h3" /><path d="M16 21h3a2 2 0 0 0 2-2v-3" /></>, 14),
+  x: sv(<><path d="M18 6 6 18" /><path d="m6 6 12 12" /></>, 16),
+  lupa: sv(<><circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" /></>, 15),
+  chevron: sv(<path d="m9 18 6-6-6-6" />, 14),
+  pulso: sv(<path d="M3 12h4l3 8 4-16 3 8h4" />, 14),
+  alerta: sv(<><path d="m21.7 18-8-14a2 2 0 0 0-3.5 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.7-3" /><path d="M12 9v4M12 17h.01" /></>, 14),
+  anterior: sv(<path d="m15 18-6-6 6-6" />, 20),
+  siguiente: sv(<path d="m9 18 6-6-6-6" />, 20),
+};
 
-type GridLayout = "1x1" | "2x2" | "3x3" | "4x4";
-const GRID_COLS: Record<GridLayout, number> = { "1x1": 1, "2x2": 2, "3x3": 3, "4x4": 4 };
-
-// ─── Find which NVR records this camera ────────
-function findRecordingNvr(camera: CameraInfo, rackNvrs: RackNvrInfo[]): { nvr: RackNvrInfo; ch: RackNvrChannel } | null {
-  for (const nvr of rackNvrs) {
-    for (const ch of nvr.channels) {
-      if (ch.cameraIp && ch.cameraIp === camera.ip) return { nvr, ch };
-      if (ch.connectedCamera && ch.connectedCamera === camera.label) return { nvr, ch };
-    }
-  }
-  return null;
+function tieneVideo(c: Camara): boolean {
+  return !!(c.streamType && c.streamType !== "nvr" && (c.streamRef || c.streamUrl));
 }
 
-// ─── Capture snapshot as blob ──────────────────
-async function captureSnapshot(camera: CameraInfo): Promise<Blob | null> {
-  try {
-    const url =
-      camera.streamType === "rtsp" ||
-      camera.streamType === "snapshot" ||
-      camera.streamType === "mjpeg"
-        ? snapshotSrc(camera)
-        : null;
-    if (!url) return null;
-    const res = await fetch(url);
-    if (!res.ok) return null;
-    return await res.blob();
-  } catch { return null; }
-}
+/* ──────────────────────────────────── recuadro de video ── */
 
-// ─── NVR Camera Cell with Overlay ─────────────
-function NvrCell({
-  camera, index, gridLabel,
-  onDoubleClick, isDragOver, onDragStart, onDragOver, onDrop, onDragEnd,
-  rackNvrs, onAssociateNvr,
+/**
+ * Un recuadro. `encendido` importa: en el muro arrancan todos, pero en la grilla
+ * de un grabador de 32 canales encender los 32 a la vez es exactamente el error
+ * que hacía inusable esta pantalla.
+ */
+function Recuadro({
+  streamRef, streamUrl, titulo, subtitulo, encendido, onEncender, onAmpliar, alto = 150,
 }: {
-  camera: CameraInfo;
-  index: number;
-  gridLabel: string;
-  onDoubleClick: () => void;
-  isDragOver: boolean;
-  onDragStart: (e: React.DragEvent) => void;
-  onDragOver: (e: React.DragEvent) => void;
-  onDrop: (e: React.DragEvent) => void;
-  onDragEnd: () => void;
-  rackNvrs: RackNvrInfo[];
-  onAssociateNvr: (camera: CameraInfo) => void;
+  streamRef?: string; streamUrl?: string;
+  titulo: string; subtitulo?: string;
+  encendido: boolean; onEncender?: () => void; onAmpliar?: () => void;
+  alto?: number;
 }) {
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(false);
-  const [bufA, setBufA] = useState("");
-  const [bufB, setBufB] = useState("");
-  const [activeBuf, setActiveBuf] = useState<"a" | "b">("a");
-  const loadingRef = useRef(false);
-  const [hovered, setHovered] = useState(false);
-  const [capturing, setCapturing] = useState(false);
-  const [sendingWa, setSendingWa] = useState(false);
-  const hasStream = (camera.streamUrl || camera.streamRef) && camera.streamType && camera.streamType !== "nvr";
-
-  const recording = findRecordingNvr(camera, rackNvrs);
-
-  const getStreamSrc = useCallback((): string => streamSrc(camera), [camera]);
-
-  useEffect(() => {
-    if (!hasStream) { setLoading(false); return; }
-    if (camera.streamType !== "snapshot") return;
-    const ms = (camera.snapshotInterval || 2) * 1000;
-    setBufA(snapshotSrc(camera));
-    setActiveBuf("a");
-    const id = setInterval(() => {
-      if (loadingRef.current) return;
-      loadingRef.current = true;
-      const nextUrl = snapshotSrc(camera);
-      const img = new Image();
-      img.onload = () => { loadingRef.current = false; setActiveBuf((prev) => { if (prev === "a") { setBufB(nextUrl); return "b"; } else { setBufA(nextUrl); return "a"; } }); setLoading(false); setError(false); };
-      img.onerror = () => { loadingRef.current = false; };
-      img.src = nextUrl;
-    }, ms);
-    return () => clearInterval(id);
-  }, [camera, hasStream]);
-
-  // Screenshot handler
-  const handleCapture = async (e: React.MouseEvent) => {
-    e.stopPropagation();
-    setCapturing(true);
-    try {
-      const blob = await captureSnapshot(camera);
-      if (!blob) { setCapturing(false); return; }
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `${camera.label.replace(/[^a-zA-Z0-9]/g, "_")}_${new Date().toISOString().slice(0, 19).replace(/:/g, "")}.jpg`;
-      a.click();
-      URL.revokeObjectURL(url);
-    } catch {}
-    setCapturing(false);
-  };
-
-  // WhatsApp share handler
-  const handleWhatsApp = async (e: React.MouseEvent) => {
-    e.stopPropagation();
-    setSendingWa(true);
-    try {
-      const blob = await captureSnapshot(camera);
-      if (!blob) { setSendingWa(false); return; }
-      // Try Web Share API first (mobile / modern browsers)
-      if (navigator.share && navigator.canShare) {
-        const file = new File([blob], `${camera.label}.jpg`, { type: "image/jpeg" });
-        const shareData = { title: camera.label, text: `📹 ${camera.label} — ${camera.ip}\n${new Date().toLocaleString()}`, files: [file] };
-        if (navigator.canShare(shareData)) {
-          await navigator.share(shareData);
-          setSendingWa(false);
-          return;
-        }
-      }
-      // Fallback: open WhatsApp web with text (can't attach image via URL scheme)
-      const text = encodeURIComponent(`📹 ${camera.label} — ${camera.ip}\nCaptura: ${new Date().toLocaleString()}`);
-      window.open(`https://wa.me/?text=${text}`, "_blank");
-    } catch {}
-    setSendingWa(false);
-  };
-
-  const isPlaceholder = !hasStream;
+  const { canvasRef, status, mode, imgSrcA, imgSrcB, activeBuf } =
+    useMjpegStream(streamUrl || null, { streamRef, fps: 1, quality: 12, enabled: encendido });
 
   return (
-    <div
-      draggable
-      onDragStart={onDragStart}
-      onDragOver={onDragOver}
-      onDrop={onDrop}
-      onDragEnd={onDragEnd}
-      onDoubleClick={hasStream ? onDoubleClick : undefined}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-      className="relative overflow-hidden select-none"
-      style={{
-        background: "#000",
-        border: isDragOver ? "2px solid #06b6d4" : "1px solid #1a1a1a",
-        cursor: hasStream ? "grab" : "default",
-        transition: "border-color 0.15s",
-      }}
-    >
-      {/* Channel badge — top-left */}
-      <div className="absolute top-0 left-0 z-30 flex items-center gap-0.5">
-        <span className="text-[10px] font-bold px-1.5 py-0.5" style={{ background: "rgba(0,0,0,0.7)", color: "#06b6d4", fontFamily: "monospace" }}>
-          {gridLabel}
+    <div className="cm-recuadro" style={{ height: alto }}>
+      {encendido ? (
+        <>
+          {mode === "canvas"
+            ? <canvas ref={canvasRef} className="cm-lienzo" />
+            : <>
+                <img src={imgSrcA} alt="" className="cm-lienzo" style={{ opacity: activeBuf === "a" ? 1 : 0 }} />
+                <img src={imgSrcB} alt="" className="cm-lienzo" style={{ opacity: activeBuf === "b" ? 1 : 0 }} />
+              </>}
+          {status !== "streaming" && (
+            <div className="cm-estado">
+              {status === "error"
+                ? <span style={{ color: ROJO }}>sin imagen</span>
+                : <span className="cm-latiendo">conectando…</span>}
+            </div>
+          )}
+        </>
+      ) : (
+        <button className="cm-encender" onClick={onEncender} title="Encender este canal">
+          {I.play("#fff")} Ver
+        </button>
+      )}
+
+      <div className="cm-pie">
+        <span className="cm-pie-txt">
+          <b>{titulo}</b>
+          {subtitulo && <span className="cm-gris"> · {subtitulo}</span>}
         </span>
-        {/* NVR recording indicator */}
-        {recording && (
-          <span className="text-[8px] font-bold px-1 py-0.5 flex items-center gap-0.5" style={{ background: "rgba(0,0,0,0.7)", color: "#a78bfa", fontFamily: "monospace" }}>
-            <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" strokeWidth="2.5"><rect x="2" y="6" width="20" height="12" rx="2" /><path d="M2 10h20" /></svg>
-            {recording.nvr.deviceLabel}
-          </span>
-        )}
+        <span className="cm-pie-acc">
+          {encendido && onEncender && (
+            <button className="cm-icono" onClick={onEncender} title="Apagar">{I.stop("#fff")}</button>
+          )}
+          {onAmpliar && (
+            <button className="cm-icono" onClick={onAmpliar} title="Ampliar">{I.ampliar("#fff")}</button>
+          )}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+/* ───────────────────────────────────── pantalla completa ── */
+
+function Visor({ fuente, titulo, subtitulo, onCerrar, onAnterior, onSiguiente }: {
+  fuente: { streamRef?: string; streamUrl?: string };
+  titulo: string; subtitulo?: string;
+  onCerrar: () => void; onAnterior?: () => void; onSiguiente?: () => void;
+}) {
+  const { canvasRef, status, mode, imgSrcA, imgSrcB, activeBuf } =
+    useMjpegStream(fuente.streamUrl || null, { streamRef: fuente.streamRef, fps: 8, quality: 5, scale: 1280, enabled: true });
+
+  useEffect(() => {
+    const t = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onCerrar();
+      if (e.key === "ArrowLeft" && onAnterior) onAnterior();
+      if (e.key === "ArrowRight" && onSiguiente) onSiguiente();
+    };
+    window.addEventListener("keydown", t);
+    return () => window.removeEventListener("keydown", t);
+  }, [onCerrar, onAnterior, onSiguiente]);
+
+  return (
+    <div className="cm-visor" onClick={onCerrar}>
+      <div className="cm-visor-caja" onClick={(e) => e.stopPropagation()}>
+        <div className="cm-visor-cab">
+          <span><b>{titulo}</b>{subtitulo && <span className="cm-gris"> · {subtitulo}</span>}</span>
+          <button className="cm-icono" onClick={onCerrar} aria-label="Cerrar">{I.x("#fff")}</button>
+        </div>
+        <div className="cm-visor-video">
+          {mode === "canvas"
+            ? <canvas ref={canvasRef} className="cm-lienzo" />
+            : <>
+                <img src={imgSrcA} alt="" className="cm-lienzo" style={{ opacity: activeBuf === "a" ? 1 : 0 }} />
+                <img src={imgSrcB} alt="" className="cm-lienzo" style={{ opacity: activeBuf === "b" ? 1 : 0 }} />
+              </>}
+          {status !== "streaming" && (
+            <div className="cm-estado cm-estado-grande">
+              {status === "error" ? <span style={{ color: ROJO }}>sin imagen</span> : <span className="cm-latiendo">conectando…</span>}
+            </div>
+          )}
+          {onAnterior && <button className="cm-flecha izq" onClick={onAnterior} aria-label="Anterior">{I.anterior("#fff")}</button>}
+          {onSiguiente && <button className="cm-flecha der" onClick={onSiguiente} aria-label="Siguiente">{I.siguiente("#fff")}</button>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ────────────────────────────────────── tarjeta grabador ── */
+
+function TarjetaGrabador({ g, onAmpliar, onPatron }: {
+  g: Grabador;
+  onAmpliar: (canal: Canal) => void;
+  onPatron: (id: string, patron: "hikvision" | "dahua") => void;
+}) {
+  const [abierto, setAbierto] = useState(false);
+  const [encendidos, setEncendidos] = useState<Set<number>>(new Set());
+  const [prueba, setPrueba] = useState<Prueba | null>(null);
+  const [probando, setProbando] = useState(false);
+
+  const reproducible = g.motivo === null;
+
+  const alternar = (n: number) => setEncendidos((p) => {
+    const s = new Set(p); s.has(n) ? s.delete(n) : s.add(n); return s;
+  });
+
+  const probar = async () => {
+    setProbando(true); setPrueba(null);
+    try {
+      const r = await fetch(apiUrl("/api/grabadores"), {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: g.id }),
+      });
+      setPrueba(await r.json());
+    } catch (e: any) {
+      setPrueba({ ok: false, diagnostico: e?.message || "No se pudo probar" });
+    }
+    setProbando(false);
+  };
+
+  return (
+    <div className={`cm-grab${abierto ? " abierto" : ""}`}>
+      <div className="cm-grab-cab" onClick={() => setAbierto((v) => !v)} role="button" tabIndex={0}
+           onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setAbierto((v) => !v); } }}>
+        <span className={`cm-chevron${abierto ? " abajo" : ""}`}>{I.chevron(GRIS)}</span>
+        <span className="cm-grab-ico" style={{ color: reproducible ? AZUL_CLARO : GRIS }}>{I.disco()}</span>
+        <span className="cm-grab-nom">
+          <b>{g.etiqueta}</b>
+          <span className="cm-gris">{g.rack ? ` · ${g.rack}` : ""} · {g.mapa}</span>
+        </span>
+        <span className="cm-grab-datos">
+          {g.ip
+            ? <span className="cm-etq cm-mono">{g.ip}</span>
+            : <span className="cm-etq cm-etq-alerta">sin IP</span>}
+          {g.modelo && <span className="cm-etq">{g.modelo}</span>}
+          <span className="cm-etq">{g.totalCanales} canales</span>
+          <span className="cm-etq">{g.documentados} documentados</span>
+        </span>
       </div>
 
-      {/* Status — top-right */}
-      <div className="absolute top-1.5 right-2 z-30">
-        {hasStream && !error && !loading && (
-          <div className="flex items-center gap-1">
-            <div className="h-1.5 w-1.5 rounded-full" style={{ background: recording ? "#ef4444" : "#22c55e", boxShadow: `0 0 4px ${recording ? "rgba(239,68,68,0.6)" : "rgba(34,197,94,0.6)"}`, animation: "nvr-rec 2s ease-in-out infinite" }} />
-            <span className="text-[8px] font-bold" style={{ color: recording ? "#ef4444" : "#22c55e", fontFamily: "monospace" }}>{recording ? "REC" : "LIVE"}</span>
-          </div>
-        )}
-        {hasStream && error && <span className="text-[8px] font-bold text-red-500 font-mono">NO SIGNAL</span>}
-      </div>
-
-      {/* ═══ HOVER OVERLAY — controls ═══ */}
-      {hovered && hasStream && !loading && (
-        <div className="absolute inset-0 z-40 flex flex-col justify-between pointer-events-none" style={{ background: "rgba(0,0,0,0.4)" }}>
-          {/* Top: NVR info */}
-          <div className="p-2 pointer-events-auto">
-            {recording && (
-              <div className="inline-flex items-center gap-1.5 px-2 py-1" style={{ background: "rgba(139,92,246,0.15)", border: "1px solid rgba(139,92,246,0.3)" }}>
-                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" strokeWidth="2"><rect x="2" y="6" width="20" height="12" rx="2" /><path d="M2 10h20" /></svg>
-                <span className="text-[9px] font-bold text-purple-300 font-mono">
-                  {recording.nvr.deviceLabel} · CH{recording.ch.channel} · {recording.ch.recording || "N/A"}
-                </span>
-              </div>
+      {abierto && (
+        <div className="cm-grab-cuerpo">
+          <div className="cm-grab-barra">
+            {reproducible ? (
+              <>
+                <button className="cm-btn" onClick={() => setEncendidos(new Set(g.canales.map((c) => c.canal)))}>
+                  {I.play()} Encender todos
+                </button>
+                <button className="cm-btn" onClick={() => setEncendidos(new Set())}>{I.stop()} Apagar todos</button>
+              </>
+            ) : (
+              <span className="cm-nota-alerta">{I.alerta(AMBAR)} {MOTIVO[g.motivo!]} — sin eso no se le puede pedir video a este grabador.</span>
+            )}
+            <span style={{ flex: 1 }} />
+            <span className="cm-segmentos" role="group" aria-label="Dialecto RTSP">
+              <span className="cm-etq-seg">RTSP</span>
+              {(["hikvision", "dahua"] as const).map((p) => (
+                <button key={p} className={`cm-seg${g.patron === p ? " act" : ""}`} onClick={() => onPatron(g.id, p)}>
+                  {p === "hikvision" ? "Hikvision" : "Dahua"}
+                </button>
+              ))}
+            </span>
+            {g.ip && (
+              <button className="cm-btn" onClick={probar} disabled={probando}>
+                {I.pulso()} {probando ? "Probando…" : "Probar conexión"}
+              </button>
             )}
           </div>
 
-          {/* Center: action buttons */}
-          <div className="flex items-center justify-center gap-2 pointer-events-auto">
-            {/* Screenshot */}
-            <button onClick={handleCapture} disabled={capturing} title="Capturar imagen"
-              className="h-9 w-9 flex items-center justify-center transition-all hover:scale-110"
-              style={{ background: "rgba(6,182,212,0.2)", border: "1px solid rgba(6,182,212,0.4)" }}>
-              {capturing ? (
-                <div className="h-4 w-4 rounded-full border-2 border-cyan-400/30 border-t-cyan-400 animate-spin" />
-              ) : (
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#06b6d4" strokeWidth="2" strokeLinecap="round">
-                  <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z" />
-                  <circle cx="12" cy="13" r="3" />
-                </svg>
-              )}
-            </button>
-
-            {/* WhatsApp share */}
-            <button onClick={handleWhatsApp} disabled={sendingWa} title="Enviar por WhatsApp"
-              className="h-9 w-9 flex items-center justify-center transition-all hover:scale-110"
-              style={{ background: "rgba(37,211,102,0.2)", border: "1px solid rgba(37,211,102,0.4)" }}>
-              {sendingWa ? (
-                <div className="h-4 w-4 rounded-full border-2 border-green-400/30 border-t-green-400 animate-spin" />
-              ) : (
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="#25d366">
-                  <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z" />
-                </svg>
-              )}
-            </button>
-
-            {/* Associate to NVR */}
-            <button onClick={(e) => { e.stopPropagation(); onAssociateNvr(camera); }} title="Asociar a NVR"
-              className="h-9 w-9 flex items-center justify-center transition-all hover:scale-110"
-              style={{ background: "rgba(139,92,246,0.2)", border: "1px solid rgba(139,92,246,0.4)" }}>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" strokeWidth="2" strokeLinecap="round">
-                <rect x="2" y="6" width="20" height="12" rx="2" /><path d="M2 10h20" />
-                <circle cx="8" cy="14" r="1" fill="#a78bfa" /><circle cx="16" cy="14" r="1" fill="#a78bfa" />
-              </svg>
-            </button>
-
-            {/* Fullscreen */}
-            <button onClick={(e) => { e.stopPropagation(); onDoubleClick(); }} title="Pantalla completa"
-              className="h-9 w-9 flex items-center justify-center transition-all hover:scale-110"
-              style={{ background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.2)" }}>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round">
-                <polyline points="15 3 21 3 21 9" /><polyline points="9 21 3 21 3 15" />
-                <line x1="21" y1="3" x2="14" y2="10" /><line x1="3" y1="21" x2="10" y2="14" />
-              </svg>
-            </button>
-          </div>
-
-          {/* Bottom: camera details */}
-          <div />
-        </div>
-      )}
-
-      {/* Loading */}
-      {hasStream && loading && !error && (
-        <div className="absolute inset-0 flex items-center justify-center z-10">
-          <div className="h-6 w-6 rounded-full border-2 border-cyan-500/20 border-t-cyan-500 animate-spin" />
-        </div>
-      )}
-
-      {/* Placeholder */}
-      {isPlaceholder && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center z-10" style={{ background: "#0a0a0a" }}>
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#333" strokeWidth="1.5" strokeLinecap="round">
-            <path d="m22 8-6 4 6 4V8Z" /><rect width="14" height="12" x="2" y="6" rx="2" ry="2" />
-            <line x1="2" y1="2" x2="22" y2="22" stroke="#333" strokeWidth="1.5" />
-          </svg>
-          <p className="text-[9px] text-white/15 mt-1.5 font-mono">SIN SEÑAL</p>
-        </div>
-      )}
-
-      {/* Error */}
-      {hasStream && error && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center z-10" style={{ background: "#0a0a0a" }}>
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#333" strokeWidth="1.5" strokeLinecap="round">
-            <path d="m22 8-6 4 6 4V8Z" /><rect width="14" height="12" x="2" y="6" rx="2" ry="2" />
-            <line x1="2" y1="2" x2="22" y2="22" stroke="#ef4444" strokeWidth="1.5" />
-          </svg>
-        </div>
-      )}
-
-      {/* Stream: RTSP / MJPEG */}
-      {hasStream && (camera.streamType === "rtsp" || camera.streamType === "mjpeg") && (
-        <img src={getStreamSrc()} alt={camera.label} draggable={false}
-          className="absolute inset-0 w-full h-full object-cover"
-          style={{ display: error ? "none" : "block" }}
-          onLoad={() => { setLoading(false); setError(false); }}
-          onError={() => { setLoading(false); setError(true); }}
-        />
-      )}
-
-      {/* Snapshot double-buffer */}
-      {hasStream && camera.streamType === "snapshot" && (
-        <>
-          {bufA && <img src={bufA} alt={camera.label} draggable={false} className="absolute inset-0 w-full h-full object-cover transition-opacity duration-500" style={{ opacity: activeBuf === "a" ? 1 : 0 }} onLoad={() => { setLoading(false); setError(false); }} />}
-          {bufB && <img src={bufB} alt={camera.label} draggable={false} className="absolute inset-0 w-full h-full object-cover transition-opacity duration-500" style={{ opacity: activeBuf === "b" ? 1 : 0 }} />}
-        </>
-      )}
-
-      {/* Iframe */}
-      {hasStream && camera.streamType === "iframe" && (
-        <iframe src={camera.streamUrl} className="absolute inset-0 w-full h-full border-none"
-          style={{ display: error ? "none" : "block" }}
-          onLoad={() => { setLoading(false); setError(false); }}
-          onError={() => { setLoading(false); setError(true); }}
-          allow="autoplay; fullscreen"
-        />
-      )}
-
-      {/* Bottom info bar */}
-      <div className="absolute inset-x-0 bottom-0 z-20 flex items-center justify-between px-2 py-1"
-        style={{ background: "linear-gradient(transparent, rgba(0,0,0,0.85))" }}>
-        <span className="text-[10px] font-semibold text-white/70 truncate font-mono">{camera.label}</span>
-        <span className="text-[9px] text-white/30 shrink-0 font-mono">{camera.ip}</span>
-      </div>
-    </div>
-  );
-}
-
-// ─── NVR Association Modal ─────────────────────
-function NvrAssociationModal({
-  camera, rackNvrs, onClose, onSave,
-}: {
-  camera: CameraInfo;
-  rackNvrs: RackNvrInfo[];
-  onClose: () => void;
-  onSave: (rackNodeId: string, deviceId: string, channel: number) => Promise<void>;
-}) {
-  const [selectedNvr, setSelectedNvr] = useState<string>("");
-  const [selectedChannel, setSelectedChannel] = useState<number>(0);
-  const [saving, setSaving] = useState(false);
-
-  // Filter NVRs from same map
-  const mapNvrs = rackNvrs.filter((n) => n.mapId === camera.mapId);
-
-  const currentNvr = mapNvrs.find((n) => `${n.rackNodeId}::${n.deviceId}` === selectedNvr);
-
-  const handleSave = async () => {
-    if (!currentNvr || !selectedChannel) return;
-    setSaving(true);
-    await onSave(currentNvr.rackNodeId, currentNvr.deviceId, selectedChannel);
-    setSaving(false);
-    onClose();
-  };
-
-  return (
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center" style={{ background: "rgba(0,0,0,0.8)" }}>
-      <div className="flex flex-col" style={{ background: "#111", border: "1px solid #333", width: "min(480px, 92vw)", maxHeight: "80vh" }}>
-        {/* Header */}
-        <div className="px-4 py-3 flex items-center justify-between" style={{ borderBottom: "1px solid #222" }}>
-          <div className="flex items-center gap-2 min-w-0">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" strokeWidth="2"><rect x="2" y="6" width="20" height="12" rx="2" /><path d="M2 10h20" /></svg>
-            <span className="text-sm font-bold text-white font-mono truncate">ASOCIAR A NVR</span>
-          </div>
-          <button onClick={onClose} className="p-1 hover:bg-white/10 text-white/40 hover:text-white transition-colors">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
-          </button>
-        </div>
-
-        {/* Camera info */}
-        <div className="px-4 py-2 flex items-center gap-3" style={{ background: "#0d0d0d", borderBottom: "1px solid #1a1a1a" }}>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#06b6d4" strokeWidth="2"><path d="m22 8-6 4 6 4V8Z" /><rect width="14" height="12" x="2" y="6" rx="2" ry="2" /></svg>
-          <div className="min-w-0">
-            <span className="text-xs font-bold text-white/80 font-mono">{camera.label}</span>
-            <span className="text-[10px] text-white/30 font-mono ml-2">{camera.ip}</span>
-          </div>
-        </div>
-
-        <div className="px-4 py-3 flex-1 overflow-y-auto space-y-3">
-          {mapNvrs.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-8">
-              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#333" strokeWidth="1.5"><rect x="2" y="6" width="20" height="12" rx="2" /><path d="M2 10h20" /></svg>
-              <p className="text-xs text-white/25 mt-2 font-mono">No hay NVR/DVR en los racks de este mapa</p>
-              <p className="text-[10px] text-white/15 mt-1">Agrega un dispositivo NVR al rack primero</p>
+          {prueba && (
+            <div className={`cm-prueba${prueba.rtsp?.abierto ? " ok" : ""}`}>
+              <b>
+                {prueba.rtsp
+                  ? `554/tcp ${prueba.rtsp.codigo} (${prueba.rtsp.ms} ms) · 80/tcp ${prueba.web?.codigo}`
+                  : "No se pudo probar"}
+              </b>
+              <span>{prueba.diagnostico || (prueba.motivo === "sin-ip" ? "Este grabador no tiene IP de gestión cargada." : "")}</span>
             </div>
-          ) : (
-            <>
-              {/* NVR selector */}
-              <div>
-                <label className="text-[10px] text-white/30 font-mono block mb-1">NVR / DVR</label>
-                <select
-                  value={selectedNvr}
-                  onChange={(e) => { setSelectedNvr(e.target.value); setSelectedChannel(0); }}
-                  className="w-full px-3 py-2 text-xs text-white font-mono focus:outline-none"
-                  style={{ background: "#0a0a0a", border: "1px solid #333" }}
-                >
-                  <option value="" style={{ background: "#0a0a0a" }}>Seleccionar NVR...</option>
-                  {mapNvrs.map((nvr) => (
-                    <option key={`${nvr.rackNodeId}::${nvr.deviceId}`} value={`${nvr.rackNodeId}::${nvr.deviceId}`} style={{ background: "#0a0a0a" }}>
-                      {nvr.deviceLabel} — {nvr.rackLabel} ({nvr.deviceIp || "sin IP"})
-                    </option>
-                  ))}
-                </select>
-              </div>
+          )}
 
-              {/* Channel selector */}
-              {currentNvr && (
-                <div>
-                  <label className="text-[10px] text-white/30 font-mono block mb-1">CANAL</label>
-                  <div className="space-y-0.5 max-h-[200px] overflow-y-auto" style={{ border: "1px solid #222" }}>
-                    {currentNvr.channels.map((ch) => {
-                      const isTaken = ch.connectedCamera && ch.connectedCamera !== camera.label;
-                      return (
-                        <button
-                          key={ch.channel}
-                          onClick={() => !isTaken && setSelectedChannel(ch.channel)}
-                          className="w-full text-left px-3 py-1.5 flex items-center gap-2 transition-colors"
-                          style={{
-                            background: selectedChannel === ch.channel ? "rgba(139,92,246,0.15)" : "transparent",
-                            borderLeft: selectedChannel === ch.channel ? "2px solid #a78bfa" : "2px solid transparent",
-                            opacity: isTaken ? 0.4 : 1,
-                            cursor: isTaken ? "not-allowed" : "pointer",
-                          }}
-                        >
-                          <span className="text-[10px] font-bold text-white/50 font-mono w-8">CH{ch.channel}</span>
-                          <span className="text-[10px] text-white/70 font-mono flex-1 truncate">{ch.label}</span>
-                          {ch.connectedCamera && (
-                            <span className="text-[8px] px-1 py-0.5 font-mono" style={{
-                              background: ch.connectedCamera === camera.label ? "rgba(34,197,94,0.15)" : "rgba(245,158,11,0.15)",
-                              color: ch.connectedCamera === camera.label ? "#22c55e" : "#f59e0b",
-                            }}>
-                              {ch.connectedCamera === camera.label ? "ACTUAL" : ch.connectedCamera}
-                            </span>
-                          )}
-                          {ch.recording && (
-                            <span className="text-[8px] text-red-400/50 font-mono">{ch.recording}</span>
-                          )}
-                        </button>
-                      );
-                    })}
+          <div className="cm-canales">
+            {g.canales.map((c) => (
+              <div key={c.canal} className="cm-canal">
+                {reproducible ? (
+                  <Recuadro
+                    streamRef={c.streamRefBaja || c.streamRef}
+                    titulo={`CH${c.canal}`}
+                    subtitulo={c.camara || c.etiqueta}
+                    encendido={encendidos.has(c.canal)}
+                    onEncender={() => alternar(c.canal)}
+                    onAmpliar={() => onAmpliar(c)}
+                    alto={128}
+                  />
+                ) : (
+                  <div className="cm-canal-vacio">
+                    <span className="cm-canal-num">CH{c.canal}</span>
+                    <span className="cm-canal-nom">{c.camara || c.etiqueta}</span>
+                    <span className="cm-canal-falta">{MOTIVO[g.motivo!]}</span>
                   </div>
-                </div>
-              )}
-            </>
-          )}
-        </div>
-
-        {/* Footer */}
-        <div className="px-4 py-3 flex items-center justify-end gap-2" style={{ borderTop: "1px solid #222" }}>
-          <button onClick={onClose} className="px-3 py-1.5 text-xs font-bold font-mono text-white/50 hover:text-white transition-colors" style={{ border: "1px solid #333" }}>
-            CANCELAR
-          </button>
-          <button
-            onClick={handleSave}
-            disabled={!selectedChannel || saving}
-            className="px-4 py-1.5 text-xs font-bold font-mono transition-all"
-            style={{
-              background: selectedChannel ? "#a78bfa" : "#333",
-              color: selectedChannel ? "#000" : "#555",
-              opacity: saving ? 0.6 : 1,
-            }}
-          >
-            {saving ? "GUARDANDO..." : "ASOCIAR"}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ─── Fullscreen Viewer ─────────────────────────
-function FullscreenViewer({ camera, onClose, onPrev, onNext, label, rackNvrs }: {
-  camera: CameraInfo; onClose: () => void; onPrev?: () => void; onNext?: () => void; label: string; rackNvrs: RackNvrInfo[];
-}) {
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(false);
-  const [bufA, setBufA] = useState("");
-  const [bufB, setBufB] = useState("");
-  const [activeBuf, setActiveBuf] = useState<"a" | "b">("a");
-  const loadingRef = useRef(false);
-  const recording = findRecordingNvr(camera, rackNvrs);
-
-  // En grande se mira de verdad: mas cuadros y mas resolucion que en el muro.
-  const getStreamSrc = useCallback((): string => streamSrcVivo(camera), [camera]);
-
-  useEffect(() => {
-    if (camera.streamType !== "snapshot") return;
-    if (!camera.streamUrl && !camera.streamRef) return;
-    const ms = (camera.snapshotInterval || 2) * 1000;
-    setBufA(snapshotSrc(camera));
-    setActiveBuf("a");
-    const id = setInterval(() => {
-      if (loadingRef.current) return;
-      loadingRef.current = true;
-      const nextUrl = snapshotSrc(camera);
-      const img = new Image();
-      img.onload = () => { loadingRef.current = false; setActiveBuf((p) => { if (p === "a") { setBufB(nextUrl); return "b"; } else { setBufA(nextUrl); return "a"; } }); setLoading(false); setError(false); };
-      img.onerror = () => { loadingRef.current = false; };
-      img.src = nextUrl;
-    }, ms);
-    return () => clearInterval(id);
-  }, [camera]);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-      if (e.key === "ArrowLeft" && onPrev) onPrev();
-      if (e.key === "ArrowRight" && onNext) onNext();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose, onPrev, onNext]);
-
-  return (
-    <div className="fixed inset-0 z-[9999] flex flex-col bg-black">
-      <div className="flex items-center justify-between px-4 py-2 shrink-0" style={{ background: "#111", borderBottom: "1px solid #222" }}>
-        <div className="flex items-center gap-3">
-          <span className="text-[11px] font-bold px-2 py-0.5" style={{ background: "#06b6d4", color: "#000", fontFamily: "monospace" }}>{label}</span>
-          <span className="text-xs font-semibold text-white/80 font-mono">{camera.label}</span>
-          <span className="text-[10px] text-white/25 font-mono">{camera.ip}</span>
-          {recording && (
-            <div className="flex items-center gap-1 ml-2 px-1.5 py-0.5" style={{ background: "rgba(139,92,246,0.15)", border: "1px solid rgba(139,92,246,0.3)" }}>
-              <div className="h-1.5 w-1.5 rounded-full bg-red-500" style={{ animation: "nvr-rec 2s ease-in-out infinite" }} />
-              <span className="text-[9px] font-bold text-purple-300 font-mono">REC · {recording.nvr.deviceLabel} CH{recording.ch.channel}</span>
-            </div>
-          )}
-          {!recording && !error && !loading && (
-            <div className="flex items-center gap-1 ml-2">
-              <div className="h-1.5 w-1.5 rounded-full bg-green-500" style={{ animation: "nvr-rec 2s ease-in-out infinite" }} />
-              <span className="text-[9px] font-bold text-green-500 font-mono">LIVE</span>
-            </div>
-          )}
-        </div>
-        <div className="flex items-center gap-1">
-          {onPrev && <button onClick={onPrev} className="p-1.5 hover:bg-white/10 text-white/40 hover:text-white"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="15 18 9 12 15 6" /></svg></button>}
-          {onNext && <button onClick={onNext} className="p-1.5 hover:bg-white/10 text-white/40 hover:text-white"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="9 6 15 12 9 18" /></svg></button>}
-          <button onClick={onClose} className="p-1.5 ml-2 hover:bg-white/10 text-white/40 hover:text-white">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
-          </button>
-        </div>
-      </div>
-      <div className="flex-1 relative flex items-center justify-center bg-black">
-        {loading && !error && <div className="absolute inset-0 flex items-center justify-center z-10"><div className="h-10 w-10 rounded-full border-2 border-cyan-500/20 border-t-cyan-500 animate-spin" /></div>}
-        {(camera.streamType === "rtsp" || camera.streamType === "mjpeg") && (
-          <img src={getStreamSrc()} alt={camera.label} className="max-w-full max-h-full object-contain" style={{ display: error ? "none" : "block" }} onLoad={() => { setLoading(false); setError(false); }} onError={() => { setLoading(false); setError(true); }} />
-        )}
-        {camera.streamType === "snapshot" && (
-          <div className="relative w-full h-full flex items-center justify-center">
-            {bufA && <img src={bufA} alt={camera.label} className="max-w-full max-h-full object-contain transition-opacity duration-500" style={{ opacity: activeBuf === "a" ? 1 : 0, position: activeBuf === "a" ? "relative" : "absolute" }} onLoad={() => { setLoading(false); setError(false); }} />}
-            {bufB && <img src={bufB} alt={camera.label} className="max-w-full max-h-full object-contain transition-opacity duration-500" style={{ opacity: activeBuf === "b" ? 1 : 0, position: activeBuf === "b" ? "relative" : "absolute" }} />}
-          </div>
-        )}
-        {camera.streamType === "iframe" && <iframe src={camera.streamUrl} className="w-full h-full border-none" allow="autoplay; fullscreen" onLoad={() => { setLoading(false); setError(false); }} onError={() => { setLoading(false); setError(true); }} />}
-        {error && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center z-10">
-            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#333" strokeWidth="1.5"><path d="m22 8-6 4 6 4V8Z" /><rect width="14" height="12" x="2" y="6" rx="2" ry="2" /><line x1="2" y1="2" x2="22" y2="22" stroke="#ef4444" strokeWidth="2" /></svg>
-            <p className="text-sm text-white/20 mt-3 font-mono">NO SIGNAL</p>
-            <button onClick={() => { setError(false); setLoading(true); }} className="mt-4 px-4 py-1.5 text-xs font-mono text-cyan-400/60 hover:text-cyan-400" style={{ border: "1px solid rgba(6,182,212,0.2)" }}>RETRY</button>
-          </div>
-        )}
-      </div>
-      <div className="px-4 py-1.5 flex items-center justify-between shrink-0" style={{ background: "#111", borderTop: "1px solid #222" }}>
-        <span className="text-[10px] text-white/20 font-mono">
-          {camera.streamType === "rtsp" ? `RTSP · ${camera.rtspFps || 2} FPS` : camera.streamType === "snapshot" ? `SNAPSHOT · ${camera.snapshotInterval || 2}s` : camera.streamType?.toUpperCase()}
-        </span>
-        <span className="text-[10px] text-white/20 font-mono">{camera.mapName}</span>
-      </div>
-    </div>
-  );
-}
-
-// ─── ONVIF Discovery Modal ────────────────────
-function OnvifScanModal({ onClose, onFound, cameras }: { onClose: () => void; onFound: () => void; cameras: CameraInfo[] }) {
-  const [scanning, setScanning] = useState(false);
-  const [scanned, setScanned] = useState(false);
-  const [devices, setDevices] = useState<any[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [user, setUser] = useState("admin");
-  const [pass, setPass] = useState("");
-  const [timeout, setTimeout_] = useState(5);
-  const [configuring, setConfiguring] = useState<Record<string, "loading" | "done" | "error">>({});
-
-  const scan = useCallback(async () => {
-    setScanning(true); setError(null); setDevices([]); setConfiguring({});
-    try {
-      const res = await fetch(apiUrl("/api/onvif/discover"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ timeout: timeout * 1000, user, pass }) });
-      const data = await res.json();
-      if (data.error) setError(data.error);
-      else setDevices(data.devices || []);
-      setScanned(true);
-    } catch (err: any) { setError(err.message || "Error de conexion"); setScanned(true); }
-    finally { setScanning(false); }
-  }, [user, pass, timeout]);
-
-  // Find matching camera node by IP
-  const findCameraByIp = (ip: string) => cameras.find((c) => c.ip === ip && c.source === "camera");
-
-  // Auto-configure stream on a camera node
-  const autoConfigStream = async (dev: any) => {
-    const cam = findCameraByIp(dev.ip);
-    if (!cam || !dev.streamUri) return;
-
-    setConfiguring((p) => ({ ...p, [dev.ip]: "loading" }));
-    try {
-      // Inject credentials into the RTSP URL if not already present
-      let rtspUrl = dev.streamUri;
-      if (user && pass && !rtspUrl.includes("@")) {
-        rtspUrl = rtspUrl.replace("rtsp://", `rtsp://${user}:${pass}@`);
-      }
-
-      const res = await fetch(apiUrl("/api/cameras"), {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          nodeId: cam.nodeId,
-          streamUrl: rtspUrl,
-          streamType: "rtsp",
-          manufacturer: [dev.manufacturer, dev.model].filter(Boolean).join(" "),
-        }),
-      });
-      const data = await res.json();
-      if (data.ok) {
-        setConfiguring((p) => ({ ...p, [dev.ip]: "done" }));
-        onFound(); // refresh camera list
-      } else {
-        setConfiguring((p) => ({ ...p, [dev.ip]: "error" }));
-      }
-    } catch {
-      setConfiguring((p) => ({ ...p, [dev.ip]: "error" }));
-    }
-  };
-
-  // Auto-configure ALL matching cameras at once
-  const autoConfigAll = async () => {
-    const matchable = devices.filter((d) => d.connected && d.streamUri && findCameraByIp(d.ip) && !configuring[d.ip]);
-    for (const dev of matchable) {
-      await autoConfigStream(dev);
-    }
-  };
-
-  const matchableCount = devices.filter((d) => d.connected && d.streamUri && findCameraByIp(d.ip) && configuring[d.ip] !== "done").length;
-
-  return (
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center" style={{ background: "rgba(0,0,0,0.8)" }}>
-      <div className="relative overflow-hidden flex flex-col" style={{ background: "#111", border: "1px solid #333", width: "min(620px, 94vw)", maxHeight: "85vh" }}>
-        <div className="px-4 py-3 flex items-center justify-between" style={{ borderBottom: "1px solid #222" }}>
-          <div className="flex items-center gap-2">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#06b6d4" strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="2" /><path d="M16.24 7.76a6 6 0 0 1 0 8.49m-8.48-.01a6 6 0 0 1 0-8.49m11.31-2.82a10 10 0 0 1 0 14.14m-14.14 0a10 10 0 0 1 0-14.14" /></svg>
-            <span className="text-sm font-bold text-white font-mono">ONVIF DISCOVERY</span>
-          </div>
-          <button onClick={onClose} className="p-1 hover:bg-white/10 text-white/40 hover:text-white"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg></button>
-        </div>
-        <div className="px-4 py-3 flex gap-3 items-end" style={{ borderBottom: "1px solid #1a1a1a" }}>
-          <div className="flex-1">
-            <label className="text-[10px] text-white/30 block mb-1 font-mono">USER</label>
-            <input type="text" value={user} onChange={(e) => setUser(e.target.value)} className="w-full px-2 py-1.5 text-xs text-white font-mono focus:outline-none" style={{ background: "#0a0a0a", border: "1px solid #333" }} />
-          </div>
-          <div className="flex-1">
-            <label className="text-[10px] text-white/30 block mb-1 font-mono">PASS</label>
-            <input type="password" value={pass} onChange={(e) => setPass(e.target.value)} className="w-full px-2 py-1.5 text-xs text-white font-mono focus:outline-none" style={{ background: "#0a0a0a", border: "1px solid #333" }} />
-          </div>
-          <div className="w-20">
-            <label className="text-[10px] text-white/30 block mb-1 font-mono">TIMEOUT</label>
-            <select value={timeout} onChange={(e) => setTimeout_(parseInt(e.target.value))} className="w-full px-2 py-1.5 text-xs text-white font-mono focus:outline-none" style={{ background: "#0a0a0a", border: "1px solid #333" }}>
-              <option value={3} style={{ background: "#0a0a0a" }}>3s</option>
-              <option value={5} style={{ background: "#0a0a0a" }}>5s</option>
-              <option value={10} style={{ background: "#0a0a0a" }}>10s</option>
-            </select>
-          </div>
-          <button onClick={scan} disabled={scanning} className="px-4 py-1.5 text-xs font-bold font-mono" style={{ background: scanning ? "#0a3a3a" : "#06b6d4", color: scanning ? "#06b6d4" : "#000", opacity: scanning ? 0.7 : 1 }}>
-            {scanning ? "SCANNING..." : "SCAN"}
-          </button>
-        </div>
-        <div className="flex-1 overflow-y-auto px-4 py-3 space-y-1" style={{ minHeight: "180px" }}>
-          {!scanned && !scanning && <div className="flex flex-col items-center justify-center py-12 text-white/15"><p className="text-xs font-mono">Press SCAN to discover</p></div>}
-          {scanning && <div className="flex flex-col items-center justify-center py-12"><div className="h-8 w-8 rounded-full border-2 border-cyan-500/20 border-t-cyan-500 animate-spin" /><p className="text-xs text-white/30 mt-3 font-mono">Searching...</p></div>}
-          {error && <div className="p-2" style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)" }}><p className="text-xs text-red-400 font-mono">{error}</p></div>}
-          {scanned && !scanning && devices.length === 0 && !error && <div className="flex flex-col items-center justify-center py-10"><p className="text-xs text-white/20 font-mono">No devices found</p></div>}
-          {devices.map((dev: any, i: number) => {
-            const matchedCam = findCameraByIp(dev.ip);
-            const cfgState = configuring[dev.ip];
-            const hasStream = dev.connected && dev.streamUri;
-            const alreadyConfigured = matchedCam && matchedCam.streamUrl && matchedCam.streamType === "rtsp";
-
-            return (
-              <div key={`${dev.ip}-${i}`} className="p-2.5 flex items-start gap-3" style={{ background: "#0a0a0a", border: `1px solid ${cfgState === "done" ? "rgba(34,197,94,0.3)" : matchedCam ? "rgba(6,182,212,0.15)" : "#1a1a1a"}` }}>
-                <div className="h-8 w-8 flex items-center justify-center shrink-0 mt-0.5" style={{ background: dev.connected ? "rgba(34,197,94,0.1)" : "#111" }}>
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={dev.connected ? "#22c55e" : "#555"} strokeWidth="1.8"><path d="m22 8-6 4 6 4V8Z" /><rect width="14" height="12" x="2" y="6" rx="2" ry="2" /></svg>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-xs font-bold text-white font-mono">{dev.ip}</span>
-                    {dev.port !== 80 && <span className="text-[10px] text-white/20 font-mono">:{dev.port}</span>}
-                    {dev.connected && <span className="text-[8px] px-1 py-0.5 font-bold font-mono" style={{ background: "#22c55e", color: "#000" }}>ONLINE</span>}
-                    {matchedCam && <span className="text-[8px] px-1 py-0.5 font-bold font-mono" style={{ background: "rgba(6,182,212,0.2)", color: "#06b6d4" }}>NODO: {matchedCam.label}</span>}
-                    {cfgState === "done" && <span className="text-[8px] px-1 py-0.5 font-bold font-mono" style={{ background: "rgba(34,197,94,0.2)", color: "#22c55e" }}>CONFIGURADO</span>}
+                )}
+                {(c.camaraIp || c.resolucion || c.grabacion) && (
+                  <div className="cm-canal-meta">
+                    {c.camaraIp && <span className="cm-mono">{c.camaraIp}</span>}
+                    {c.resolucion && <span>{c.resolucion}</span>}
+                    {c.grabacion && <span>{c.grabacion}</span>}
                   </div>
-                  <div className="text-[10px] text-white/30 mt-0.5 truncate font-mono">{[dev.manufacturer, dev.model].filter(Boolean).join(" · ") || "ONVIF Device"}</div>
-                  {dev.streamUri && (
-                    <div className="text-[9px] text-cyan-400/40 font-mono mt-0.5 truncate">{dev.streamUri}</div>
-                  )}
-                  {dev.snapshotUri && (
-                    <div className="text-[9px] text-amber-400/30 font-mono mt-0.5 truncate">SNAP: {dev.snapshotUri}</div>
-                  )}
-                </div>
-                {/* Auto-config button */}
-                <div className="shrink-0 flex flex-col items-end gap-1 mt-0.5">
-                  {hasStream && matchedCam && !alreadyConfigured && cfgState !== "done" && (
-                    <button
-                      onClick={() => autoConfigStream(dev)}
-                      disabled={cfgState === "loading"}
-                      className="flex items-center gap-1 px-2 py-1 text-[9px] font-bold font-mono transition-all"
-                      style={{ background: "rgba(6,182,212,0.15)", border: "1px solid rgba(6,182,212,0.3)", color: "#06b6d4" }}
-                    >
-                      {cfgState === "loading" ? (
-                        <div className="h-3 w-3 rounded-full border border-cyan-400/30 border-t-cyan-400 animate-spin" />
-                      ) : (
-                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="20 6 9 17 4 12" /></svg>
-                      )}
-                      AUTO-CONFIG
-                    </button>
-                  )}
-                  {hasStream && matchedCam && alreadyConfigured && cfgState !== "done" && (
-                    <button
-                      onClick={() => autoConfigStream(dev)}
-                      disabled={cfgState === "loading"}
-                      className="flex items-center gap-1 px-2 py-1 text-[9px] font-bold font-mono transition-all"
-                      style={{ background: "rgba(245,158,11,0.1)", border: "1px solid rgba(245,158,11,0.2)", color: "#f59e0b" }}
-                    >
-                      {cfgState === "loading" ? (
-                        <div className="h-3 w-3 rounded-full border border-amber-400/30 border-t-amber-400 animate-spin" />
-                      ) : (
-                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" /><path d="M21 3v5h-5" /></svg>
-                      )}
-                      RE-CONFIG
-                    </button>
-                  )}
-                  {cfgState === "done" && (
-                    <span className="text-[9px] font-bold font-mono text-green-400">
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" className="inline mr-0.5"><polyline points="20 6 9 17 4 12" /></svg>
-                      OK
-                    </span>
-                  )}
-                  {cfgState === "error" && (
-                    <span className="text-[9px] font-bold font-mono text-red-400">ERROR</span>
-                  )}
-                  {!matchedCam && hasStream && (
-                    <span className="text-[8px] text-white/20 font-mono">Sin nodo en mapa</span>
-                  )}
-                  {!hasStream && dev.connected && (
-                    <span className="text-[8px] text-white/20 font-mono">Sin stream URI</span>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-        {scanned && (
-          <div className="px-4 py-2.5 flex items-center justify-between" style={{ borderTop: "1px solid #222" }}>
-            <span className="text-[10px] text-white/20 font-mono">{devices.length} device{devices.length !== 1 ? "s" : ""}</span>
-            <div className="flex items-center gap-2">
-              {matchableCount > 0 && (
-                <button
-                  onClick={autoConfigAll}
-                  className="flex items-center gap-1.5 px-3 py-1 text-[10px] font-bold font-mono transition-all"
-                  style={{ background: "#06b6d4", color: "#000" }}
-                >
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="20 6 9 17 4 12" /></svg>
-                  AUTO-CONFIG ALL ({matchableCount})
-                </button>
-              )}
-              <button onClick={onClose} className="px-3 py-1 text-xs font-bold font-mono text-white/50 hover:text-white" style={{ border: "1px solid #333" }}>CLOSE</button>
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ─── Map Selector Card ─────────────────────────
-function MapCard({ map, onSelect }: { map: MapWithCameras; onSelect: () => void }) {
-  const totalCams = map.cameras.filter((c) => c.streamUrl && c.streamType !== "nvr").length;
-  const nvrCams = map.cameras.filter((c) => c.source === "nvr").length;
-  const isEmpty = map.cameras.length === 0;
-
-  const content = (
-    <div className="px-4 py-3 flex items-center gap-3">
-      <div className="h-10 w-10 flex items-center justify-center shrink-0" style={{ background: isEmpty ? "#111" : "#0a2a2a", border: `1px solid ${isEmpty ? "#1a1a1a" : "#164e4e"}` }}>
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={isEmpty ? "#333" : "#06b6d4"} strokeWidth="1.5" strokeLinecap="round"><path d="m22 8-6 4 6 4V8Z" /><rect width="14" height="12" x="2" y="6" rx="2" ry="2" /></svg>
-      </div>
-      <div className="flex-1 min-w-0">
-        <h3 className={`text-[13px] font-bold truncate font-mono ${isEmpty ? "text-white/30" : "text-white/85"}`}>{map.mapName}</h3>
-        <div className="flex items-center gap-3 mt-0.5">
-          {totalCams > 0 && <span className="text-[10px] text-cyan-400/60 font-mono">{totalCams} LIVE</span>}
-          {nvrCams > 0 && <span className="text-[10px] text-purple-400/50 font-mono">{nvrCams} NVR</span>}
-          {isEmpty && <span className="text-[10px] text-white/15 font-mono">NO CAMERAS</span>}
-        </div>
-      </div>
-      {!isEmpty && <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#444" strokeWidth="2" strokeLinecap="round"><polyline points="9 6 15 12 9 18" /></svg>}
-    </div>
-  );
-
-  if (isEmpty) return <div style={{ background: "#0a0a0a", border: "1px solid #1a1a1a", opacity: 0.5 }}>{content}</div>;
-
-  return (
-    <button onClick={onSelect} className="w-full text-left transition-all duration-150 hover:bg-[#0d1a1a]" style={{ background: "#0a0a0a", border: "1px solid #1a1a1a" }}
-      onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.borderColor = "#164e4e"; }}
-      onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.borderColor = "#1a1a1a"; }}>
-      {content}
-    </button>
-  );
-}
-
-// ─── Main Page ─────────────────────────────────
-export default function CamerasPage() {
-  const [cameras, setCameras] = useState<CameraInfo[]>([]);
-  const [allMaps, setAllMaps] = useState<MapInfo[]>([]);
-  const [rackNvrs, setRackNvrs] = useState<RackNvrInfo[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [selectedMap, setSelectedMap] = useState<MapWithCameras | null>(null);
-  useSinMarco(!!selectedMap);
-  const [layout, setLayout] = useState<GridLayout>("2x2");
-  const [fullscreenIdx, setFullscreenIdx] = useState<number | null>(null);
-  const [showOnvif, setShowOnvif] = useState(false);
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
-  const [associatingCamera, setAssociatingCamera] = useState<CameraInfo | null>(null);
-
-  // Pagination
-  const [currentPage, setCurrentPage] = useState(0);
-  const [autoCycle, setAutoCycle] = useState(false);
-  const autoCycleRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  // Drag & drop
-  const [cameraOrder, setCameraOrder] = useState<CameraInfo[]>([]);
-  /** Nodos de camara del mapa que nunca se configuraron para video. */
-  const [sinVideo, setSinVideo] = useState<CameraInfo[]>([]);
-  const [dragIdx, setDragIdx] = useState<number | null>(null);
-  const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
-
-  useEffect(() => { setIsAuthenticated(!!localStorage.getItem("kumamap_user")); }, []);
-
-  const fetchCameras = useCallback(async () => {
-    setLoading(true); setError(null);
-    try {
-      const res = await fetch(apiUrl("/api/cameras"));
-      const data = await res.json();
-      if (data.error) setError(data.error);
-      else {
-        setCameras(data.cameras || []);
-        setAllMaps(data.maps || []);
-        setRackNvrs(data.rackNvrs || []);
-      }
-    } catch (err: any) { setError(err.message || "Error cargando cámaras"); }
-    finally { setLoading(false); }
-  }, []);
-
-  useEffect(() => { if (isAuthenticated) fetchCameras(); }, [isAuthenticated, fetchCameras]);
-  useEffect(() => {
-    if (selectedMap) {
-      // Sort: cameras with live streams first, then without
-      const sorted = [...selectedMap.cameras].sort((a, b) => {
-        const aHas = a.streamUrl && a.streamType && a.streamType !== "nvr" ? 0 : 1;
-        const bHas = b.streamUrl && b.streamType && b.streamType !== "nvr" ? 0 : 1;
-        return aHas - bHas;
-      });
-      // Las que no tienen video no van al muro: serian recuadros negros para
-      // siempre. Se cuentan aparte para que se sepa que estan y falta configurarlas.
-      setCameraOrder(sorted.filter((c) => tieneVideo(c) || c.streamType === "nvr"));
-      setSinVideo(sorted.filter((c) => !tieneVideo(c) && c.streamType !== "nvr"));
-      setCurrentPage(0);
-    }
-  }, [selectedMap]);
-
-  // Reset page when layout changes
-  useEffect(() => { setCurrentPage(0); }, [layout]);
-
-  // Auto-cycle pages
-  useEffect(() => {
-    if (autoCycleRef.current) clearInterval(autoCycleRef.current);
-    if (!autoCycle || cameraOrder.length === 0) return;
-    const cols = GRID_COLS[layout];
-    const perPage = cols * cols;
-    const totalPages = Math.ceil(cameraOrder.length / perPage);
-    if (totalPages <= 1) return;
-    autoCycleRef.current = setInterval(() => {
-      setCurrentPage((p) => (p + 1) % totalPages);
-    }, 10000); // 10 seconds per page
-    return () => { if (autoCycleRef.current) clearInterval(autoCycleRef.current); };
-  }, [autoCycle, cameraOrder.length, layout]);
-
-  if (isAuthenticated === null) return <div className="min-h-screen flex items-center justify-center bg-black"><div className="h-8 w-8 rounded-full border-2 border-cyan-500/20 border-t-cyan-500 animate-spin" /></div>;
-  if (!isAuthenticated) { if (typeof window !== "undefined") window.location.href = "/"; return null; }
-
-  const mapsWithCameras: MapWithCameras[] = allMaps.map((m) => ({ ...m, cameras: cameras.filter((c) => c.mapId === m.mapId) }));
-  mapsWithCameras.sort((a, b) => { const d = (a.cameras.length > 0 ? 0 : 1) - (b.cameras.length > 0 ? 0 : 1); return d || a.mapName.localeCompare(b.mapName); });
-
-  const cols = GRID_COLS[layout];
-  const perPage = cols * cols;
-  const totalStreams = cameras.filter((c) => c.streamUrl && c.streamType !== "nvr").length;
-  const totalNvr = cameras.filter((c) => c.source === "nvr").length;
-
-  // Drag handlers — adjusted for page-local indices
-  const handleDragStart = (globalIdx: number) => (e: React.DragEvent) => { setDragIdx(globalIdx); e.dataTransfer.effectAllowed = "move"; };
-  const handleDragOver = (globalIdx: number) => (e: React.DragEvent) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; setDragOverIdx(globalIdx); };
-  const handleDrop = (targetGlobalIdx: number) => (e: React.DragEvent) => {
-    e.preventDefault();
-    if (dragIdx === null || dragIdx === targetGlobalIdx) { setDragIdx(null); setDragOverIdx(null); return; }
-    const n = [...cameraOrder]; const [m] = n.splice(dragIdx, 1); n.splice(targetGlobalIdx, 0, m);
-    setCameraOrder(n); setDragIdx(null); setDragOverIdx(null);
-  };
-  const handleDragEnd = () => { setDragIdx(null); setDragOverIdx(null); };
-
-  const activeForFullscreen = cameraOrder.filter((c) => c.streamUrl && c.streamType !== "nvr");
-  const openFullscreen = (cam: CameraInfo) => { const i = activeForFullscreen.findIndex((c) => c.nodeId === cam.nodeId); setFullscreenIdx(i >= 0 ? i : 0); };
-
-  // Associate camera to NVR channel
-  const handleAssociateNvr = async (rackNodeId: string, deviceId: string, channel: number) => {
-    if (!associatingCamera) return;
-    try {
-      await fetch(apiUrl("/api/cameras"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rackNodeId, deviceId, channel, cameraLabel: associatingCamera.label, cameraIp: associatingCamera.ip }),
-      });
-      await fetchCameras();
-    } catch {}
-  };
-
-  // ── Map Selector ──
-  if (!selectedMap) {
-    return (
-      <div className="min-h-full bg-black">
-        <header className="sticky top-0 z-50 px-5 py-3 flex items-center gap-3" style={{ background: "#0a0a0a", borderBottom: "1px solid #1a1a1a" }}>
-          <div className="flex-1" />
-          <button onClick={() => setShowOnvif(true)} className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-bold font-mono" style={{ background: "#06b6d4", color: "#000" }}>
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="2" /><path d="M16.24 7.76a6 6 0 0 1 0 8.49m-8.48-.01a6 6 0 0 1 0-8.49" /></svg>
-            DISCOVER
-          </button>
-          <button onClick={fetchCameras} className="h-8 w-8 flex items-center justify-center text-white/25 hover:text-white/60" title="Refresh">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" /><path d="M21 3v5h-5" /></svg>
-          </button>
-        </header>
-        <main className="max-w-3xl mx-auto px-5 py-5">
-          {!loading && !error && (
-            <div className="flex items-center gap-4 mb-4 px-1">
-              <span className="text-[11px] text-white/25 font-mono">{allMaps.length} MAP{allMaps.length !== 1 ? "S" : ""}</span>
-              {totalStreams > 0 && <><div className="h-3 w-px bg-white/10" /><span className="text-[11px] text-cyan-400/50 font-mono">{totalStreams} LIVE</span></>}
-              {totalNvr > 0 && <><div className="h-3 w-px bg-white/10" /><span className="text-[11px] text-purple-400/50 font-mono">{totalNvr} NVR CH</span></>}
-            </div>
-          )}
-          {loading && <div className="flex items-center justify-center py-20"><div className="h-8 w-8 rounded-full border-2 border-cyan-500/20 border-t-cyan-500 animate-spin" /></div>}
-          {error && !loading && <div className="flex flex-col items-center justify-center py-20"><p className="text-sm text-red-400/60 font-mono">{error}</p></div>}
-          {!loading && !error && mapsWithCameras.length === 0 && <div className="flex flex-col items-center justify-center py-20"><p className="text-sm text-white/30 font-mono">NO MAPS CONFIGURED</p></div>}
-          {!loading && !error && mapsWithCameras.length > 0 && <div className="space-y-1">{mapsWithCameras.map((m) => <MapCard key={m.mapId} map={m} onSelect={() => setSelectedMap(m)} />)}</div>}
-        </main>
-        {showOnvif && <OnvifScanModal onClose={() => setShowOnvif(false)} onFound={fetchCameras} cameras={cameras} />}
-      </div>
-    );
-  }
-
-  // ── Camera Grid — NVR Style with Pagination ──
-  const totalPages = Math.ceil(cameraOrder.length / perPage);
-  const pageStart = currentPage * perPage;
-  const pageCameras = cameraOrder.slice(pageStart, pageStart + perPage);
-
-  // Keyboard navigation
-  const handleGridKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "ArrowLeft" && currentPage > 0) setCurrentPage(currentPage - 1);
-    if (e.key === "ArrowRight" && currentPage < totalPages - 1) setCurrentPage(currentPage + 1);
-  };
-
-  // Time display
-  const now = new Date();
-  const timeStr = now.toLocaleTimeString("es-UY", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-  const dateStr = now.toLocaleDateString("es-UY", { weekday: "short", day: "2-digit", month: "short", year: "numeric" });
-
-  return (
-    <div className="h-screen flex flex-col bg-black overflow-hidden" onKeyDown={handleGridKeyDown} tabIndex={0}>
-      {/* ── NVR Header Bar ── */}
-      <header className="shrink-0 flex items-center gap-2 px-3 py-1" style={{ background: "linear-gradient(180deg, #1a1a2e 0%, #0f0f1a 100%)", borderBottom: "1px solid #2a2a3e" }}>
-        {/* Back + Map name */}
-        <button onClick={() => setSelectedMap(null)} className="flex items-center gap-1 text-white/30 hover:text-white/60 transition-colors">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polyline points="15 18 9 12 15 6" /></svg>
-        </button>
-        <div className="h-3.5 w-px" style={{ background: "#2a2a3e" }} />
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#06b6d4" strokeWidth="2" strokeLinecap="round"><path d="m22 8-6 4 6 4V8Z" /><rect width="14" height="12" x="2" y="6" rx="2" ry="2" /></svg>
-        <h1 className="text-[11px] font-bold text-white/85 truncate font-mono tracking-wide">{selectedMap.mapName}</h1>
-        <span className="text-[9px] px-1.5 py-0.5 font-bold font-mono" style={{ background: "rgba(6,182,212,0.15)", color: "#06b6d4", border: "1px solid rgba(6,182,212,0.2)" }}>
-          {cameraOrder.filter((c) => c.streamUrl && c.streamType !== "nvr").length} LIVE
-        </span>
-
-        <div className="flex-1" />
-
-        {/* Page indicator */}
-        {totalPages > 1 && (
-          <div className="flex items-center gap-1">
-            <button
-              onClick={() => setCurrentPage(Math.max(0, currentPage - 1))}
-              disabled={currentPage === 0}
-              className="h-6 w-6 flex items-center justify-center transition-colors"
-              style={{ color: currentPage === 0 ? "#333" : "#888" }}
-            >
-              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="15 18 9 12 15 6" /></svg>
-            </button>
-
-            {/* Page dots */}
-            <div className="flex items-center gap-0.5">
-              {Array.from({ length: totalPages }, (_, i) => (
-                <button
-                  key={i}
-                  onClick={() => setCurrentPage(i)}
-                  className="transition-all"
-                  style={{
-                    width: currentPage === i ? "16px" : "6px",
-                    height: "6px",
-                    borderRadius: "3px",
-                    background: currentPage === i ? "#06b6d4" : "#333",
-                    boxShadow: currentPage === i ? "0 0 6px rgba(6,182,212,0.5)" : "none",
-                  }}
-                />
-              ))}
-            </div>
-
-            <button
-              onClick={() => setCurrentPage(Math.min(totalPages - 1, currentPage + 1))}
-              disabled={currentPage === totalPages - 1}
-              className="h-6 w-6 flex items-center justify-center transition-colors"
-              style={{ color: currentPage === totalPages - 1 ? "#333" : "#888" }}
-            >
-              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="9 6 15 12 9 18" /></svg>
-            </button>
-
-            <span className="text-[9px] font-mono text-white/25 ml-1">{currentPage + 1}/{totalPages}</span>
-          </div>
-        )}
-
-        {/* Auto-cycle toggle */}
-        {totalPages > 1 && (
-          <>
-            <div className="h-3.5 w-px ml-1" style={{ background: "#2a2a3e" }} />
-            <button
-              onClick={() => setAutoCycle(!autoCycle)}
-              title={autoCycle ? "Detener auto-rotación" : "Auto-rotar páginas (10s)"}
-              className="flex items-center gap-1 px-1.5 py-0.5 transition-all"
-              style={{
-                background: autoCycle ? "rgba(6,182,212,0.15)" : "transparent",
-                border: `1px solid ${autoCycle ? "rgba(6,182,212,0.3)" : "transparent"}`,
-              }}
-            >
-              {autoCycle ? (
-                <svg width="10" height="10" viewBox="0 0 24 24" fill="#06b6d4" stroke="none"><rect x="6" y="4" width="4" height="16" rx="1" /><rect x="14" y="4" width="4" height="16" rx="1" /></svg>
-              ) : (
-                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#555" strokeWidth="2"><polygon points="5 3 19 12 5 21 5 3" /></svg>
-              )}
-              <span className="text-[8px] font-mono" style={{ color: autoCycle ? "#06b6d4" : "#555" }}>SEQ</span>
-            </button>
-          </>
-        )}
-
-        <div className="h-3.5 w-px ml-1" style={{ background: "#2a2a3e" }} />
-
-        {/* ONVIF Discovery */}
-        <button onClick={() => setShowOnvif(true)} className="flex items-center gap-1 px-2 py-0.5 text-[9px] font-bold font-mono transition-all hover:bg-cyan-400/10" style={{ color: "#06b6d4", border: "1px solid rgba(6,182,212,0.2)" }}>
-          <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><circle cx="12" cy="12" r="2" /><path d="M16.24 7.76a6 6 0 0 1 0 8.49m-8.48-.01a6 6 0 0 1 0-8.49" /></svg>
-          ONVIF
-        </button>
-
-        {/* Layout selector */}
-        <div className="flex items-center" style={{ border: "1px solid #2a2a3e", borderRadius: "2px" }}>
-          {(["1x1", "2x2", "3x3", "4x4"] as GridLayout[]).map((g) => (
-            <button key={g} onClick={() => setLayout(g)} className="px-2 py-0.5 text-[9px] font-bold font-mono transition-all"
-              style={{
-                background: layout === g ? "#06b6d4" : "transparent",
-                color: layout === g ? "#000" : "#555",
-                borderRight: g !== "4x4" ? "1px solid #2a2a3e" : "none",
-              }}>
-              {g}
-            </button>
-          ))}
-        </div>
-      </header>
-
-      {/* ── Camera Grid ── */}
-      <main className="flex-1 overflow-hidden relative" style={{ background: "#0a0a0f" }}>
-        {cameraOrder.length === 0 ? (
-          <div className="h-full flex flex-col items-center justify-center">
-            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#222" strokeWidth="1.5"><path d="m22 8-6 4 6 4V8Z" /><rect width="14" height="12" x="2" y="6" rx="2" ry="2" /></svg>
-            <p className="text-sm text-white/15 mt-3 font-mono">SIN CÁMARAS CONFIGURADAS</p>
-            <div className="flex items-center gap-2 mt-4">
-              <button onClick={() => setShowOnvif(true)} className="px-3 py-1.5 text-xs font-bold font-mono" style={{ background: "#06b6d4", color: "#000" }}>DISCOVER ONVIF</button>
-              <Link href={`/map/${selectedMap.mapId}`} className="px-3 py-1.5 text-xs font-mono text-white/40" style={{ border: "1px solid #333" }}>ABRIR MAPA</Link>
-            </div>
-          </div>
-        ) : (
-          <div
-            className="w-full h-full grid"
-            style={{
-              gridTemplateColumns: `repeat(${cols}, 1fr)`,
-              gridTemplateRows: `repeat(${cols}, 1fr)`,
-              gap: "2px",
-              padding: "2px",
-              background: "#0a0a0f",
-            }}
-          >
-            {pageCameras.map((cam, localIdx) => {
-              const globalIdx = pageStart + localIdx;
-              return (
-                <NvrCell
-                  key={cam.nodeId}
-                  camera={cam}
-                  index={globalIdx}
-                  gridLabel={`CH${String(globalIdx + 1).padStart(2, "0")}`}
-                  onDoubleClick={() => openFullscreen(cam)}
-                  isDragOver={dragOverIdx === globalIdx && dragIdx !== globalIdx}
-                  onDragStart={handleDragStart(globalIdx)}
-                  onDragOver={handleDragOver(globalIdx)}
-                  onDrop={handleDrop(globalIdx)}
-                  onDragEnd={handleDragEnd}
-                  rackNvrs={rackNvrs}
-                  onAssociateNvr={setAssociatingCamera}
-                />
-              );
-            })}
-            {/* Fill empty cells if page is not full */}
-            {pageCameras.length < perPage && Array.from({ length: perPage - pageCameras.length }, (_, i) => (
-              <div key={`empty-${i}`} style={{ background: "#0a0a0f", border: "1px solid #141420" }}>
-                <div className="w-full h-full flex items-center justify-center">
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#1a1a2e" strokeWidth="1.5" strokeLinecap="round">
-                    <path d="m22 8-6 4 6 4V8Z" /><rect width="14" height="12" x="2" y="6" rx="2" ry="2" />
-                  </svg>
-                </div>
+                )}
               </div>
             ))}
           </div>
-        )}
-      </main>
-
-      {/* ── NVR Status Bar ── */}
-      <footer className="shrink-0 flex items-center justify-between px-3 py-0.5" style={{ background: "linear-gradient(180deg, #0f0f1a 0%, #1a1a2e 100%)", borderTop: "1px solid #2a2a3e" }}>
-        <div className="flex items-center gap-3">
-          <span className="text-[9px] font-mono text-white/20">{cameraOrder.length} CH</span>
-          {sinVideo.length > 0 && (
-            <span className="text-[9px] font-mono" style={{ color: "#f59e0b" }}
-              title={sinVideo.map((c) => c.label + (c.ip ? ` (${c.ip})` : "")).join(", ") +
-                     " — son nodos de camara del mapa sin stream configurado"}>
-              {sinVideo.length} SIN VIDEO
-            </span>
-          )}
-          <div className="h-2.5 w-px" style={{ background: "#2a2a3e" }} />
-          <span className="text-[9px] font-mono text-white/20">
-            CH{String(pageStart + 1).padStart(2, "0")}–CH{String(Math.min(pageStart + perPage, cameraOrder.length)).padStart(2, "0")}
-          </span>
-          {autoCycle && (
-            <>
-              <div className="h-2.5 w-px" style={{ background: "#2a2a3e" }} />
-              <div className="flex items-center gap-1">
-                <div className="h-1.5 w-1.5 rounded-full" style={{ background: "#06b6d4", animation: "nvr-rec 2s ease-in-out infinite" }} />
-                <span className="text-[8px] font-mono text-cyan-400/50">SEQ 10s</span>
-              </div>
-            </>
-          )}
         </div>
-        <div className="flex items-center gap-3">
-          <span className="text-[9px] font-mono text-white/15">{dateStr}</span>
-          <span className="text-[10px] font-mono font-bold text-white/30">{timeStr}</span>
-        </div>
-      </footer>
-
-      {fullscreenIdx !== null && activeForFullscreen[fullscreenIdx] && (
-        <FullscreenViewer
-          camera={activeForFullscreen[fullscreenIdx]}
-          label={`CH${String(cameraOrder.findIndex((c) => c.nodeId === activeForFullscreen[fullscreenIdx].nodeId) + 1).padStart(2, "0")}`}
-          onClose={() => setFullscreenIdx(null)}
-          onPrev={fullscreenIdx > 0 ? () => setFullscreenIdx(fullscreenIdx - 1) : undefined}
-          onNext={fullscreenIdx < activeForFullscreen.length - 1 ? () => setFullscreenIdx(fullscreenIdx + 1) : undefined}
-          rackNvrs={rackNvrs}
-        />
       )}
-
-      {associatingCamera && (
-        <NvrAssociationModal
-          camera={associatingCamera}
-          rackNvrs={rackNvrs}
-          onClose={() => setAssociatingCamera(null)}
-          onSave={handleAssociateNvr}
-        />
-      )}
-
-      {showOnvif && <OnvifScanModal onClose={() => setShowOnvif(false)} onFound={fetchCameras} cameras={cameras} />}
-      <style>{`@keyframes nvr-rec { 0%,100%{opacity:1} 50%{opacity:0.3} }`}</style>
     </div>
   );
 }
+
+/* ────────────────────────────────────────────── página ── */
+
+type Vista = "muro" | "grabadores" | "faltan";
+
+export default function CamarasPage() {
+  const [camaras, setCamaras] = useState<Camara[]>([]);
+  const [grabadores, setGrabadores] = useState<Grabador[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  /**
+   * Los grabadores traen IPs de gestión y usuarios, así que esa ruta pide sesión
+   * mientras que la de cámaras es pública (la usan el quiosco y el móvil). Si no
+   * se distinguiera, la pantalla mostraría "0 grabadores" a alguien que en
+   * realidad tiene nueve y sólo le falta entrar: el peor cartel posible.
+   */
+  const [faltaSesion, setFaltaSesion] = useState(false);
+  const [cargando, setCargando] = useState(true);
+  const [vista, setVista] = useState<Vista>("muro");
+  const [q, setQ] = useState("");
+  const [abierta, setAbierta] = useState<number | null>(null);
+  const [canalAbierto, setCanalAbierto] = useState<{ canal: Canal; grabador: Grabador } | null>(null);
+
+  const cargar = useCallback(async () => {
+    try {
+      const [rc, rg] = await Promise.all([
+        fetch(apiUrl("/api/cameras"), { credentials: "include" }),
+        fetch(apiUrl("/api/grabadores"), { credentials: "include" }),
+      ]);
+      const bc = await rc.json();
+      const bg = await rg.json().catch(() => ({}));
+      if (!rc.ok) { setError(bc?.error || `HTTP ${rc.status}`); setCargando(false); return; }
+      setCamaras(bc.cameras || []);
+      setFaltaSesion(rg.status === 401 || rg.status === 403);
+      setGrabadores(rg.ok ? (bg.grabadores || []) : []);
+      setError(null);
+    } catch (e: any) { setError(e?.message || "Error de red"); }
+    setCargando(false);
+  }, []);
+
+  useEffect(() => { cargar(); }, [cargar]);
+
+  const cambiarPatron = async (id: string, patron: "hikvision" | "dahua") => {
+    setGrabadores((p) => p.map((g) => (g.id === id ? { ...g, patron } : g)));
+    await fetch(apiUrl("/api/grabadores"), {
+      method: "PUT", credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, patron }),
+    });
+    await cargar();
+  };
+
+  const filtro = q.trim().toLowerCase();
+  const enVivo = useMemo(() => camaras.filter(tieneVideo), [camaras]);
+  const sinVideo = useMemo(() => camaras.filter((c) => !tieneVideo(c)), [camaras]);
+
+  const muro = useMemo(() => enVivo.filter((c) =>
+    !filtro || c.label.toLowerCase().includes(filtro) || c.mapName.toLowerCase().includes(filtro) || c.ip.includes(filtro)),
+    [enVivo, filtro]);
+  const grabsFiltrados = useMemo(() => grabadores.filter((g) =>
+    !filtro || g.etiqueta.toLowerCase().includes(filtro) || g.mapa.toLowerCase().includes(filtro) ||
+    g.rack.toLowerCase().includes(filtro) || g.ip.includes(filtro)),
+    [grabadores, filtro]);
+  const faltan = useMemo(() => sinVideo.filter((c) =>
+    !filtro || c.label.toLowerCase().includes(filtro) || c.mapName.toLowerCase().includes(filtro) || c.ip.includes(filtro)),
+    [sinVideo, filtro]);
+
+  const porCliente = useMemo(() => {
+    const m = new Map<string, Camara[]>();
+    for (const c of muro) { const l = m.get(c.mapName) || []; l.push(c); m.set(c.mapName, l); }
+    return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  }, [muro]);
+
+  const totalCanales = grabadores.reduce((n, g) => n + g.totalCanales, 0);
+
+  return (
+    <div className="cm-envoltura">
+      <style>{CSS}</style>
+
+      <header className="cm-cab">
+        <div className="cm-logo">{I.camara("#fff")}</div>
+        <div style={{ flex: 1, minWidth: 240 }}>
+          <h1>Cámaras y grabadores</h1>
+          <p>
+            El muro son las cámaras que hoy dan imagen. Los grabadores traen su grilla
+            de canales: se enciende el que se quiera mirar, y cuando un canal no se puede
+            ver, dice por qué.
+          </p>
+        </div>
+        <div className="cm-kpis">
+          <div className="cm-kpi"><b style={{ color: enVivo.length ? VERDE : undefined }}>{enVivo.length}</b><span>En vivo</span></div>
+          <div className="cm-kpi"><b style={{ color: sinVideo.length ? AMBAR : undefined }}>{sinVideo.length}</b><span>Sin configurar</span></div>
+          <div className="cm-kpi"><b>{faltaSesion ? "—" : grabadores.length}</b><span>Grabadores</span></div>
+          <div className="cm-kpi"><b>{faltaSesion ? "—" : totalCanales}</b><span>Canales</span></div>
+        </div>
+      </header>
+
+      {error && <div className="cm-error">{error}</div>}
+
+      <div className="cm-filtros">
+        <div className="cm-segmentos" role="group" aria-label="Vista">
+          {([["muro", `Muro (${enVivo.length})`], ["grabadores", faltaSesion ? "Grabadores" : `Grabadores (${grabadores.length})`], ["faltan", `Sin configurar (${sinVideo.length})`]] as Array<[Vista, string]>).map(([k, t]) => (
+            <button key={k} className={`cm-seg${vista === k ? " act" : ""}`} onClick={() => setVista(k)}>{t}</button>
+          ))}
+        </div>
+        <div className="cm-buscador">
+          {I.lupa(GRIS)}
+          <input className="cm-input cm-limpio" placeholder="Buscar cámara, cliente o IP…" value={q} onChange={(e) => setQ(e.target.value)} />
+          {q && <button className="cm-btn cm-mini" onClick={() => setQ("")} aria-label="Limpiar">{I.x()}</button>}
+        </div>
+      </div>
+
+      {cargando ? <p className="cm-gris">Cargando…</p> : (
+        <>
+          {vista === "muro" && (
+            enVivo.length === 0 ? (
+              <div className="cm-vacio">
+                <p><b>Ninguna cámara tiene video configurado.</b></p>
+                <p>Hay {sinVideo.length} nodos de cámara en los mapas sin URL de stream. Están en la pestaña "Sin configurar".</p>
+              </div>
+            ) : porCliente.map(([cliente, lista]) => (
+              <section key={cliente} className="cm-bloque">
+                <h2>{cliente} <span className="cm-gris">· {lista.length}</span></h2>
+                <div className="cm-muro">
+                  {lista.map((c) => {
+                    const i = muro.indexOf(c);
+                    return (
+                      <Recuadro key={c.nodeId}
+                        streamRef={c.streamRefBaja || c.streamRef}
+                        streamUrl={c.streamUrl}
+                        titulo={c.label}
+                        subtitulo={c.ip}
+                        encendido
+                        onAmpliar={() => setAbierta(i)}
+                      />
+                    );
+                  })}
+                </div>
+              </section>
+            ))
+          )}
+
+          {vista === "grabadores" && (
+            faltaSesion ? (
+              <div className="cm-vacio">
+                <p><b>Hace falta iniciar sesión para ver los grabadores.</b></p>
+                <p>
+                  El muro se puede mirar sin entrar —lo usan el quiosco y el móvil—, pero la lista de
+                  grabadores trae las IP de gestión y los usuarios de cada equipo, así que sólo se
+                  muestra a un operador con sesión abierta.
+                </p>
+              </div>
+            ) : grabsFiltrados.length === 0 ? (
+              <div className="cm-vacio"><p><b>No hay grabadores documentados.</b></p>
+                <p>Se leen de los dispositivos NVR/DVR dentro de los racks y de los nodos de grabador de los mapas.</p></div>
+            ) : (
+              <div className="cm-lista-grab">
+                {grabsFiltrados.map((g) => (
+                  <TarjetaGrabador key={g.id} g={g}
+                    onAmpliar={(canal) => setCanalAbierto({ canal, grabador: g })}
+                    onPatron={cambiarPatron} />
+                ))}
+              </div>
+            )
+          )}
+
+          {vista === "faltan" && (
+            faltan.length === 0 ? (
+              <div className="cm-vacio"><p><b>Todas las cámaras tienen video configurado.</b></p></div>
+            ) : (
+              <>
+                <div className="cm-aviso">
+                  <span style={{ color: AMBAR, display: "inline-flex", marginTop: 2 }}>{I.alerta(AMBAR)}</span>
+                  <span>
+                    Estos nodos están dibujados como cámara en el mapa pero <b>no tienen URL de stream</b>.
+                    Antes se pintaban en el muro como recuadros negros para siempre; ahora se cuentan acá.
+                    Se arreglan desde el mapa, en el nodo, cargando el RTSP.
+                  </span>
+                </div>
+                <div className="cm-tabla-wrap">
+                  <table className="cm-tabla">
+                    <thead><tr><th>Cliente</th><th>Cámara</th><th>IP</th><th>Falta</th></tr></thead>
+                    <tbody>
+                      {faltan.map((c) => (
+                        <tr key={c.nodeId}>
+                          <td>{c.mapName}</td>
+                          <td><b>{c.label}</b></td>
+                          <td className="cm-mono">{c.ip || <span className="cm-gris">—</span>}</td>
+                          <td className="cm-gris">{c.ip ? "URL de stream" : "IP y URL de stream"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )
+          )}
+        </>
+      )}
+
+      {abierta != null && muro[abierta] && (
+        <Visor
+          fuente={{ streamRef: muro[abierta].streamRef, streamUrl: muro[abierta].streamUrl }}
+          titulo={muro[abierta].label}
+          subtitulo={`${muro[abierta].mapName} · ${muro[abierta].ip}`}
+          onCerrar={() => setAbierta(null)}
+          onAnterior={muro.length > 1 ? () => setAbierta((i) => ((i ?? 0) - 1 + muro.length) % muro.length) : undefined}
+          onSiguiente={muro.length > 1 ? () => setAbierta((i) => ((i ?? 0) + 1) % muro.length) : undefined}
+        />
+      )}
+
+      {canalAbierto && (
+        <Visor
+          fuente={{ streamRef: canalAbierto.canal.streamRef }}
+          titulo={`${canalAbierto.grabador.etiqueta} · CH${canalAbierto.canal.canal}`}
+          subtitulo={canalAbierto.canal.camara || canalAbierto.grabador.mapa}
+          onCerrar={() => setCanalAbierto(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+const CSS = `
+.cm-envoltura{max-width:1400px;margin:0 auto;padding:26px 20px 70px;color:var(--foreground)}
+.cm-cab{display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:16px}
+.cm-logo{width:46px;height:46px;border-radius:12px;background:linear-gradient(135deg,${AZUL},#0f3f9e);display:flex;align-items:center;justify-content:center;box-shadow:0 6px 18px ${AZUL}45;flex:none}
+.cm-cab h1{font-size:22px;font-weight:700;margin:0;letter-spacing:-.3px}
+.cm-cab p{color:var(--muted-foreground);margin:3px 0 0;font-size:13px;max-width:72ch;line-height:1.55}
+.cm-kpis{display:flex;gap:8px;flex-wrap:wrap}
+.cm-kpi{text-align:center;padding:7px 15px;border-radius:10px;background:var(--surface-card);border:1px solid var(--border);min-width:86px}
+.cm-kpi b{display:block;font-size:20px;font-weight:700;font-variant-numeric:tabular-nums;line-height:1.1}
+.cm-kpi span{font-size:10px;color:var(--muted-foreground);text-transform:uppercase;letter-spacing:.5px}
+.cm-error{background:rgba(220,38,38,.12);border:1px solid ${ROJO};color:#f87171;padding:10px 14px;border-radius:9px;margin-bottom:12px;font-size:13px}
+.cm-gris{color:var(--muted-foreground)}
+.cm-mono{font-variant-numeric:tabular-nums;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
+
+.cm-filtros{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px}
+.cm-segmentos{display:flex;align-items:center;background:var(--surface-elevated);border:1px solid var(--border);border-radius:9px;padding:2px;gap:2px}
+.cm-etq-seg{font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted-foreground);padding:0 8px 0 7px}
+.cm-seg{background:transparent;border:none;color:var(--muted-foreground);font:inherit;font-size:12.5px;font-weight:600;padding:5px 12px;border-radius:7px;cursor:pointer;white-space:nowrap}
+.cm-seg:hover{color:var(--text-secondary)}
+.cm-seg.act{background:var(--card);color:${AZUL_CLARO};box-shadow:0 1px 3px rgba(0,0,0,.14)}
+.cm-buscador{display:flex;align-items:center;gap:7px;flex:1;min-width:200px;max-width:340px;background:var(--card);border:1px solid var(--border);border-radius:9px;padding:0 8px 0 11px}
+.cm-input{background:var(--card);border:1px solid var(--border);color:var(--foreground);border-radius:9px;padding:8px 11px;font:inherit;font-size:13px;outline:none}
+.cm-limpio{flex:1;min-width:0;border:none!important;background:transparent!important;padding-left:0}
+.cm-btn{display:inline-flex;align-items:center;gap:6px;background:var(--card);border:1px solid var(--border);color:var(--foreground);font:inherit;font-size:12.5px;font-weight:600;padding:6px 12px;border-radius:8px;cursor:pointer;white-space:nowrap}
+.cm-btn:hover{background:var(--surface-hover)}
+.cm-btn:disabled{opacity:.55;cursor:default}
+.cm-mini{padding:3px 6px;border:none;background:transparent}
+
+.cm-bloque{margin-bottom:20px}
+.cm-bloque h2{font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--text-secondary);margin:0 0 8px}
+.cm-muro{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px}
+
+.cm-recuadro{position:relative;border-radius:11px;overflow:hidden;background:#0b0f17;border:1px solid var(--border);display:flex;align-items:center;justify-content:center}
+.cm-lienzo{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transition:opacity .18s}
+.cm-estado{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:11.5px;color:#8493a8;pointer-events:none}
+.cm-estado-grande{font-size:14px}
+.cm-latiendo{animation:cm-late 1.4s ease-in-out infinite}
+@keyframes cm-late{0%,100%{opacity:.35}50%{opacity:.9}}
+.cm-encender{position:relative;z-index:2;display:inline-flex;align-items:center;gap:7px;background:rgba(27,95,217,.9);border:none;color:#fff;font:inherit;font-size:12.5px;font-weight:600;padding:7px 15px;border-radius:99px;cursor:pointer}
+.cm-encender:hover{background:${AZUL_CLARO}}
+.cm-pie{position:absolute;left:0;right:0;bottom:0;display:flex;align-items:center;gap:8px;padding:6px 9px;background:linear-gradient(transparent,rgba(0,0,0,.82));color:#fff;font-size:11.5px}
+.cm-pie-txt{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cm-pie .cm-gris{color:rgba(255,255,255,.55)}
+.cm-pie-acc{display:flex;gap:4px;flex:none}
+.cm-icono{display:inline-flex;background:rgba(255,255,255,.12);border:none;color:#fff;padding:4px;border-radius:6px;cursor:pointer}
+.cm-icono:hover{background:rgba(255,255,255,.24)}
+
+.cm-lista-grab{display:flex;flex-direction:column;gap:9px}
+.cm-grab{border:1px solid var(--border);border-radius:13px;background:var(--card);overflow:hidden}
+.cm-grab.abierto{border-color:${AZUL}55}
+.cm-grab-cab{display:flex;align-items:center;gap:10px;padding:11px 13px;cursor:pointer;outline:none}
+.cm-grab-cab:hover{background:var(--surface-hover)}
+.cm-chevron{display:inline-flex;color:var(--muted-foreground);flex:none;transition:transform .14s}
+.cm-chevron.abajo{transform:rotate(90deg)}
+.cm-grab-ico{display:inline-flex;flex:none}
+.cm-grab-nom{flex:1;min-width:0;font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cm-grab-datos{display:flex;gap:5px;flex-wrap:wrap;justify-content:flex-end;flex:none}
+.cm-etq{font-size:10.5px;font-weight:600;color:var(--text-secondary);border:1px solid var(--border);border-radius:5px;padding:1px 7px;white-space:nowrap}
+.cm-etq-alerta{color:${AMBAR};border-color:${AMBAR}66}
+
+.cm-grab-cuerpo{border-top:1px solid var(--border);padding:11px 13px 13px}
+.cm-grab-barra{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+.cm-nota-alerta{display:inline-flex;align-items:center;gap:7px;font-size:12.5px;color:var(--text-secondary)}
+.cm-prueba{display:flex;flex-direction:column;gap:2px;border:1px solid ${AMBAR}55;background:${AMBAR}0e;border-radius:10px;padding:9px 12px;margin-bottom:10px;font-size:12.5px;line-height:1.5}
+.cm-prueba.ok{border-color:${VERDE}55;background:${VERDE}0e}
+.cm-prueba b{font-variant-numeric:tabular-nums;font-size:12px}
+.cm-prueba span{color:var(--text-secondary)}
+
+.cm-canales{display:grid;grid-template-columns:repeat(auto-fill,minmax(176px,1fr));gap:9px}
+.cm-canal{display:flex;flex-direction:column;gap:3px}
+.cm-canal-vacio{height:128px;border:1px dashed var(--border);border-radius:11px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;background:var(--surface-card);padding:8px;text-align:center}
+.cm-canal-num{font-size:12px;font-weight:700;color:var(--text-secondary)}
+.cm-canal-nom{font-size:11.5px;color:var(--muted-foreground);max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cm-canal-falta{font-size:10px;text-transform:uppercase;letter-spacing:.4px;color:${AMBAR};margin-top:2px}
+.cm-canal-meta{display:flex;gap:7px;flex-wrap:wrap;font-size:10.5px;color:var(--muted-foreground);padding-left:2px}
+
+.cm-aviso{display:flex;align-items:flex-start;gap:9px;border:1px solid ${AMBAR}55;background:${AMBAR}0e;border-radius:11px;padding:10px 13px;margin-bottom:12px;font-size:12.5px;line-height:1.55;color:var(--text-secondary)}
+.cm-vacio{border:1px dashed var(--border);border-radius:14px;padding:26px;text-align:center;color:var(--muted-foreground);font-size:13px;line-height:1.6}
+.cm-vacio p{margin:0 0 6px;max-width:62ch;margin-inline:auto}
+.cm-vacio b{color:var(--foreground)}
+
+.cm-tabla-wrap{overflow-x:auto;border:1px solid var(--border);border-radius:14px;background:var(--card)}
+.cm-tabla{width:100%;min-width:640px;border-collapse:collapse;font-size:13px}
+.cm-tabla thead th{text-align:left;font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.6px;color:var(--muted-foreground);padding:10px 12px;border-bottom:1px solid var(--border);white-space:nowrap}
+.cm-tabla td{padding:9px 12px;border-top:1px solid var(--border)}
+.cm-tabla tbody tr:hover{background:var(--surface-hover)}
+
+.cm-visor{position:fixed;inset:0;z-index:60;background:rgba(4,7,12,.9);display:flex;align-items:center;justify-content:center;padding:22px}
+.cm-visor-caja{width:min(1180px,100%);background:#0b0f17;border:1px solid rgba(255,255,255,.12);border-radius:14px;overflow:hidden;box-shadow:0 24px 70px rgba(0,0,0,.6)}
+.cm-visor-cab{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 13px;color:#e6edf6;font-size:13.5px;border-bottom:1px solid rgba(255,255,255,.1)}
+.cm-visor-cab .cm-gris{color:rgba(255,255,255,.5)}
+.cm-visor-video{position:relative;aspect-ratio:16/9;background:#05080d}
+.cm-flecha{position:absolute;top:50%;transform:translateY(-50%);background:rgba(0,0,0,.45);border:none;color:#fff;padding:12px 9px;cursor:pointer;border-radius:9px}
+.cm-flecha:hover{background:rgba(0,0,0,.7)}
+.cm-flecha.izq{left:10px}
+.cm-flecha.der{right:10px}
+
+@media(max-width:640px){
+  .cm-envoltura{padding:18px 14px 60px}
+  .cm-kpis{width:100%}
+  .cm-kpi{flex:1;min-width:0;padding:7px 8px}
+  .cm-muro{grid-template-columns:repeat(auto-fill,minmax(160px,1fr))}
+  .cm-canales{grid-template-columns:repeat(auto-fill,minmax(140px,1fr))}
+  .cm-grab-datos{width:100%;justify-content:flex-start}
+}
+`;

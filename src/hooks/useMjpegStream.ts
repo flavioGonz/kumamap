@@ -21,6 +21,8 @@ interface MjpegOptions {
   enabled?: boolean;
   /** Server-signed stream token — preferred over the raw `rtspUrl`. */
   streamRef?: string;
+  /** Ancho al que escalar. Sin esto siempre se pedían 640 px. */
+  scale?: number;
 }
 
 type StreamStatus = "connecting" | "streaming" | "error" | "stopped";
@@ -30,7 +32,7 @@ export function useMjpegStream(
   rtspUrl: string | null,
   options: MjpegOptions = {},
 ) {
-  const { fps = 4, quality = 8, enabled = true, streamRef } = options;
+  const { fps = 4, quality = 8, enabled = true, streamRef, scale } = options;
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [status, setStatus] = useState<StreamStatus>("stopped");
   const [mode, setMode] = useState<StreamMode>("canvas");
@@ -60,7 +62,7 @@ export function useMjpegStream(
     // ── Try ReadableStream first (Chrome, Firefox, modern Edge) ──
     const tryStreamMode = async (): Promise<boolean> => {
       try {
-        const streamUrl = rtspSrc(source, { fps, quality });
+        const streamUrl = rtspSrc(source, scale ? { fps, quality, scale } : { fps, quality });
         const res = await fetch(streamUrl, { signal: controller.signal });
 
         // Safari returns res.body === null for streaming responses
@@ -155,7 +157,7 @@ export function useMjpegStream(
       const ms = 3000; // 3s per snapshot (ffmpeg takes ~2-4s)
       let errCount = 0;
 
-      const getUrl = () => snapshotSrc(source);
+      const getUrl = () => snapshotSrc(source, Date.now(), scale ? { scale, quality } : undefined);
 
       // Load first frame
       setImgSrcA(getUrl());
@@ -203,7 +205,7 @@ export function useMjpegStream(
       abortRef.current = null;
       if (cleanupSnapshot) cleanupSnapshot();
     };
-  }, [rtspUrl, streamRef, fps, quality, enabled]);
+  }, [rtspUrl, streamRef, fps, quality, enabled, scale]);
 
   return { canvasRef, status, mode, imgSrcA, imgSrcB, activeBuf };
 }

@@ -18,7 +18,7 @@ interface Ventanas { h24: Tramo; d7: Tramo; d30: Tramo }
 interface DiaSla { fecha: string; up: number; down: number; pct: number | null; ping: number | null }
 interface Monitor {
   id: number; nombre: string; tipo: string; activo: boolean; estado: number | null;
-  intervalo: number; ventanas: Ventanas; serie?: DiaSla[];
+  intervalo: number; ventanas: Ventanas; serie?: DiaSla[]; mant?: number;
 }
 interface FilaMapa {
   id: string; nombre: string; monitores: number;
@@ -27,6 +27,7 @@ interface FilaMapa {
   sla: Ventanas; peor: { id: number; nombre: string; pct: number } | null;
 }
 interface Alcance { desde: string | null; horas: number }
+interface VentanaMant { id: number; titulo: string; monitores: number }
 
 const AZUL = "#1b5fd9";
 const AZUL_CLARO = "#4f8cf5";
@@ -34,6 +35,7 @@ const VERDE = "#16a34a";
 const AMBAR = "#f59e0b";
 const ROJO = "#dc2626";
 const GRIS = "#8493a8";
+const VIOLETA = "#8b5cf6";   // el mismo que usa el mapa para MAINT
 
 type Ventana = "h24" | "d7" | "d30";
 const VENTANAS: Array<{ k: Ventana; t: string; largo: string }> = [
@@ -111,6 +113,7 @@ export default function SlaPage() {
   const [alcance, setAlcance] = useState<Alcance | null>(null);
   const [conDato, setConDato] = useState(0);
   const [huerfanos, setHuerfanos] = useState(0);
+  const [mantenimiento, setMantenimiento] = useState<VentanaMant[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [cargando, setCargando] = useState(true);
 
@@ -129,6 +132,7 @@ export default function SlaPage() {
       setMapas(b.mapas || []); setGlobal(b.global || null);
       setAlcance(b.alcance || null); setConDato(b.monitoresConDato || 0);
       setHuerfanos(b.huerfanosTotal || 0);
+      setMantenimiento(b.mantenimiento || []);
       setError(null);
     } catch (e: any) {
       setError(e?.message || "Error de red");
@@ -196,6 +200,17 @@ export default function SlaPage() {
       </header>
 
       {error && <div className="sla-error">{error}</div>}
+
+      {mantenimiento.length > 0 && (
+        <div className="sla-aviso sla-aviso-mant">
+          <span className="sla-punto" style={{ background: VIOLETA }} />
+          <span>
+            <b>{mantenimiento.length === 1 ? "Hay una ventana de mantenimiento corriendo" : `Hay ${mantenimiento.length} ventanas de mantenimiento corriendo`}:</b>{" "}
+            {mantenimiento.map((v) => `${v.titulo} (${v.monitores})`).join(" · ")}. Mientras
+            dure, esos minutos no cuentan como caída en los números de abajo.
+          </span>
+        </div>
+      )}
 
       {huerfanos > 0 && (
         <div className="sla-aviso">
@@ -326,6 +341,11 @@ export default function SlaPage() {
                                     ))}
                                     <td className="sla-td-c sla-num" title={`${mo.ventanas.d30.down} latidos caídos · un latido cada ${mo.intervalo} s`}>
                                       {fmtCaido(mo.ventanas.d30.down, mo.intervalo)}
+                                      {!!mo.mant && (
+                                        <span className="sla-mant" title={`${mo.mant} latidos en ventana de mantenimiento: no cuentan como caída`}>
+                                          +{fmtCaido(mo.mant, mo.intervalo)} mant.
+                                        </span>
+                                      )}
                                     </td>
                                     <td className="sla-td-c sla-num">
                                       {mo.ventanas.d30.ping != null
@@ -430,6 +450,8 @@ const CSS = `
 .sla-enlace>span:nth-child(2){white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:230px}
 .sla-aviso{display:flex;align-items:flex-start;gap:9px;border:1px solid ${AMBAR}55;background:${AMBAR}0e;border-radius:11px;padding:10px 13px;margin-bottom:12px;font-size:12.5px;line-height:1.55;color:var(--text-secondary)}
 .sla-aviso .sla-punto{margin-top:6px}
+.sla-aviso-mant{border-color:${VIOLETA}55;background:${VIOLETA}0e}
+.sla-mant{display:inline-block;margin-left:6px;font-size:10px;font-weight:700;color:${VIOLETA};border:1px solid ${VIOLETA}55;border-radius:4px;padding:0 5px;white-space:nowrap}
 .sla-nota-aviso{color:${AMBAR}}
 .sla-etq-aviso{margin-left:6px;color:${AMBAR};border-color:${AMBAR}66}
 .sla-etq{font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--muted-foreground);border:1px solid var(--border);border-radius:4px;padding:0 5px}

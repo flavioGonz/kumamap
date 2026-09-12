@@ -80,8 +80,10 @@ const MAX_INTENTOS = 3;
 /** Historial que guardamos por servidor. */
 const MAX_HISTORIAL = 200;
 
-export type JobTipo = "ping" | "tcp" | "http" | "dns" | "traceroute" | "scan";
-export const JOB_TIPOS: JobTipo[] = ["ping", "tcp", "http", "dns", "traceroute", "scan"];
+export type JobTipo = "ping" | "tcp" | "http" | "dns" | "traceroute" | "scan" | "sensor";
+export const JOB_TIPOS: JobTipo[] = ["ping", "tcp", "http", "dns", "traceroute", "scan", "sensor"];
+/** Los agentes anteriores a esta version no saben ejecutar el encargo "sensor". */
+export const VERSION_SENSOR = "6.1.2";
 
 export interface Job {
   id: string;
@@ -217,7 +219,7 @@ function rowToJob(r: any): Job {
 /** Valida y normaliza lo que llega del panel. Tira 400 con un mensaje util. */
 function normalizar(input: any): { tipo: JobTipo; destino: string; params: Record<string, any> } {
   const tipo = String(input?.tipo || "").toLowerCase() as JobTipo;
-  if (!JOB_TIPOS.includes(tipo)) throw httpErr(400, "tipo invalido (ping|tcp|http|dns|traceroute|scan)");
+  if (!JOB_TIPOS.includes(tipo)) throw httpErr(400, "tipo invalido (ping|tcp|http|dns|traceroute|scan|sensor)");
   const params: Record<string, any> = {};
   const to = Number(input?.timeoutMs);
   if (to >= 500 && to <= 30000) params.timeoutMs = Math.round(to);
@@ -232,6 +234,14 @@ function normalizar(input: any): { tipo: JobTipo; destino: string; params: Recor
       params.puertos = input.puertos.map((p: any) => Number(p)).filter((p: number) => p > 0 && p < 65536).slice(0, 12);
     }
     return { tipo, destino: rango, params };
+  }
+
+  // Encender un sensor del propio agente. El destino es la clave del modulo, y
+  // por eso no pasa por la validacion de destinos de red de mas abajo.
+  if (tipo === "sensor") {
+    const clave = String(input?.sensor || input?.destino || "").trim().toLowerCase();
+    if (!/^[a-z]{2,20}$/.test(clave)) throw httpErr(400, "sensor invalido");
+    return { tipo, destino: clave, params };
   }
 
   if (tipo === "http") {

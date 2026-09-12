@@ -655,7 +655,7 @@ function Cajon({ d, survey, agente, ultima, onRecargarAgentes, busy, onCerrar, o
           {pest === "sensores" && <VistaSensores d={d} />}
           {pest === "respaldos" && <VistaRespaldos d={d} />}
           {pest === "eventos" && <VistaEventos d={d} />}
-          {pest === "relevamiento" && <VistaRelevamiento survey={survey} d={d} />}
+          {pest === "relevamiento" && <VistaRelevamiento survey={survey} d={d} agente={agente} />}
           {pest === "encargos" && <VistaEncargos d={d} />}
           {pest === "agente" && <VistaAgente d={d} agente={agente} ultima={ultima} onRecargar={onRecargarAgentes} />}
         </div>
@@ -1053,8 +1053,138 @@ function VistaEventos({ d }: { d: AdoptedDevice }) {
   );
 }
 
+/* ── sensores que pide el relevamiento ── */
+
+/** Un módulo de sensor del agente se ve en el panel como uno o más recuadros. */
+const TILES_DE: Record<string, string[]> = {
+  system: ["cpu", "mem"], disk: ["disk", "diskio"], net: ["net", "inet"],
+  services: ["svc"], processes: ["proc"], security: ["av", "fw"],
+  updates: ["upd"], events: ["evt"], logons: ["logon"], db: ["db"],
+  hardware: ["bmc"], probes: ["probe"], veeam: ["veeam"],
+};
+const NOMBRE_SENSOR: Record<string, string> = {
+  system: "CPU y memoria", disk: "Discos", net: "Red", services: "Servicios",
+  processes: "Procesos", security: "Antivirus y firewall", updates: "Windows Update",
+  events: "Eventos de Windows", logons: "Inicios de sesión", db: "Bases de datos",
+  hardware: "Hardware (iLO/iDRAC)", probes: "Sondas remotas", veeam: "Respaldos (Veeam)",
+};
+
+/** El agente ejecuta el encargo "sensor" recién desde esta versión. */
+const VERSION_SENSOR = "6.1.2";
+
+/** Compara "6.1.2" con "6.1.1" sin traer una dependencia para tres números. */
+function versionAlMenos(v: string | undefined, minima: string): boolean {
+  if (!v) return false;
+  const a = String(v).split(".").map((x) => parseInt(x, 10) || 0);
+  const b = minima.split(".").map((x) => parseInt(x, 10) || 0);
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    const d = (a[i] || 0) - (b[i] || 0);
+    if (d !== 0) return d > 0;
+  }
+  return true;
+}
+
+interface Sugerencia { sensor: string; productos: string[]; encendido: boolean }
+
+/**
+ * Qué sensores pide lo que está instalado, y cuáles de esos están reportando.
+ * El relevamiento nombra módulos del agente; el reporte trae recuadros. La tabla
+ * de arriba es la traducción entre las dos cosas.
+ */
+function sensoresQuePide(survey: Survey | undefined, d: AdoptedDevice): Sugerencia[] {
+  if (!survey?.productos?.length) return [];
+  const pedidos = new Map<string, string[]>();
+  for (const p of survey.productos) {
+    for (const s of p.sensores || []) {
+      const l = pedidos.get(s) || [];
+      if (!l.includes(p.nombre)) l.push(p.nombre);
+      pedidos.set(s, l);
+    }
+  }
+  const reportando = new Set(d.metrics.map((m) => m.id));
+  return [...pedidos.entries()]
+    .map(([sensor, productos]) => ({
+      sensor, productos,
+      encendido: (TILES_DE[sensor] || [sensor]).some((t) => reportando.has(t)),
+    }))
+    .sort((a, b) => Number(a.encendido) - Number(b.encendido) || a.sensor.localeCompare(b.sensor));
+}
+
+function SensoresQuePide({ survey, d, agente }: { survey?: Survey; d: AdoptedDevice; agente?: AgenteVersion }) {
+  const [encargando, setEncargando] = useState<string | null>(null);
+  const [hecho, setHecho] = useState<Record<string, string>>({});
+  const sugerencias = useMemo(() => sensoresQuePide(survey, d), [survey, d]);
+  if (!sugerencias.length) return null;
+
+  const apagados = sugerencias.filter((s) => !s.encendido);
+  const puedeEncargar = versionAlMenos(agente?.version, VERSION_SENSOR);
+
+  const encargar = async (sensor: string) => {
+    setEncargando(sensor);
+    const { error: e } = await apiFetch(apiUrl("/api/monitor-ng/jobs"), {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ deviceId: d.deviceId, tipo: "sensor", sensor }),
+    });
+    setEncargando(null);
+    setHecho((h) => ({ ...h, [sensor]: e ? `no se pudo: ${e}` : "encargado" }));
+  };
+
+  return (
+    <div>
+      <div className="mng-micro">Sensores que pide este servidor</div>
+      {apagados.length === 0 ? (
+        <p className="mng-nota">
+          Todo lo que el relevamiento reconoció ya tiene su sensor reportando.
+        </p>
+      ) : (
+        <p className="mng-nota" style={{ marginBottom: 9 }}>
+          {apagados.length === 1
+            ? "Hay un sensor apagado que el relevamiento pide por lo que está instalado."
+            : `Hay ${apagados.length} sensores apagados que el relevamiento pide por lo que está instalado.`}
+          {" "}Encenderlos no es una orden: queda como encargo y el agente lo recoge en su próximo reporte.
+        </p>
+      )}
+      <div className="mng-sugerencias">
+        {sugerencias.map((s) => {
+          const c = s.encendido ? VERDE : AMBAR;
+          return (
+            <div key={s.sensor} className="mng-sugerencia" style={{ borderLeftColor: c }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div className="mng-sug-cab">
+                  <span className="mng-punto" style={{ background: c }} />
+                  <span className="mng-sug-nom">{NOMBRE_SENSOR[s.sensor] || s.sensor}</span>
+                  <code className="mng-sensor-id">{s.sensor}</code>
+                </div>
+                <div className="mng-sug-por">
+                  {s.encendido ? "reportando" : "apagado"} · lo pide {s.productos.join(", ")}
+                </div>
+              </div>
+              {!s.encendido && (
+                hecho[s.sensor] ? (
+                  <span className="mng-chip" style={{ color: hecho[s.sensor] === "encargado" ? VERDE : ROJO }}>
+                    {hecho[s.sensor]}
+                  </span>
+                ) : puedeEncargar ? (
+                  <button className="mng-btn-fantasma" disabled={encargando === s.sensor}
+                    onClick={() => encargar(s.sensor)}>
+                    {encargando === s.sensor ? "Encargando…" : "Encargar que se encienda"}
+                  </button>
+                ) : (
+                  <span className="mng-chip" title={`El agente ejecuta este encargo desde la ${VERSION_SENSOR}; este tiene la ${agente?.version || "desconocida"}. Por ahora se enciende en la consola del propio servidor.`}>
+                    necesita agente {VERSION_SENSOR}
+                  </span>
+                )
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 /* ── relevamiento ── */
-function VistaRelevamiento({ survey, d }: { survey?: Survey; d: AdoptedDevice }) {
+function VistaRelevamiento({ survey, d, agente }: { survey?: Survey; d: AdoptedDevice; agente?: AgenteVersion }) {
   if (!survey) {
     return <Vacio
       texto="Todavía no llegó el relevamiento."
@@ -1133,6 +1263,8 @@ function VistaRelevamiento({ survey, d }: { survey?: Survey; d: AdoptedDevice })
           </div>
         ) : <p className="mng-nota">No reconoció ningún producto conocido en este servidor.</p>}
       </div>
+
+      <SensoresQuePide survey={survey} d={d} agente={agente} />
 
       {survey.roles?.length > 0 && (
         <div>
@@ -1515,6 +1647,13 @@ const CSS = `
 .mng-vol-barra>span{display:block;height:100%;border-radius:99px}
 .mng-productos{display:flex;flex-direction:column;gap:7px}
 .mng-producto{display:flex;align-items:center;gap:10px;border:1px solid var(--border);border-radius:10px;padding:9px 11px;background:var(--card)}
+
+/* sugerencias de sensores */
+.mng-sugerencias{display:flex;flex-direction:column;gap:7px}
+.mng-sugerencia{display:flex;align-items:center;gap:12px;border:1px solid var(--border);border-left:3px solid;border-radius:10px;padding:9px 11px;background:var(--card)}
+.mng-sug-cab{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.mng-sug-nom{font-weight:600;font-size:13.5px}
+.mng-sug-por{font-size:11.5px;color:var(--muted-foreground);margin-top:3px;line-height:1.45}
 
 /* encargos */
 .mng-form{display:flex;flex-direction:column;gap:8px;border:1px solid var(--border);border-radius:12px;padding:12px;background:var(--surface-card)}

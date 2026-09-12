@@ -66,7 +66,13 @@ const PUBLIC_GET_PREFIXES = [
 
 // API routes accessible via ANY method without auth (needed by mobile PWA)
 const PUBLIC_ANY_PREFIXES = [
-  "/api/monitor-ng",      // monitor-ng ingest (auth propia por Bearer token)
+  // Del agente monitor-ng: se autentica con su propio token Bearer y no tiene
+  // sesion. Lo demas que cuelga de /api/monitor-ng es el panel y va con sesion,
+  // que antes quedaba fuera del control de roles por estar todo bajo el mismo
+  // prefijo.
+  "/api/monitor-ng/report",
+  "/api/monitor-ng/register",
+  "/api/monitor-ng/adopt-status",
   "/api/push",             // push subscription CRUD + test (needed by mobile PWA)
   "/api/hik/events",       // Hikvision camera event webhooks (NVR pushes here)
 ];
@@ -84,18 +90,35 @@ function isPublicAnyRoute(pathname: string): boolean {
   return PUBLIC_ANY_PREFIXES.some((p) => pathname.startsWith(p));
 }
 
+type Rol = "admin" | "operador" | "lector";
+
 interface TokenResult {
   username: string | null;
+  /**
+   * Los tokens anteriores a los usuarios propios no traen rol. Se los toma como
+   * administrador: hasta entonces habia un solo usuario y podia todo.
+   */
+  rol: Rol;
   /** true when the token is valid but past the renewal threshold */
   needsRenewal: boolean;
 }
+
+function aRol(v: unknown): Rol {
+  return v === "operador" || v === "lector" ? v : "admin";
+}
+
+/** Metodos que modifican algo. Un lector no pasa de aca. */
+const METODOS_QUE_ESCRIBEN = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+
+/** Rutas reservadas a administradores. */
+const SOLO_ADMIN = ["/api/usuarios"];
 
 function validateToken(token: string): TokenResult {
   try {
     // New HMAC tokens: payloadBase64url.signatureBase64url
     if (token.includes(".")) {
       const [payloadB64, sig] = token.split(".");
-      if (!payloadB64 || !sig) return { username: null, needsRenewal: false };
+      if (!payloadB64 || !sig) return { username: null, rol: "admin", needsRenewal: false };
 
       const expectedSig = crypto
         .createHmac("sha256", SECRET)
@@ -103,21 +126,22 @@ function validateToken(token: string): TokenResult {
         .digest("base64url");
 
       // Constant-time comparison
-      if (sig.length !== expectedSig.length) return { username: null, needsRenewal: false };
+      if (sig.length !== expectedSig.length) return { username: null, rol: "admin", needsRenewal: false };
       const sigBuf = Buffer.from(sig);
       const expBuf = Buffer.from(expectedSig);
       if (sigBuf.length !== expBuf.length || !crypto.timingSafeEqual(sigBuf, expBuf)) {
-        return { username: null, needsRenewal: false };
+        return { username: null, rol: "admin", needsRenewal: false };
       }
 
       const payload = JSON.parse(Buffer.from(payloadB64, "base64url").toString());
       if (typeof payload.exp !== "number" || payload.exp < Date.now()) {
-        return { username: null, needsRenewal: false };
+        return { username: null, rol: "admin", needsRenewal: false };
       }
 
       const timeRemaining = payload.exp - Date.now();
       return {
         username: payload.u || null,
+        rol: aRol(payload.r),
         needsRenewal: timeRemaining < TOKEN_RENEW_THRESHOLD,
       };
     }
@@ -128,16 +152,17 @@ function validateToken(token: string): TokenResult {
     //     document.cookie = "kumamap_session=" + btoa("admin:")
     // Only HMAC-signed tokens (payload.signature) are accepted now. Users holding
     // an old cookie simply get a 401 and re-login once.
-    return { username: null, needsRenewal: false };
+    return { username: null, rol: "admin", needsRenewal: false };
   } catch {
-    return { username: null, needsRenewal: false };
+    return { username: null, rol: "admin", needsRenewal: false };
   }
 }
 
 /** Create a fresh HMAC session token */
-function createToken(username: string): string {
+function createToken(username: string, rol: Rol): string {
   const payload = JSON.stringify({
     u: username,
+    r: rol,
     exp: Date.now() + TOKEN_MAX_AGE_MS,
     nonce: crypto.randomBytes(8).toString("hex"),
   });
@@ -159,18 +184,22 @@ function createToken(username: string): string {
  * These headers are stripped-and-reset on every request, so a client cannot
  * spoof them by sending their own `x-kumamap-auth: 1`.
  */
-function allow(req: NextRequest, username: string | null, needsRenewal: boolean) {
+function allow(req: NextRequest, username: string | null, rol: Rol, needsRenewal: boolean) {
   const headers = new Headers(req.headers);
   headers.delete("x-kumamap-user");
   headers.delete("x-kumamap-auth");
+  headers.delete("x-kumamap-rol");
   headers.set("x-kumamap-auth", username ? "1" : "0");
-  if (username) headers.set("x-kumamap-user", username);
+  if (username) {
+    headers.set("x-kumamap-user", username);
+    headers.set("x-kumamap-rol", rol);
+  }
 
   const response = NextResponse.next({ request: { headers } });
 
   // Sliding session: renew token when >50% of lifetime has elapsed
   if (username && needsRenewal) {
-    response.cookies.set("kumamap_session", createToken(username), {
+    response.cookies.set("kumamap_session", createToken(username, rol), {
       httpOnly: true,
       sameSite: "lax",
       secure: COOKIE_SECURE,
@@ -195,13 +224,13 @@ export function proxy(req: NextRequest) {
   // can tell an authenticated operator from an anonymous kiosk and redact
   // credentials accordingly.
   const token = req.cookies.get("kumamap_session")?.value;
-  const { username, needsRenewal } = token
+  const { username, rol, needsRenewal } = token
     ? validateToken(token)
-    : { username: null, needsRenewal: false };
+    : { username: null, rol: "admin" as Rol, needsRenewal: false };
 
   // Public routes: pass through, authenticated or not
   if (isPublicGetRoute(req.method, pathname) || isPublicAnyRoute(pathname)) {
-    return allow(req, username, needsRenewal);
+    return allow(req, username, rol, needsRenewal);
   }
 
   // Everything else requires a valid session
@@ -214,7 +243,23 @@ export function proxy(req: NextRequest) {
     return NextResponse.json({ error: "Sesión expirada" }, { status: 401 });
   }
 
-  return allow(req, username, needsRenewal);
+  // ── Roles ────────────────────────────────────────────────────────────────
+  // Un lector mira; no escribe en ningun lado. Y hay rutas que son de
+  // administradores aunque el metodo sea de lectura.
+  if (SOLO_ADMIN.some((p) => pathname.startsWith(p)) && rol !== "admin") {
+    return NextResponse.json(
+      { error: "Esta sección es de administradores" },
+      { status: 403 }
+    );
+  }
+  if (METODOS_QUE_ESCRIBEN.has(req.method) && rol === "lector") {
+    return NextResponse.json(
+      { error: "Tu cuenta es de sólo lectura: no puede modificar nada." },
+      { status: 403 }
+    );
+  }
+
+  return allow(req, username, rol, needsRenewal);
 }
 
 // NOTE: do not add further exports to this file. Next.js expects a proxy/

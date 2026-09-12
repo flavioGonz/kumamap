@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth, requireAdmin } from "@/lib/auth";
-import { listarTraps, resumenTraps, borrarTraps, estadoReceptor, reubicarPendientes } from "@/lib/traps";
+import {
+  listarTraps, resumenTraps, borrarTraps, estadoReceptor, reubicarPendientes,
+  configTraps, guardarConfigTraps,
+} from "@/lib/traps";
 import { estadoIndice, refrescarAhora } from "@/lib/mapa-ips";
 
 export const dynamic = "force-dynamic";
@@ -24,6 +27,7 @@ export async function GET(req: NextRequest) {
       traps,
       resumen: resumenTraps(),
       receptor: estadoReceptor(),
+      config: configTraps(),
       indice: estadoIndice(),
     });
   } catch (err: any) {
@@ -32,7 +36,9 @@ export async function GET(req: NextRequest) {
 }
 
 /**
- * POST /api/traps  { accion: "reubicar" }
+ * POST /api/traps
+ *   { accion: "reubicar" }    → rearma el índice y reubica los avisos sin equipo
+ *   { accion: "comunidades", comunidades: [...], abierto: bool }  → sólo admin
  * Rearma el índice de IPs del mapa y vuelve a intentar ubicar los avisos que
  * quedaron sin equipo. Es lo que se usa después de cargarle la IP a un nodo.
  */
@@ -41,6 +47,17 @@ export async function POST(req: NextRequest) {
   if (a instanceof NextResponse) return a;
   try {
     const b = await req.json().catch(() => ({}));
+
+    if (b?.accion === "comunidades") {
+      // Cambiar quién puede mandarnos avisos es una decisión de administración.
+      const adm = requireAdmin(req);
+      if (adm instanceof NextResponse) return adm;
+      const config = guardarConfigTraps({ comunidades: b.comunidades, abierto: b.abierto });
+      // El receptor vive en el proceso del servidor y mira la base cada 10 s: el
+      // cambio se aplica solo, sin reiniciar nada.
+      return NextResponse.json({ ok: true, config });
+    }
+
     if (b?.accion !== "reubicar") {
       return NextResponse.json({ error: "Acción desconocida" }, { status: 400 });
     }

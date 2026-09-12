@@ -1617,6 +1617,7 @@ export default function LeafletMapView({
       const isWaypoint = node.icon === "_waypoint";
       const isPolygon = node.icon === "_polygon";
       const isRack = node.icon === "_rack";
+      const isTrafico = node.icon === "_traffic";
       const cd = safeJsonParse<NodeCustomData>(node.custom_data);
       let color = getStatusColor(node.kuma_monitor_id);
       const m = getMonitorData(node.kuma_monitor_id);
@@ -1732,6 +1733,121 @@ export default function LeafletMapView({
           iconSize: [antSize, antSize],
           iconAnchor: [antSize / 2, antSize / 2],
         });
+      } else if (isTrafico) {
+        // ── Ventana de trafico suelta ─────────────────────────────────────────
+        // Es un nodo como cualquier otro: se arrastra, se guarda con el mapa y
+        // sobrevive a recargar. La diferencia es que en vez de un icono dibuja el
+        // grafico del sensor SNMP que tenga asignado. El monitor se elige con el
+        // mismo modal de siempre (clic derecho -> Editar), y por eso no hace falta
+        // inventar una pantalla nueva.
+        const monTraf = node.kuma_monitor_id ? getMonitorData(node.kuma_monitor_id) : null;
+
+        if (!node.kuma_monitor_id || !monTraf) {
+          nodeIcon = L.divIcon({
+            className: "traffic-node",
+            html: `<div style="background:rgba(11,14,20,.95);border:1px dashed rgba(255,255,255,.22);
+                     border-radius:11px;padding:10px 12px;min-width:186px;color:#93a3b8;
+                     font-family:ui-sans-serif,system-ui,sans-serif;font-size:11.5px;line-height:1.5;
+                     box-shadow:0 8px 24px rgba(0,0,0,.5)">
+                     <div style="font-weight:600;color:#c8d4e4;margin-bottom:3px">Ventana de tráfico</div>
+                     Sin sensor asignado. Clic derecho → Editar y elegí un monitor SNMP.
+                   </div>`,
+            iconSize: [0, 0], iconAnchor: [0, 0],
+          });
+        } else {
+          const AZUL_T = "#3987e5", AQUA_T = "#199e70";
+          const claveT = `traf-${node.kuma_monitor_id}`;
+          const cacheT: any = (window as any)[claveT] || null;
+
+          if (!cacheT || cacheT.sello !== monTraf.msg) {
+            safeFetch<any>(apiUrl(`/api/kuma/traffic/${node.kuma_monitor_id}?minutos=60`), undefined, "TraficoNodo")
+              .then((dd) => { if (dd) (window as any)[claveT] = { ...dd, sello: monTraf.msg || "" }; })
+              .catch(() => {});
+          }
+
+          const entT = cacheT?.entrada || null;
+          const salT = cacheT?.salida || null;
+          const capT: number | null = cacheT?.capacidadBps ?? null;
+          const ifazT = cacheT?.interfaz || null;
+          const picoT = Math.max(entT?.pico || 0, salT?.pico || 0);
+          const techoT = picoT > 0 ? picoT * 1.15 : 1;
+
+          const WT = 172, HT = 40;
+          const puntosT = (s: any) => {
+            const p: Array<{ t: number; bps: number }> = (s?.puntos || []).slice(-60);
+            if (p.length < 2) return null;
+            return p.map((v, i) => ({ x: (i / (p.length - 1)) * WT, y: HT - (v.bps / techoT) * (HT - 3), ...v }));
+          };
+          const pE = puntosT(entT), pS = puntosT(salT);
+          const caminoT = (pts: any[] | null) =>
+            pts ? pts.map((q, i) => `${i === 0 ? "M" : "L"}${q.x.toFixed(1)},${q.y.toFixed(1)}`).join(" ") : "";
+
+          let bandasT = "";
+          const baseT = pE || pS;
+          if (baseT && baseT.length > 1) {
+            const anchoT = WT / baseT.length;
+            bandasT = baseT.map((q: any, i: number) => {
+              const hora = new Date(q.t).toLocaleTimeString("es-UY", { hour: "2-digit", minute: "2-digit" });
+              const a = pE?.[i] ? formatTraffic(pE[i].bps) : "—";
+              const b = pS?.[i] ? formatTraffic(pS[i].bps) : "—";
+              return `<rect x="${(q.x - anchoT / 2).toFixed(1)}" y="0" width="${anchoT.toFixed(1)}" height="${HT}" fill="transparent"><title>${hora}  ▼ ${a}   ▲ ${b}</title></rect>`;
+            }).join("");
+          }
+
+          const yCapT = capT && picoT > 0 && capT < techoT ? (HT - (capT / techoT) * (HT - 3)).toFixed(1) : null;
+          const graficoT = (pE || pS) ? `
+            <svg width="${WT}" height="${HT}" viewBox="0 0 ${WT} ${HT}" style="display:block;overflow:visible">
+              <line x1="0" y1="${HT}" x2="${WT}" y2="${HT}" stroke="#ffffff" stroke-width="1" opacity=".12"/>
+              ${yCapT ? `<line x1="0" y1="${yCapT}" x2="${WT}" y2="${yCapT}" stroke="#8493a8" stroke-width="1" stroke-dasharray="3 3" opacity=".5"/>` : ""}
+              ${pE ? `<path d="${caminoT(pE)} L${WT},${HT} L0,${HT} Z" fill="${AZUL_T}" opacity=".22"/>
+                      <path d="${caminoT(pE)}" fill="none" stroke="${AZUL_T}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>` : ""}
+              ${pS ? `<path d="${caminoT(pS)}" fill="none" stroke="${AQUA_T}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>` : ""}
+              ${bandasT}
+            </svg>` : "";
+
+          const filaT = (col: string, flecha: string, s: any) => `
+            <div style="display:flex;align-items:baseline;gap:5px;min-width:0">
+              <span style="width:7px;height:7px;border-radius:2px;background:${col};flex:none;transform:translateY(-1px)"></span>
+              <span style="font-size:9px;color:#93a3b8;letter-spacing:.04em">${flecha}</span>
+              <span style="font-size:13px;font-weight:700;color:#e8eef7;font-variant-numeric:tabular-nums;white-space:nowrap">${s?.actual != null ? formatTraffic(s.actual) : "—"}</span>
+            </div>`;
+
+          const pctT = capT && picoT > 0 ? Math.round((picoT / capT) * 100) : null;
+          const pieT = picoT > 0
+            ? `pico ${formatTraffic(picoT)}${pctT != null ? ` · ${pctT}% de ${formatTraffic(capT!)}` : ""}`
+            : (cacheT?.aviso || "esperando lecturas");
+          const tituloT = ifazT?.nombre
+            ? `${ifazT.nombre}${ifazT.alias ? ` · ${ifazT.alias}` : ""}`
+            : (node.label || monTraf.name || "tráfico");
+
+          nodeIcon = L.divIcon({
+            className: "traffic-node",
+            html: `<div style="
+                background:rgba(8,12,20,.94);
+                border:1px solid ${color}44;
+                border-radius:12px;
+                padding:9px 11px 8px;
+                min-width:194px;
+                box-shadow:0 10px 28px rgba(0,0,0,.6);
+                backdrop-filter:blur(8px);
+                font-family:ui-sans-serif,system-ui,sans-serif;
+                cursor:${isLocked ? "default" : "grab"};
+              ">
+                <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">
+                  <span style="width:6px;height:6px;border-radius:99px;background:${color};flex:none;box-shadow:0 0 6px ${color}"></span>
+                  <span style="font-size:10.5px;font-weight:600;color:#c4d0e0;letter-spacing:.02em;
+                               white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:172px">${tituloT}</span>
+                </div>
+                <div style="display:flex;gap:12px;margin-bottom:5px">
+                  ${filaT(AZUL_T, "▼", entT)}
+                  ${salT ? filaT(AQUA_T, "▲", salT) : ""}
+                </div>
+                ${graficoT}
+                <div style="margin-top:5px;font-size:9px;color:#7d8da0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:182px">${pieT}</div>
+              </div>`,
+            iconSize: [0, 0], iconAnchor: [0, 0],
+          });
+        }
       } else {
         const hasLinkedMap = Array.isArray(cd.linkedMaps) && cd.linkedMaps.length > 0;
         nodeIcon = createMarkerIcon(L, color, pulse, isSource, nodeScale, node.icon || "server", hasLinkedMap);
@@ -2373,7 +2489,7 @@ export default function LeafletMapView({
       }
 
       // If this is a waypoint/blind node (not a label, camera, polygon), follow the chain
-      const isWaypoint = node.icon === "_waypoint" || (node.icon !== "_textLabel" && node.icon !== "_camera" && node.icon !== "_polygon" && !node.kuma_monitor_id);
+      const isWaypoint = node.icon === "_waypoint" || (node.icon !== "_textLabel" && node.icon !== "_camera" && node.icon !== "_polygon" && node.icon !== "_traffic" && !node.kuma_monitor_id);
       if (!isWaypoint) return undefined;
 
       visited.add(fromEdgeId);
@@ -2852,7 +2968,7 @@ export default function LeafletMapView({
     // Build set of currently-down node IDs
     const downNodeIds = new Set<string>();
     nodesRef.current.forEach((node) => {
-      if (node.icon === "_textLabel" || node.icon === "_waypoint" || node.icon === "_camera" || node.icon === "_polygon") return;
+      if (node.icon === "_textLabel" || node.icon === "_waypoint" || node.icon === "_camera" || node.icon === "_polygon" || node.icon === "_traffic") return;
       if (node.icon === "_rack") {
         // Rack node: show downtime badge if ANY device monitor is DOWN
         const rackInfo = getRackStatus(node);
@@ -3019,7 +3135,7 @@ export default function LeafletMapView({
 
     nodesRef.current.forEach((node) => {
       // Skip special node types — they have their own rendering in renderNodes
-      if (node.icon === "_textLabel" || node.icon === "_waypoint" || node.icon === "_camera" || node.icon === "_polygon") return;
+      if (node.icon === "_textLabel" || node.icon === "_waypoint" || node.icon === "_camera" || node.icon === "_polygon" || node.icon === "_traffic") return;
 
       const marker = markersRef.current.get(node.id);
       if (!marker) return;
@@ -4828,6 +4944,22 @@ export default function LeafletMapView({
                 nodesRef.current = [...nodesRef.current, { id, kuma_monitor_id: null, label: text, x: center.lat, y: center.lng, icon: "_textLabel" }];
                 if (LRef.current) renderNodes(LRef.current, mapRef.current);
                 toast.success("Etiqueta creada");
+              }}
+            />
+            <DropdownItem
+              icon={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3v18h18"/><path d="m7 15 3-5 4 3 5-8"/></svg>}
+              label="Ventana de tráfico"
+              onClick={() => {
+                setActiveDropdown(null);
+                if (!mapRef.current) return;
+                const center = mapRef.current.getCenter();
+                const id = `traf-${Date.now()}`;
+                nodesRef.current = [...nodesRef.current, {
+                  id, kuma_monitor_id: null, label: "Tráfico", x: center.lat, y: center.lng,
+                  icon: "_traffic", custom_data: JSON.stringify({ type: "traffic" }),
+                }];
+                if (LRef.current) renderNodes(LRef.current, mapRef.current);
+                toast.success("Ventana agregada — clic derecho → Editar para elegir el sensor SNMP");
               }}
             />
           </ToolbarDropdown>

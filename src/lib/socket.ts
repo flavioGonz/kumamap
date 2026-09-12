@@ -32,6 +32,23 @@ export function getSocket(): Socket {
     socket.on("kuma:monitors", (data: { connected: boolean; monitors: unknown[] }) => {
       lastMonitorsPayload = data;
     });
+
+    // El servidor manda solo lo que cambio. Se mezcla con la ultima foto y se
+    // vuelve a disparar "kuma:monitors" a los oyentes locales: para el resto de
+    // la aplicacion no cambio nada, y por el cable viaja una fraccion.
+    socket.on("kuma:delta", (d: { connected: boolean; cambiados: any[]; quitados: number[] }) => {
+      if (!lastMonitorsPayload) return;   // sin foto previa no hay que mezclar; ya llegara
+      const porId = new Map<number, any>(
+        (lastMonitorsPayload.monitors as any[]).map((m) => [m.id, m])
+      );
+      // Mezcla, no reemplazo: el delta trae solo lo volatil.
+      for (const m of d.cambiados || []) porId.set(m.id, { ...(porId.get(m.id) || {}), ...m });
+      for (const id of d.quitados || []) porId.delete(id);
+      lastMonitorsPayload = { connected: d.connected, monitors: [...porId.values()] };
+      for (const fn of socket!.listeners("kuma:monitors")) {
+        try { (fn as (p: unknown) => void)(lastMonitorsPayload); } catch { /* un oyente roto no corta al resto */ }
+      }
+    });
   }
   return socket;
 }

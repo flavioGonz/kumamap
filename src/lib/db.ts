@@ -68,10 +68,14 @@ try { db.exec(`ALTER TABLE network_maps ADD COLUMN view_state TEXT`); } catch { 
 try { db.exec(`ALTER TABLE network_maps ADD COLUMN parent_id TEXT REFERENCES network_maps(id) ON DELETE SET NULL`); } catch { /* already exists */ }
 try { db.exec(`ALTER TABLE network_maps ADD COLUMN background_blob BLOB`); } catch { /* already exists */ }
 try { db.exec(`ALTER TABLE network_maps ADD COLUMN background_mime TEXT`); } catch { /* already exists */ }
+try { db.exec(`ALTER TABLE network_maps ADD COLUMN scale_m_per_unit REAL`); } catch { /* already exists */ }
+
+/** Cache en disco de las imagenes de fondo de los mapas (el blob en DB es la fuente de verdad). */
+const MAP_UPLOADS_DIR = path.join(process.cwd(), "data", "uploads", "network-maps");
 
 // Auto-migrate: import existing file-based backgrounds into DB blobs
 (() => {
-  const UPLOADS_DIR = path.join(process.cwd(), "data", "uploads", "network-maps");
+  const UPLOADS_DIR = MAP_UPLOADS_DIR;
   const mapsWithFiles = db.prepare(
     `SELECT id, background_image FROM network_maps WHERE background_type = 'image' AND background_image IS NOT NULL AND background_image != '' AND background_blob IS NULL`
   ).all() as { id: string; background_image: string }[];
@@ -102,6 +106,8 @@ export interface NetworkMap {
   background_scale: number;
   background_offset_x: number;
   background_offset_y: number;
+  /** Metros por unidad de mapa (CRS.Simple) para mapas image/grid; null = sin calibrar. */
+  scale_m_per_unit: number | null;
   kuma_group_id: number | null;
   parent_id: string | null;
   width: number;
@@ -136,7 +142,7 @@ export interface MapEdge {
 }
 
 // Columns to select in normal queries (excludes heavy background_blob)
-const MAP_COLS = `id, name, background_type, background_image, background_mime, background_scale, background_offset_x, background_offset_y, kuma_group_id, parent_id, view_state, width, height, created_at, updated_at`;
+const MAP_COLS = `id, name, background_type, background_image, background_mime, background_scale, background_offset_x, background_offset_y, scale_m_per_unit, kuma_group_id, parent_id, view_state, width, height, created_at, updated_at`;
 
 export const mapsDb = {
   getAll(): NetworkMap[] {
@@ -191,7 +197,17 @@ export const mapsDb = {
     data: Partial<
       Pick<
         NetworkMap,
-        "name" | "background_type" | "background_image" | "width" | "height" | "parent_id"
+        | "name"
+        | "background_type"
+        | "background_image"
+        | "background_mime"
+        | "background_scale"
+        | "background_offset_x"
+        | "background_offset_y"
+        | "width"
+        | "height"
+        | "parent_id"
+        | "scale_m_per_unit"
       >
     >
   ): NetworkMap | undefined {
@@ -283,6 +299,154 @@ export const mapsDb = {
       ).run(mapId);
     });
     tx();
+  },
+
+  /**
+   * Clona un mapa completo (fondo incluido) en un mapa nuevo.
+   *
+   * Copia TODAS las columnas de `network_maps` de forma dinámica — incluido
+   * `background_blob` / `background_mime` / `background_scale` / offsets /
+   * `scale_m_per_unit` / `view_state` — por lo que los mapas de tipo `image`
+   * (foto/plano) conservan su imagen de fondo. Antes el clonado pasaba por
+   * export→import, que sólo serializaba `background_type` y perdía la imagen:
+   * el resultado era un mapa "en blanco".
+   *
+   * Los nodos y links se reinsertan con IDs nuevos, remapeando las referencias
+   * dentro de `custom_data` / `view_state`.
+   */
+  cloneMap(
+    sourceId: string,
+    opts?: { name?: string; parentId?: string | null }
+  ): NetworkMap | null {
+    const src = db
+      .prepare(`SELECT * FROM network_maps WHERE id = ?`)
+      .get(sourceId) as Record<string, any> | undefined;
+    if (!src) return null;
+
+    const newId = genId();
+    const newName = (opts?.name || "").trim() || `${src.name} (copia)`;
+    const newParent =
+      opts && Object.prototype.hasOwnProperty.call(opts, "parentId")
+        ? opts.parentId ?? null
+        : (src.parent_id ?? null);
+
+    // Nombre de archivo propio para el fondo, para que borrar un mapa nunca
+    // deje al otro sin imagen (el blob en DB es la fuente de verdad).
+    let newBgImage: string | null = null;
+    const srcBgImage: string | null = src.background_image ?? null;
+    if (srcBgImage) {
+      const ext = path.extname(String(srcBgImage)) || ".png";
+      newBgImage = `bg-${Date.now()}-${crypto.randomBytes(3).toString("hex")}${ext}`;
+    }
+
+    // Columnas a copiar tal cual (todo menos identidad/nombre/padre/timestamps/fondo)
+    const skip = new Set([
+      "id",
+      "name",
+      "parent_id",
+      "background_image",
+      "created_at",
+      "updated_at",
+    ]);
+    const passthrough = Object.keys(src).filter((c) => !skip.has(c) && c !== "view_state");
+
+    // ── Nodos y links de origen ──
+    const srcNodes = db
+      .prepare(`SELECT * FROM network_map_nodes WHERE map_id = ?`)
+      .all(sourceId) as Record<string, any>[];
+    const srcEdges = db
+      .prepare(`SELECT * FROM network_map_edges WHERE map_id = ?`)
+      .all(sourceId) as Record<string, any>[];
+
+    const nodeIdMap = new Map<string, string>();
+    for (const n of srcNodes) {
+      nodeIdMap.set(
+        String(n.id),
+        `node-${Date.now()}-${crypto.randomBytes(4).toString("hex")}`
+      );
+    }
+    const remapIds = (val: any): any => {
+      if (typeof val !== "string" || !val.includes("node-")) return val;
+      let out = val;
+      for (const [oldId, nid] of nodeIdMap) out = out.split(oldId).join(nid);
+      return out;
+    };
+
+    const tx = db.transaction(() => {
+      const cols = ["id", "name", "parent_id", "background_image", "view_state", ...passthrough];
+      const vals = [
+        newId,
+        newName,
+        newParent,
+        newBgImage,
+        remapIds(src.view_state ?? null),
+        ...passthrough.map((c) => src[c] ?? null),
+      ];
+      db.prepare(
+        `INSERT INTO network_maps (${cols.join(", ")}) VALUES (${cols
+          .map(() => "?")
+          .join(", ")})`
+      ).run(...vals);
+
+      if (srcNodes.length) {
+        const nodeCols = Object.keys(srcNodes[0]).filter(
+          (c) => c !== "id" && c !== "map_id"
+        );
+        const insertNode = db.prepare(
+          `INSERT INTO network_map_nodes (id, map_id, ${nodeCols.join(", ")})
+           VALUES (?, ?, ${nodeCols.map(() => "?").join(", ")})`
+        );
+        for (const n of srcNodes) {
+          insertNode.run(
+            nodeIdMap.get(String(n.id))!,
+            newId,
+            ...nodeCols.map((c) => remapIds(n[c] ?? null))
+          );
+        }
+      }
+
+      if (srcEdges.length) {
+        const edgeCols = Object.keys(srcEdges[0]).filter(
+          (c) => c !== "id" && c !== "map_id"
+        );
+        const insertEdge = db.prepare(
+          `INSERT INTO network_map_edges (id, map_id, ${edgeCols.join(", ")})
+           VALUES (?, ?, ${edgeCols.map(() => "?").join(", ")})`
+        );
+        for (const e of srcEdges) {
+          insertEdge.run(
+            `edge-${Date.now()}-${crypto.randomBytes(4).toString("hex")}`,
+            newId,
+            ...edgeCols.map((c) => {
+              if (c === "source_node_id" || c === "target_node_id") {
+                return nodeIdMap.get(String(e[c])) ?? e[c];
+              }
+              return remapIds(e[c] ?? null);
+            })
+          );
+        }
+      }
+    });
+    tx();
+
+    // Cache en disco del fondo (best-effort; el blob en DB alcanza para servirlo)
+    if (newBgImage && srcBgImage) {
+      try {
+        const dir = MAP_UPLOADS_DIR;
+        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+        const srcPath = path.join(dir, path.basename(String(srcBgImage)));
+        const dstPath = path.join(dir, newBgImage);
+        if (fs.existsSync(srcPath)) {
+          fs.copyFileSync(srcPath, dstPath);
+        } else if (src.background_blob) {
+          fs.writeFileSync(dstPath, src.background_blob as Buffer);
+        }
+      } catch {
+        /* el fondo se sirve igual desde el blob en DB */
+      }
+    }
+
+    return this.getById(newId) ?? null;
   },
 
   setBackground(id: string, filename: string, blob?: Buffer, mime?: string) {

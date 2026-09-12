@@ -51,9 +51,10 @@ const edgeTypes: EdgeTypes = { interface: InterfaceEdge as any };
 interface MapData {
   id: string;
   name: string;
-  background_type: "image" | "livemap";
+  background_type: "grid" | "image" | "livemap";
   background_image: string | null;
   background_scale: number;
+  scale_m_per_unit: number | null;
   kuma_group_id: number | null;
   view_state: string | null;
   nodes: any[];
@@ -827,10 +828,22 @@ function CanvasInner({
 
   const hasSelection = nodes.some((n) => n.selected) || edges.some((e) => e.selected);
 
-  const bgType = mapData?.background_type || "livemap";
+  const bgType: string = mapData?.background_type || "livemap";
   const bgImage = bgType === "image" && mapData?.background_image
     ? apiUrl(`/api/uploads/network-maps/${mapData.background_image}`) : null;
   const bgScale = mapData?.background_scale || 1.0;
+  const scaleMPerUnit = mapData?.scale_m_per_unit ?? null;
+  const handleSaveScale = async (mPerUnit: number | null) => {
+    setMapData((prev) => (prev ? { ...prev, scale_m_per_unit: mPerUnit } : prev));
+    try {
+      await safeFetch(apiUrl(`/api/maps/${mapId}`), {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scale_m_per_unit: mPerUnit }),
+      }, "SaveScale");
+      toast.success(mPerUnit ? "Escala calibrada" : "Calibración borrada");
+    } catch { toast.error("No se pudo guardar la escala"); }
+  };
 
   // Monitor IDs on this map — for TimeMachine filtering
   const mapMonitorIds = useMemo(() =>
@@ -985,6 +998,9 @@ function CanvasInner({
           imageBackground={bgImage || undefined}
           onUploadBackground={handleUploadBg}
           onSetLiveMap={handleSetLiveMap}
+          backgroundType={bgType as "grid" | "image" | "livemap"}
+          scaleMPerUnit={scaleMPerUnit}
+          onSaveScale={handleSaveScale}
           initialNodes={(mapData.nodes || []).map((n: any) => ({
             id: n.id,
             kuma_monitor_id: n.kuma_monitor_id,
@@ -1348,6 +1364,9 @@ function CanvasInner({
             panelCollapsed={panelCollapsed}
             onTogglePanel={() => setPanelCollapsed(v => !v)}
             availableMaps={allMaps}
+            backgroundType={mapData?.background_type || "livemap"}
+            scaleMPerUnit={scaleMPerUnit}
+            onSaveScale={handleSaveScale}
             initialNodes={(mapData?.nodes || []).map((n: any) => ({
               id: n.id,
               kuma_monitor_id: n.kuma_monitor_id,

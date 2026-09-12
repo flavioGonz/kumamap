@@ -14,3 +14,15 @@ data/
 *.tsbuildinfo
 next-env.d.ts
 hosts_remotos.md
+
+# copias que dejan los parches de despliegue
+*.bak
+*.bak-*
+*.bak2
+_bak-*/
+_up/
+.next.bak/
+*.patch
+
+# instaladores del agente monitor-ng: 234 MB, van al release de GitHub
+public/downloads/

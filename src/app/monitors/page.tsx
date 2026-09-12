@@ -1383,16 +1383,7 @@ export default function MonitorsPage() {
         {/* Header */}
         <header className="page-header">
           <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-            <a href="/" className="back-link">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="15 18 9 12 15 6"/></svg>
-              Mapas
-            </a>
-            <div style={{ width: 1, height: 24, background: "rgba(255,255,255,0.06)" }} />
             <div>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#60a5fa" strokeWidth="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
-                <h1 style={{ fontSize: 20, fontWeight: 900, color: "#ededed", margin: 0 }}>Monitores</h1>
-              </div>
               <div style={{ fontSize: 10, color: "#666", display: "flex", alignItems: "center", gap: 6, marginTop: 2 }}>
                 <span className="status-dot" style={{ background: connected ? "#22c55e" : "#ef4444" }} />
                 {connected ? "Kuma conectado" : "Kuma desconectado"}

@@ -22,6 +22,9 @@ import {
 import dynamic from "next/dynamic";
 import Tooltip from "./Tooltip";
 import { SEPARATION_TYPES, separationStyle } from "@/lib/separation";
+import { copperStyle, COPPER_MAX_M } from "@/lib/copper";
+import { measure, formatMeters, calibrationFromReference, type MapBackgroundType } from "@/lib/measure";
+import LaserPointer from "./LaserPointer";
 
 // ── Heavy / conditional components — lazy loaded ──────────────────
 const TimeMachine = dynamic(() => import("./TimeMachine"), { ssr: false });
@@ -128,6 +131,12 @@ interface LeafletMapViewProps {
   onUploadBackground?: () => void;
   /** Triggered when user wants to switch map type to livemap */
   onSetLiveMap?: () => void;
+  /** Tipo de fondo: "livemap" mide en metros reales; "image"/"grid" usa calibración. */
+  backgroundType?: MapBackgroundType;
+  /** Metros por unidad de mapa (image/grid); null = sin calibrar. */
+  scaleMPerUnit?: number | null;
+  /** Persistir la calibración (metros por unidad) del mapa. */
+  onSaveScale?: (metersPerUnit: number | null) => void;
   /** Navigate to a linked map in the same window */
   onOpenMap?: (mapId: string) => void;
   /** Kiosk: expose map handle for programmatic flyTo */
@@ -256,10 +265,22 @@ export default function LeafletMapView({
   imageBackground = null,
   onUploadBackground,
   onSetLiveMap,
+  backgroundType = "livemap",
+  scaleMPerUnit = null,
+  onSaveScale,
   onOpenMap,
   onMapReady,
 }: LeafletMapViewProps) {
   const isImageMode = !!imageBackground;
+  // ── Láser / medición / calibración ──
+  const [laserActive, setLaserActive] = useState(false);
+  const [rulerPts, setRulerPts] = useState<[number, number][]>([]);
+  const [calibrateMode, setCalibrateMode] = useState(false);
+  const [calibMeters, setCalibMeters] = useState("");
+  const backgroundTypeRef = useRef<MapBackgroundType>(backgroundType);
+  const scaleMPerUnitRef = useRef<number | null>(scaleMPerUnit);
+  useEffect(() => { backgroundTypeRef.current = backgroundType; }, [backgroundType]);
+  useEffect(() => { scaleMPerUnitRef.current = scaleMPerUnit; }, [scaleMPerUnit]);
   // Auto-refresh after 20 min idle to prevent memory leaks from Leaflet markers
   useAutoRefresh(20);
 
@@ -476,22 +497,12 @@ export default function LeafletMapView({
               }
             }
           }
-          // For any DOWN monitor that the DB didn't return a time for
-          // (DB not configured or no heartbeat history), seed with Date.now()
-          // so the badge at least starts counting from this moment.
-          for (const id of downIds) {
-            if (!downSinceRef.current.has(id)) {
-              downSinceRef.current.set(id, Date.now());
-            }
-          }
+          // Nada de sembrar con Date.now(): si la base no sabe cuando empezo la caida, el
+          // cartel no se dibuja. Un contador que arranca de cero en cada recarga dice
+          // algo falso, y eso es peor que no decir nada.
         })
         .catch(() => {
-          // DB not configured — seed all DOWN monitors with Date.now()
-          for (const id of downIds) {
-            if (!downSinceRef.current.has(id)) {
-              downSinceRef.current.set(id, Date.now());
-            }
-          }
+          /* sin respuesta del servidor: se mantiene lo que ya se sabia */
         });
     }
   }, [kumaMonitors]);
@@ -2409,7 +2420,15 @@ export default function LeafletMapView({
       const isWireless = cd.linkType === "wireless";
       const isVPN = cd.linkType === "vpn";
       const isSeparation = cd.linkType === "separation";
+      const isCopper = cd.linkType === "copper";
       const sepStyle = isSeparation ? separationStyle(cd.sepType) : null;
+      // Largo del enlace (distancia entre sus dos nodos) para medición y regla de cobre.
+      let edgeMeters: number | null = null;
+      try {
+        const d = measure(map, [srcNode.x, srcNode.y], [tgtNode.x, tgtNode.y], backgroundTypeRef.current, scaleMPerUnitRef.current);
+        edgeMeters = d.meters;
+      } catch { edgeMeters = null; }
+      const copper = isCopper ? copperStyle(edgeMeters) : null;
       const isDown = !isSeparation && (srcStatus === 0 || tgtStatus === 0);
       const isBothDown = !isSeparation && srcStatus === 0 && tgtStatus === 0;
       const isMaint = !isSeparation && (srcStatus === 3 || tgtStatus === 3) && !isDown;
@@ -2420,6 +2439,13 @@ export default function LeafletMapView({
       let lineCap: "round" | "butt" | "square" | undefined = sepStyle ? "butt" : isVPN ? "round" : undefined;
       let lineWeight = sepStyle ? sepStyle.weight : isDown ? 4 : isVPN ? 5 : 3;
       const lineOpacity = isSeparation ? 0.9 : isBothDown ? 0.4 : isDown ? 0.9 : 0.9;
+
+      // Alerta de cobre fuera de límite: remarca la línea (DOWN/MAINT/PENDING tienen prioridad).
+      if (copper && copper.status !== "ok" && !isDown && !isMaint && !isPending && !isSeparation) {
+        lineColor = copper.color;
+        dashArray = copper.status === "alert" ? "10,6" : "5,7";
+        lineWeight = Math.max(lineWeight, 4);
+      }
 
       // Build line points — straight or bezier curve
       let linePoints: [number, number][];
@@ -2490,6 +2516,20 @@ export default function LeafletMapView({
           <span style="font-size:9px;color:#666;">${statusLabel(tgtStatus)}</span>
         </div>`);
 
+        // Longitud del enlace + alerta de cobre (no bloqueante)
+        if (edgeMeters != null) {
+          const warn = !!(copper && copper.status !== "ok");
+          rows.push(`<div style="display:flex;align-items:center;justify-content:space-between;gap:6px;padding:5px 0 3px;border-top:1px solid rgba(255,255,255,0.06);margin-top:3px;">
+            <span style="font-size:10px;color:#999;font-weight:600;">LONGITUD</span>
+            <span style="font-size:12px;font-weight:800;color:${warn ? copper!.color : "#e5e7eb"};">${formatMeters(edgeMeters)}${warn ? " " + copper!.icon : ""}</span>
+          </div>`);
+          if (warn) {
+            rows.push(`<div style="font-size:9px;color:${copper!.color};font-weight:700;padding-bottom:2px;">Cobre: ${copper!.label} — se permite igual</div>`);
+          }
+        } else if (isCopper) {
+          rows.push(`<div style="font-size:9px;color:#9ca3af;padding:5px 0 2px;border-top:1px solid rgba(255,255,255,0.06);margin-top:3px;">Calibrá la escala del plano para medir el largo del cobre</div>`);
+        }
+
         return `<div style="min-width:180px;max-width:260px;">${rows.join("")}</div>`;
       };
 
@@ -2502,101 +2542,125 @@ export default function LeafletMapView({
       };
       line.on("click", openLinkPopup);
 
-      // SNMP traffic widget — draggable with mini sparkline
+      // ── Trafico del enlace ────────────────────────────────────────────────
+      // El calculo ya no se hace aca: lo devuelve /api/kuma/traffic con el tiempo
+      // real entre lecturas y, si existe, el sentido contrario. Este bloque solo
+      // dibuja. Area para la entrada, linea para la salida: es el lenguaje que
+      // cualquiera que haya mirado un grafico de red reconoce de un vistazo.
       if (cd.snmpMonitorId && !cd.hideTraffic) {
         const snmpMon = kumaMonitors.find((m) => m.id === cd.snmpMonitorId);
         if (snmpMon) {
           const savedPos = cd.trafficLabelPos;
           const posLat = savedPos ? savedPos[0] : (srcNode.x + tgtNode.x) / 2;
           const posLng = savedPos ? savedPos[1] : (srcNode.y + tgtNode.y) / 2;
-          const statusColor = !snmpMon.active ? "#6b7280" : snmpMon.status === 1 ? "#22c55e" : snmpMon.status === 0 ? "#ef4444" : "#f59e0b";
 
-          // Extract SNMP counter value from msg: "comparing NNNN >= YYYY"
-          const extractCounter = (msg: string): number | null => {
-            const m = msg.match(/comparing\s+(\d+)/);
-            return m ? parseInt(m[1]) : null;
-          };
+          const AZUL = "#3987e5";   // entrada  · par validado contra fondo oscuro
+          const AQUA = "#199e70";   // salida
+          const estado = !snmpMon.active ? "#8493a8" : snmpMon.status === 1 ? "#22c55e" : snmpMon.status === 0 ? "#ef4444" : "#f59e0b";
 
-          // Use cached throughput data (computed from SNMP counter deltas)
-          const hbKey = `traffic-hb-${cd.snmpMonitorId}`;
-          const cachedData: { throughputs: number[]; lastValue: string } = (window as any)[hbKey] || { throughputs: [], lastValue: "" };
-          const monInterval = snmpMon.interval || 60; // monitor polling interval in seconds
+          const clave = `traf-${cd.snmpMonitorId}`;
+          const cache: any = (window as any)[clave] || null;
 
-          // Compute current throughput from cached data
-          let currentThroughput = cachedData.throughputs.length > 0
-            ? cachedData.throughputs[cachedData.throughputs.length - 1]
-            : null;
-          const formattedValue = currentThroughput != null ? formatTraffic(currentThroughput) : "N/A";
-
-          // Build a mini SVG sparkline from throughput history
-          let sparkSvg = "";
-          if (cachedData.throughputs.length >= 2) {
-            const pts = cachedData.throughputs.slice(-30);
-            const maxV = Math.max(...pts, 1);
-            const w = 80, h = 22;
-            const pathParts = pts.map((v, i) => {
-              const x = (i / (pts.length - 1)) * w;
-              const y = h - (v / maxV) * (h - 2);
-              return `${i === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`;
-            });
-            const fillParts = [...pathParts, `L${w},${h}`, `L0,${h}`, "Z"];
-            sparkSvg = `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" style="display:block;margin-top:2px">
-              <path d="${fillParts.join(" ")}" fill="${statusColor}15" />
-              <path d="${pathParts.join(" ")}" fill="none" stroke="${statusColor}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>`;
-          }
-
-          // Fetch heartbeat data and compute throughput from SNMP counter deltas
-          if (!cachedData.throughputs.length || cachedData.lastValue !== snmpMon.msg) {
-            safeFetch<{ msg?: string }[]>(apiUrl(`/api/kuma/history/${cd.snmpMonitorId}`), undefined, "SNMPHistory")
-              .then((beats) => {
-                if (!beats) return;
-                // Extract counter values from each heartbeat msg
-                const counters: number[] = [];
-                for (const b of beats) {
-                  const val = extractCounter(b.msg || "");
-                  if (val !== null) counters.push(val);
-                }
-                // Compute throughput deltas (bytes/s → bits/s) between consecutive readings
-                const throughputs: number[] = [];
-                for (let i = 1; i < counters.length; i++) {
-                  let delta = counters[i] - counters[i - 1];
-                  // Handle 32-bit counter wrap (4294967296 = 2^32)
-                  if (delta < 0) delta += 4294967296;
-                  const bps = (delta * 8) / monInterval; // bits per second
-                  if (bps >= 0 && bps < 100_000_000_000) throughputs.push(bps); // sanity: < 100Gbps
-                }
-                if (throughputs.length > 0) {
-                  (window as any)[hbKey] = {
-                    throughputs: throughputs.slice(-30),
-                    lastValue: snmpMon.msg || "",
-                  };
-                }
-              })
+          // Se refresca cuando llega un latido nuevo, o si nunca se pidio.
+          if (!cache || cache.sello !== snmpMon.msg) {
+            safeFetch<any>(apiUrl(`/api/kuma/traffic/${cd.snmpMonitorId}?minutos=60`), undefined, "Trafico")
+              .then((d) => { if (d) (window as any)[clave] = { ...d, sello: snmpMon.msg || "" }; })
               .catch(() => {});
           }
 
+          const ent = cache?.entrada || null;
+          const sal = cache?.salida || null;
+          const cap: number | null = cache?.capacidadBps ?? null;
+          const ifaz = cache?.interfaz || null;
+
+          const pico = Math.max(ent?.pico || 0, sal?.pico || 0);
+          const techo = pico > 0 ? pico * 1.15 : 1;
+
+          const W = 148, H = 34;
+          const serieAPuntos = (s: any) => {
+            const p: Array<{ t: number; bps: number }> = (s?.puntos || []).slice(-60);
+            if (p.length < 2) return null;
+            return p.map((v, i) => ({ x: (i / (p.length - 1)) * W, y: H - (v.bps / techo) * (H - 3), ...v }));
+          };
+          const pEnt = serieAPuntos(ent);
+          const pSal = serieAPuntos(sal);
+          const camino = (pts: any[] | null) => (pts ? pts.map((q, i) => `${i === 0 ? "M" : "L"}${q.x.toFixed(1)},${q.y.toFixed(1)}`).join(" ") : "");
+
+          // Bandas invisibles con <title>: dan el dato exacto de cada lectura al
+          // pasar el mouse, sin agregar una capa de tooltip propia.
+          let bandas = "";
+          const base = pEnt || pSal;
+          if (base && base.length > 1) {
+            const ancho = W / base.length;
+            bandas = base.map((q: any, i: number) => {
+              const hora = new Date(q.t).toLocaleTimeString("es-UY", { hour: "2-digit", minute: "2-digit" });
+              const a = pEnt?.[i] ? formatTraffic(pEnt[i].bps) : "—";
+              const b = pSal?.[i] ? formatTraffic(pSal[i].bps) : "—";
+              return `<rect x="${(q.x - ancho / 2).toFixed(1)}" y="0" width="${ancho.toFixed(1)}" height="${H}" fill="transparent"><title>${hora}  ▼ ${a}   ▲ ${b}</title></rect>`;
+            }).join("");
+          }
+
+          const lineaCap = cap && pico > 0 && cap < techo
+            ? `<line x1="0" y1="${(H - (cap / techo) * (H - 3)).toFixed(1)}" x2="${W}" y2="${(H - (cap / techo) * (H - 3)).toFixed(1)}" stroke="#8493a8" stroke-width="1" stroke-dasharray="3 3" opacity="0.5"/>`
+            : "";
+
+          const grafico = (pEnt || pSal) ? `
+            <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" style="display:block;overflow:visible">
+              <line x1="0" y1="${H}" x2="${W}" y2="${H}" stroke="#ffffff" stroke-width="1" opacity="0.12"/>
+              ${lineaCap}
+              ${pEnt ? `<path d="${camino(pEnt)} L${W},${H} L0,${H} Z" fill="${AZUL}" opacity="0.22"/>
+                        <path d="${camino(pEnt)}" fill="none" stroke="${AZUL}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>` : ""}
+              ${pSal ? `<path d="${camino(pSal)}" fill="none" stroke="${AQUA}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>` : ""}
+              ${bandas}
+            </svg>` : "";
+
+          const fila = (color: string, flecha: string, etiqueta: string, s: any) => `
+            <div style="display:flex;align-items:baseline;gap:5px;min-width:0">
+              <span style="width:7px;height:7px;border-radius:2px;background:${color};flex:none;transform:translateY(-1px)"></span>
+              <span style="font-size:9px;color:#93a3b8;letter-spacing:.04em">${flecha}</span>
+              <span style="font-size:12.5px;font-weight:700;color:#e8eef7;font-variant-numeric:tabular-nums;white-space:nowrap"
+                    title="${etiqueta}">${s?.actual != null ? formatTraffic(s.actual) : "—"}</span>
+            </div>`;
+
+          const pctCap = cap && pico > 0 ? Math.round((pico / cap) * 100) : null;
+          const pie = pico > 0
+            ? `pico ${formatTraffic(pico)}${pctCap != null ? ` · ${pctCap}% de ${formatTraffic(cap!)}` : ""}`
+            : (cache?.aviso || "esperando lecturas");
+
+          const titulo = ifaz?.nombre
+            ? `${ifaz.nombre}${ifaz.alias ? ` · ${ifaz.alias}` : ""}`
+            : (snmpMon.name || "tráfico");
+
           const trafficLabel = L.marker([posLat, posLng], {
-            draggable: !isLocked,
+            // Siempre arrastrable: moverla no cambia la topologia, es una anotacion.
+            draggable: true,
             icon: L.divIcon({
               className: "traffic-label",
               html: `<div style="
-                background:rgba(6,6,10,0.92);
-                border:1px solid ${statusColor}44;
-                color:${statusColor};
-                font-size:10px;font-weight:800;
-                font-family:ui-monospace,monospace;
-                padding:4px 8px;border-radius:8px;
-                white-space:nowrap;
-                box-shadow:0 4px 16px rgba(0,0,0,0.6), 0 0 12px ${statusColor}15;
-                cursor:${isLockedRef.current ? "default" : "grab"};
-                min-width:80px;
+                background:rgba(8,12,20,0.93);
+                border:1px solid rgba(255,255,255,0.10);
+                border-radius:11px;
+                padding:8px 10px 7px;
+                min-width:166px;
+                box-shadow:0 8px 26px rgba(0,0,0,0.62);
+                backdrop-filter:blur(8px);
+                font-family:ui-sans-serif,system-ui,sans-serif;
+                cursor:grab;
               ">
-                <div style="display:flex;align-items:center;gap:4px;">
-                  <span style="font-size:7px;opacity:0.6">▲▼</span>
-                  <span>${formattedValue}</span>
+                <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">
+                  <span style="width:6px;height:6px;border-radius:99px;background:${estado};flex:none;
+                               box-shadow:0 0 6px ${estado}"></span>
+                  <span style="font-size:10px;font-weight:600;color:#c4d0e0;letter-spacing:.02em;
+                               white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:150px"
+                        title="${snmpMon.name || ""}">${titulo}</span>
                 </div>
-                ${sparkSvg}
+                <div style="display:flex;gap:12px;margin-bottom:5px">
+                  ${fila(AZUL, "▼", "entrada", ent)}
+                  ${sal ? fila(AQUA, "▲", "salida", sal) : ""}
+                </div>
+                ${grafico}
+                <div style="margin-top:5px;font-size:9px;color:#7d8da0;letter-spacing:.02em;
+                            white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:160px">${pie}</div>
               </div>`,
               iconSize: [0, 0],
               iconAnchor: [0, 14],
@@ -2604,8 +2668,16 @@ export default function LeafletMapView({
             interactive: true,
           });
 
-          // Save position after drag
+          trafficLabel.on("dragstart", () => {
+            const el = trafficLabel.getElement();
+            if (el) { (el.firstElementChild as HTMLElement)?.style.setProperty("cursor", "grabbing");
+                      el.style.opacity = "0.85"; }
+          });
+
           trafficLabel.on("dragend", () => {
+            const el = trafficLabel.getElement();
+            if (el) { (el.firstElementChild as HTMLElement)?.style.setProperty("cursor", "grab");
+                      el.style.opacity = "1"; }
             const pos = trafficLabel.getLatLng();
             const idx = edgesRef.current.findIndex((e) => e.id === edge.id);
             if (idx >= 0) {
@@ -2615,16 +2687,11 @@ export default function LeafletMapView({
             }
           });
 
-          // Right-click to hide
           trafficLabel.on("contextmenu", (e: any) => {
             e.originalEvent.preventDefault();
             e.originalEvent.stopPropagation();
             ctxHandledRef.current = true;
-            setCtxMenu({
-              x: e.originalEvent.clientX,
-              y: e.originalEvent.clientY,
-              edgeId: edge.id,
-            });
+            setCtxMenu({ x: e.originalEvent.clientX, y: e.originalEvent.clientY, edgeId: edge.id });
           });
 
           trafficLabel.addTo(map);
@@ -2632,7 +2699,7 @@ export default function LeafletMapView({
         }
       }
 
-      // MikroTik direct traffic widget — polls router REST API for live TX/RX
+      // MikroTik direct traffic widget - polls router REST API for live TX/RX
       if (cd.mikrotikTraffic && !cd.hideTraffic && !cd.snmpMonitorId) {
         const savedPos = cd.trafficLabelPos;
         const posLat = savedPos ? savedPos[0] : (srcNode.x + tgtNode.x) / 2;
@@ -2837,6 +2904,13 @@ export default function LeafletMapView({
         if (el) {
           const span = el.querySelector(".dt-elapsed");
           if (span) span.textContent = elapsedStr;
+          // Si Kuma abrio una racha nueva, el "desde" tiene que moverse con el
+          // contador. Si no, el cartel muestra dos tiempos que no se corresponden.
+          const desde = el.querySelector(".dt-since") as HTMLElement | null;
+          if (desde && desde.dataset.ts !== String(downTimestamp)) {
+            desde.textContent = `desde ${sinceStr}`;
+            desde.dataset.ts = String(downTimestamp);
+          }
         }
       } else {
         // ── Tooltip bubble: timer (big) + since (small) + bottom arrow ─────────
@@ -2879,7 +2953,7 @@ export default function LeafletMapView({
               ">${elapsedStr}</span>
             </div>
             <!-- Row 2: since date -->
-            <div style="
+            <div class="dt-since" data-ts="${downTimestamp}" style="
               margin-top:4px;padding-left:21px;
               font-size:9px;color:rgba(252,165,165,0.5);
               font-family:monospace;letter-spacing:0.5px;line-height:1;
@@ -3187,8 +3261,10 @@ export default function LeafletMapView({
     const map = mapRef.current;
     if (!map) return 0;
     if (isImageMode) {
-      // Image mode: Euclidean pixel distance
-      return Math.sqrt((p2[0] - p1[0]) ** 2 + (p2[1] - p1[1]) ** 2);
+      // Image mode: Euclidean pixel distance, convertida a metros si el plano está calibrado
+      const px = Math.sqrt((p2[0] - p1[0]) ** 2 + (p2[1] - p1[1]) ** 2);
+      const mpu = scaleMPerUnitRef.current;
+      return (mpu != null && mpu > 0) ? px * mpu : px;
     }
     // Geo mode: use Leaflet's haversine distance → meters
     return map.distance(p1, p2);
@@ -3226,7 +3302,8 @@ export default function LeafletMapView({
       const segDist = calcDistance(prev, curr);
       const midLat = (prev[0] + curr[0]) / 2;
       const midLng = (prev[1] + curr[1]) / 2;
-      const labelText = isImageMode ? `${segDist.toFixed(0)} px` : formatDistance(segDist);
+      const uncal = isImageMode && !(scaleMPerUnitRef.current != null && scaleMPerUnitRef.current > 0);
+      const labelText = uncal ? `${segDist.toFixed(0)} px` : formatDistance(segDist);
       const label = L.marker([midLat, midLng], {
         icon: L.divIcon({
           className: "measure-label",
@@ -3250,7 +3327,8 @@ export default function LeafletMapView({
       let totalDist = 0;
       for (let i = 1; i < pts.length; i++) totalDist += calcDistance(pts[i - 1], pts[i]);
       if (pts.length >= 3) {
-        const totalText = isImageMode ? `Total: ${totalDist.toFixed(0)} px` : `Total: ${formatDistance(totalDist)}`;
+        const uncalT = isImageMode && !(scaleMPerUnitRef.current != null && scaleMPerUnitRef.current > 0);
+        const totalText = uncalT ? `Total: ${totalDist.toFixed(0)} px` : `Total: ${formatDistance(totalDist)}`;
         const totalLabel = L.marker(curr, {
           icon: L.divIcon({
             className: "measure-total-label",
@@ -3271,7 +3349,8 @@ export default function LeafletMapView({
     if (pts.length >= 2) {
       let totalDist = 0;
       for (let i = 1; i < pts.length; i++) totalDist += calcDistance(pts[i - 1], pts[i]);
-      const totalText = isImageMode ? `${totalDist.toFixed(0)} px` : formatDistance(totalDist);
+      const uncalF = isImageMode && !(scaleMPerUnitRef.current != null && scaleMPerUnitRef.current > 0);
+      const totalText = uncalF ? `${totalDist.toFixed(0)} px` : formatDistance(totalDist);
       toast.success(`Distancia total: ${totalText}`, { duration: 8000 });
     }
     setMeasureMode(false);
@@ -4281,6 +4360,79 @@ export default function LeafletMapView({
         onDragOver={handleDragOver}
       />
 
+      {/* ── Puntero láser (editor + kiosko) ── */}
+      <LaserPointer containerRef={containerRef} active={laserActive} onToggle={setLaserActive} />
+
+      {/* ── Calibración: overlay que captura clicks para dibujar la referencia ── */}
+      {calibrateMode && (
+        <div
+          className="absolute inset-0 cursor-crosshair"
+          style={{ zIndex: 1200 }}
+          onClick={(e) => {
+            const m = mapRef.current; const cont = containerRef.current;
+            if (!m || !cont) return;
+            const rect = cont.getBoundingClientRect();
+            const ll = m.containerPointToLatLng([e.clientX - rect.left, e.clientY - rect.top] as any);
+            setRulerPts((prev) => (calibrateMode && prev.length >= 2) ? [[ll.lat, ll.lng]] : [...prev, [ll.lat, ll.lng]]);
+          }}
+          onContextMenu={(e) => { e.preventDefault(); setRulerPts([]); }}
+        >
+          <svg className="absolute inset-0 w-full h-full" style={{ pointerEvents: "none" }}>
+            {(() => {
+              const m = mapRef.current;
+              if (!m) return null;
+              const cpts = rulerPts.map((p) => m.latLngToContainerPoint(p as any));
+              return (
+                <>
+                  {cpts.length >= 2 && (
+                    <polyline points={cpts.map((c) => `${c.x},${c.y}`).join(" ")} fill="none" stroke={calibrateMode ? "#38bdf8" : "#f59e0b"} strokeWidth="2.5" strokeDasharray="6,5" />
+                  )}
+                  {cpts.map((c, i) => (
+                    <circle key={i} cx={c.x} cy={c.y} r={4.5} fill={calibrateMode ? "#38bdf8" : "#f59e0b"} stroke="#000" strokeWidth="1.5" />
+                  ))}
+                </>
+              );
+            })()}
+          </svg>
+        </div>
+      )}
+
+      {/* ── Badge de calibración (los controles viven en el menú Dibujar) ── */}
+      {calibrateMode && (
+        <div className="absolute left-3 bottom-16 rounded-lg px-3 py-2" style={{ zIndex: 1300, background: "rgba(17,24,39,0.94)", color: "#e5e7eb", border: "1px solid rgba(255,255,255,0.12)", boxShadow: "0 4px 16px rgba(0,0,0,0.5)", maxWidth: 260 }}>
+          {(() => {
+            const m = mapRef.current;
+            let firstRaw: number | null = null;
+            if (m && rulerPts.length >= 2) firstRaw = m.distance(rulerPts[0] as any, rulerPts[1] as any);
+            if (rulerPts.length < 2) {
+              return <div style={{ fontSize: 11 }}>🎯 Dibujá una referencia de <b>largo conocido</b> — 2 clics sobre el plano.</div>;
+            }
+            return (
+              <div style={{ fontSize: 11 }}>
+                <div style={{ marginBottom: 6 }}>Largo real de la referencia:</div>
+                <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                  <input value={calibMeters} onChange={(e) => setCalibMeters(e.target.value)} placeholder="metros" inputMode="decimal"
+                    style={{ width: 70, padding: "3px 6px", borderRadius: 6, background: "rgba(0,0,0,0.4)", border: "1px solid rgba(255,255,255,0.15)", color: "#fff", fontSize: 12 }} />
+                  <span style={{ fontSize: 11, color: "#9ca3af" }}>m</span>
+                  <button
+                    onClick={() => {
+                      const meters = parseFloat(calibMeters.replace(",", "."));
+                      const mpu = firstRaw != null ? calibrationFromReference(firstRaw, meters) : null;
+                      if (mpu == null) { toast.error("Valor inválido"); return; }
+                      onSaveScale?.(mpu);
+                      setCalibrateMode(false); setRulerPts([]); setCalibMeters("");
+                    }}
+                    style={{ padding: "3px 10px", borderRadius: 6, background: "#38bdf8", color: "#04283a", fontWeight: 700, fontSize: 11 }}
+                  >Guardar</button>
+                  <button onClick={() => { setCalibrateMode(false); setRulerPts([]); }} title="Cancelar" style={{ fontSize: 12, color: "#9ca3af" }}>✕</button>
+                </div>
+                <button onClick={() => setRulerPts([])} style={{ marginTop: 6, fontSize: 10, color: "#9ca3af" }}>↺ rehacer</button>
+              </div>
+            );
+          })()}
+        </div>
+      )}
+
       {/* ── Link mode overlay: captures ALL clicks above Leaflet ── */}
       {linkSource && (
         <div
@@ -4726,6 +4878,26 @@ export default function LeafletMapView({
                 }
               }}
             />
+            <DropdownItem
+              icon={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="2.5"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>}
+              label={laserActive ? "Apagar láser" : "Puntero láser (L)"}
+              active={laserActive}
+              onClick={() => { setActiveDropdown(null); setLaserActive(v => !v); }}
+            />
+            {!readonly && onSaveScale && backgroundType !== "livemap" && (
+              <DropdownItem
+                icon={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="8"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg>}
+                label={calibrateMode ? "Cancelar calibración" : (scaleMPerUnit ? "Recalibrar escala" : "Calibrar escala")}
+                active={calibrateMode}
+                onClick={() => {
+                  setActiveDropdown(null);
+                  if (calibrateMode) { setCalibrateMode(false); setRulerPts([]); return; }
+                  if (measureMode) finishMeasurement();
+                  setRulerPts([]); setCalibrateMode(true);
+                  toast.info("Dibujá una referencia de largo conocido (2 clics) y poné los metros.", { duration: 5000 });
+                }}
+              />
+            )}
           </ToolbarDropdown>
 
           {/* ── "Mapa" dropdown ── */}

@@ -191,8 +191,30 @@ export default function MapListView({
   };
 
   // ── Clone map ──
+  // Usa el endpoint server-side /clone, que copia el mapa entero incluida la
+  // imagen de fondo (blob en DB). El camino viejo (export → import) sólo
+  // serializaba `background_type`, por lo que los mapas tipo foto se clonaban
+  // en blanco. Se mantiene como fallback para backends sin el endpoint nuevo.
   const cloneMap = async (map: MapSummary) => {
     try {
+      const res = await fetch(apiUrl(`/api/maps/${map.id}/clone`), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: `${map.name} (copia)` }),
+      });
+
+      if (res.ok) {
+        toast.success("Mapa clonado", { description: `${map.name} (copia)` });
+        fetchMaps();
+        return;
+      }
+
+      if (res.status !== 404 && res.status !== 405) {
+        toast.error("Error al clonar mapa", { description: `HTTP ${res.status}` });
+        return;
+      }
+
+      // ── Fallback legacy: export → import ──
       const data = await safeFetch<Record<string, unknown>>(apiUrl(`/api/maps/${map.id}/export`), undefined, "CloneExport");
       if (!data) { toast.error("Error al clonar mapa"); return; }
       const imported = await safeFetch(apiUrl("/api/maps/import"), {
@@ -378,12 +400,8 @@ export default function MapListView({
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl"
-            style={{ background: "rgba(59,130,246,0.12)", border: "1px solid rgba(59,130,246,0.25)" }}>
-            <Network className="h-5 w-5 text-blue-400" />
-          </div>
           <div>
-            <h1 className="text-xl font-black tracking-tight" style={{ color: "var(--text-primary)" }}>KumaMap</h1>
+            <h1 className="text-xl font-black tracking-tight" style={{ color: "var(--text-primary)" }}>Mapas</h1>
             <div className="flex items-center gap-2 text-[10px]" style={{ color: "var(--muted-foreground)" }}>
               <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: kumaConnected ? "#22c55e" : "#ef4444", boxShadow: kumaConnected ? "0 0 6px #22c55e" : "0 0 6px #ef4444" }} />
               {kumaConnected ? "Kuma conectado" : "Kuma desconectado"}
@@ -422,120 +440,11 @@ export default function MapListView({
           </Tooltip>
 
           {/* ── Monitors ── */}
-          <Tooltip content="Gestión de Monitores" placement="bottom">
-          <a
-            href={`${process.env.NEXT_PUBLIC_BASE_PATH || ""}/monitors`}
-            className="flex h-8 w-8 items-center justify-center rounded-lg transition-all"
-            style={{ color: "var(--text-tertiary)", border: "1px solid transparent" }}
-            onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = "#22c55e"; (e.currentTarget as HTMLElement).style.borderColor = "rgba(34,197,94,0.25)"; (e.currentTarget as HTMLElement).style.background = "rgba(34,197,94,0.08)"; }}
-            onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = "var(--text-tertiary)"; (e.currentTarget as HTMLElement).style.borderColor = "transparent"; (e.currentTarget as HTMLElement).style.background = "transparent"; }}
-          >
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
-          </a>
-          </Tooltip>
-
           {/* ── Servidores monitor-ng ── */}
-          <Tooltip content="Servidores monitor-ng (adopción)" placement="bottom">
-          <a
-            href={`${process.env.NEXT_PUBLIC_BASE_PATH || ""}/monitor-ng`}
-            className="flex h-8 w-8 items-center justify-center rounded-lg transition-all"
-            style={{ color: "var(--text-tertiary)", border: "1px solid transparent" }}
-            onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = "#e11d48"; (e.currentTarget as HTMLElement).style.borderColor = "rgba(225,29,72,0.25)"; (e.currentTarget as HTMLElement).style.background = "rgba(225,29,72,0.08)"; }}
-            onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = "var(--text-tertiary)"; (e.currentTarget as HTMLElement).style.borderColor = "transparent"; (e.currentTarget as HTMLElement).style.background = "transparent"; }}
-          >
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="18" height="16" x="3" y="4" rx="2"/><path d="M3 12h4l2-5 3 9 2-4h5"/></svg>
-          </a>
-          </Tooltip>
-
           {/* ── Alert Manager ── */}
-          <Tooltip content="Centro de Alertas" placement="bottom">
-          <a
-            href={`${process.env.NEXT_PUBLIC_BASE_PATH || ""}/alerts`}
-            className="flex h-8 w-8 items-center justify-center rounded-lg transition-all"
-            style={{ color: "#f87171", border: "1px solid transparent" }}
-            onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.borderColor = "rgba(239,68,68,0.25)"; (e.currentTarget as HTMLElement).style.background = "rgba(239,68,68,0.08)"; }}
-            onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.borderColor = "transparent"; (e.currentTarget as HTMLElement).style.background = "transparent"; }}
-          >
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
-          </a>
-          </Tooltip>
-
           {/* ── Cameras (dropdown) ── */}
-          <div ref={cameraMenuRef} style={{ position: "relative" }}>
-            <Tooltip content="Cámaras" placement="bottom">
-            <button
-              onClick={() => setCameraMenuOpen((v) => !v)}
-              className="flex h-8 w-8 items-center justify-center rounded-lg transition-all"
-              style={{ color: cameraMenuOpen ? "#06b6d4" : "var(--text-tertiary)", border: `1px solid ${cameraMenuOpen ? "rgba(6,182,212,0.25)" : "transparent"}`, background: cameraMenuOpen ? "rgba(6,182,212,0.08)" : "transparent", cursor: "pointer" }}
-              onMouseEnter={(e) => { if (!cameraMenuOpen) { (e.currentTarget as HTMLElement).style.color = "#06b6d4"; (e.currentTarget as HTMLElement).style.borderColor = "rgba(6,182,212,0.25)"; (e.currentTarget as HTMLElement).style.background = "rgba(6,182,212,0.08)"; } }}
-              onMouseLeave={(e) => { if (!cameraMenuOpen) { (e.currentTarget as HTMLElement).style.color = "var(--text-tertiary)"; (e.currentTarget as HTMLElement).style.borderColor = "transparent"; (e.currentTarget as HTMLElement).style.background = "transparent"; } }}
-            >
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2" ry="2"/></svg>
-            </button>
-            </Tooltip>
-            {cameraMenuOpen && (
-              <div
-                style={{
-                  position: "absolute",
-                  top: "calc(100% + 6px)",
-                  right: 0,
-                  minWidth: 180,
-                  background: "var(--secondary)",
-                  border: "1px solid var(--glass-border)",
-                  borderRadius: 10,
-                  boxShadow: "0 8px 32px rgba(0,0,0,0.5)",
-                  padding: "4px 0",
-                  zIndex: 100,
-                  overflow: "hidden",
-                }}
-              >
-                {[
-                  { label: "Liveview", href: "/cameras", icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2" ry="2"/></svg>, color: "#06b6d4" },
-                  { label: "LPR", href: "/plates", icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="1" y="5" width="22" height="14" rx="3"/><text x="12" y="15" textAnchor="middle" fontSize="8" fill="currentColor" stroke="none" fontWeight="bold">LPR</text></svg>, color: "#f59e0b" },
-                  { label: "Face", href: "#", icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="10" r="7"/><path d="M9 14h6"/><circle cx="9.5" cy="9" r="0.5" fill="currentColor"/><circle cx="14.5" cy="9" r="0.5" fill="currentColor"/><path d="M5 20a9 9 0 0 1 14 0"/></svg>, color: "#a78bfa", disabled: true },
-                ].map((item) => (
-                  <a
-                    key={item.label}
-                    href={item.disabled ? undefined : `${process.env.NEXT_PUBLIC_BASE_PATH || ""}${item.href}`}
-                    onClick={(e) => { if (item.disabled) e.preventDefault(); setCameraMenuOpen(false); }}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 10,
-                      padding: "8px 14px",
-                      color: item.disabled ? "var(--text-tertiary)" : "var(--text-secondary)",
-                      textDecoration: "none",
-                      fontSize: 13,
-                      fontWeight: 500,
-                      cursor: item.disabled ? "not-allowed" : "pointer",
-                      transition: "background 0.15s",
-                      opacity: item.disabled ? 0.5 : 1,
-                    }}
-                    onMouseEnter={(e) => { if (!item.disabled) { (e.currentTarget as HTMLElement).style.background = "var(--surface-elevated)"; (e.currentTarget as HTMLElement).style.color = item.color; } }}
-                    onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; (e.currentTarget as HTMLElement).style.color = item.disabled ? "var(--text-tertiary)" : "var(--text-secondary)"; }}
-                  >
-                    <span style={{ display: "flex", alignItems: "center" }}>{item.icon}</span>
-                    <span>{item.label}</span>
-                    {item.disabled && <span style={{ marginLeft: "auto", fontSize: 10, color: "var(--muted-foreground)", fontStyle: "italic" }}>pronto</span>}
-                  </a>
-                ))}
-              </div>
-            )}
-          </div>
-
+          
           {/* ── Metrics ── */}
-          <Tooltip content="Métricas del servidor" placement="bottom">
-          <a
-            href={`${process.env.NEXT_PUBLIC_BASE_PATH || ""}/metrics`}
-            className="flex h-8 w-8 items-center justify-center rounded-lg transition-all"
-            style={{ color: "var(--text-tertiary)", border: "1px solid transparent" }}
-            onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = "#a78bfa"; (e.currentTarget as HTMLElement).style.borderColor = "rgba(167,139,250,0.25)"; (e.currentTarget as HTMLElement).style.background = "rgba(167,139,250,0.08)"; }}
-            onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = "var(--text-tertiary)"; (e.currentTarget as HTMLElement).style.borderColor = "transparent"; (e.currentTarget as HTMLElement).style.background = "transparent"; }}
-          >
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 20V10M12 20V4M6 20v-6"/></svg>
-          </a>
-          </Tooltip>
-
           {/* ── Deploy ── */}
           <Tooltip content="Deploy a servidores" placement="bottom">
           <button
@@ -550,18 +459,6 @@ export default function MapListView({
           </Tooltip>
 
           {/* ── Theme toggle ── */}
-          <Tooltip content={`Tema: ${themeLabel}`} placement="bottom">
-          <button
-            onClick={cycleTheme}
-            className="flex h-8 w-8 items-center justify-center rounded-lg transition-all"
-            style={{ color: "var(--text-tertiary)", border: "1px solid transparent" }}
-            onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = "var(--text-primary)"; (e.currentTarget as HTMLElement).style.borderColor = "var(--glass-border)"; (e.currentTarget as HTMLElement).style.background = "var(--surface-hover)"; }}
-            onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = "var(--text-tertiary)"; (e.currentTarget as HTMLElement).style.borderColor = "transparent"; (e.currentTarget as HTMLElement).style.background = "transparent"; }}
-          >
-            <ThemeIcon className="h-3.5 w-3.5" />
-          </button>
-          </Tooltip>
-
           {/* ── Changelog ── */}
           <Tooltip content="Novedades" placement="bottom">
             <ChangelogBadge onClick={() => setChangelogOpen(true)} />
@@ -584,26 +481,7 @@ export default function MapListView({
           </button>
           </Tooltip>
 
-          {/* divider */}
-          <div className="h-5 w-px mx-0.5" style={{ background: "var(--glass-border)" }} />
-
-          {/* ── Logout ── */}
-          <Tooltip content="Cerrar sesión" placement="bottom">
-          <button
-            onClick={() => {
-              localStorage.removeItem("kumamap_user");
-              safeFetch(apiUrl("/api/auth"), { method: "DELETE" }, "Logout");
-              onLogout();
-            }}
-            className="flex h-8 w-8 items-center justify-center rounded-lg transition-all"
-            style={{ color: "var(--text-tertiary)", border: "1px solid transparent" }}
-            onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = "var(--text-secondary)"; (e.currentTarget as HTMLElement).style.borderColor = "var(--glass-border)"; (e.currentTarget as HTMLElement).style.background = "var(--surface-hover)"; }}
-            onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = "var(--text-tertiary)"; (e.currentTarget as HTMLElement).style.borderColor = "transparent"; (e.currentTarget as HTMLElement).style.background = "transparent"; }}
-          >
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></svg>
-          </button>
-          </Tooltip>
-        </div>
+          </div>
       </div>
 
       {/* Search + Filters bar */}

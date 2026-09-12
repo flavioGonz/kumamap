@@ -553,7 +553,7 @@ export default function PlatesPage() {
   ];
 
   return (
-    <div className="min-h-screen" style={{ background: palette.bg, color: palette.text }}>
+    <div className="min-h-full" style={{ background: palette.bg, color: palette.text }}>
       {/* ── Premium Header ── */}
       <header
         className="sticky top-0 z-50"
@@ -565,26 +565,8 @@ export default function PlatesPage() {
         }}
       >
         <div className="max-w-[1600px] mx-auto flex items-center gap-5 px-8 py-4">
-          <a
-            href={apiUrl("/")}
-            className="flex items-center justify-center w-9 h-9 rounded-xl transition-all hover:scale-105"
-            style={{ background: "rgba(255,255,255,0.04)", border: `1px solid ${palette.border}` }}
-          >
-            <ArrowLeft className="w-4 h-4" style={{ color: palette.textMuted }} />
-          </a>
-
           {/* Logo */}
           <div className="flex items-center gap-3">
-            <div
-              className="w-10 h-10 rounded-xl flex items-center justify-center"
-              style={{
-                background: `linear-gradient(135deg, ${palette.accent}20, ${palette.accent}05)`,
-                border: `1px solid ${palette.accent}25`,
-                boxShadow: `0 0 24px ${palette.accent}10`,
-              }}
-            >
-              <Fingerprint className="w-5 h-5" style={{ color: palette.accent }} />
-            </div>
             <div>
               <h1 className="text-base font-bold tracking-tight" style={{ color: "#fff" }}>
                 Control de Accesos

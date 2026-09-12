@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useCallback, useRef } from "react";
+import { useSinMarco } from "@/components/AppShell";
 import Link from "next/link";
 import { apiUrl } from "@/lib/api";
 import { snapshotSrc, streamSrc } from "@/lib/camera-url";
@@ -826,6 +827,7 @@ export default function CamerasPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedMap, setSelectedMap] = useState<MapWithCameras | null>(null);
+  useSinMarco(!!selectedMap);
   const [layout, setLayout] = useState<GridLayout>("2x2");
   const [fullscreenIdx, setFullscreenIdx] = useState<number | null>(null);
   const [showOnvif, setShowOnvif] = useState(false);
@@ -931,17 +933,8 @@ export default function CamerasPage() {
   // ── Map Selector ──
   if (!selectedMap) {
     return (
-      <div className="min-h-screen bg-black">
+      <div className="min-h-full bg-black">
         <header className="sticky top-0 z-50 px-5 py-3 flex items-center gap-3" style={{ background: "#0a0a0a", borderBottom: "1px solid #1a1a1a" }}>
-          <Link href="/" className="flex items-center gap-1.5 text-white/30 hover:text-white/60 transition-colors">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polyline points="15 18 9 12 15 6" /></svg>
-            <span className="text-xs font-mono">MAPS</span>
-          </Link>
-          <div className="h-4 w-px bg-white/10" />
-          <div className="flex items-center gap-2">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#06b6d4" strokeWidth="1.8" strokeLinecap="round"><path d="m22 8-6 4 6 4V8Z" /><rect width="14" height="12" x="2" y="6" rx="2" ry="2" /></svg>
-            <h1 className="text-sm font-bold text-white/90 font-mono">CAMERAS</h1>
-          </div>
           <div className="flex-1" />
           <button onClick={() => setShowOnvif(true)} className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-bold font-mono" style={{ background: "#06b6d4", color: "#000" }}>
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="2" /><path d="M16.24 7.76a6 6 0 0 1 0 8.49m-8.48-.01a6 6 0 0 1 0-8.49" /></svg>

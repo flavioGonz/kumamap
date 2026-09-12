@@ -59,6 +59,9 @@ const PUBLIC_GET_PREFIXES = [
   "/api/hik/events/stream", // SSE event stream (used by LPR feed)
   "/api/uploads",           // uploaded files (map background images, etc.)
   "/api/ups",              // UPS SNMP polling + history (needed by kiosk tour tooltip)
+  "/api/dns-watch",        // estado de los resolvers DNS publicos (lo usa el login)
+  "/api/agent",            // metadatos del agente monitor-ng (tarjeta de descarga del login)
+  "/downloads",            // instalador del agente, servido como archivo estatico
 ];
 
 // API routes accessible via ANY method without auth (needed by mobile PWA)

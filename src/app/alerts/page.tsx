@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { useSinMarco } from "@/components/AppShell";
 import { apiUrl } from "@/lib/api";
 import { safeFetch } from "@/lib/error-handler";
 import { ChangelogBadge, ChangelogModal } from "@/components/ChangelogModal";
@@ -149,6 +150,7 @@ export default function AlertsPage() {
   const [groupByMonitor, setGroupByMonitor] = useState(true);
   const [expandedMonitors, setExpandedMonitors] = useState<Set<number>>(new Set());
   const [nocMode, setNocMode] = useState(false);
+  useSinMarco(nocMode);
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [showFollowedOnly, setShowFollowedOnly] = useState(false);
   const [changelogOpen, setChangelogOpen] = useState(false);
@@ -439,10 +441,10 @@ export default function AlertsPage() {
   const collapseAll = useCallback(() => { setExpandedMonitors(new Set()); }, []);
 
   // ── Auth check ──
-  if (isAuthenticated === null) return <div className="h-screen w-screen bg-[#0a0a0a] flex items-center justify-center"><div className="h-6 w-6 rounded-full border-2 border-white/10 border-t-blue-400 animate-spin" /></div>;
+  if (isAuthenticated === null) return <div className="h-full w-full bg-[#0a0a0a] flex items-center justify-center"><div className="h-6 w-6 rounded-full border-2 border-white/10 border-t-blue-400 animate-spin" /></div>;
   if (!isAuthenticated) {
     return (
-      <div className="h-screen w-screen bg-[#0a0a0a] flex items-center justify-center">
+      <div className="h-full w-full bg-[#0a0a0a] flex items-center justify-center">
         <div className="text-center">
           <p className="text-white/40 text-sm mb-4">Acceso requerido</p>
           <a href={`${process.env.NEXT_PUBLIC_BASE_PATH || ""}/`} className="px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-500 transition-colors">Iniciar sesión</a>
@@ -459,27 +461,13 @@ export default function AlertsPage() {
   // RENDER
   // ══════════════════════════════════════════════════════════════
   return (
-    <div className={`h-screen w-screen bg-[#0a0a0a] flex flex-col overflow-hidden ${nocMode ? "" : ""}`}>
+    <div className={`h-full w-full bg-[#0a0a0a] flex flex-col overflow-hidden ${nocMode ? "" : ""}`}>
       {/* ── Top bar ── */}
       <header className={`shrink-0 border-b border-white/[0.06] ${nocMode ? "px-6 py-2" : "px-6 py-3"}`} style={{ background: "linear-gradient(180deg, rgba(15,15,20,0.98) 0%, rgba(10,10,10,0.95) 100%)", backdropFilter: "blur(16px)" }}>
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl flex items-center justify-center relative" style={{ background: "linear-gradient(135deg, #ef4444, #f97316)", boxShadow: kpis.unackDown > 0 ? "0 0 20px rgba(239,68,68,0.3)" : "none" }}>
-              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" /><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />
-              </svg>
-              {kpis.unackDown > 0 && (
-                <span className="absolute -top-1 -right-1 min-w-[16px] h-4 flex items-center justify-center rounded-full text-[9px] font-black text-white px-1"
-                  style={{ background: "#ef4444", boxShadow: "0 0 8px rgba(239,68,68,0.5)", animation: "noc-pulse 2s ease-in-out infinite" }}>
-                  {kpis.unackDown}
-                </span>
-              )}
-            </div>
             <div>
-              <h1 className="text-[15px] font-bold text-white/95 leading-none tracking-tight">Centro de Alertas</h1>
               <p className="text-[10px] text-white/30 mt-0.5 flex items-center gap-1.5">
-                <span className="text-white/20">KumaMap</span>
-                <span className="text-white/10">·</span>
                 <span>{monitors.length} monitores</span>
                 <span className="text-white/10">·</span>
                 <span>{activeRangeLabel}</span>
@@ -506,12 +494,7 @@ export default function AlertsPage() {
               {nocMode ? "Salir" : "NOC"}
             </button>
             {/* Back to map */}
-            {!nocMode && (
-              <a href={`${process.env.NEXT_PUBLIC_BASE_PATH || ""}/`} className="h-8 px-3 flex items-center gap-1.5 rounded-lg text-[11px] font-medium text-white/40 hover:text-white/70 hover:bg-white/[0.06] transition-all">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21"/><line x1="9" y1="3" x2="9" y2="18"/><line x1="15" y1="6" x2="15" y2="21"/></svg>
-                Mapa
-              </a>
-            )}
+            
           </div>
         </div>
       </header>

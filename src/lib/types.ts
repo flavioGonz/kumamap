@@ -126,6 +126,10 @@ export interface NodeCustomData {
   protocol?: string;        // e.g. "802.11ac", "AirMax", "NanoBeam"
   peerNodeId?: string;      // ID of the other antenna in a PTP pair
 
+  // Panel de UPS fijado al mapa: vuelve a abrirse solo al entrar
+  upsPanelFijo?: boolean;
+  upsPanelPos?: [number, number];
+
   // Credentials (stored locally)
   credUser?: string;
   credPass?: string;

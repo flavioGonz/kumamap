@@ -4,7 +4,16 @@ import {
   createSessionToken,
   checkLoginRateLimit,
   resetLoginRateLimit,
+  leerSesion,
 } from "@/lib/auth";
+import { verificarCredenciales } from "@/lib/usuarios";
+
+/** GET → quién está adentro. Lo usa la interfaz para saber qué mostrar. */
+export async function GET(req: NextRequest) {
+  const s = leerSesion(req);
+  if (!s) return NextResponse.json({ autenticado: false }, { status: 200 });
+  return NextResponse.json({ autenticado: true, usuario: s.usuario, rol: s.rol });
+}
 
 export async function POST(req: NextRequest) {
   // Rate limiting by IP
@@ -26,27 +35,32 @@ export async function POST(req: NextRequest) {
   }
   const { username, password } = parsed.data;
 
-  // Validate against KUMA_USER/KUMA_PASS env vars.
-  const validUser = process.env.KUMA_USER || "";
-  const validPass = process.env.KUMA_PASS || "";
-
-  if (!validUser || !validPass) {
-    console.error("[Auth] KUMA_USER or KUMA_PASS not set in environment");
-    return NextResponse.json({ error: "Servidor mal configurado" }, { status: 500 });
+  // Primero la tabla de usuarios; si no hay coincidencia, el usuario del entorno
+  // (KUMA_USER / KUMA_PASS), que es la llave de repuesto para no quedarse afuera.
+  let cred = null;
+  try {
+    cred = verificarCredenciales(username, password);
+  } catch (err) {
+    console.error("[Auth] Error consultando la tabla de usuarios:", err);
+    // Si la tabla falla, el entorno todavía tiene que poder entrar.
+    const envU = (process.env.KUMA_USER || "").trim();
+    const envP = process.env.KUMA_PASS || "";
+    if (envU && envP && username === envU && password === envP) {
+      cred = { usuario: envU, rol: "admin" as const, origen: "entorno" as const };
+    }
   }
 
-  if (username !== validUser || password !== validPass) {
+  if (!cred) {
     console.warn(`[Auth] Failed login attempt for user: ${username} from ${ip}`);
     return NextResponse.json({ error: "Credenciales incorrectas" }, { status: 401 });
   }
 
-  // Success — reset rate limit and create secure token
   resetLoginRateLimit(ip);
 
-  const token = createSessionToken(username);
-  console.log(`[Auth] Successful login for user: ${username}`);
+  const token = createSessionToken(cred.usuario, cred.rol);
+  console.log(`[Auth] Successful login for user: ${cred.usuario} (${cred.rol}, ${cred.origen})`);
 
-  const response = NextResponse.json({ success: true, username });
+  const response = NextResponse.json({ success: true, username: cred.usuario, rol: cred.rol });
   response.cookies.set("kumamap_session", token, {
     httpOnly: true,
     sameSite: "lax",

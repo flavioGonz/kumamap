@@ -1,10 +1,22 @@
 "use client";
 
+/**
+ * Panel de UPS.
+ *
+ * Lo primero que uno quiere saber de una UPS es si está tomando de la red o de
+ * la batería, y cuánto aguanta. Eso va arriba y en grande. Después las cifras
+ * del momento, y abajo las curvas de las últimas horas con las tiradas en
+ * batería sombreadas: sin eso, un corte de dos minutos a las 3 de la mañana no
+ * se ve en ninguna parte.
+ *
+ * El panel se puede fijar: queda anotado en el nodo y vuelve a abrirse solo al
+ * entrar al mapa, en la misma posición.
+ */
+
 import { useState, useEffect, useCallback, useRef, memo } from "react";
 import {
-  X, RefreshCw, Zap, BatteryFull, Thermometer, Clock,
-  Activity, AlertTriangle, Plug, ArrowUpFromLine,
-  Gauge, Power, ChevronDown, ChevronUp, Settings,
+  X, RefreshCw, Zap, Thermometer, Clock, Activity, AlertTriangle,
+  Plug, Gauge, Settings, Pin, PinOff,
 } from "lucide-react";
 import { apiUrl } from "@/lib/api";
 import { getSocket } from "@/lib/socket";
@@ -14,444 +26,539 @@ import {
 } from "@/lib/ups";
 
 const VENDOR_BADGE: Record<UpsVendor, string | null> = {
-  apc: "APC",
-  rfc1628: "RFC1628",
-  nut: "NUT",
-  unknown: null,
+  apc: "APC", rfc1628: "RFC 1628", nut: "NUT", unknown: null,
 };
 
-// ── Compact Battery SVG ────────────────────────────────────────────────────
+/* Par categórico validado contra fondo oscuro (ΔE 19.6 con deuteranopía). */
+const AZUL = "#3987e5";
+const AQUA = "#199e70";
+const AMBAR = "#f59e0b";
+const ROJO = "#ef4444";
 
-function CompactBattery({ charge, health, onBattery }: { charge: number; health: string; onBattery: boolean }) {
-  const color = batteryColor(charge);
-  const fillH = Math.max(1, (charge / 100) * 28);
-  return (
-    <svg viewBox="0 0 24 42" width={28} height={48} className={onBattery ? "ups-pulse" : ""}>
-      <rect x="2" y="6" width="20" height="34" rx="3" ry="3" fill="none" stroke="rgba(255,255,255,0.15)" strokeWidth="1.5" />
-      <rect x="8" y="2" width="8" height="5" rx="1.5" ry="1.5" fill="none" stroke="rgba(255,255,255,0.15)" strokeWidth="1.5" />
-      <rect x="4" y={38 - fillH} width="16" height={fillH} rx="1.5" ry="1.5" fill={color} opacity="0.85">
-        <animate attributeName="opacity" values="0.85;0.6;0.85" dur="2s" repeatCount={onBattery ? "indefinite" : "0"} />
-      </rect>
-      <text x="12" y="25" textAnchor="middle" dominantBaseline="central" fill="white" fontSize="8" fontWeight="800" fontFamily="monospace">
-        {charge}%
-      </text>
-      {!onBattery && charge < 100 && (
-        <g transform="translate(8, 9)" opacity="0.7">
-          <path d="M4 0L2 4H4L2 8L6 3H4L6 0Z" fill="#f59e0b" />
-        </g>
-      )}
-      {(health === "replace" || health === "fault" || health === "low") && (
-        <circle cx="20" cy="8" r="3.5" fill="#ef4444">
-          <animate attributeName="opacity" values="1;0.4;1" dur="1s" repeatCount="indefinite" />
-        </circle>
-      )}
-    </svg>
-  );
-}
+const ANCHO = 344;
+const GRAF_W = ANCHO - 26;   // ancho útil dentro del panel
+const GRAF_H = 52;
 
-// ── Compact Circular Gauge ─────────────────────────────────────────────────
+/* ─────────────────────────────────────────── anillo de carga ── */
 
-function MiniGauge({ value, max, label, unit, color }: {
-  value: number; max: number; label: string; unit: string; color: string;
+function Anillo({ pct, color, enBateria, etiqueta }: {
+  pct: number; color: string; enBateria: boolean; etiqueta: string;
 }) {
-  const size = 56;
-  const r = 20;
-  const cx = size / 2, cy = size / 2;
-  const circ = 2 * Math.PI * r;
-  const pct = Math.min(value / max, 1);
-  const dashoff = circ * (1 - pct * 0.75);
-
+  const R = 30, C = 2 * Math.PI * R;
+  const p = Math.max(0, Math.min(100, pct)) / 100;
   return (
-    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", position: "relative" }}>
-      <svg width={size} height={size} style={{ transform: "rotate(135deg)" }}>
-        <circle cx={cx} cy={cy} r={r} fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="3.5"
-          strokeDasharray={`${circ * 0.75} ${circ * 0.25}`} strokeLinecap="round" />
-        <circle cx={cx} cy={cy} r={r} fill="none" stroke={color} strokeWidth="3.5"
-          strokeDasharray={`${circ * 0.75} ${circ * 0.25}`} strokeDashoffset={dashoff}
-          strokeLinecap="round" style={{ transition: "stroke-dashoffset 0.8s ease" }} />
+    <div style={{ position: "relative", width: 76, height: 76, flex: "none" }}>
+      <svg width={76} height={76} style={{ transform: "rotate(-90deg)" }}>
+        <circle cx={38} cy={38} r={R} fill="none" stroke="rgba(255,255,255,.07)" strokeWidth={7} />
+        <circle cx={38} cy={38} r={R} fill="none" stroke={color} strokeWidth={7} strokeLinecap="round"
+          strokeDasharray={`${(C * p).toFixed(1)} ${C.toFixed(1)}`}
+          style={{ transition: "stroke-dasharray .7s ease" }} />
       </svg>
-      <div style={{ position: "absolute", top: size * 0.2, display: "flex", flexDirection: "column", alignItems: "center" }}>
-        <span style={{ fontSize: 12, fontWeight: 800, fontFamily: "monospace", color, lineHeight: 1 }}>{Math.round(value)}</span>
-        <span style={{ fontSize: 7, color: "rgba(255,255,255,0.3)", fontWeight: 600 }}>{unit}</span>
+      <div style={{
+        position: "absolute", inset: 0, display: "flex", flexDirection: "column",
+        alignItems: "center", justifyContent: "center", gap: 0,
+      }}>
+        <span style={{ fontSize: 21, fontWeight: 700, color: "#f2f5fa", lineHeight: 1, fontVariantNumeric: "tabular-nums" }}>
+          {Math.round(pct)}<span style={{ fontSize: 11, opacity: .55 }}>%</span>
+        </span>
+        <span style={{ fontSize: 8.5, color: "rgba(255,255,255,.4)", textTransform: "uppercase", letterSpacing: ".06em", marginTop: 1 }}>
+          {etiqueta}
+        </span>
       </div>
-      <span style={{ fontSize: 8, color: "rgba(255,255,255,0.35)", fontWeight: 600, textTransform: "uppercase", marginTop: -2, letterSpacing: "0.03em" }}>{label}</span>
+      {enBateria && (
+        <span style={{
+          position: "absolute", inset: -3, borderRadius: "50%",
+          border: `1px solid ${AMBAR}55`, animation: "upsLate 1.6s ease-in-out infinite",
+        }} />
+      )}
     </div>
   );
 }
 
-// ── Mini Sparkline ──────────────────────────────────────────────────────────
+/* ──────────────────────────────────────────────── gráfica ── */
 
-const Sparkline = memo(function Sparkline({
-  data, color, width = 260, height = 28, label, unit,
+interface Tramo { x0: number; x1: number }
+
+const Grafica = memo(function Grafica({
+  puntos, tiempos, tramos, color, titulo, unidad, decimales = 0, minFijo, maxFijo,
 }: {
-  data: number[]; color: string; width?: number; height?: number; label: string; unit: string;
+  puntos: number[]; tiempos: number[]; tramos: Tramo[];
+  color: string; titulo: string; unidad: string;
+  decimales?: number; minFijo?: number; maxFijo?: number;
 }) {
-  if (data.length < 2) return (
-    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", height: 16 }}>
-      <span style={{ fontSize: 8, color: "rgba(255,255,255,0.25)", fontWeight: 600, textTransform: "uppercase" }}>{label}</span>
-      <span style={{ fontSize: 8, color: "rgba(255,255,255,0.12)" }}>Recopilando...</span>
-    </div>
-  );
-  const maxV = Math.max(...data, 1), minV = Math.min(...data, 0), range = (maxV - minV) || 1;
-  const pts = data.map((v, i) => ({ x: (i / (data.length - 1)) * width, y: height - ((v - minV) / range) * (height - 4) - 2 }));
-  const line = pts.map((p, i) => `${i === 0 ? "M" : "L"}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
-  const area = `${line} L${width},${height} L0,${height} Z`;
-  const gid = `sg-${label.replace(/\s/g, "")}`;
-  const last = data[data.length - 1];
+  if (puntos.length < 2) {
+    return (
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "5px 0" }}>
+        <span style={grafTitulo}>{titulo}</span>
+        <span style={{ fontSize: 10.5, color: "rgba(255,255,255,.22)" }}>juntando lecturas…</span>
+      </div>
+    );
+  }
+
+  const crudoMax = Math.max(...puntos), crudoMin = Math.min(...puntos);
+  let max = maxFijo ?? crudoMax, min = minFijo ?? crudoMin;
+  if (max - min < 1e-6) { max = max + 1; min = min - 1; }
+  const margen = (max - min) * 0.12;
+  if (maxFijo == null) max += margen;
+  if (minFijo == null) min -= margen;
+
+  const y = (v: number) => GRAF_H - ((v - min) / (max - min)) * (GRAF_H - 4) - 2;
+  const x = (i: number) => (i / (puntos.length - 1)) * GRAF_W;
+
+  const linea = puntos.map((v, i) => `${i === 0 ? "M" : "L"}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
+  const area = `${linea} L${GRAF_W},${GRAF_H} L0,${GRAF_H} Z`;
+  const gid = `ups-g-${titulo.replace(/[^a-z]/gi, "")}`;
+  const ultimo = puntos[puntos.length - 1];
+
+  const hora = (t: number) => new Date(t).toLocaleTimeString("es-UY", { hour: "2-digit", minute: "2-digit" });
+  const anchoBanda = GRAF_W / puntos.length;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <span style={{ fontSize: 8, color: "rgba(255,255,255,0.25)", fontWeight: 600, textTransform: "uppercase" }}>{label}</span>
-        <span style={{ fontSize: 9, fontWeight: 700, fontFamily: "monospace", color }}>{last.toFixed(last % 1 ? 1 : 0)} {unit}</span>
+    <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+        <span style={grafTitulo}>{titulo}</span>
+        <span style={{ fontSize: 12, fontWeight: 700, color, fontVariantNumeric: "tabular-nums" }}>
+          {ultimo.toFixed(decimales)} <span style={{ fontSize: 9.5, opacity: .6 }}>{unidad}</span>
+        </span>
       </div>
-      <svg width={width} height={height} style={{ display: "block" }}>
-        <defs><linearGradient id={gid} x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={color} stopOpacity="0.2" /><stop offset="100%" stopColor={color} stopOpacity="0.01" /></linearGradient></defs>
-        <path d={area} fill={`url(#${gid})`} />
-        <path d={line} fill="none" stroke={color} strokeWidth={1.2} strokeLinejoin="round" />
-        <circle cx={pts[pts.length - 1].x} cy={pts[pts.length - 1].y} r={2} fill={color} stroke="rgba(0,0,0,0.3)" strokeWidth={0.8} />
-      </svg>
+      <div style={{ position: "relative" }}>
+        <svg width={GRAF_W} height={GRAF_H} style={{ display: "block" }}>
+          <defs>
+            <linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor={color} stopOpacity=".28" />
+              <stop offset="100%" stopColor={color} stopOpacity=".02" />
+            </linearGradient>
+          </defs>
+          {/* Tiradas en batería: el dato que explica todo lo demás. */}
+          {tramos.map((t, i) => (
+            <rect key={i} x={t.x0 * GRAF_W} y={0} width={Math.max(1.5, (t.x1 - t.x0) * GRAF_W)} height={GRAF_H}
+              fill={AMBAR} opacity=".14" />
+          ))}
+          <line x1={0} y1={GRAF_H - 1} x2={GRAF_W} y2={GRAF_H - 1} stroke="#ffffff" strokeWidth={1} opacity=".08" />
+          <path d={area} fill={`url(#${gid})`} />
+          <path d={linea} fill="none" stroke={color} strokeWidth={1.8} strokeLinejoin="round" strokeLinecap="round" />
+          <circle cx={x(puntos.length - 1)} cy={y(ultimo)} r={2.6} fill={color} stroke="#0e1117" strokeWidth={1} />
+          {puntos.map((v, i) => (
+            <rect key={i} x={x(i) - anchoBanda / 2} y={0} width={anchoBanda} height={GRAF_H} fill="transparent">
+              <title>{`${hora(tiempos[i] ?? 0)}  ${v.toFixed(decimales)} ${unidad}`}</title>
+            </rect>
+          ))}
+        </svg>
+      </div>
+      <div style={ejes}>
+        <span>{hora(tiempos[0] ?? 0)}</span>
+        <span style={{ opacity: .7 }}>mín {crudoMin.toFixed(decimales)} · máx {crudoMax.toFixed(decimales)} {unidad}</span>
+        <span>{hora(tiempos[tiempos.length - 1] ?? 0)}</span>
+      </div>
     </div>
   );
 });
 
-// ── CSS keyframes (injected once) ───────────────────────────────────────────
+const grafTitulo: React.CSSProperties = {
+  fontSize: 9.5, color: "rgba(255,255,255,.42)", fontWeight: 600,
+  textTransform: "uppercase", letterSpacing: ".06em",
+};
+const ejes: React.CSSProperties = {
+  display: "flex", justifyContent: "space-between", gap: 6,
+  fontSize: 9, color: "rgba(255,255,255,.28)", fontVariantNumeric: "tabular-nums",
+};
+
+/* ────────────────────────────────────────────── estilos ── */
 
 const STYLE_ID = "ups-panel-styles";
-function injectStyles() {
-  if (typeof document === "undefined") return;
-  if (document.getElementById(STYLE_ID)) return;
-  const style = document.createElement("style");
-  style.id = STYLE_ID;
-  style.textContent = `
-    @keyframes upsPulse { 0%, 100% { filter: drop-shadow(0 0 3px rgba(245,158,11,0.3)); } 50% { filter: drop-shadow(0 0 8px rgba(245,158,11,0.6)); } }
-    .ups-pulse { animation: upsPulse 1.5s ease-in-out infinite; }
+function inyectar() {
+  if (typeof document === "undefined" || document.getElementById(STYLE_ID)) return;
+  const s = document.createElement("style");
+  s.id = STYLE_ID;
+  s.textContent = `
+    @keyframes upsLate { 0%,100%{opacity:1} 50%{opacity:.25} }
+    .ups-btn{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;
+      border-radius:7px;border:1px solid rgba(255,255,255,.07);background:rgba(255,255,255,.04);
+      color:rgba(255,255,255,.5);cursor:pointer;transition:color .12s,background .12s}
+    .ups-btn:hover{color:#e7edf6;background:rgba(255,255,255,.09)}
+    .ups-btn.act{color:${AZUL};border-color:${AZUL}55;background:${AZUL}1c}
+    @media (prefers-reduced-motion:reduce){ .ups-late,[style*="upsLate"]{animation:none!important} }
   `;
-  document.head.appendChild(style);
+  document.head.appendChild(s);
 }
 
-// ── Main UPS Panel ──────────────────────────────────────────────────────────
+/* ──────────────────────────────────────────────── panel ── */
 
 export default function UpsPanel({
   nodeId, ip, upsName, onClose, onConfigure, anchorX, anchorY,
+  fijado, onFijar, posGuardada, onMover,
 }: {
   nodeId: string; ip?: string; upsName: string; onClose: () => void;
   onConfigure?: () => void; anchorX?: number; anchorY?: number;
+  /** Fijado = vuelve a abrirse solo al entrar al mapa. */
+  fijado?: boolean;
+  onFijar?: (v: boolean, pos: { left: number; top: number }) => void;
+  posGuardada?: { left: number; top: number } | null;
+  onMover?: (pos: { left: number; top: number }) => void;
 }) {
   const [data, setData] = useState<UpsResult | null>(null);
   const [history, setHistory] = useState<UpsHistoryPoint[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [expanded, setExpanded] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
-  const mountedRef = useRef(true);
-  const panelRef = useRef<HTMLDivElement>(null);
+  const vivoRef = useRef(true);
 
-  // ── Draggable positioning ──
-  const PANEL_W = 280;
-  const initLeft = anchorX != null ? Math.max(8, Math.min(anchorX - PANEL_W / 2, (typeof window !== "undefined" ? window.innerWidth : 1200) - PANEL_W - 8)) : undefined;
-  const initTop = anchorY != null ? Math.max(8, Math.min(anchorY + 20, (typeof window !== "undefined" ? window.innerHeight : 800) - 300)) : undefined;
-  const [pos, setPos] = useState({ left: initLeft ?? 0, top: initTop ?? 80 });
-  const useAnchor = anchorX != null && anchorY != null;
-  const [dragging, setDragging] = useState(false);
-  const dragOffset = useRef({ x: 0, y: 0 });
+  /* ── posición ── */
+  const anchoVentana = typeof window !== "undefined" ? window.innerWidth : 1280;
+  const altoVentana = typeof window !== "undefined" ? window.innerHeight : 800;
+  const inicial = posGuardada
+    ? posGuardada
+    : {
+        left: Math.max(8, Math.min((anchorX ?? anchoVentana - ANCHO - 60) - ANCHO / 2, anchoVentana - ANCHO - 8)),
+        top: Math.max(8, Math.min((anchorY ?? 80) + 20, altoVentana - 340)),
+      };
+  const [pos, setPos] = useState(inicial);
+  const [arrastrando, setArrastrando] = useState(false);
+  const salto = useRef({ x: 0, y: 0 });
 
-  const onDragStart = (e: React.MouseEvent) => {
-    if ((e.target as HTMLElement).closest("button, input, form")) return;
+  const alBajar = (e: React.MouseEvent) => {
+    if ((e.target as HTMLElement).closest("button, input, form, a")) return;
     e.preventDefault();
-    setDragging(true);
-    dragOffset.current = { x: e.clientX - pos.left, y: e.clientY - pos.top };
+    setArrastrando(true);
+    salto.current = { x: e.clientX - pos.left, y: e.clientY - pos.top };
   };
   useEffect(() => {
-    if (!dragging) return;
-    const onMove = (e: MouseEvent) => setPos({ left: e.clientX - dragOffset.current.x, top: e.clientY - dragOffset.current.y });
-    const onUp = () => setDragging(false);
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
-    return () => { window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); };
-  }, [dragging]);
+    if (!arrastrando) return;
+    const mover = (e: MouseEvent) => setPos({ left: e.clientX - salto.current.x, top: e.clientY - salto.current.y });
+    const soltar = () => {
+      setArrastrando(false);
+      setPos((p) => { onMover?.(p); return p; });
+    };
+    window.addEventListener("mousemove", mover);
+    window.addEventListener("mouseup", soltar);
+    return () => { window.removeEventListener("mousemove", mover); window.removeEventListener("mouseup", soltar); };
+  }, [arrastrando, onMover]);
 
-  useEffect(() => { injectStyles(); }, []);
+  useEffect(() => { inyectar(); }, []);
 
-  // Credentials live in the node's custom_data — the server resolves them from nodeId.
-  const poll = useCallback(async () => {
+  /* ── datos ── */
+  const consultar = useCallback(async () => {
     if (!nodeId) return;
     abortRef.current?.abort();
-    const controller = new AbortController();
-    abortRef.current = controller;
+    const c = new AbortController();
+    abortRef.current = c;
     setLoading(true);
     try {
       const res = await fetch(apiUrl("/api/ups/poll"), {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ nodeId }), signal: controller.signal,
+        body: JSON.stringify({ nodeId }), signal: c.signal,
       });
-      const result: UpsResult = await res.json();
-      if (!mountedRef.current) return;
-      setData(result);
-      setError(result.reachable ? null : result.error || "No se pudo alcanzar la UPS");
+      const r: UpsResult = await res.json();
+      if (!vivoRef.current) return;
+      setData(r);
+      setError(r.reachable ? null : r.error || "No se pudo alcanzar la UPS");
     } catch (err: any) {
-      if (err.name === "AbortError") return;
-      if (mountedRef.current) setError(err.message);
+      if (err?.name === "AbortError") return;
+      if (vivoRef.current) setError(err?.message || "error");
     } finally {
-      if (mountedRef.current) setLoading(false);
+      if (vivoRef.current) setLoading(false);
     }
   }, [nodeId]);
 
-  const fetchHistory = useCallback(async () => {
+  const traerHistorial = useCallback(async () => {
     try {
       const res = await fetch(apiUrl(`/api/ups/history?nodeId=${encodeURIComponent(nodeId)}&hours=6`));
-      const json = await res.json();
-      if (mountedRef.current && json.points) setHistory(json.points);
-    } catch { /* non-critical */ }
+      const j = await res.json();
+      if (vivoRef.current && j.points) setHistory(j.points);
+    } catch { /* no es crítico */ }
   }, [nodeId]);
 
   useEffect(() => {
-    mountedRef.current = true;
-    poll(); fetchHistory();
-    // The background monitor pushes every 30 s; the interval only covers a dead socket.
-    const pi = setInterval(poll, 30_000);
-    const hi = setInterval(fetchHistory, 60_000);
-    return () => { mountedRef.current = false; abortRef.current?.abort(); clearInterval(pi); clearInterval(hi); };
-  }, [poll, fetchHistory]);
+    vivoRef.current = true;
+    consultar(); traerHistorial();
+    const a = setInterval(consultar, 30_000);
+    const b = setInterval(traerHistorial, 60_000);
+    return () => { vivoRef.current = false; abortRef.current?.abort(); clearInterval(a); clearInterval(b); };
+  }, [consultar, traerHistorial]);
 
-  // Live push from the server-side poller.
   useEffect(() => {
     const socket = getSocket();
-    const onReading = (payload: { nodeId: string; result: UpsResult }) => {
-      if (payload?.nodeId !== nodeId || !payload.result) return;
-      setData(payload.result);
-      setError(payload.result.reachable ? null : payload.result.error || "No se pudo alcanzar la UPS");
+    const lectura = (p: { nodeId: string; result: UpsResult }) => {
+      if (p?.nodeId !== nodeId || !p.result) return;
+      setData(p.result);
+      setError(p.result.reachable ? null : p.result.error || "No se pudo alcanzar la UPS");
     };
-    const onSnapshot = (snap: Record<string, UpsResult>) => {
-      const r = snap?.[nodeId];
+    const foto = (s: Record<string, UpsResult>) => {
+      const r = s?.[nodeId];
       if (r) { setData(r); setError(r.reachable ? null : r.error || "No se pudo alcanzar la UPS"); }
     };
-    socket.on("ups:reading", onReading);
-    socket.on("ups:snapshot", onSnapshot);
-    return () => { socket.off("ups:reading", onReading); socket.off("ups:snapshot", onSnapshot); };
+    socket.on("ups:reading", lectura);
+    socket.on("ups:snapshot", foto);
+    return () => { socket.off("ups:reading", lectura); socket.off("ups:snapshot", foto); };
   }, [nodeId]);
 
-  const bat = data?.battery, inp = data?.input, out = data?.output, ident = data?.identity;
-  const onBattery = out?.status === "onBattery";
-  const stColor = out ? statusColor(out.status) : "#6b7280";
-  const stLabel = out ? statusLabel(out.status) : "—";
-  const hCharge = history.map(p => p.charge), hLoad = history.map(p => p.load);
-  const hInputV = history.filter(p => p.inputV != null).map(p => p.inputV!);
-  const hTemp = history.filter(p => p.temp != null).map(p => p.temp!);
-  const displayIp = ip || data?.ip || "—";
-  const vendorBadge = data?.vendor ? VENDOR_BADGE[data.vendor] : null;
-  const transport = data?.vendor === "nut" ? "NUT" : "SNMP";
+  /* ── derivados ── */
+  const bat = data?.battery, ent = data?.input, sal = data?.output, ident = data?.identity;
+  const enBateria = sal?.status === "onBattery";
+  const cEstado = sal ? statusColor(sal.status) : "#6b7280";
+  const tEstado = sal ? statusLabel(sal.status) : "—";
+  const ipVisible = ip || data?.ip || "—";
+  const marca = data?.vendor ? VENDOR_BADGE[data.vendor] : null;
+  const transporte = data?.vendor === "nut" ? "NUT" : "SNMP";
 
-  // ── Inline metric helper ──
-  const M = ({ icon, label: l, value: v, unit: u, color: c }: { icon: React.ReactNode; label: string; value: string | number; unit: string; color: string }) => (
-    <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "3px 0" }}>
-      <span style={{ color: "rgba(255,255,255,0.2)", flexShrink: 0 }}>{icon}</span>
-      <span style={{ fontSize: 8, color: "rgba(255,255,255,0.3)", fontWeight: 600, textTransform: "uppercase", minWidth: 50 }}>{l}</span>
-      <span style={{ fontSize: 12, fontWeight: 800, fontFamily: "monospace", color: c, marginLeft: "auto" }}>{v}</span>
-      <span style={{ fontSize: 8, color: "rgba(255,255,255,0.2)", fontWeight: 600, minWidth: 18 }}>{u}</span>
+  const tiempos = history.map((p) => p.t);
+  /** Tramos en batería, en fracción del ancho: lo que hace legible el resto. */
+  const tramos: Tramo[] = [];
+  {
+    let ini = -1;
+    for (let i = 0; i < history.length; i++) {
+      const enBat = String(history[i].status || "").toLowerCase().includes("battery");
+      if (enBat && ini < 0) ini = i;
+      if ((!enBat || i === history.length - 1) && ini >= 0) {
+        const fin = enBat ? i : i - 1;
+        tramos.push({ x0: ini / Math.max(1, history.length - 1), x1: fin / Math.max(1, history.length - 1) });
+        ini = -1;
+      }
+    }
+  }
+
+  const serieCarga = history.map((p) => p.load);
+  const serieBateria = history.map((p) => p.charge);
+  const serieEntrada = history.filter((p) => p.inputV != null).map((p) => p.inputV!);
+  const tiemposEntrada = history.filter((p) => p.inputV != null).map((p) => p.t);
+  const serieTemp = history.filter((p) => p.temp != null).map((p) => p.temp!);
+  const tiemposTemp = history.filter((p) => p.temp != null).map((p) => p.t);
+
+  const Cifra = ({ icono, k, v, u, c }: { icono: React.ReactNode; k: string; v: string; u: string; c?: string }) => (
+    <div style={{
+      display: "flex", flexDirection: "column", gap: 2, padding: "7px 9px", minWidth: 0,
+      border: "1px solid rgba(255,255,255,.06)", borderRadius: 9, background: "rgba(255,255,255,.025)",
+    }}>
+      <span style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 9, color: "rgba(255,255,255,.38)", textTransform: "uppercase", letterSpacing: ".05em" }}>
+        {icono}{k}
+      </span>
+      <span style={{ fontSize: 14, fontWeight: 700, color: c || "#e7edf6", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>
+        {v}<span style={{ fontSize: 9.5, opacity: .55, marginLeft: 2 }}>{u}</span>
+      </span>
     </div>
   );
 
   return (
     <div
-      ref={panelRef}
-      className="fixed z-50 flex flex-col shadow-2xl"
+      className="fixed z-50 flex flex-col"
       style={{
-        ...(useAnchor ? { left: pos.left, top: pos.top } : { top: 80, right: 60 }),
-        width: PANEL_W,
-        maxHeight: "calc(100vh - 60px)",
-        background: "rgba(14,14,14,0.97)",
-        border: "1px solid rgba(255,255,255,0.06)",
-        borderRadius: 12,
-        backdropFilter: "blur(20px)",
+        left: pos.left, top: pos.top, width: ANCHO,
+        maxHeight: "calc(100vh - 40px)",
+        background: "rgba(11,14,20,.97)",
+        border: `1px solid ${enBateria ? AMBAR + "44" : "rgba(255,255,255,.08)"}`,
+        borderRadius: 14,
+        boxShadow: "0 18px 50px rgba(0,0,0,.55)",
+        backdropFilter: "blur(18px)",
         overflow: "hidden",
-        userSelect: dragging ? "none" : "auto",
+        userSelect: arrastrando ? "none" : "auto",
       }}
     >
-      {/* ── Header ── */}
-      <div
-        onMouseDown={useAnchor ? onDragStart : undefined}
-        style={{
-          display: "flex", alignItems: "center", justifyContent: "space-between",
-          padding: "6px 10px",
-          borderBottom: "1px solid rgba(255,255,255,0.06)",
-          cursor: useAnchor ? (dragging ? "grabbing" : "grab") : undefined,
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          <div style={{
-            width: 24, height: 24, borderRadius: 6,
-            background: `${stColor}15`, border: `1px solid ${stColor}30`,
-            display: "flex", alignItems: "center", justifyContent: "center",
-          }}>
-            <Zap className="w-3 h-3" style={{ color: stColor }} />
+      {/* ── cabecera ── */}
+      <div onMouseDown={alBajar} style={{
+        display: "flex", alignItems: "center", gap: 9, padding: "9px 11px",
+        borderBottom: "1px solid rgba(255,255,255,.07)",
+        cursor: arrastrando ? "grabbing" : "grab",
+        background: `linear-gradient(180deg, ${cEstado}0f, transparent)`,
+      }}>
+        <div style={{
+          width: 30, height: 30, borderRadius: 9, flex: "none",
+          background: `${cEstado}18`, border: `1px solid ${cEstado}3a`,
+          display: "flex", alignItems: "center", justifyContent: "center",
+        }}>
+          <Zap className="w-4 h-4" style={{ color: cEstado }} />
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: "#eef2f8", lineHeight: 1.2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+            {upsName}
           </div>
-          <div>
-            <h3 style={{ fontSize: 11, fontWeight: 700, color: "#ededed", margin: 0, lineHeight: 1.2 }}>{upsName}</h3>
-            <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 9 }}>
-              <span style={{
-                display: "inline-flex", alignItems: "center", gap: 2,
-                padding: "0px 4px", borderRadius: 3,
-                background: `${stColor}15`, color: stColor, fontWeight: 700, fontSize: 8,
-              }}>
-                <Power className="w-2 h-2" />{stLabel}
-              </span>
-              {ident?.manufacturer && <span style={{ color: "rgba(255,255,255,0.2)", fontSize: 8 }}>{ident.manufacturer}</span>}
-              {vendorBadge && (
-                <span style={{ padding: "0px 3px", borderRadius: 2, fontSize: 7, background: "rgba(255,255,255,0.05)", color: "rgba(255,255,255,0.2)", fontWeight: 600 }}>
-                  {vendorBadge}
-                </span>
-              )}
-            </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 2, fontSize: 10, color: "rgba(255,255,255,.32)" }}>
+            <span style={{ fontFamily: "ui-monospace,monospace" }}>{ipVisible}</span>
+            <span>·</span>
+            <span>{transporte}{marca ? ` · ${marca}` : ""}</span>
           </div>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
-          <button onClick={poll} disabled={loading} className="rounded p-1 transition-all cursor-pointer" style={{ color: "rgba(255,255,255,0.3)", background: "rgba(255,255,255,0.04)" }}>
-            <RefreshCw className={`w-3 h-3 ${loading ? "animate-spin" : ""}`} />
+        <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+          <button className="ups-btn" onClick={consultar} disabled={loading} title="Volver a consultar">
+            <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
           </button>
-          {onConfigure && (
-            <button onClick={onConfigure} title="Configurar UPS" className="rounded p-1 transition-all cursor-pointer" style={{ color: "rgba(255,255,255,0.3)", background: "rgba(255,255,255,0.04)" }}>
-              <Settings className="w-3 h-3" />
+          {onFijar && (
+            <button className={"ups-btn" + (fijado ? " act" : "")} onClick={() => onFijar(!fijado, pos)}
+              title={fijado ? "Dejar de mostrarlo al abrir el mapa" : "Dejarlo abierto: vuelve solo al entrar al mapa"}>
+              {fijado ? <Pin className="w-3.5 h-3.5" /> : <PinOff className="w-3.5 h-3.5" />}
             </button>
           )}
-          <button onClick={onClose} className="rounded p-1 transition-all cursor-pointer" style={{ color: "rgba(255,255,255,0.3)", background: "rgba(255,255,255,0.04)" }}>
-            <X className="w-3 h-3" />
-          </button>
+          {onConfigure && (
+            <button className="ups-btn" onClick={onConfigure} title="Configurar la UPS">
+              <Settings className="w-3.5 h-3.5" />
+            </button>
+          )}
+          <button className="ups-btn" onClick={onClose} title="Cerrar"><X className="w-3.5 h-3.5" /></button>
         </div>
       </div>
 
-      {/* ── Content ── */}
-      <div style={{ flex: 1, overflowY: "auto", padding: "6px 10px", display: "flex", flexDirection: "column", gap: 6 }}>
-        {/* Loading */}
+      <div style={{ flex: 1, overflowY: "auto", padding: "11px 13px 13px", display: "flex", flexDirection: "column", gap: 11 }}>
+
         {loading && !data && (
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, padding: 12 }}>
-            <RefreshCw className="w-3.5 h-3.5 animate-spin" style={{ color: "#f59e0b" }} />
-            <span style={{ fontSize: 10, color: "rgba(255,255,255,0.4)" }}>Consultando {displayIp}...</span>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, padding: 18 }}>
+            <RefreshCw className="w-4 h-4 animate-spin" style={{ color: AZUL }} />
+            <span style={{ fontSize: 12, color: "rgba(255,255,255,.45)" }}>Consultando {ipVisible}…</span>
           </div>
         )}
 
-        {/* Error */}
         {error && !data && (
-          <div style={{ display: "flex", alignItems: "center", gap: 6, padding: 8, background: "rgba(239,68,68,0.06)", border: "1px solid rgba(239,68,68,0.15)", borderRadius: 8 }}>
-            <AlertTriangle className="w-3.5 h-3.5 shrink-0" style={{ color: "#ef4444" }} />
-            <span style={{ fontSize: 10, color: "#ef4444" }}>{error}</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: 10, background: "rgba(239,68,68,.07)", border: "1px solid rgba(239,68,68,.2)", borderRadius: 10 }}>
+            <AlertTriangle className="w-4 h-4 shrink-0" style={{ color: ROJO }} />
+            <span style={{ fontSize: 11.5, color: "#fca5a5" }}>{error}</span>
           </div>
         )}
 
-        {data?.reachable && bat && out && (
+        {data?.reachable && bat && sal && (
           <>
-            {/* ── Hero: Battery + Gauges in one row ── */}
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              {/* Battery + runtime */}
-              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 1 }}>
-                <CompactBattery charge={bat.charge} health={bat.health} onBattery={onBattery} />
-                <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
-                  <Clock className="w-2 h-2" style={{ color: "rgba(255,255,255,0.25)" }} />
+            {/* ── lo primero que se mira ── */}
+            <div style={{ display: "flex", alignItems: "center", gap: 13 }}>
+              <Anillo pct={bat.charge} color={batteryColor(bat.charge)} enBateria={enBateria} etiqueta="batería" />
+              <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 5 }}>
+                <span style={{
+                  display: "inline-flex", alignItems: "center", gap: 6, alignSelf: "flex-start",
+                  padding: "3px 10px", borderRadius: 99, fontSize: 11.5, fontWeight: 700,
+                  color: cEstado, background: `${cEstado}18`, border: `1px solid ${cEstado}45`,
+                }}>
+                  <span style={{ width: 6, height: 6, borderRadius: 99, background: cEstado }} />
+                  {tEstado}
+                </span>
+                <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+                  <Clock className="w-3 h-3" style={{ color: "rgba(255,255,255,.3)" }} />
                   <span style={{
-                    fontSize: 9, fontWeight: 700, fontFamily: "monospace",
-                    color: bat.runtimeMinutes != null && bat.runtimeMinutes < 10 ? "#ef4444" : "#22c55e",
+                    fontSize: 17, fontWeight: 700, fontVariantNumeric: "tabular-nums",
+                    color: bat.runtimeMinutes != null && bat.runtimeMinutes < 10 ? ROJO : "#e7edf6",
                   }}>
                     {runtimeStr(bat.runtimeMinutes)}
                   </span>
+                  <span style={{ fontSize: 10, color: "rgba(255,255,255,.32)" }}>de autonomía</span>
                 </div>
-              </div>
-
-              {/* Gauges */}
-              <div style={{ display: "flex", gap: 4, flex: 1, justifyContent: "space-around" }}>
-                {out.loadPercent != null && (
-                  <MiniGauge value={out.loadPercent} max={100} label="Carga" unit="%" color={loadColor(out.loadPercent)} />
-                )}
-                {out.voltage != null && (
-                  <MiniGauge value={out.voltage} max={260} label="Salida" unit="V" color={out.voltage >= 200 && out.voltage <= 240 ? "#22c55e" : "#f59e0b"} />
-                )}
-                {inp?.voltage != null && (
-                  <MiniGauge value={inp.voltage} max={260} label="Entrada" unit="V" color={inp.voltage >= 200 && inp.voltage <= 240 ? "#3b82f6" : "#f59e0b"} />
+                {sal.loadPercent != null && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "rgba(255,255,255,.38)" }}>
+                      <span>carga del equipo</span>
+                      <span style={{ color: loadColor(sal.loadPercent), fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>
+                        {Math.round(sal.loadPercent)} %
+                      </span>
+                    </div>
+                    <div style={{ height: 5, borderRadius: 99, background: "rgba(255,255,255,.07)", overflow: "hidden" }}>
+                      <span style={{
+                        display: "block", height: "100%", borderRadius: 99,
+                        width: `${Math.min(100, sal.loadPercent)}%`, background: loadColor(sal.loadPercent),
+                        transition: "width .6s ease",
+                      }} />
+                    </div>
+                  </div>
                 )}
               </div>
             </div>
 
-            {/* Battery health warnings (only if needed) */}
             {bat.health !== "normal" && bat.health !== "unknown" && (
-              <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "2px 6px", borderRadius: 5, background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.15)" }}>
-                <AlertTriangle className="w-2.5 h-2.5" style={{ color: "#ef4444" }} />
-                <span style={{ fontSize: 9, color: "#ef4444", fontWeight: 600 }}>
-                  {bat.health === "replace" ? "Reemplazar batería" : bat.health === "low" ? "Batería baja" : bat.health === "depleted" ? "Agotada" : bat.health === "fault" ? "Falla" : bat.health}
+              <div style={{ display: "flex", alignItems: "center", gap: 7, padding: "7px 10px", borderRadius: 9, background: "rgba(239,68,68,.09)", border: "1px solid rgba(239,68,68,.22)" }}>
+                <AlertTriangle className="w-3.5 h-3.5 shrink-0" style={{ color: ROJO }} />
+                <span style={{ fontSize: 11.5, color: "#fca5a5", fontWeight: 600 }}>
+                  {bat.health === "replace" ? "Hay que reemplazar la batería"
+                    : bat.health === "low" ? "Batería baja"
+                    : bat.health === "depleted" ? "Batería agotada"
+                    : bat.health === "fault" ? "Falla en la batería" : bat.health}
                 </span>
               </div>
             )}
 
-            {/* ── Compact metrics list ── */}
-            <div style={{ borderTop: "1px solid rgba(255,255,255,0.04)", borderBottom: "1px solid rgba(255,255,255,0.04)", padding: "2px 0" }}>
-              {bat.temperature != null && <M icon={<Thermometer className="w-2.5 h-2.5" />} label="Temp." value={bat.temperature} unit="°C" color={bat.temperature > 40 ? "#ef4444" : bat.temperature > 35 ? "#f59e0b" : "#22c55e"} />}
-              {bat.voltage != null && <M icon={<BatteryFull className="w-2.5 h-2.5" />} label="Batería" value={bat.voltage.toFixed(1)} unit="Vdc" color="#3b82f6" />}
-              {inp?.frequency != null && <M icon={<Activity className="w-2.5 h-2.5" />} label="Frecuencia" value={inp.frequency.toFixed(1)} unit="Hz" color={Math.abs(inp.frequency - 50) <= 1 ? "#22c55e" : "#f59e0b"} />}
-              {out.power != null && <M icon={<Gauge className="w-2.5 h-2.5" />} label="Potencia" value={out.power} unit={data.vendor === "apc" ? "VA" : "W"} color="#8b5cf6" />}
-              {out.current != null && <M icon={<Zap className="w-2.5 h-2.5" />} label="Corriente" value={out.current.toFixed(1)} unit="A" color="#06b6d4" />}
-              {inp?.voltageMax != null && inp?.voltageMin != null && <M icon={<ArrowUpFromLine className="w-2.5 h-2.5" />} label="Rango in" value={`${inp.voltageMin}–${inp.voltageMax}`} unit="V" color="rgba(255,255,255,0.45)" />}
+            {/* ── cifras del momento ── */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0,1fr))", gap: 7 }}>
+              {ent?.voltage != null && (
+                <Cifra icono={<Plug className="w-2.5 h-2.5" />} k="entrada" v={String(Math.round(ent.voltage))} u="V"
+                  c={ent.voltage >= 200 && ent.voltage <= 245 ? "#e7edf6" : AMBAR} />
+              )}
+              {sal.voltage != null && (
+                <Cifra icono={<Zap className="w-2.5 h-2.5" />} k="salida" v={String(Math.round(sal.voltage))} u="V"
+                  c={sal.voltage >= 200 && sal.voltage <= 245 ? "#e7edf6" : AMBAR} />
+              )}
+              {ent?.frequency != null && (
+                <Cifra icono={<Activity className="w-2.5 h-2.5" />} k="frecuencia" v={ent.frequency.toFixed(1)} u="Hz"
+                  c={Math.abs(ent.frequency - 50) <= 1.5 ? "#e7edf6" : AMBAR} />
+              )}
+              {bat.temperature != null && (
+                <Cifra icono={<Thermometer className="w-2.5 h-2.5" />} k="temperatura" v={String(Math.round(bat.temperature))} u="°C"
+                  c={bat.temperature > 40 ? ROJO : bat.temperature > 35 ? AMBAR : "#e7edf6"} />
+              )}
+              {sal.power != null && (
+                <Cifra icono={<Gauge className="w-2.5 h-2.5" />} k="potencia" v={String(Math.round(sal.power))}
+                  u={data.vendor === "apc" ? "VA" : "W"} />
+              )}
+              {bat.voltage != null && (
+                <Cifra icono={<Zap className="w-2.5 h-2.5" />} k="batería" v={bat.voltage.toFixed(1)} u="Vcc" />
+              )}
             </div>
 
-            {/* Model */}
+            {/* ── curvas ── */}
+            <div style={{ display: "flex", flexDirection: "column", gap: 10, paddingTop: 3, borderTop: "1px solid rgba(255,255,255,.06)" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                <span style={{ fontSize: 11, fontWeight: 600, color: "rgba(255,255,255,.55)" }}>Últimas 6 horas</span>
+                <span style={{ fontSize: 9.5, color: "rgba(255,255,255,.28)" }}>
+                  {tramos.length > 0
+                    ? <><span style={{ display: "inline-block", width: 8, height: 8, background: AMBAR, opacity: .5, borderRadius: 2, marginRight: 4, verticalAlign: -1 }} />
+                        {tramos.length} {tramos.length === 1 ? "tirada" : "tiradas"} en batería</>
+                    : `${history.length} lecturas`}
+                </span>
+              </div>
+              <Grafica puntos={serieCarga} tiempos={tiempos} tramos={tramos} color={AZUL} titulo="Carga" unidad="%" minFijo={0} />
+              <Grafica puntos={serieBateria} tiempos={tiempos} tramos={tramos} color={AQUA} titulo="Batería" unidad="%" minFijo={0} maxFijo={100} />
+              {serieEntrada.length > 1 && (
+                <Grafica puntos={serieEntrada} tiempos={tiemposEntrada} tramos={tramos} color={AZUL} titulo="Tensión de entrada" unidad="V" />
+              )}
+              {serieTemp.length > 1 && (
+                <Grafica puntos={serieTemp} tiempos={tiemposTemp} tramos={tramos} color={AMBAR} titulo="Temperatura" unidad="°C" decimales={1} />
+              )}
+            </div>
+
             {ident?.model && (
-              <div style={{ fontSize: 8, color: "rgba(255,255,255,0.2)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {ident.model}{ident.serial && <span style={{ marginLeft: 4, color: "rgba(255,255,255,0.12)" }}>S/N {ident.serial}</span>}
-              </div>
-            )}
-
-            {/* ── Sparklines toggle ── */}
-            <button
-              onClick={() => setExpanded(!expanded)}
-              className="flex items-center justify-between w-full px-2 py-1 rounded transition-all cursor-pointer"
-              style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.05)" }}
-            >
-              <span style={{ fontSize: 8, fontWeight: 600, color: "rgba(255,255,255,0.3)", textTransform: "uppercase", letterSpacing: "0.04em" }}>Historial 6h</span>
-              <div style={{ display: "flex", alignItems: "center", gap: 3 }}>
-                <span style={{ fontSize: 8, color: "rgba(255,255,255,0.15)" }}>{history.length}pts</span>
-                {expanded ? <ChevronUp className="w-3 h-3" style={{ color: "rgba(255,255,255,0.25)" }} /> : <ChevronDown className="w-3 h-3" style={{ color: "rgba(255,255,255,0.25)" }} />}
-              </div>
-            </button>
-
-            {expanded && (
-              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                <Sparkline data={hCharge} color={batteryColor(bat.charge)} label="Batería" unit="%" />
-                <Sparkline data={hLoad} color={loadColor(out.loadPercent ?? 0)} label="Carga" unit="%" />
-                {hInputV.length > 0 && <Sparkline data={hInputV} color="#3b82f6" label="V. entrada" unit="V" />}
-                {hTemp.length > 0 && <Sparkline data={hTemp} color="#f97316" label="Temp." unit="°C" />}
+              <div style={{ fontSize: 10, color: "rgba(255,255,255,.25)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {ident.model}{ident.serial ? ` · S/N ${ident.serial}` : ""}
               </div>
             )}
           </>
         )}
 
-        {/* Unreachable */}
         {data && !data.reachable && (
-          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6, padding: 12, textAlign: "center" }}>
-            <Plug className="w-6 h-6" style={{ color: "rgba(255,255,255,0.1)" }} />
-            <span style={{ fontSize: 10, color: "rgba(255,255,255,0.3)" }}>No se pudo alcanzar la UPS</span>
-            <span style={{ fontSize: 9, color: "rgba(255,255,255,0.15)" }}>{data.error || `${displayIp} no responde`}</span>
-            <div style={{ display: "flex", gap: 4 }}>
-              <button onClick={poll} className="px-3 py-1 rounded text-[9px] font-bold cursor-pointer" style={{ background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.4)", border: "1px solid rgba(255,255,255,0.08)" }}>Reintentar</button>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8, padding: 18, textAlign: "center" }}>
+            <Plug className="w-7 h-7" style={{ color: "rgba(255,255,255,.14)" }} />
+            <span style={{ fontSize: 12.5, color: "rgba(255,255,255,.45)" }}>No se pudo alcanzar la UPS</span>
+            <span style={{ fontSize: 11, color: "rgba(255,255,255,.24)" }}>{data.error || `${ipVisible} no responde`}</span>
+            <div style={{ display: "flex", gap: 6, marginTop: 3 }}>
+              <button onClick={consultar} className="cursor-pointer" style={botonChico}>Reintentar</button>
               {onConfigure && (
-                <button onClick={onConfigure} className="px-3 py-1 rounded text-[9px] font-bold cursor-pointer" style={{ background: "rgba(245,158,11,0.1)", color: "#f59e0b", border: "1px solid rgba(245,158,11,0.25)" }}>Configurar</button>
+                <button onClick={onConfigure} className="cursor-pointer"
+                  style={{ ...botonChico, color: AZUL, borderColor: AZUL + "45", background: AZUL + "14" }}>
+                  Configurar
+                </button>
               )}
             </div>
           </div>
         )}
       </div>
 
-      {/* ── Footer ── */}
-      <div style={{ padding: "4px 10px", borderTop: "1px solid rgba(255,255,255,0.06)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <span style={{ fontSize: 8, color: "rgba(255,255,255,0.12)", fontFamily: "monospace" }}>{displayIp} · {transport}</span>
-        <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-          {data?.cached && <span style={{ fontSize: 7, color: "rgba(255,255,255,0.1)", fontStyle: "italic" }}>cache</span>}
-          {onConfigure && (
-            <button onClick={onConfigure} className="cursor-pointer"
-              style={{ display: "inline-flex", alignItems: "center", gap: 2, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)", padding: "1px 5px", borderRadius: 3, color: "rgba(255,255,255,0.3)", fontSize: 8, fontWeight: 600, transition: "all 0.15s" }}
-              onMouseEnter={(e) => { e.currentTarget.style.color = "#f59e0b"; }}
-              onMouseLeave={(e) => { e.currentTarget.style.color = "rgba(255,255,255,0.3)"; }}>
-              <Settings className="w-2 h-2" />Configurar
-            </button>
-          )}
-        </div>
+      <div style={{
+        padding: "6px 12px", borderTop: "1px solid rgba(255,255,255,.07)",
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        fontSize: 9.5, color: "rgba(255,255,255,.25)",
+      }}>
+        <span>
+          {data?.timestamp ? `leído ${new Date(data.timestamp).toLocaleTimeString("es-UY", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}` : "sin lectura"}
+          {data?.cached ? " · de caché" : ""}
+        </span>
+        {fijado && <span style={{ color: AZUL }}>fijado al mapa</span>}
       </div>
     </div>
   );
 }
+
+const botonChico: React.CSSProperties = {
+  padding: "5px 12px", borderRadius: 8, fontSize: 11, fontWeight: 600,
+  background: "rgba(255,255,255,.06)", color: "rgba(255,255,255,.55)",
+  border: "1px solid rgba(255,255,255,.1)",
+};

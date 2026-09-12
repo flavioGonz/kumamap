@@ -84,6 +84,8 @@ const MENUS: Menu[] = [
         icono: ic(<path d="M22 12h-4l-3 9L9 3l-3 9H2" />) },
       { href: "/alerts", texto: "Alertas", nota: "Qué se cayó y cuándo",
         icono: ic(<><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3" /><path d="M12 9v4" /><path d="M12 17h.01" /></>) },
+      { href: "/traps", texto: "Traps SNMP", nota: "Avisos que mandan los equipos solos",
+        icono: ic(<><path d="M12 12v8" /><path d="M5 8a7 7 0 0 1 14 0" /><path d="M8.5 10a3.5 3.5 0 0 1 7 0" /><circle cx="12" cy="12" r="1.5" /></>) },
     ],
   },
   {
@@ -100,6 +102,8 @@ const MENUS: Menu[] = [
     items: [
       { href: "/metrics", texto: "Métricas", nota: "Salud del propio controlador",
         icono: ic(<><path d="M3 3v18h18" /><path d="m7 15 3-5 4 3 5-8" /></>) },
+      { href: "/usuarios", texto: "Usuarios", nota: "Quién entra y con qué alcance",
+        icono: ic(<><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M22 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></>) },
     ],
   },
 ];

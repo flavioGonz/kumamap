@@ -11,9 +11,10 @@ const TOKEN_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
  * Create a cryptographic session token containing the username and expiry.
  * Format: base64(payload).base64(hmac)
  */
-export function createSessionToken(username: string): string {
+export function createSessionToken(username: string, rol?: string): string {
   const payload = JSON.stringify({
     u: username,
+    r: rol || "admin",
     exp: Date.now() + TOKEN_MAX_AGE_MS,
     nonce: crypto.randomBytes(8).toString("hex"),
   });
@@ -129,4 +130,46 @@ export function requireAuthCompat(req: NextRequest): string | NextResponse {
   const res = NextResponse.json({ error: "Sesión expirada" }, { status: 401 });
   res.cookies.delete("kumamap_session");
   return res;
+}
+
+// ── Rol de la sesión ─────────────────────────────────────────────────────────
+// Los tokens viejos no traen rol. Se los trata como administrador: hasta ahora
+// había un solo usuario y podía todo; degradarlos silenciosamente dejaría a
+// alguien sin poder entrar a lo suyo después de un despliegue.
+
+export type RolSesion = "admin" | "operador" | "lector";
+
+export interface Sesion { usuario: string; rol: RolSesion }
+
+export function leerSesion(req: NextRequest): Sesion | null {
+  const token = req.cookies.get("kumamap_session")?.value;
+  if (!token) return null;
+  try {
+    const [payloadB64, sig] = token.split(".");
+    if (!payloadB64 || !sig) return null;
+    const esperada = crypto.createHmac("sha256", SECRET).update(payloadB64).digest("base64url");
+    if (sig.length !== esperada.length) return null;
+    if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(esperada))) return null;
+    const payload = JSON.parse(Buffer.from(payloadB64, "base64url").toString());
+    if (typeof payload.exp !== "number" || payload.exp < Date.now()) return null;
+    if (!payload.u) return null;
+    const r = payload.r;
+    return { usuario: payload.u, rol: r === "operador" || r === "lector" ? r : "admin" };
+  } catch {
+    return null;
+  }
+}
+
+/** Igual que requireAuth, pero además exige rol de administrador. */
+export function requireAdmin(req: NextRequest): Sesion | NextResponse {
+  const s = leerSesion(req);
+  if (!s) {
+    const res = NextResponse.json({ error: "No autenticado" }, { status: 401 });
+    res.cookies.delete("kumamap_session");
+    return res;
+  }
+  if (s.rol !== "admin") {
+    return NextResponse.json({ error: "Hace falta ser administrador" }, { status: 403 });
+  }
+  return s;
 }

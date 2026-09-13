@@ -4,9 +4,10 @@ import next from "next";
 import { Server as SocketIOServer } from "socket.io";
 import { getKumaClient, type KumaMonitor, type KumaHeartbeat } from "./src/lib/kuma";
 import webpush from "web-push";
-import { getAllSubscriptions, removeSubscription } from "./src/lib/push-store";
+
 import { iniciarReceptorDeTraps, reubicarPendientes } from "./src/lib/traps";
 import { getUpsMonitor } from "./src/lib/ups-monitor";
+import { reportarEstado, avisarAMapa, mapaDeNodo } from "./src/lib/avisos";
 
 const dev = process.env.NODE_ENV !== "production";
 const port = parseInt(process.env.PORT || "3000", 10);
@@ -132,47 +133,25 @@ app.prepare().then(() => {
     }
 
     {
-      // ── Push notifications for DOWN/UP transitions ──────────────────────
-      if (VAPID_PUBLIC && VAPID_PRIVATE) {
-        for (const m of cambiados) {
-          const prev = prevStatus.get(m.id);
-          if (prev !== undefined && prev !== m.status) {
-            if (m.status === 0) {
-              sendPushToAll({
-                title: `⚠ ${m.name} DOWN`,
-                body: m.msg || "Monitor caído",
-                tag: `down-${m.id}`,
-                data: { url: "/mobile" },
-              });
-            } else if (m.status === 1 && prev === 0) {
-              sendPushToAll({
-                title: `✓ ${m.name} UP`,
-                body: `Recuperado · ${m.ping ?? "?"}ms`,
-                tag: `up-${m.id}`,
-                data: { url: "/mobile" },
-              });
-            }
-          }
-          prevStatus.set(m.id, m.status ?? 2);
-        }
+      // ── Avisos de caída y de vuelta ─────────────────────────────────────
+      //
+      // Este bucle mandaba su propio push, en paralelo con el que push-sender ya
+      // mandaba desde el latido de Kuma: DOS notificaciones por cada caída. Y
+      // sólo aquel camino tenía el filtro de mantenimiento de K2, así que al
+      // cerrar una ventana salía igual un "recuperado" falso desde acá.
+      //
+      // Ahora los dos reportan a avisos.ts, que decide una sola vez y manda el
+      // aviso únicamente a quien sigue ese cliente. Se conservan los dos
+      // informantes porque ven cosas distintas: el sondeo llega aunque Kuma esté
+      // respondiendo por base en vez de por socket.
+      for (const m of cambiados) {
+        void reportarEstado(m.id, m.name, m.status ?? 2, m.msg || "", m.ping ?? null);
       }
     }
   }, 2000);
 
-  // ── Send push notification to all subscribers ────────────────────────────
-  function sendPushToAll(payload: { title: string; body: string; tag?: string; data?: any }) {
-    const subs = getAllSubscriptions();
-    if (subs.length === 0) return;
-    const json = JSON.stringify(payload);
-    for (const sub of subs) {
-      webpush.sendNotification(sub, json).catch((err: any) => {
-        // Remove expired/invalid subscriptions
-        if (err.statusCode === 404 || err.statusCode === 410) {
-          removeSubscription(sub.endpoint);
-        }
-      });
-    }
-  }
+  // El envío de avisos vive en src/lib/avisos.ts: es el único que sabe a quién
+  // le interesa cada cliente, y el único que decide si un aviso corresponde.
 
   // Receptor de traps SNMP: el equipo avisa solo, sin que nadie le pregunte.
   iniciarReceptorDeTraps((trap) => {
@@ -191,7 +170,8 @@ app.prepare().then(() => {
       io.emit("ups:alerta", a);
       // El corte de energia es de las pocas cosas que justifican despertar a
       // alguien: si la UPS paso a bateria, el reloj ya empezo a correr.
-      sendPushToAll({
+      // El aviso de la UPS va a quien sigue ESE cliente, igual que los de caída.
+      void avisarAMapa(mapaDeNodo(a.nodeId), {
         title: a.title,
         body: a.body,
         tag: `ups-${a.nodeId}-${a.kind}`,

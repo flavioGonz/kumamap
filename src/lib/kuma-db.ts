@@ -67,6 +67,107 @@ function getSqliteDb(): import("better-sqlite3").Database {
   return sqliteDb!;
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// Dias con caidas, para el calendario de TimeMachine
+//
+// Antes cualquier latido con status=0 pintaba el dia de rojo. Con 6.746 latidos
+// caidos en 30 dias eso marcaba los 90 dias de los 90, o sea nada. Ahora una
+// caida cuenta solo si duro mas que el umbral, y el dia se calcula en hora de
+// Montevideo: una caida a las 22:00 pasaba al dia siguiente porque DATE() corta
+// en UTC.
+// ─────────────────────────────────────────────────────────────────────────
+
+export interface DiaConCaidas {
+  /** YYYY-MM-DD en hora local */
+  fecha: string;
+  /** cuantas caidas superaron el umbral ese dia */
+  caidas: number;
+  /** minutos caidos ese dia, sumando todos los monitores */
+  minutos: number;
+}
+
+interface CambioCrudo {
+  monitor_id: number;
+  status: number;
+  /** ISO con Z */
+  t: string;
+}
+
+const ZONA_CAL = process.env.MANT_TZ || "America/Montevideo";
+// Medido sobre los 90 dias de produccion: con 2 min el calendario marca 89 dias
+// de 90, con 5 baja a 50 y con 15 a 28. Cinco minutos es el corte donde deja de
+// marcar el ruido de fondo y sigue mostrando todo lo que vale la pena visitar.
+// Ajustable con TIMELINE_UMBRAL_MIN sin tocar codigo.
+const UMBRAL_CAIDA_MS =
+  Math.max(0, Number(process.env.TIMELINE_UMBRAL_MIN) || 5) * 60_000;
+
+/** Desfase de la zona respecto de UTC, en ms, en ese instante. */
+function desfaseZona(ms: number): number {
+  const d = new Date(ms);
+  const local = new Date(d.toLocaleString("en-US", { timeZone: ZONA_CAL }));
+  const utc = new Date(d.toLocaleString("en-US", { timeZone: "UTC" }));
+  return local.getTime() - utc.getTime();
+}
+
+/** Fecha local YYYY-MM-DD de un instante. */
+function fechaLocal(ms: number): string {
+  const off = desfaseZona(ms);
+  return new Date(ms + off).toISOString().slice(0, 10);
+}
+
+/** Reparte una caida entre los dias locales que toca. */
+function repartir(
+  acc: Map<string, { caidas: number; ms: number }>,
+  inicio: number,
+  fin: number
+): void {
+  let t = inicio;
+  let primero = true;
+  while (t < fin) {
+    const off = desfaseZona(t);
+    const finDia = Math.floor((t + off) / 86_400_000) * 86_400_000 + 86_400_000 - off;
+    const corte = Math.min(finDia, fin);
+    const dia = fechaLocal(t);
+    const e = acc.get(dia) || { caidas: 0, ms: 0 };
+    e.ms += corte - t;
+    if (primero) e.caidas += 1;
+    acc.set(dia, e);
+    primero = false;
+    t = corte;
+  }
+}
+
+function agruparCaidasPorDia(cambios: CambioCrudo[]): DiaConCaidas[] {
+  const acc = new Map<string, { caidas: number; ms: number }>();
+  const ahora = Date.now();
+
+  for (let i = 0; i < cambios.length; i++) {
+    const c = cambios[i];
+    if (c.status !== 0) continue;
+    const sig = cambios[i + 1];
+    const inicio = Date.parse(c.t);
+    if (!Number.isFinite(inicio)) continue;
+    // Si el proximo cambio ya es de otro monitor, la caida sigue abierta.
+    const fin =
+      sig && sig.monitor_id === c.monitor_id ? Date.parse(sig.t) : ahora;
+    if (!Number.isFinite(fin) || fin <= inicio) continue;
+    if (fin - inicio < UMBRAL_CAIDA_MS) continue;
+    repartir(acc, inicio, fin);
+  }
+
+  return Array.from(acc.entries())
+    .map(([fecha, v]) => ({
+      fecha,
+      caidas: v.caidas,
+      minutos: Math.round(v.ms / 60_000),
+    }))
+    .sort((a, b) => a.fecha.localeCompare(b.fecha));
+}
+
+export function umbralCaidaMinutos(): number {
+  return UMBRAL_CAIDA_MS / 60_000;
+}
+
 function fetchHeartbeatsFromSqlite(
   monitorIds: number[],
   hours: number,
@@ -94,7 +195,7 @@ function fetchHeartbeatsFromSqlite(
   return stmt.all(...monitorIds, since, until) as KumaHeartbeat[];
 }
 
-function fetchBadDatesSqlite(monitorIds: number[]): string[] {
+function fetchBadDatesSqlite(monitorIds: number[]): DiaConCaidas[] {
   const db = getSqliteDb();
 
   const cutoff = new Date(Date.now() - 90 * 86_400_000)
@@ -104,15 +205,19 @@ function fetchBadDatesSqlite(monitorIds: number[]): string[] {
 
   const placeholders = monitorIds.map(() => "?").join(",");
   const stmt = db.prepare(`
-    SELECT DISTINCT DATE(time) as eventDate
-    FROM heartbeat
-    WHERE monitor_id IN (${placeholders})
-      AND status = 0
-      AND time >= ?
+    SELECT monitor_id, status, t FROM (
+      SELECT monitor_id, status,
+             REPLACE(time, ' ', 'T') || 'Z' AS t,
+             LAG(status) OVER (PARTITION BY monitor_id ORDER BY time) AS ant
+        FROM heartbeat
+       WHERE monitor_id IN (${placeholders})
+         AND time >= ?
+    ) c
+    WHERE ant IS NULL OR status <> ant
+    ORDER BY monitor_id, t
   `);
 
-  const rows = stmt.all(...monitorIds, cutoff) as { eventDate: string }[];
-  return rows.map((r) => r.eventDate);
+  return agruparCaidasPorDia(stmt.all(...monitorIds, cutoff) as CambioCrudo[]);
 }
 
 // ─────────────────────────────────────────────
@@ -191,29 +296,35 @@ async function fetchHeartbeatsFromMysql(
      WHERE monitor_id IN (?)
        AND time >= ?
        AND time <= ?
-     ORDER BY time ASC`,
+     ORDER BY time ASC
+     LIMIT 400000`,
     [monitorIds, since, until]
   );
 
   return rows as KumaHeartbeat[];
 }
 
-async function fetchBadDatesMysql(monitorIds: number[]): Promise<string[]> {
+async function fetchBadDatesMysql(monitorIds: number[]): Promise<DiaConCaidas[]> {
   const db = getKumaDb();
 
+  // Solo las transiciones, no los 200.000 latidos: LAG() compara cada latido con
+  // el anterior del mismo monitor y nos deja unicamente los cambios de estado.
+  // El tiempo sale como texto con Z para no depender de la zona de la sesion.
   const [rows] = await db.query(
-    `SELECT DISTINCT DATE(time) as eventDate
-     FROM heartbeat
-     WHERE monitor_id IN (?)
-       AND status = 0
-       AND time >= DATE_SUB(NOW(), INTERVAL 90 DAY)`,
+    `SELECT monitor_id, status, t FROM (
+        SELECT monitor_id, status,
+               DATE_FORMAT(time, '%Y-%m-%dT%H:%i:%sZ') AS t,
+               LAG(status) OVER (PARTITION BY monitor_id ORDER BY time) AS ant
+          FROM heartbeat
+         WHERE monitor_id IN (?)
+           AND time >= DATE_SUB(NOW(), INTERVAL 90 DAY)
+      ) c
+      WHERE ant IS NULL OR status <> ant
+      ORDER BY monitor_id, t`,
     [monitorIds]
   );
 
-  return (rows as { eventDate: Date | string }[]).map((r) => {
-    const d = new Date(r.eventDate);
-    return d.toISOString().split("T")[0];
-  });
+  return agruparCaidasPorDia(rows as CambioCrudo[]);
 }
 
 // ─────────────────────────────────────────────
@@ -252,7 +363,7 @@ export async function fetchHeartbeatsFromDb(
  * Fetch the list of calendar dates (last 90 days) that had at least one DOWN event.
  * Used by the timeline calendar heatmap. Returns [] if DB is not configured.
  */
-export async function fetchBadDatesFromDb(monitorIds: number[]): Promise<string[]> {
+export async function fetchBadDatesFromDb(monitorIds: number[]): Promise<DiaConCaidas[]> {
   if (!monitorIds || monitorIds.length === 0) return [];
 
   const mode = detectMode();

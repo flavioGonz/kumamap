@@ -27,8 +27,10 @@ export async function GET(req: NextRequest) {
     : null;
 
   // Get real historical beats from Kuma DB (cached 5min)
+  // Incluimos los pausados: su historia es valida aunque hoy no midan.
+  // Los grupos si quedan afuera, son agregados de otros monitores.
   const activeMonitorIds = monitors
-    .filter((m) => m.active && m.type !== "group" && (!filterSet || filterSet.has(m.id)))
+    .filter((m) => m.type !== "group" && (!filterSet || filterSet.has(m.id)))
     .map((m) => m.id);
 
   // Optimize: Use direct MySQL query if available, fallback to Socket.IO
@@ -108,7 +110,7 @@ export async function GET(req: NextRequest) {
     events,
     statusChanges,
     monitors: monitors
-      .filter((m) => m.active && m.type !== "group" && (!filterSet || filterSet.has(m.id)))
-      .map((m) => ({ id: m.id, name: m.name, type: m.type, status: m.status, parent: m.parent })),
+      .filter((m) => m.type !== "group" && (!filterSet || filterSet.has(m.id)))
+      .map((m) => ({ id: m.id, name: m.name, type: m.type, status: m.status, parent: m.parent, activo: m.active !== false })),
   });
 }

@@ -13,15 +13,17 @@ export async function GET(req: NextRequest) {
     : null;
 
   const activeMonitorIds = monitors
-    .filter((m) => m.active && m.type !== "group" && (!filterSet || filterSet.has(m.id)))
+    .filter((m) => m.type !== "group" && (!filterSet || filterSet.has(m.id)))
     .map((m) => m.id);
 
-  let badDates: string[] = [];
+  let dias: Array<{ fecha: string; caidas: number; minutos: number }> = [];
+  let umbralMin = 2;
 
   try {
-    const { fetchBadDatesFromDb } = await import("@/lib/kuma-db");
+    const { fetchBadDatesFromDb, umbralCaidaMinutos } = await import("@/lib/kuma-db");
+    umbralMin = umbralCaidaMinutos();
     if (activeMonitorIds.length > 0) {
-      badDates = await fetchBadDatesFromDb(activeMonitorIds);
+      dias = await fetchBadDatesFromDb(activeMonitorIds);
     }
   } catch (error) {
     // DB not configured or unavailable — return empty calendar (non-fatal)
@@ -32,6 +34,10 @@ export async function GET(req: NextRequest) {
   }
 
   return NextResponse.json({
-    badDates
+    // badDates se mantiene por compatibilidad; dias trae ademas la severidad
+    // para que el calendario pueda graduar el color en vez de pintar si/no.
+    badDates: dias.map((d) => d.fecha),
+    dias,
+    umbralMin,
   });
 }

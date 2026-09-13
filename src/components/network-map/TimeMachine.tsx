@@ -10,18 +10,47 @@ const fmtTime = new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2
 const fmtTimeShort = new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" });
 const fmtDate = new Intl.DateTimeFormat("es-UY", { day: "2-digit", month: "2-digit" });
 
+// ── El servidor corre con TZ=UTC ───────────────────────────────────────
+// Un <input type="datetime-local"> entrega "2026-09-12T12:00", sin zona. El
+// navegador lo lee como mediodia de Montevideo y el servidor como mediodia UTC:
+// tres horas de diferencia, y el rango personalizado traia datos de otro momento.
+// Mandamos siempre el instante absoluto.
+function aInstante(local: string): string {
+  const d = new Date(local);
+  return isNaN(d.getTime()) ? local : d.toISOString();
+}
+
+// ── Colores de estado ──────────────────────────────────────────────────
+// 0 caido · 1 arriba · 2 pendiente · 3 en mantenimiento.
+// El 3 es real desde que existen las ventanas de mantenimiento: antes se pintaba
+// ambar igual que "pendiente" y no habia forma de distinguirlos.
+const COLOR_ESTADO: Record<number, string> = {
+  0: "#ef4444",
+  1: "#22c55e",
+  2: "#f59e0b",
+  3: "#818cf8",
+};
+function colorDeEstado(status: number | undefined): string {
+  return COLOR_ESTADO[status ?? 2] || "#f59e0b";
+}
+
 // ── Event color helper (was duplicated 3×) ─────────────────────────────
 function getEventColor(status: number, prevStatus: number): string {
+  if (status === 3 || prevStatus === 3) return COLOR_ESTADO[3]; // mantenimiento
   if (status === 0) return "#ef4444";          // DOWN
   if (prevStatus === 0 && status === 1) return "#22c55e"; // RECOVERY
   return "#f59e0b";                            // OTHER CHANGE
 }
 function getEventLabel(status: number, prevStatus: number): string {
+  if (status === 3) return "MANT";
+  if (prevStatus === 3) return "FIN M";
   if (status === 0) return "DOWN";
   if (prevStatus === 0 && status === 1) return "UP";
   return "CHG";
 }
 function getEventIcon(status: number, prevStatus: number): string {
+  if (status === 3) return "◆ MANTENIMIENTO";
+  if (prevStatus === 3) return "◇ FIN MANTENIMIENTO";
   if (status === 0) return "▼ DOWN";
   if (prevStatus === 0 && status === 1) return "▲ RECOVERED";
   return "● CAMBIO";
@@ -62,10 +91,18 @@ interface TimelineEvent {
 interface TimelineResponse {
   events: TimelineEvent[];
   statusChanges: Record<number, { t: number; s: number }[]>;
+  monitors?: Array<{ id: number; activo?: boolean }>;
 }
 
+interface DiaConCaidas {
+  fecha: string;
+  caidas: number;
+  minutos: number;
+}
 interface BadDatesResponse {
   badDates?: string[];
+  dias?: DiaConCaidas[];
+  umbralMin?: number;
 }
 
 interface MonitorInfo { id: number; name: string; type: string; status?: number; }
@@ -98,7 +135,11 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
   const [loaded, setLoaded] = useState(false);
   const [activePanel, setActivePanel] = useState<"speed" | "range" | "events" | "sensor" | null>(null);
   const [focusMonitorId, setFocusMonitorId] = useState<number | null>(null); // null = all monitors
-  const [badDates, setBadDates] = useState<Set<string>>(new Set());
+  const [diasMalos, setDiasMalos] = useState<Map<string, DiaConCaidas>>(new Map());
+  // Umbral de duracion: el 84 % de las caidas del portafolio duran menos de dos
+  // minutos y tapan a las que importan. 0 = mostrar todo.
+  const [minDuracionMin, setMinDuracionMin] = useState(2);
+  const [pausados, setPausados] = useState<Set<number>>(new Set());
   const barRef = useRef<HTMLDivElement>(null);
 
   // External focus trigger — when a node context menu opens TimeMachine with a specific sensor
@@ -112,6 +153,7 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
   const lastJumpRef = useRef<string>("");
   const pendingJumpPosRef = useRef<number | null>(null);
   const jumpAbortRef = useRef<AbortController | null>(null);
+  const listaAbortRef = useRef<AbortController | null>(null);
   useEffect(() => {
     if (!jumpTo) return;
     const key = `${jumpTo.monitorId}-${jumpTo.time.getTime()}`;
@@ -151,7 +193,7 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
     const ids = Array.from(mapMonitorSet).join(",");
     if (ids) {
       setLoading(true);
-      const url = apiUrl(`/api/kuma/timeline?from=${encodeURIComponent(fromStr)}&to=${encodeURIComponent(toStr)}&monitorIds=${ids}`);
+      const url = apiUrl(`/api/kuma/timeline?from=${encodeURIComponent(aInstante(fromStr))}&to=${encodeURIComponent(aInstante(toStr))}&monitorIds=${ids}`);
       safeFetch<TimelineResponse>(url, { signal: ac.signal }, "TimeMachine")
         .then(d => {
           if (ac.signal.aborted) return;
@@ -219,18 +261,27 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
     const ids = Array.from(mapMonitorSet).join(",");
     let url: string;
     if (useCustomRange && customFrom && customTo) {
-      url = apiUrl(`/api/kuma/timeline?from=${encodeURIComponent(customFrom)}&to=${encodeURIComponent(customTo)}&monitorIds=${ids}`);
+      url = apiUrl(`/api/kuma/timeline?from=${encodeURIComponent(aInstante(customFrom))}&to=${encodeURIComponent(aInstante(customTo))}&monitorIds=${ids}`);
     } else {
       url = apiUrl(`/api/kuma/timeline?hours=${hoursBack}&monitorIds=${ids}`);
     }
-    safeFetch<TimelineResponse>(url, undefined, "TimeMachine")
+
+    // Sin esto, cambiar rapido de 1 h a 168 h y volver deja la respuesta lenta
+    // pisando a la rapida.
+    listaAbortRef.current?.abort();
+    const ac = new AbortController();
+    listaAbortRef.current = ac;
+
+    safeFetch<TimelineResponse>(url, { signal: ac.signal }, "TimeMachine")
       .then(d => {
+        if (ac.signal.aborted) return;
         setAllEvents(d?.events || []);
         setStatusChanges(d?.statusChanges || {});
+        setPausados(new Set((d?.monitors || []).filter(m => m.activo === false).map(m => m.id)));
         setLoading(false);
         setLoaded(true);
       })
-      .catch(() => { setLoading(false); });
+      .catch(() => { if (!ac.signal.aborted) setLoading(false); });
   }, [hoursBack, useCustomRange, customFrom, customTo, mapMonitorKey]);
 
   useEffect(() => {
@@ -241,19 +292,23 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
   // Fetch summary of bad dates
   useEffect(() => {
     if (mapMonitorSet.size === 0 || !open) {
-      setBadDates(new Set());
+      setDiasMalos(new Map());
       return;
     }
     const ids = Array.from(mapMonitorSet).join(",");
     safeFetch<BadDatesResponse>(apiUrl(`/api/kuma/timeline/summary?monitorIds=${ids}`), undefined, "TimeMachine Summary")
       .then(d => {
-        if (d?.badDates) setBadDates(new Set(d.badDates));
+        const m = new Map<string, DiaConCaidas>();
+        for (const dia of d?.dias || []) m.set(dia.fecha, dia);
+        setDiasMalos(m);
       });
   }, [mapMonitorKey, open]);
 
-  // Refresh every 2 min — only when tab is visible
+  // Refresco cada 2 min — solo con la pestana visible, y solo si el rango llega
+  // hasta ahora. Un rango historico cerrado no cambia: repetirlo era traer 1 MB
+  // cada dos minutos para nada.
   useEffect(() => {
-    if (!open || !loaded) return;
+    if (!open || !loaded || useCustomRange) return;
     let iv: ReturnType<typeof setInterval> | null = null;
     const start = () => { if (!iv) iv = setInterval(fetchTimeline, 120000); };
     const stop = () => { if (iv) { clearInterval(iv); iv = null; } };
@@ -261,7 +316,26 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
     if (!document.hidden) start();
     document.addEventListener("visibilitychange", onVis);
     return () => { stop(); document.removeEventListener("visibilitychange", onVis); };
-  }, [open, loaded, fetchTimeline]);
+  }, [open, loaded, useCustomRange, fetchTimeline]);
+
+  // Marca los eventos que pertenecen a una caida mas corta que el umbral: se
+  // ocultan la baja y su recuperacion, que son el mismo parpadeo contado dos veces.
+  const eventosCortos = useMemo(() => {
+    const cortos = new Set<string>();
+    if (minDuracionMin <= 0) return cortos;
+    const umbral = minDuracionMin * 60000;
+    const ahora = Date.now();
+    for (const [id, ch] of Object.entries(statusChanges)) {
+      for (let i = 0; i < ch.length; i++) {
+        if (ch[i].s !== 0) continue;
+        const fin = i + 1 < ch.length ? ch[i + 1].t : ahora;
+        if (fin - ch[i].t >= umbral) continue;
+        cortos.add(`${id}:${ch[i].t}`);
+        if (i + 1 < ch.length) cortos.add(`${id}:${ch[i + 1].t}`);
+      }
+    }
+    return cortos;
+  }, [statusChanges, minDuracionMin]);
 
   // Filter events to map monitors + time range + focus sensor
   const visibleEvents = useMemo(() => {
@@ -272,6 +346,7 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
         if (focusMonitorId !== null && e.monitorId !== focusMonitorId) return false;
         if (mapMonitorSet.size > 0 && !mapMonitorSet.has(e.monitorId)) return false;
         const t = new Date(e.time).getTime();
+        if (eventosCortos.has(`${e.monitorId}:${t}`)) return false;
         return t >= startMs && t <= endMs;
       })
       .map(e => ({
@@ -279,7 +354,7 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
         position: (new Date(e.time).getTime() - startMs) / rangeMs,
         timeDate: new Date(e.time),
       }));
-  }, [allEvents, timeStart, timeEnd, rangeMs, mapMonitorSet, focusMonitorId]);
+  }, [allEvents, timeStart, timeEnd, rangeMs, mapMonitorSet, focusMonitorId, eventosCortos]);
 
   // Focused monitor name for display
   const focusMonitorName = useMemo(() => {
@@ -294,8 +369,12 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
     const targetMs = t.getTime();
     for (const mon of activeMonitors) {
       const changes = statusChanges[mon.id];
-      if (!changes || changes.length === 0) { map.set(mon.id, mon.status ?? 1); continue; }
+      // Sin latidos en el rango no sabemos que estado tenia. Antes se dibujaba el
+      // estado de HOY como si fuera historico; ahora va 2 = sin dato.
+      if (!changes || changes.length === 0) { map.set(mon.id, 2); continue; }
       const idx = bisectStatus(changes, targetMs);
+      // Antes del primer latido del rango extrapolamos hacia atras con ese primer
+      // estado, que es lo unico que sabemos.
       map.set(mon.id, idx >= 0 ? changes[idx].s : changes[0].s);
     }
     return map;
@@ -630,9 +709,29 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
           {/* Divider */}
           <div className="h-px mb-3" style={{ background: "rgba(255,255,255,0.06)" }} />
 
+          {/* Filtro de duracion minima */}
+          <div className="text-[10px] font-bold text-[#999] mb-2 uppercase tracking-wider">Ocultar caídas cortas</div>
+          <div className="grid grid-cols-4 gap-1.5 mb-1">
+            {[0, 2, 5, 15].map(m => (
+              <button key={m} onClick={() => setMinDuracionMin(m)}
+                className="rounded-xl py-2 text-[11px] font-bold text-center transition-all"
+                style={{ background: minDuracionMin === m ? "rgba(34,197,94,0.15)" : "rgba(255,255,255,0.03)", border: `1px solid ${minDuracionMin === m ? "rgba(34,197,94,0.3)" : "rgba(255,255,255,0.04)"}`, color: minDuracionMin === m ? "#4ade80" : "#888" }}>
+                {m === 0 ? "Todo" : `> ${m}m`}
+              </button>
+            ))}
+          </div>
+          <div className="text-[9px] text-[#666] mb-3">
+            {minDuracionMin === 0
+              ? "Se muestran todos los eventos, parpadeos incluidos."
+              : `Se ocultan las caídas de menos de ${minDuracionMin} min.`}
+          </div>
+
+          {/* Divider */}
+          <div className="h-px mb-3" style={{ background: "rgba(255,255,255,0.06)" }} />
+
           {/* Mini Calendar for finding events */}
           <EventMiniCalendar 
-             badDates={badDates} 
+             dias={diasMalos} 
              onSelectDate={(year, month, d) => {
                const pad = (n: number) => n.toString().padStart(2, "0");
                const dateStr = `${year}-${pad(month + 1)}-${pad(d)}`;
@@ -686,11 +785,16 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
           <div className="flex items-center gap-2 mb-3">
             <Zap className="h-4 w-4 text-red-400" />
             <span className="text-[11px] font-bold text-[#ededed]">Eventos ({visibleEvents.length})</span>
-            <span className="text-[9px] text-[#555] ml-auto">{rangeLabel}</span>
+            <span className="text-[9px] text-[#555] ml-auto">
+              {rangeLabel}{minDuracionMin > 0 ? ` · > ${minDuracionMin}m` : ""}
+            </span>
           </div>
           {visibleEvents.length === 0 && (
             <div className="text-[10px] text-[#555] text-center py-6">
-              {loading ? "Cargando..." : "Sin eventos en este rango"}
+              {loading ? "Cargando..."
+                : minDuracionMin > 0
+                  ? `Sin caídas de más de ${minDuracionMin} min en este rango`
+                  : "Sin eventos en este rango"}
             </div>
           )}
           <div className="space-y-1">
@@ -747,7 +851,8 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
             {activeMonitors.map(m => {
               const isActive = focusMonitorId === m.id;
               const mStatus = m.status ?? 2;
-              const statusColor = mStatus === 0 ? "#ef4444" : mStatus === 1 ? "#22c55e" : "#f59e0b";
+              const enPausa = pausados.has(m.id);
+              const statusColor = enPausa ? "#6b7280" : colorDeEstado(mStatus);
               return (
                 <button key={m.id}
                   onClick={() => { setFocusMonitorId(m.id); setActivePanel(null); onFocusEvent?.(m.id, mStatus === 0 ? "down" : "up"); }}
@@ -756,9 +861,11 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
                   onMouseEnter={e => { if (!isActive) { (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.05)"; } }}
                   onMouseLeave={e => { if (!isActive) { (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.02)"; } }}
                 >
-                  <div className="h-3 w-3 rounded-full shrink-0" style={{ background: statusColor, boxShadow: `0 0 6px ${statusColor}` }} />
+                  <div className="h-3 w-3 rounded-full shrink-0" style={{ background: statusColor, boxShadow: enPausa ? "none" : `0 0 6px ${statusColor}` }} />
                   <div className="flex-1 min-w-0">
                     <div className="text-[10px] font-bold text-[#ededed] truncate">{m.name}</div>
+                    {enPausa && <div className="text-[9px] text-[#6b7280]">pausado — se muestra su historia</div>}
+                    {mStatus === 3 && !enPausa && <div className="text-[9px]" style={{ color: COLOR_ESTADO[3] }}>en mantenimiento</div>}
                   </div>
                   {isActive && <Crosshair className="h-3 w-3 text-green-400 shrink-0" />}
                 </button>
@@ -775,7 +882,7 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
   );
 }
 
-const EventMiniCalendar = memo(function EventMiniCalendar({ badDates, onSelectDate }: { badDates: Set<string>, onSelectDate: (y: number, m: number, d: number) => void }) {
+const EventMiniCalendar = memo(function EventMiniCalendar({ dias, onSelectDate }: { dias: Map<string, DiaConCaidas>, onSelectDate: (y: number, m: number, d: number) => void }) {
   const [currentMonth, setCurrentMonth] = useState(() => {
     const d = new Date();
     d.setDate(1);
@@ -813,15 +920,26 @@ const EventMiniCalendar = memo(function EventMiniCalendar({ badDates, onSelectDa
           
           const pad = (n: number) => n.toString().padStart(2, "0");
           const dateStr = `${year}-${pad(month + 1)}-${pad(d)}`;
-          const hasEvent = badDates.has(dateStr);
-          
+          const dia = dias.get(dateStr);
+
+          // Gradua el color por minutos caidos: un dia con 4 min y otro con 6 h
+          // no pueden verse iguales.
+          const tono = !dia ? null
+            : dia.minutos >= 120 ? { color: "#f87171", punto: "#f87171", op: 1 }
+            : dia.minutos >= 20  ? { color: "#fb923c", punto: "#fb923c", op: 0.85 }
+            :                      { color: "#facc15", punto: "#facc15", op: 0.7 };
+
           return (
             <button key={i} 
               onClick={() => onSelectDate(year, month, d)}
+              title={!dia ? undefined
+                : dia.caidas === 0
+                  ? `viene caído del día anterior · ${dia.minutos} min`
+                  : `${dia.caidas} caída${dia.caidas === 1 ? "" : "s"} · ${dia.minutos} min`}
               className="relative h-6 flex justify-center items-center text-[11px] rounded transition-all hover:bg-[rgba(255,255,255,0.1)] text-[#bbb] font-mono group"
             >
-               <span style={{ color: hasEvent ? "#f87171" : "inherit" }}>{d}</span>
-               {hasEvent && <div className="absolute top-0.5 right-0.5 w-1 h-1 rounded-full bg-red-400 opacity-60 group-hover:opacity-100 shadow-[0_0_4px_#f87171]" />}
+               <span style={{ color: tono ? tono.color : "inherit" }}>{d}</span>
+               {tono && <div className="absolute top-0.5 right-0.5 w-1 h-1 rounded-full group-hover:opacity-100" style={{ background: tono.punto, opacity: tono.op, boxShadow: `0 0 4px ${tono.punto}` }} />}
             </button>
           )
         })}

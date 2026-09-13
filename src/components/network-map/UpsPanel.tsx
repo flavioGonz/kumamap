@@ -435,7 +435,7 @@ export default function UpsPanel({
               <span>carga</span>
             </span>
           )}
-          {bat?.runtimeMinutes != null && (
+          {bat?.runtimeMinutes != null && bat.runtimeMinutes > 0 && (
             <span style={miniCifra} title="Autonomía restante">
               <b style={{ color: bat.runtimeMinutes < 10 ? ROJO : "#e7edf6" }}>{runtimeStr(bat.runtimeMinutes)}</b>
             </span>
@@ -480,13 +480,21 @@ export default function UpsPanel({
                 </span>
                 <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
                   <Clock className="w-3 h-3" style={{ color: "rgba(255,255,255,.3)" }} />
-                  <span style={{
-                    fontSize: 17, fontWeight: 700, fontVariantNumeric: "tabular-nums",
-                    color: bat.runtimeMinutes != null && bat.runtimeMinutes < 10 ? ROJO : "#e7edf6",
-                  }}>
+                  <span
+                    title={bat.runtimeMinutes == null
+                      ? "Este equipo no informa la autonomía por SNMP. Muchas UPS sólo la calculan cuando pasan a batería."
+                      : "Autonomía estimada por el propio equipo"}
+                    style={{
+                      fontSize: 17, fontWeight: 700, fontVariantNumeric: "tabular-nums",
+                      // El rojo es para una autonomía corta de verdad. Un equipo que no la
+                      // informa devolvía 0, y el panel pintaba un guion rojo permanente.
+                      color: bat.runtimeMinutes != null && bat.runtimeMinutes > 0 && bat.runtimeMinutes < 10 ? ROJO : "#e7edf6",
+                    }}>
                     {runtimeStr(bat.runtimeMinutes)}
                   </span>
-                  <span style={{ fontSize: 10, color: "rgba(255,255,255,.32)" }}>de autonomía</span>
+                  <span style={{ fontSize: 10, color: "rgba(255,255,255,.32)" }}>
+                    {bat.runtimeMinutes == null ? "sin dato de autonomía" : "de autonomía"}
+                  </span>
                 </div>
                 {sal.loadPercent != null && (
                   <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>

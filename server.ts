@@ -6,6 +6,7 @@ import { getKumaClient, type KumaMonitor, type KumaHeartbeat } from "./src/lib/k
 import webpush from "web-push";
 import { getAllSubscriptions, removeSubscription } from "./src/lib/push-store";
 import { iniciarReceptorDeTraps, reubicarPendientes } from "./src/lib/traps";
+import { getUpsMonitor } from "./src/lib/ups-monitor";
 
 const dev = process.env.NODE_ENV !== "production";
 const port = parseInt(process.env.PORT || "3000", 10);
@@ -178,6 +179,28 @@ app.prepare().then(() => {
     io.emit("trap:nuevo", trap);
   });
 
+  // Monitor de UPS: sondea cada 30 s, guarda cada lectura y evalua las alertas.
+  //
+  // El modulo estaba escrito entero y nunca se arrancaba: nadie llamaba a
+  // start(). Por eso `ups_history` tenia cero filas y el panel mostraba
+  // "0 lecturas" con las graficas de seis horas vacias desde el primer dia.
+  const ups = getUpsMonitor();
+  ups.start({
+    onReading: (nodeId, result) => io.emit("ups:reading", { nodeId, result }),
+    onAlert: (a) => {
+      io.emit("ups:alerta", a);
+      // El corte de energia es de las pocas cosas que justifican despertar a
+      // alguien: si la UPS paso a bateria, el reloj ya empezo a correr.
+      sendPushToAll({
+        title: a.title,
+        body: a.body,
+        tag: `ups-${a.nodeId}-${a.kind}`,
+        data: { url: "/" },
+      });
+      console.log(`[UPS] ${a.severity.toUpperCase()} ${a.label}: ${a.title}`);
+    },
+  });
+
   // El indice de IPs del mapa se rearma solo cada cinco minutos; los avisos que
   // quedaron sin equipo se vuelven a intentar cada diez. Es barato y evita tener
   // que apretar el boton despues de cargarle la IP a un nodo.
@@ -193,6 +216,10 @@ app.prepare().then(() => {
       connected: kuma.isConnected,
       monitors: kuma.getMonitors(),
     });
+
+    // La ultima lectura de cada UPS, para que el panel pinte al instante en vez
+    // de quedarse en blanco hasta el proximo sondeo.
+    socket.emit("ups:snapshot", ups.getAllLatest());
 
     // Send heartbeat history for a specific monitor
     socket.on("kuma:getHistory", (monitorId: number) => {

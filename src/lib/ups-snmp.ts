@@ -184,7 +184,14 @@ async function tryRfc1628(session: any): Promise<UpsReading | null> {
       health,
       temperature: v(RFC1628_OID.upsBatteryTemperature) != null ? toNumber(v(RFC1628_OID.upsBatteryTemperature)) : undefined,
       voltage: batVoltageRaw != null ? batVoltageRaw / 10 : undefined, // 0.1 Vdc
-      runtimeMinutes: v(RFC1628_OID.upsEstimatedMinutesRemaining) != null ? toNumber(v(RFC1628_OID.upsEstimatedMinutesRemaining)) : undefined,
+      // Un 0 acá no es "cero minutos": es el equipo diciendo que no la calcula.
+      // Muchas UPS sólo estiman la autonomía cuando ya están en batería. Se trata
+      // como sin dato, igual que hace la rama APC unas líneas más arriba.
+      runtimeMinutes: (() => {
+        const n = v(RFC1628_OID.upsEstimatedMinutesRemaining) != null
+          ? toNumber(v(RFC1628_OID.upsEstimatedMinutesRemaining)) : undefined;
+        return n != null && n > 0 ? n : undefined;
+      })(),
     };
 
     const inFreqRaw = v(RFC1628_OID.upsInputFrequency) != null ? toNumber(v(RFC1628_OID.upsInputFrequency)) : undefined;

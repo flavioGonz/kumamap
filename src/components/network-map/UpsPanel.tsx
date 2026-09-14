@@ -36,7 +36,7 @@ const AMBAR = "#f59e0b";
 const ROJO = "#ef4444";
 
 const ANCHO = 344;
-const ANCHO_MINI = 238;
+const ANCHO_MINI = 214; // mismo ancho que la ventana de tráfico
 const GRAF_W = ANCHO - 26;   // ancho útil dentro del panel
 const GRAF_H = 52;
 
@@ -412,38 +412,46 @@ export default function UpsPanel({
       </div>
 
       {mini ? (
-        /* Resumen: lo minimo para saber si hay que mirar. El resto esta a un clic. */
-        <div className="ups-mini" style={{ padding: "7px 11px 9px", display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap" }}>
-          <span style={{
-            display: "inline-flex", alignItems: "center", gap: 5,
-            padding: "2px 8px", borderRadius: 99, fontSize: 10.5, fontWeight: 700,
-            color: cEstado, background: `${cEstado}18`, border: `1px solid ${cEstado}45`, whiteSpace: "nowrap",
-          }}>
-            <span style={{ width: 5, height: 5, borderRadius: 99, background: cEstado }} />
-            {data?.reachable ? tEstado : "sin respuesta"}
-          </span>
+        /* Resumen tipo tarjeta, del mismo tamaño y estilo que la ventana de tráfico:
+           estado + barras de batería y carga + autonomía. */
+        <div className="ups-mini" style={{ padding: "9px 11px 10px", display: "flex", flexDirection: "column", gap: 9 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 10.5, fontWeight: 700, color: cEstado, whiteSpace: "nowrap" }}>
+              <span style={{ width: 6, height: 6, borderRadius: 99, background: cEstado, boxShadow: `0 0 6px ${cEstado}` }} />
+              {data?.reachable ? tEstado : "sin respuesta"}
+            </span>
+            {enBateria && <span style={{ fontSize: 9, fontWeight: 700, color: AMBAR, whiteSpace: "nowrap" }}>⚡ en batería</span>}
+          </div>
 
           {bat && (
-            <span style={miniCifra} title="Carga de la batería">
-              <b style={{ color: batteryColor(bat.charge) }}>{Math.round(bat.charge)}<small>%</small></b>
-              <span>bat</span>
-            </span>
+            <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                <span style={{ fontSize: 9, color: "#7d8da0", textTransform: "uppercase", letterSpacing: ".05em" }}>Batería</span>
+                <span style={{ fontSize: 12.5, fontWeight: 700, color: batteryColor(bat.charge), fontVariantNumeric: "tabular-nums" }}>{Math.round(bat.charge)}%</span>
+              </div>
+              <div style={{ height: 5, borderRadius: 99, background: "rgba(255,255,255,.08)", overflow: "hidden" }}>
+                <div style={{ height: "100%", width: `${Math.max(0, Math.min(100, bat.charge))}%`, background: batteryColor(bat.charge), borderRadius: 99, transition: "width .6s ease" }} />
+              </div>
+            </div>
           )}
           {sal?.loadPercent != null && (
-            <span style={miniCifra} title="Carga del equipo conectado">
-              <b style={{ color: loadColor(sal.loadPercent) }}>{Math.round(sal.loadPercent)}<small>%</small></b>
-              <span>carga</span>
-            </span>
+            <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                <span style={{ fontSize: 9, color: "#7d8da0", textTransform: "uppercase", letterSpacing: ".05em" }}>Carga</span>
+                <span style={{ fontSize: 12.5, fontWeight: 700, color: loadColor(sal.loadPercent), fontVariantNumeric: "tabular-nums" }}>{Math.round(sal.loadPercent)}%</span>
+              </div>
+              <div style={{ height: 5, borderRadius: 99, background: "rgba(255,255,255,.08)", overflow: "hidden" }}>
+                <div style={{ height: "100%", width: `${Math.max(0, Math.min(100, sal.loadPercent))}%`, background: loadColor(sal.loadPercent), borderRadius: 99, transition: "width .6s ease" }} />
+              </div>
+            </div>
           )}
-          {bat?.runtimeMinutes != null && bat.runtimeMinutes > 0 && (
-            <span style={miniCifra} title="Autonomía restante">
-              <b style={{ color: bat.runtimeMinutes < 10 ? ROJO : "#e7edf6" }}>{runtimeStr(bat.runtimeMinutes)}</b>
-            </span>
-          )}
-          {bat && bat.health !== "normal" && bat.health !== "unknown" && (
-            <span style={{ ...miniCifra, color: ROJO }} title="La batería necesita atención">
-              <AlertTriangle className="w-3 h-3" />
-            </span>
+          {(bat?.runtimeMinutes != null || (bat && bat.health !== "normal" && bat.health !== "unknown")) && (
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 1, paddingTop: 7, borderTop: "1px solid rgba(255,255,255,.06)" }}>
+              <span style={{ fontSize: 10, fontWeight: 600, color: bat?.runtimeMinutes != null && bat.runtimeMinutes < 10 ? ROJO : "#93a3b8" }}>
+                {bat?.runtimeMinutes != null ? `Autonomía ${runtimeStr(bat.runtimeMinutes)}` : ""}
+              </span>
+              {bat && bat.health !== "normal" && bat.health !== "unknown" && <AlertTriangle className="w-3 h-3" style={{ color: ROJO }} />}
+            </div>
           )}
           {!data && <span style={{ fontSize: 11, color: "rgba(255,255,255,.4)" }}>consultando…</span>}
         </div>

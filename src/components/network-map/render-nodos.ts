@@ -18,7 +18,6 @@ import { toast } from "@/components/ui/SileoToast";
 import { safeJsonParse, safeFetch } from "@/lib/error-handler";
 import type { NodeCustomData, EdgeCustomData } from "@/lib/types";
 import { apiUrl } from "@/lib/api";
-import { normalizeOutputStatus, statusColor as upsStatusColor, statusLabel as upsStatusLabel, batteryColor as upsBatteryColor, runtimeStr as upsRuntimeStr } from "@/lib/ups";
 import { statusColors, getStatusColor as _getStatusColor, getMonitorData as _getMonitorData } from "@/utils/status";
 import { iconSvgPaths, getIconSvg, createMarkerIcon } from "@/utils/map-icons";
 import { formatTraffic } from "@/utils/format";
@@ -374,93 +373,9 @@ export function dibujarNodos(L: any, map: any, ctx: ContextoRenderNodos) {
         });
       }
     } else if (isUps) {
-      // ── Nodo UPS: tarjeta flotante con el estado, igual que la ventana de
-      // tráfico. En vez de un icono suelto + un panel aparte, el propio nodo
-      // muestra batería / carga / autonomía. Los datos los deja un poller en
-      // window["ups-<id>"] (UpsResult). Flota fijo en pantalla (floatPos).
-      const claveU = `ups-${node.id}`;
-      const cacheU: any = (window as any)[claveU] || null;
-      const titU = node.label || "UPS";
-      if (!cd.ip) {
-        nodeIcon = L.divIcon({
-          className: "ups-node",
-          html: `<div style="background:rgba(11,14,20,.95);border:1px dashed rgba(255,255,255,.22);border-radius:11px;padding:10px 12px;min-width:186px;color:#93a3b8;font-family:ui-sans-serif,system-ui,sans-serif;font-size:11.5px;line-height:1.5;box-shadow:0 8px 24px rgba(0,0,0,.5);cursor:${isLocked ? "default" : "grab"}">
-              <div style="font-weight:600;color:#c8d4e4;margin-bottom:3px">UPS</div>
-              Sin configurar. Clic derecho → Configurar UPS.
-            </div>`,
-          iconSize: [200, 64], iconAnchor: [0, 0],
-        });
-      } else if (!cacheU || cacheU.reachable === false) {
-        const msgU = cacheU && cacheU.reachable === false ? "sin respuesta de la UPS" : "consultando…";
-        const colU = cacheU && cacheU.reachable === false ? "#ef4444" : "#64748b";
-        nodeIcon = L.divIcon({
-          className: "ups-node",
-          html: `<div style="background:rgba(8,12,20,.94);border:1px solid ${colU}44;border-radius:12px;padding:9px 11px;min-width:194px;box-shadow:0 10px 28px rgba(0,0,0,.6);backdrop-filter:blur(8px);font-family:ui-sans-serif,system-ui,sans-serif;cursor:${isLocked ? "default" : "grab"}">
-              <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
-                <span style="width:6px;height:6px;border-radius:99px;background:${colU};flex:none"></span>
-                <span style="font-size:10.5px;font-weight:600;color:#c4d0e0;max-width:172px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${titU}</span>
-              </div>
-              <div style="font-size:11px;color:#7d8da0">${msgU}</div>
-            </div>`,
-          iconSize: [200, 64], iconAnchor: [0, 0],
-        });
-      } else {
-        // Tarjeta con el mismo tamaño y estilo que la ventana de tráfico (214×160).
-        const r = cacheU;
-        const st = normalizeOutputStatus(r.status);
-        const col = upsStatusColor(st);
-        const enBat = st === "onBattery";
-        const chg = typeof r.charge === "number" ? Math.max(0, Math.min(100, r.charge)) : null;
-        const load = typeof r.load === "number" ? Math.max(0, Math.min(100, r.load)) : null;
-        const rt = upsRuntimeStr(r.runtime);
-        const bcol = chg != null ? upsBatteryColor(chg) : "#64748b";
-        const inV = typeof r.inputV === "number" ? Math.round(r.inputV) : null;
-        const outV = typeof r.outputV === "number" ? Math.round(r.outputV) : null;
-        const barra = (pct: number | null, color: string) => {
-          const w = pct != null ? Math.round(pct) : 0;
-          return `<div style="height:5px;border-radius:99px;background:rgba(255,255,255,.08);overflow:hidden">
-              <div style="height:100%;width:${w}%;background:${color};border-radius:99px;transition:width .6s ease"></div>
-            </div>`;
-        };
-        const fila = (lbl: string, val: string, pct: number | null, color: string) => `
-          <div style="display:flex;flex-direction:column;gap:3px">
-            <div style="display:flex;justify-content:space-between;align-items:baseline">
-              <span style="font-size:9px;color:#7d8da0;text-transform:uppercase;letter-spacing:.05em">${lbl}</span>
-              <span style="font-size:12.5px;font-weight:700;color:${color};font-variant-numeric:tabular-nums">${val}</span>
-            </div>
-            ${barra(pct, color)}
-          </div>`;
-        nodeIcon = L.divIcon({
-          className: "ups-node",
-          html: `<div style="
-              background:rgba(8,12,20,.94);
-              border:1px solid ${col}44;
-              border-radius:12px;
-              padding:9px 11px 8px;
-              width:214px;
-              box-sizing:border-box;
-              box-shadow:0 10px 28px rgba(0,0,0,.6);
-              backdrop-filter:blur(8px);
-              font-family:ui-sans-serif,system-ui,sans-serif;
-              cursor:${isLocked ? "default" : "grab"};
-            ">
-              <div style="display:flex;align-items:center;gap:6px;margin-bottom:9px">
-                <span style="width:7px;height:7px;border-radius:99px;background:${col};flex:none;box-shadow:0 0 6px ${col}"></span>
-                <span style="font-size:10.5px;font-weight:600;color:#c4d0e0;letter-spacing:.02em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:118px">${titU}</span>
-                <span style="margin-left:auto;font-size:9px;font-weight:700;color:${col};text-transform:uppercase;letter-spacing:.04em">${upsStatusLabel(st)}</span>
-              </div>
-              <div style="display:flex;flex-direction:column;gap:9px">
-                ${fila("Batería", chg != null ? Math.round(chg) + "%" : "—", chg, bcol)}
-                ${fila("Carga", load != null ? Math.round(load) + "%" : "—", load, load != null && load >= 90 ? "#ef4444" : "#e8eef7")}
-              </div>
-              <div style="display:flex;justify-content:space-between;align-items:center;margin-top:9px;padding-top:7px;border-top:1px solid rgba(255,255,255,.06)">
-                <span style="font-size:10px;color:${enBat ? "#f59e0b" : "#93a3b8"};font-weight:600">${enBat ? "⚡ " : ""}Autonomía ${rt}</span>
-                <span style="font-size:9px;color:#7d8da0;font-variant-numeric:tabular-nums">${inV != null ? inV + "V" : ""}${inV != null && outV != null ? " → " : ""}${outV != null ? outV + "V" : ""}</span>
-              </div>
-            </div>`,
-          iconSize: [214, 160], iconAnchor: [0, 0],
-        });
-      }
+      // La UPS es un device dentro de un rack: NO se dibuja en el mapa. Sus
+      // datos van sólo al panel flotante (UpsPanel). El nodo queda invisible.
+      nodeIcon = L.divIcon({ className: "ups-hidden", html: "", iconSize: [0, 0], iconAnchor: [0, 0] });
     } else if (isMng) {
       // ── Servidor monitor-ng: tarjeta flotante como la ventana de tráfico (214×160).
       // Se vincula a un dispositivo adoptado (clic derecho/doble clic) y muestra su

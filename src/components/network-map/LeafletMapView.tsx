@@ -761,51 +761,6 @@ export default function LeafletMapView({
     return () => { vivo = false; clearInterval(iv); };
   }, []);
 
-  // ── Poller de nodos UPS ──
-  // Cada nodo UPS configurado (con ip) consulta su estado cada 15 s y lo deja en
-  // window["ups-<id>"] (UpsResult); la tarjeta del nodo lo lee al redibujar. Es
-  // el equivalente al poller de la ventana de tráfico.
-  useEffect(() => {
-    let vivo = true;
-    const tick = async () => {
-      const nodos = nodesRef.current.filter((nn) => nn.icon === "ups");
-      if (!nodos.length) return;
-      let cambio = false;
-      for (const nn of nodos) {
-        const cd = safeJsonParse<NodeCustomData>(nn.custom_data);
-        if (!cd.ip) continue;
-        try {
-          const r = await fetch(apiUrl("/api/ups/poll"), {
-            method: "POST", credentials: "include", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              ip: cd.ip,
-              community: cd.upsSnmpCommunity || cd.snmpCommunity || "public",
-              protocol: cd.upsProtocol || "snmp",
-              nutPort: cd.nutPort,
-              nutUpsName: cd.nutUpsName || undefined,
-            }),
-          });
-          const d = await r.json().catch(() => null);
-          const nuevo = r.ok && d ? d : { reachable: false };
-          const clave = `ups-${nn.id}`;
-          const antes = (window as any)[clave];
-          const cambioReal = !antes || antes.reachable !== nuevo.reachable || antes.status !== nuevo.status ||
-            Math.round(antes.charge || 0) !== Math.round(nuevo.charge || 0) || Math.round(antes.load || 0) !== Math.round(nuevo.load || 0);
-          (window as any)[clave] = nuevo;
-          if (cambioReal) cambio = true;
-        } catch {
-          const clave = `ups-${nn.id}`;
-          if ((window as any)[clave]?.reachable !== false) cambio = true;
-          (window as any)[clave] = { reachable: false };
-        }
-      }
-      if (cambio && vivo && LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current);
-    };
-    tick();
-    const iv = setInterval(tick, 15000);
-    return () => { vivo = false; clearInterval(iv); };
-  }, []);
-
   // ── Poller de nodos monitor-ng ──
   // Si hay algún nodo monitor-ng vinculado, trae la lista de dispositivos
   // adoptados (con estado + métricas) cada 15 s y la deja indexada en

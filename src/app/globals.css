@@ -199,6 +199,10 @@ body.theme-transitioning *::after {
 }
 .leaflet-container {
   z-index: 0 !important;
+  background: #0a0a0a !important;
+}
+.leaflet-tile-pane {
+  background: #0a0a0a !important;
 }
 
 /* Pulsing animation for DOWN links */

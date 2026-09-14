@@ -1113,7 +1113,7 @@ export default function CamerasPage() {
             <p className="text-sm text-white/15 mt-3 font-mono">SIN CÁMARAS CONFIGURADAS</p>
             <div className="flex items-center gap-2 mt-4">
               <button onClick={() => setShowOnvif(true)} className="px-3 py-1.5 text-xs font-bold font-mono" style={{ background: "#06b6d4", color: "#000" }}>DISCOVER ONVIF</button>
-              <Link href={`/?map=${selectedMap.mapId}`} className="px-3 py-1.5 text-xs font-mono text-white/40" style={{ border: "1px solid #333" }}>ABRIR MAPA</Link>
+              <Link href={`/map/${selectedMap.mapId}`} className="px-3 py-1.5 text-xs font-mono text-white/40" style={{ border: "1px solid #333" }}>ABRIR MAPA</Link>
             </div>
           </div>
         ) : (

@@ -97,6 +97,9 @@ export interface NodeCustomData {
   // SNMP
   snmpMonitorId?: number;
 
+  // UPS SNMP monitoring
+  upsSnmpCommunity?: string;  // SNMP community for UPS polling (default: "public")
+
   // Allow additional dynamic fields
   [key: string]: unknown;
 }
@@ -124,6 +127,14 @@ export interface EdgeCustomData {
   snmpMonitorId?: number;
   hideTraffic?: boolean;
   trafficLabelPos?: [number, number];
+  /** MikroTik direct traffic source — polls router REST API for live bps */
+  mikrotikTraffic?: {
+    host: string;
+    user: string;
+    pass: string;
+    interface: string;
+    port?: number;
+  };
   [key: string]: unknown;
 }
 

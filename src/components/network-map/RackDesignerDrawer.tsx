@@ -7,7 +7,8 @@ import {
   FileSpreadsheet, Printer, FileDown, Upload, ImageIcon, Camera as CameraIcon, ZoomIn, Trash,
   Eye, EyeOff, Copy, PhoneIncoming, Activity,
 } from "lucide-react";
-import html2canvas from "html2canvas";
+// html2canvas loaded on-demand (~200KB) — only when user exports/prints
+const getHtml2Canvas = () => import("html2canvas").then(m => m.default);
 import { apiUrl } from "@/lib/api";
 import { safeFetch } from "@/lib/error-handler";
 import { motion, AnimatePresence } from "framer-motion";
@@ -542,6 +543,7 @@ export default function RackDesignerDrawer({ open, onClose, nodeId, nodes, monit
     document.body.appendChild(container);
 
     try {
+      const html2canvas = await getHtml2Canvas();
       const canvas = await html2canvas(container, {
         backgroundColor: "#0f0f0f",
         scale: 2,
@@ -737,6 +739,7 @@ export default function RackDesignerDrawer({ open, onClose, nodeId, nodes, monit
     document.body.appendChild(container);
 
     try {
+      const html2canvas = await getHtml2Canvas();
       const canvas = await html2canvas(container, { backgroundColor: "#0f0f0f", scale: 2, useCORS: true, logging: false, removeContainer: false } as any);
       const a = document.createElement("a");
       a.href = canvas.toDataURL("image/png");
@@ -873,6 +876,7 @@ export default function RackDesignerDrawer({ open, onClose, nodeId, nodes, monit
                 // Capture rack image for export embedding
                 if (rackRef.current) {
                   try {
+                    const html2canvas = await getHtml2Canvas();
                     const canvas = await html2canvas(rackRef.current, { backgroundColor: "#0f0f0f", scale: 2, useCORS: true, logging: false } as any);
                     setRackImageBase64(canvas.toDataURL("image/png"));
                   } catch { setRackImageBase64(null); }

@@ -1,9 +1,53 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useRef, useCallback, useMemo, memo } from "react";
 import { Clock, Play, Pause, Radio, Gauge, Calendar, Zap, ChevronRight, Crosshair, ChevronLeft } from "lucide-react";
 import { apiUrl } from "@/lib/api";
 import { safeFetch } from "@/lib/error-handler";
+
+// ── Cached Intl formatters (created once, reused forever) ──────────────
+const fmtTime = new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+const fmtTimeShort = new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" });
+const fmtDate = new Intl.DateTimeFormat("es-UY", { day: "2-digit", month: "2-digit" });
+
+// ── Event color helper (was duplicated 3×) ─────────────────────────────
+function getEventColor(status: number, prevStatus: number): string {
+  if (status === 0) return "#ef4444";          // DOWN
+  if (prevStatus === 0 && status === 1) return "#22c55e"; // RECOVERY
+  return "#f59e0b";                            // OTHER CHANGE
+}
+function getEventLabel(status: number, prevStatus: number): string {
+  if (status === 0) return "DOWN";
+  if (prevStatus === 0 && status === 1) return "UP";
+  return "CHG";
+}
+function getEventIcon(status: number, prevStatus: number): string {
+  if (status === 0) return "▼ DOWN";
+  if (prevStatus === 0 && status === 1) return "▲ RECOVERED";
+  return "● CAMBIO";
+}
+
+// ── Binary search: find last index where arr[i].t <= target ─────────────
+function bisectStatus(changes: { t: number; s: number }[], targetMs: number): number {
+  let lo = 0, hi = changes.length - 1, result = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >>> 1;
+    if (changes[mid].t <= targetMs) { result = mid; lo = mid + 1; }
+    else hi = mid - 1;
+  }
+  return result;
+}
+
+// ── Binary search: find first event index with position >= pos ──────────
+function bisectEvents(events: { position: number }[], pos: number): number {
+  let lo = 0, hi = events.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1;
+    if (events[mid].position < pos) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}
 
 interface TimelineEvent {
   monitorId: number;
@@ -56,7 +100,6 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
   const [focusMonitorId, setFocusMonitorId] = useState<number | null>(null); // null = all monitors
   const [badDates, setBadDates] = useState<Set<string>>(new Set());
   const barRef = useRef<HTMLDivElement>(null);
-  const playRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // External focus trigger — when a node context menu opens TimeMachine with a specific sensor
   useEffect(() => {
@@ -68,11 +111,17 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
   // External jumpTo — Alert Manager sends { time, monitorId }
   const lastJumpRef = useRef<string>("");
   const pendingJumpPosRef = useRef<number | null>(null);
+  const jumpAbortRef = useRef<AbortController | null>(null);
   useEffect(() => {
     if (!jumpTo) return;
     const key = `${jumpTo.monitorId}-${jumpTo.time.getTime()}`;
     if (key === lastJumpRef.current) return;
     lastJumpRef.current = key;
+
+    // Abort any in-flight jumpTo fetch
+    jumpAbortRef.current?.abort();
+    const ac = new AbortController();
+    jumpAbortRef.current = ac;
 
     // Set focus to the specific monitor
     setFocusMonitorId(jumpTo.monitorId);
@@ -103,20 +152,21 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
     if (ids) {
       setLoading(true);
       const url = apiUrl(`/api/kuma/timeline?from=${encodeURIComponent(fromStr)}&to=${encodeURIComponent(toStr)}&monitorIds=${ids}`);
-      safeFetch<TimelineResponse>(url, undefined, "TimeMachine")
+      safeFetch<TimelineResponse>(url, { signal: ac.signal }, "TimeMachine")
         .then(d => {
+          if (ac.signal.aborted) return;
           setAllEvents(d?.events || []);
           setStatusChanges(d?.statusChanges || {});
           setLoading(false);
           setLoaded(true);
-          // Restore position after data loads (in case anything reset it)
           if (pendingJumpPosRef.current !== null) {
             setPosition(pendingJumpPosRef.current);
             pendingJumpPosRef.current = null;
           }
         })
-        .catch(() => { setLoading(false); });
+        .catch((e) => { if (!ac.signal.aborted) setLoading(false); });
     }
+    return () => ac.abort();
   }, [jumpTo]);
 
   // Stable key for the monitor ID set (avoids unnecessary refetches)
@@ -201,11 +251,16 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
       });
   }, [mapMonitorKey, open]);
 
-  // Refresh every 2 min
+  // Refresh every 2 min — only when tab is visible
   useEffect(() => {
     if (!open || !loaded) return;
-    const iv = setInterval(fetchTimeline, 120000);
-    return () => clearInterval(iv);
+    let iv: ReturnType<typeof setInterval> | null = null;
+    const start = () => { if (!iv) iv = setInterval(fetchTimeline, 120000); };
+    const stop = () => { if (iv) { clearInterval(iv); iv = null; } };
+    const onVis = () => { document.hidden ? stop() : start(); };
+    if (!document.hidden) start();
+    document.addEventListener("visibilitychange", onVis);
+    return () => { stop(); document.removeEventListener("visibilitychange", onVis); };
   }, [open, loaded, fetchTimeline]);
 
   // Filter events to map monitors + time range + focus sensor
@@ -240,9 +295,8 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
     for (const mon of activeMonitors) {
       const changes = statusChanges[mon.id];
       if (!changes || changes.length === 0) { map.set(mon.id, mon.status ?? 1); continue; }
-      let status = changes[0].s;
-      for (const c of changes) { if (c.t <= targetMs) status = c.s; else break; }
-      map.set(mon.id, status);
+      const idx = bisectStatus(changes, targetMs);
+      map.set(mon.id, idx >= 0 ? changes[idx].s : changes[0].s);
     }
     return map;
   }, [statusChanges, activeMonitors]);
@@ -254,30 +308,61 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
 
   useEffect(() => {
     const statuses = currentTime ? getStatusesAtTime(currentTime) : new Map<number, number>();
-    onTimeChange(currentTime, statuses);
+    if (playing) {
+      throttledNotify(currentTime, statuses);
+    } else {
+      onTimeChange(currentTime, statuses); // immediate when scrubbing/stopped
+    }
   }, [currentTime]);
 
   useEffect(() => { onDragging?.(dragging); }, [dragging, onDragging]);
 
-  // Play
+  // ── Throttled onTimeChange — avoids flooding parent with 20 renders/sec ──
+  const lastNotifyRef = useRef(0);
+  const throttledNotify = useCallback((time: Date | null, statuses: Map<number, number>) => {
+    const now = performance.now();
+    if (now - lastNotifyRef.current < 180) return; // ~5.5 fps max during playback
+    lastNotifyRef.current = now;
+    onTimeChange(time, statuses);
+  }, [onTimeChange]);
+
+  // Play — requestAnimationFrame for smooth, battery-friendly animation
+  const rafRef = useRef<number | null>(null);
+  const lastFrameRef = useRef(0);
   useEffect(() => {
-    if (!playing) { if (playRef.current) clearInterval(playRef.current); return; }
+    if (!playing) {
+      if (rafRef.current) { cancelAnimationFrame(rafRef.current); rafRef.current = null; }
+      return;
+    }
+    const msPerFrame = 50; // target ~20fps playback ticks
     const step = (speed * 60000) / rangeMs;
-    playRef.current = setInterval(() => {
+
+    const tick = (now: number) => {
+      if (now - lastFrameRef.current < msPerFrame) {
+        rafRef.current = requestAnimationFrame(tick);
+        return;
+      }
+      lastFrameRef.current = now;
+
       setPosition(prev => {
         const next = prev + step;
         if (next >= 1) { setPlaying(false); return 1; }
-        for (const evt of visibleEvents) {
-          if (prev < evt.position && next >= evt.position) {
-            setPlaying(false);
-            onFocusEvent?.(evt.monitorId, evt.status === 0 ? "down" : "up");
-            return evt.position;
-          }
+        // Binary search for first event past prev position
+        const idx = bisectEvents(visibleEvents, prev + 0.0001);
+        if (idx < visibleEvents.length && visibleEvents[idx].position <= next) {
+          const evt = visibleEvents[idx];
+          setPlaying(false);
+          onFocusEvent?.(evt.monitorId, evt.status === 0 ? "down" : "up");
+          return evt.position;
         }
         return next;
       });
-    }, 50);
-    return () => { if (playRef.current) clearInterval(playRef.current); };
+      rafRef.current = requestAnimationFrame(tick);
+    };
+
+    lastFrameRef.current = performance.now();
+    rafRef.current = requestAnimationFrame(tick);
+    return () => { if (rafRef.current) { cancelAnimationFrame(rafRef.current); rafRef.current = null; } };
   }, [playing, speed, rangeMs, visibleEvents]);
 
   const updatePosition = useCallback((clientY: number) => {
@@ -370,8 +455,7 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
           {/* Event markers */}
           {visibleEvents.map((evt, i) => {
             const isDown = evt.status === 0;
-            const isRecovery = evt.prevStatus === 0 && evt.status === 1;
-            const evtColor = isDown ? "#ef4444" : isRecovery ? "#22c55e" : "#f59e0b";
+            const evtColor = getEventColor(evt.status, evt.prevStatus);
             return (
               <div key={i} className="absolute left-0 right-0 group/evt cursor-pointer"
                 style={{ top: `${evt.position * 100}%`, pointerEvents: "auto" }}
@@ -388,9 +472,9 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
                   </div>
                   <div className="flex items-center gap-2 text-[10px]">
                     <span className="font-bold px-2 py-0.5 rounded-md" style={{ background: evtColor + "22", color: evtColor, border: `1px solid ${evtColor}33` }}>
-                      {isDown ? "▼ DOWN" : isRecovery ? "▲ RECOVERED" : "● CAMBIO"}
+                      {getEventIcon(evt.status, evt.prevStatus)}
                     </span>
-                    <span className="font-mono text-[#777]">{evt.timeDate.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</span>
+                    <span className="font-mono text-[#777]">{fmtTime.format(evt.timeDate)}</span>
                   </div>
                   {evt.msg && <div className="text-[9px] text-[#555] mt-1 truncate max-w-[220px]">{evt.msg}</div>}
                 </div>
@@ -407,8 +491,8 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
                 <div key={i} className="relative">
                   <div className="absolute left-0 right-0 h-px" style={{ background: "rgba(255,255,255,0.03)" }} />
                   <span className="absolute left-1/2 -translate-x-1/2 text-[6px] text-[#333] font-mono whitespace-nowrap">
-                    {t.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                    {showDate && <span className="text-[#2a2a2a] ml-0.5">{t.toLocaleDateString("es-UY", { day: "2-digit", month: "2-digit" })}</span>}
+                    {fmtTimeShort.format(t)}
+                    {showDate && <span className="text-[#2a2a2a] ml-0.5">{fmtDate.format(t)}</span>}
                   </span>
                 </div>
               );
@@ -429,10 +513,10 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
               {!isLive && (
                 <div className="absolute left-[64px] -top-3.5 rounded-xl px-2.5 py-1 text-[10px] font-mono font-bold whitespace-nowrap"
                   style={{ background: "rgba(8,8,8,0.95)", border: "1px solid rgba(59,130,246,0.3)", color: "#60a5fa", boxShadow: "0 4px 16px rgba(0,0,0,0.5)" }}>
-                  <span>{currentTime?.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</span>
+                  <span>{currentTime ? fmtTime.format(currentTime) : ""}</span>
                   {currentTime && (
                     <span className="ml-1.5 text-[8px] text-white/30">
-                      {currentTime.toLocaleDateString("es-UY", { day: "2-digit", month: "2-digit" })}
+                      {fmtDate.format(currentTime)}
                     </span>
                   )}
                   {downCount > 0 && <span className="ml-1.5 text-red-400 font-bold">{downCount}↓</span>}
@@ -488,11 +572,11 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
           {/* LIVE / current time indicator */}
           <div className="text-center font-mono font-black mt-1" style={{ color: isLive ? "#4ade80" : useCustomRange ? "#a855f7" : "#60a5fa", lineHeight: 1.2 }}>
             <div className="text-[9px]">
-              {isLive ? "LIVE" : currentTime?.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) || "▶"}
+              {isLive ? "LIVE" : currentTime ? fmtTimeShort.format(currentTime) : "▶"}
             </div>
             {!isLive && currentTime && (
               <div className="text-[7px] opacity-50">
-                {currentTime.toLocaleDateString("es-UY", { day: "2-digit", month: "2-digit" })}
+                {fmtDate.format(currentTime)}
               </div>
             )}
           </div>
@@ -612,8 +696,7 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
           <div className="space-y-1">
             {visibleEvents.map((evt, i) => {
               const isDown = evt.status === 0;
-              const isRecovery = evt.prevStatus === 0 && evt.status === 1;
-              const evtColor = isDown ? "#ef4444" : isRecovery ? "#22c55e" : "#f59e0b";
+              const evtColor = getEventColor(evt.status, evt.prevStatus);
               return (
                 <button key={i}
                   onClick={() => { setPosition(evt.position); setPlaying(false); setActivePanel(null); onFocusEvent?.(evt.monitorId, isDown ? "down" : "up"); }}
@@ -626,8 +709,8 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
                   <div className="flex-1 min-w-0">
                     <div className="text-[10px] font-bold text-[#ededed] truncate">{evt.monitorName}</div>
                     <div className="flex items-center gap-2 text-[9px]">
-                      <span className="font-bold" style={{ color: evtColor }}>{isDown ? "DOWN" : isRecovery ? "UP" : "CHG"}</span>
-                      <span className="text-[#555] font-mono">{evt.timeDate.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</span>
+                      <span className="font-bold" style={{ color: evtColor }}>{getEventLabel(evt.status, evt.prevStatus)}</span>
+                      <span className="text-[#555] font-mono">{fmtTime.format(evt.timeDate)}</span>
                     </div>
                   </div>
                   <ChevronRight className="h-3 w-3 text-[#333] group-hover/ev:text-[#666] transition-colors shrink-0" />
@@ -692,7 +775,7 @@ export default function TimeMachine({ open, onToggle, onTimeChange, onDragging, 
   );
 }
 
-function EventMiniCalendar({ badDates, onSelectDate }: { badDates: Set<string>, onSelectDate: (y: number, m: number, d: number) => void }) {
+const EventMiniCalendar = memo(function EventMiniCalendar({ badDates, onSelectDate }: { badDates: Set<string>, onSelectDate: (y: number, m: number, d: number) => void }) {
   const [currentMonth, setCurrentMonth] = useState(() => {
     const d = new Date();
     d.setDate(1);
@@ -745,4 +828,4 @@ function EventMiniCalendar({ badDates, onSelectDate }: { badDates: Set<string>, 
       </div>
     </div>
   );
-}
+});

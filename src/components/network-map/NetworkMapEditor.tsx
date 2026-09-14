@@ -18,7 +18,7 @@ import {
   BackgroundVariant,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/SileoToast";
 
 import KumaMonitorNode, { type KumaNodeData } from "./KumaMonitorNode";
 import TextLabelNode, { type TextLabelData } from "./TextLabelNode";

@@ -1,6 +1,6 @@
 "use client";
 
-import { toast } from "sonner";
+import { toast } from "@/components/ui/SileoToast";
 
 interface LensPickerModalProps {
   open: boolean;

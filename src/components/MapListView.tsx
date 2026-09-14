@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/SileoToast";
 import {
   Plus,
   Network,

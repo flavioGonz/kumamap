@@ -75,7 +75,9 @@ export async function mikrotikFetch(
   user: string,
   pass: string,
   timeoutMs = 8000,
-  port?: number
+  port?: number,
+  /** Optional POST body — when provided, the request uses POST instead of GET */
+  body?: Record<string, unknown>
 ): Promise<any> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -95,11 +97,13 @@ export async function mikrotikFetch(
       const url = `${scheme}://${ip}${portSuffix}/rest${path}`;
 
       const fetchOptions: RequestInit & { dispatcher?: unknown } = {
+        method: body ? "POST" : "GET",
         headers: {
           Authorization: authHeader,
           "Content-Type": "application/json",
         },
         signal: controller.signal,
+        ...(body ? { body: JSON.stringify(body) } : {}),
       };
 
       // For HTTPS with self-signed certs: use the insecure agent

@@ -84,6 +84,14 @@ export function dibujarNodos(L: any, map: any, ctx: ContextoRenderNodos) {
   } = ctx;
 
   if (!map || !map.getContainer()) return;
+  // Estilos de las ventanas flotantes: controles overlay que sólo aparecen
+  // cuando el mouse está encima (tráfico/ups/monitor-ng), inyectados una vez.
+  if (typeof document !== "undefined" && !document.getElementById("km-float-styles")) {
+    const st = document.createElement("style");
+    st.id = "km-float-styles";
+    st.textContent = ".km-float .km-float-ctrls{opacity:0;transition:opacity .15s}.km-float:hover .km-float-ctrls{opacity:1}";
+    document.head.appendChild(st);
+  }
   // Perf: juntamos los re-aplicadores de gradiente (FOV/beam) de este render
   // y registramos UN solo handler zoomend (quitando el previo). Antes se
   // registraba uno POR NODO en cada redibujo sin limpiarlos -> se acumulaban
@@ -346,21 +354,26 @@ export function dibujarNodos(L: any, map: any, ctx: ContextoRenderNodos) {
 
         nodeIcon = L.divIcon({
           className: "traffic-node",
-          html: `<div style="
-              background:rgba(8,12,20,.94);
-              border:1px solid ${color}44;
+          html: `<div class="km-float" style="
+              position:relative;
+              background:rgba(8,12,20,.92);
+              border:none;
               border-radius:12px;
               padding:9px 11px 8px;
               min-width:194px;
               box-shadow:0 10px 28px rgba(0,0,0,.6);
               backdrop-filter:blur(8px);
               font-family:ui-sans-serif,system-ui,sans-serif;
-              cursor:${isLocked ? "default" : "grab"};
+              cursor:grab;
             ">
+              <div class="km-float-ctrls" data-traf-ctrls="1" style="position:absolute;top:6px;right:6px;display:flex;gap:3px;opacity:0;transition:opacity .15s">
+                <span data-traf-action="edit" title="Editar ventana (SNMP)" style="width:20px;height:20px;display:flex;align-items:center;justify-content:center;border-radius:6px;background:rgba(255,255,255,.08);cursor:pointer;color:#c4d0e0;font-size:11px">✎</span>
+                <span data-traf-action="close" title="Quitar del mapa" style="width:20px;height:20px;display:flex;align-items:center;justify-content:center;border-radius:6px;background:rgba(255,255,255,.08);cursor:pointer;color:#c4d0e0;font-size:11px">✕</span>
+              </div>
               <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">
                 <span style="width:6px;height:6px;border-radius:99px;background:${color};flex:none;box-shadow:0 0 6px ${color}"></span>
                 <span style="font-size:10.5px;font-weight:600;color:#c4d0e0;letter-spacing:.02em;
-                             white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:172px">${tituloT}</span>
+                             white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:150px">${tituloT}</span>
               </div>
               <div style="display:flex;gap:12px;margin-bottom:5px">
                 ${filaT(AZUL_T, "▼", entT)}
@@ -443,7 +456,9 @@ export function dibujarNodos(L: any, map: any, ctx: ContextoRenderNodos) {
 
     const marker = L.marker([node.x, node.y], {
       icon: nodeIcon,
-      draggable: !isLocked && node.icon !== '_polygon',
+      // Las ventanas flotantes (tráfico / ups / monitor-ng) se arrastran siempre,
+      // igual que el panel de UPS, aunque el mapa esté bloqueado (modo vista).
+      draggable: (isTrafico || isUps || isMng) ? true : (!isLocked && node.icon !== '_polygon'),
     });
 
     // Camera FOV cone + interactive handles
@@ -894,8 +909,23 @@ export function dibujarNodos(L: any, map: any, ctx: ContextoRenderNodos) {
     });
 
     // Click — open popup or stream viewer for cameras
-    marker.on("click", () => {
-      if (isWaypoint || isPolygon || isTrafico || isUps || isMng) return;
+    marker.on("click", (e: any) => {
+      // Controles overlay de la ventana de tráfico (aparecen al pasar el mouse).
+      if (isTrafico) {
+        const tgt = e?.originalEvent?.target as HTMLElement | undefined;
+        const btn = tgt?.closest?.("[data-traf-action]") as HTMLElement | null;
+        if (btn) {
+          const action = btn.getAttribute("data-traf-action");
+          if (action === "edit") { abrirTrafico(node.id); }
+          else if (action === "close") {
+            pushUndo();
+            nodesRef.current = nodesRef.current.filter((n) => n.id !== node.id);
+            renderNodes(L, map);
+          }
+        }
+        return;
+      }
+      if (isWaypoint || isPolygon || isUps || isMng) return;
       // Label click: show description tooltip if it has one
       if (isLabel) {
         const labelCd = safeJsonParse<NodeCustomData>(nodesRef.current.find(n => n.id === node.id)?.custom_data);

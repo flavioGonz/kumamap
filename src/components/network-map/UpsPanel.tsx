@@ -40,6 +40,47 @@ const ANCHO_MINI = 214; // mismo ancho que la ventana de tráfico
 const GRAF_W = ANCHO - 26;   // ancho útil dentro del panel
 const GRAF_H = 52;
 
+/* ─────────────────────────────────────── pila con niveles ── */
+
+/**
+ * Ícono de pila (batería) con niveles de medición: la cáscara con su borne y,
+ * dentro, barritas que se van llenando según la carga y toman el color del
+ * estado (verde / ámbar / rojo). Sirve para leer la batería de un vistazo.
+ */
+function PilaBateria({ charge, enBateria, w = 30 }: { charge: number; enBateria?: boolean; w?: number }) {
+  const c = Math.max(0, Math.min(100, charge));
+  const col = batteryColor(c);
+  const h = w * 0.56;
+  const bornW = w * 0.08;
+  const cuerpoW = w - bornW - 1;
+  const pad = Math.max(1.4, w * 0.07);
+  const niveles = 4;
+  const gap = pad * 0.8;
+  const interiorW = cuerpoW - pad * 2;
+  const barW = (interiorW - gap * (niveles - 1)) / niveles;
+  const llenos = Math.round((c / 100) * niveles);
+  return (
+    <span style={{ position: "relative", display: "inline-flex", lineHeight: 0 }} title={`Batería ${Math.round(c)}%`}>
+      <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} style={{ display: "block" }}>
+        {/* cáscara */}
+        <rect x={0.75} y={0.75} width={cuerpoW} height={h - 1.5} rx={2.2} fill="none"
+          stroke="rgba(255,255,255,.5)" strokeWidth={1.2} />
+        {/* borne */}
+        <rect x={cuerpoW + 1} y={h * 0.3} width={bornW} height={h * 0.4} rx={0.8} fill="rgba(255,255,255,.5)" />
+        {/* niveles */}
+        {Array.from({ length: niveles }).map((_, i) => (
+          <rect key={i} x={pad + i * (barW + gap)} y={pad} width={barW} height={h - pad * 2} rx={0.8}
+            fill={i < llenos ? col : "rgba(255,255,255,.09)"}
+            style={{ transition: "fill .5s ease" }} />
+        ))}
+      </svg>
+      {enBateria && (
+        <span style={{ position: "absolute", right: -3, top: -4, fontSize: w * 0.34, color: AMBAR, lineHeight: 1 }}>⚡</span>
+      )}
+    </span>
+  );
+}
+
 /* ─────────────────────────────────────────── anillo de carga ── */
 
 function Anillo({ pct, color, enBateria, etiqueta }: {
@@ -180,6 +221,9 @@ function inyectar() {
     .ups-btn.act{color:${AZUL};border-color:${AZUL}55;background:${AZUL}1c}
     .ups-mini b{font-size:13px;font-weight:700;font-variant-numeric:tabular-nums;color:#e7edf6}
     .ups-mini small{font-size:9px;opacity:.6;margin-left:1px}
+    /* Sin marcos: los controles de la cabecera sólo aparecen al pasar el mouse. */
+    .ups-panel .ups-hd-ctrls{opacity:0;transition:opacity .15s;pointer-events:none}
+    .ups-panel:hover .ups-hd-ctrls{opacity:1;pointer-events:auto}
     @media (prefers-reduced-motion:reduce){ .ups-late,[style*="upsLate"]{animation:none!important} }
   `;
   document.head.appendChild(s);
@@ -347,14 +391,17 @@ export default function UpsPanel({
 
   return (
     <div
-      className="fixed z-50 flex flex-col"
+      className="ups-panel fixed z-50 flex flex-col"
       style={{
         left: pos.left, top: pos.top, width: ancho,
         maxHeight: "calc(100vh - 40px)",
         background: "rgba(11,14,20,.97)",
-        border: `1px solid ${enBateria ? AMBAR + "44" : "rgba(255,255,255,.08)"}`,
+        // Sin marcos: sin borde; cuando está en batería, un halo ámbar en vez de borde.
+        border: "none",
         borderRadius: 14,
-        boxShadow: "0 18px 50px rgba(0,0,0,.55)",
+        boxShadow: enBateria
+          ? `0 18px 50px rgba(0,0,0,.55), 0 0 0 1px ${AMBAR}55, 0 0 22px ${AMBAR}33`
+          : "0 18px 50px rgba(0,0,0,.55)",
         backdropFilter: "blur(18px)",
         overflow: "hidden",
         userSelect: arrastrando ? "none" : "auto",
@@ -363,7 +410,6 @@ export default function UpsPanel({
       {/* ── cabecera ── */}
       <div onMouseDown={alBajar} style={{
         display: "flex", alignItems: "center", gap: 9, padding: "9px 11px",
-        borderBottom: "1px solid rgba(255,255,255,.07)",
         cursor: arrastrando ? "grabbing" : "grab",
         background: `linear-gradient(180deg, ${cEstado}0f, transparent)`,
       }}>
@@ -386,7 +432,7 @@ export default function UpsPanel({
             </div>
           )}
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+        <div className="ups-hd-ctrls" style={{ display: "flex", alignItems: "center", gap: 4 }}>
           <button className="ups-btn" onClick={consultar} disabled={loading} title="Volver a consultar">
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
           </button>
@@ -425,8 +471,11 @@ export default function UpsPanel({
 
           {bat && (
             <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-                <span style={{ fontSize: 9, color: "#7d8da0", textTransform: "uppercase", letterSpacing: ".05em" }}>Batería</span>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 9, color: "#7d8da0", textTransform: "uppercase", letterSpacing: ".05em" }}>
+                  <PilaBateria charge={bat.charge} enBateria={enBateria} w={26} />
+                  Batería
+                </span>
                 <span style={{ fontSize: 12.5, fontWeight: 700, color: batteryColor(bat.charge), fontVariantNumeric: "tabular-nums" }}>{Math.round(bat.charge)}%</span>
               </div>
               <div style={{ height: 5, borderRadius: 99, background: "rgba(255,255,255,.08)", overflow: "hidden" }}>

@@ -8,6 +8,7 @@ import ContextMenu, { menuIcons } from "./ContextMenu";
 import LinkModal, { type LinkFormData } from "./LinkModal";
 import InputModal from "./InputModal";
 import SnmpTrafficModal, { type TraficoAplicado } from "./SnmpTrafficModal";
+import TrafficHistoryModal from "./TrafficHistoryModal";
 import {
   Pencil,
   Signal,
@@ -583,6 +584,7 @@ export default function LeafletMapView({
   const [showPass, setShowPass] = useState(false);
   const [trafModalOpen, setTrafModalOpen] = useState(false);
   const [trafModalNodeId, setTrafModalNodeId] = useState<string | null>(null);
+  const [histTrafNodeId, setHistTrafNodeId] = useState<string | null>(null);
 
   // Camera stream modals
   const [streamConfigNodeId, setStreamConfigNodeId] = useState<string | null>(null);
@@ -1937,7 +1939,7 @@ export default function LeafletMapView({
       setLensPickerNodeId, setLensPickerOpen, setNodeMapModalNodeId, setOnvifModalOpen,
       setRackDrawerNodeId, setSizePickerNodeId, setStreamConfigNodeId, setStreamViewers,
       setTimeMachineOpen, setTmFocusMonitorId, setUpsConfigNodeId, setUpsPaneles,
-      setTrafModalNodeId, setTrafModalOpen,
+      setTrafModalNodeId, setTrafModalOpen, setHistTrafNodeId,
     });
   }
 
@@ -3098,6 +3100,23 @@ export default function LeafletMapView({
           }}
         />
       )}
+
+      {/* ── Historial de la ventana de tráfico ── */}
+      {histTrafNodeId && (() => {
+        const hn = nodesRef.current.find((n) => n.id === histTrafNodeId);
+        const hcd = safeJsonParse<NodeCustomData>(hn?.custom_data);
+        const st = hcd.snmpTraffic;
+        return (
+          <TrafficHistoryModal
+            open={!!histTrafNodeId}
+            titulo={hn?.label || st?.ifName || "Ventana de tráfico"}
+            inId={st?.kumaInId}
+            outId={st?.kumaOutId}
+            capacidadBps={st?.capacidadBps}
+            onClose={() => setHistTrafNodeId(null)}
+          />
+        );
+      })()}
 
 
       {/* Assign Monitor Modal */}

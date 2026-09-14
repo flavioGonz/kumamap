@@ -61,6 +61,7 @@ export interface ContextoMenuNodo {
   setUpsPaneles: React.Dispatch<React.SetStateAction<Array<{ nodeId: string; x: number; y: number }>>>;
   setTrafModalNodeId: React.Dispatch<React.SetStateAction<string | null>>;
   setTrafModalOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  setHistTrafNodeId: React.Dispatch<React.SetStateAction<string | null>>;
 }
 
 export function itemsDeNodo(nodeId: string, ctx: ContextoMenuNodo) {
@@ -73,7 +74,7 @@ export function itemsDeNodo(nodeId: string, ctx: ContextoMenuNodo) {
     setLensPickerNodeId, setLensPickerOpen, setNodeMapModalNodeId, setOnvifModalOpen,
     setRackDrawerNodeId, setSizePickerNodeId, setStreamConfigNodeId, setStreamViewers,
     setTimeMachineOpen, setTmFocusMonitorId, setUpsConfigNodeId, setUpsPaneles,
-    setTrafModalNodeId, setTrafModalOpen,
+    setTrafModalNodeId, setTrafModalOpen, setHistTrafNodeId,
   } = ctx;
 
   const node = nodesRef.current.find((n) => n.id === nodeId);
@@ -92,6 +93,14 @@ export function itemsDeNodo(nodeId: string, ctx: ContextoMenuNodo) {
         label: cdT.snmpTraffic ? "Editar ventana (SNMP)" : "Configurar ventana (SNMP)",
         icon: menuIcons.Signal,
         onClick: () => { setTrafModalNodeId(nodeId); setTrafModalOpen(true); },
+      },
+      {
+        label: "Ver historial",
+        icon: menuIcons.Clock,
+        onClick: () => {
+          if (cdT.snmpTraffic?.kumaInId) setHistTrafNodeId(nodeId);
+          else toast.info("Todavía no tiene sensores creados");
+        },
       },
       {
         label: "Apariencia",

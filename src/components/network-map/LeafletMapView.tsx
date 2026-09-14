@@ -1425,6 +1425,7 @@ export default function LeafletMapView({
       setInputModalOpen, setNodeMapModalNodeId, setRackDrawerNodeId, setStreamConfigNodeId,
       setStreamViewers, setTooltipAnchor,
       renderNodes, getStatusColor, getMonitorData,
+      abrirTrafico: (nid: string) => { setTrafModalNodeId(nid); setTrafModalOpen(true); },
     });
   }
 
@@ -2545,7 +2546,7 @@ export default function LeafletMapView({
                 const id = `traf-${Date.now()}`;
                 nodesRef.current = [...nodesRef.current, {
                   id, kuma_monitor_id: null, label: "Tráfico", x: center.lat, y: center.lng,
-                  icon: "_traffic", custom_data: JSON.stringify({ type: "traffic" }),
+                  icon: "_traffic", custom_data: JSON.stringify({ type: "traffic", floatPos: { fx: 0.5, fy: 0.4 } }),
                 }];
                 if (LRef.current) renderNodes(LRef.current, mapRef.current);
                 setTrafModalNodeId(id); setTrafModalOpen(true);

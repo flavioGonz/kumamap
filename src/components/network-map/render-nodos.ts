@@ -64,6 +64,8 @@ export interface ContextoRenderNodos {
   setStreamConfigNodeId: React.Dispatch<React.SetStateAction<string | null>>;
   setStreamViewers: React.Dispatch<React.SetStateAction<{ nodeId: string; mode: "tooltip" | "pip" }[]>>;
   setTooltipAnchor: React.Dispatch<React.SetStateAction<{ x: number; y: number }>>;
+  /** Abre el modal de fuente SNMP para una ventana de tráfico (crear/reconfigurar). */
+  abrirTrafico: (nodeId: string) => void;
 }
 
 export function dibujarNodos(L: any, map: any, ctx: ContextoRenderNodos) {
@@ -74,7 +76,7 @@ export function dibujarNodos(L: any, map: any, ctx: ContextoRenderNodos) {
     renderEdges, setAntennaConfigNodeId, setCtxMenu, setInputModalConfig,
     setInputModalOpen, setNodeMapModalNodeId, setRackDrawerNodeId, setStreamConfigNodeId,
     setStreamViewers, setTooltipAnchor,
-    renderNodes, getStatusColor, getMonitorData,
+    renderNodes, getStatusColor, getMonitorData, abrirTrafico,
   } = ctx;
 
   if (!map || !map.getContainer()) return;
@@ -772,7 +774,9 @@ export function dibujarNodos(L: any, map: any, ctx: ContextoRenderNodos) {
           if (readonly) window.open(apiUrl(`/view/${linked[0].id}`), "_blank");
           else setNodeMapModalNodeId(node.id);
         } else if (!isLockedRef.current) {
-          if (isCamera) {
+          if (isTrafico) {
+            abrirTrafico(node.id);
+          } else if (isCamera) {
             // Camera: open stream config modal
             setStreamConfigNodeId(node.id);
           } else if (isAntenna) {
@@ -964,7 +968,15 @@ export function dibujarNodos(L: any, map: any, ctx: ContextoRenderNodos) {
       const pos = marker.getLatLng();
       const idx = nodesRef.current.findIndex((n) => n.id === node.id);
       if (idx >= 0) {
-        nodesRef.current[idx] = { ...nodesRef.current[idx], x: pos.lat, y: pos.lng };
+        if (isTrafico) {
+          const cont = map.getContainer();
+          const cp = map.latLngToContainerPoint(pos);
+          const cdF = safeJsonParse<NodeCustomData>(nodesRef.current[idx].custom_data);
+          cdF.floatPos = { fx: cp.x / Math.max(1, cont.clientWidth), fy: cp.y / Math.max(1, cont.clientHeight) };
+          nodesRef.current[idx] = { ...nodesRef.current[idx], custom_data: JSON.stringify(cdF) };
+        } else {
+          nodesRef.current[idx] = { ...nodesRef.current[idx], x: pos.lat, y: pos.lng };
+        }
       }
       renderEdges(L, map);
     });
@@ -972,4 +984,30 @@ export function dibujarNodos(L: any, map: any, ctx: ContextoRenderNodos) {
     marker.addTo(map);
     markersRef.current.set(node.id, marker);
   });
+
+  // ── Ventanas de tráfico: flotan fijas en la pantalla ──
+  // En vez de quedar clavadas a una coordenada del mapa (y moverse al navegar),
+  // se reposicionan en cada move/zoom para quedar en el mismo punto de pantalla,
+  // guardado como fracción del contenedor en cd.floatPos. Un solo handler por
+  // mapa, refrescado en cada render.
+  const mapAny = map as any;
+  if (mapAny.__trafReposition) {
+    map.off("move zoom moveend zoomend resize viewreset", mapAny.__trafReposition);
+  }
+  const reposTraf = () => {
+    const cont = map.getContainer();
+    if (!cont) return;
+    const W = cont.clientWidth, H = cont.clientHeight;
+    for (const nn of nodesRef.current) {
+      if (nn.icon !== "_traffic") continue;
+      const cdT = safeJsonParse<NodeCustomData>(nn.custom_data);
+      const fp = cdT.floatPos;
+      const mk = markersRef.current.get(nn.id);
+      if (!mk || !fp || typeof fp.fx !== "number") continue;
+      try { mk.setLatLng(map.containerPointToLatLng([fp.fx * W, fp.fy * H])); } catch { /* */ }
+    }
+  };
+  mapAny.__trafReposition = reposTraf;
+  map.on("move zoom moveend zoomend resize viewreset", reposTraf);
+  reposTraf();
 }

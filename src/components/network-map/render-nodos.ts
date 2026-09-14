@@ -247,7 +247,7 @@ export function dibujarNodos(L: any, map: any, ctx: ContextoRenderNodos) {
                    <div style="font-weight:600;color:#c8d4e4;margin-bottom:3px">Ventana de tráfico</div>
                    Sin sensor asignado. Clic derecho → Editar y elegí un monitor SNMP.
                  </div>`,
-          iconSize: [0, 0], iconAnchor: [0, 0],
+          iconSize: [200, 64], iconAnchor: [0, 0],
         });
       } else {
         const AZUL_T = "#3987e5", AQUA_T = "#199e70";
@@ -353,7 +353,7 @@ export function dibujarNodos(L: any, map: any, ctx: ContextoRenderNodos) {
               ${graficoT}
               <div style="margin-top:5px;font-size:9px;color:#7d8da0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:182px">${pieT}</div>
             </div>`,
-          iconSize: [0, 0], iconAnchor: [0, 0],
+          iconSize: [214, 160], iconAnchor: [0, 0],
         });
       }
     } else {
@@ -723,7 +723,7 @@ export function dibujarNodos(L: any, map: any, ctx: ContextoRenderNodos) {
     }
 
     // Label tooltip (always visible) — only for non-label/camera nodes
-    if (!isLabel && !isWaypoint) {
+    if (!isLabel && !isWaypoint && !isTrafico) {
       const cd_label = safeJsonParse<NodeCustomData>(node.custom_data);
       if (!cd_label.labelHidden) {
         const labelFontSizePx = cd_label.labelSize ? `${cd_label.labelSize}px` : "11px";
@@ -809,7 +809,7 @@ export function dibujarNodos(L: any, map: any, ctx: ContextoRenderNodos) {
 
     // Click — open popup or stream viewer for cameras
     marker.on("click", () => {
-      if (isWaypoint || isPolygon) return;
+      if (isWaypoint || isPolygon || isTrafico) return;
       // Label click: show description tooltip if it has one
       if (isLabel) {
         const labelCd = safeJsonParse<NodeCustomData>(nodesRef.current.find(n => n.id === node.id)?.custom_data);

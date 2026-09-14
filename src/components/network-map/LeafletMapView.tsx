@@ -1937,6 +1937,7 @@ export default function LeafletMapView({
       setLensPickerNodeId, setLensPickerOpen, setNodeMapModalNodeId, setOnvifModalOpen,
       setRackDrawerNodeId, setSizePickerNodeId, setStreamConfigNodeId, setStreamViewers,
       setTimeMachineOpen, setTmFocusMonitorId, setUpsConfigNodeId, setUpsPaneles,
+      setTrafModalNodeId, setTrafModalOpen,
     });
   }
 

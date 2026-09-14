@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { Plus } from "lucide-react";
+import { Plus, ChevronRight, ChevronLeft } from "lucide-react";
 import Tooltip from "./Tooltip";
 
 interface EditorSidebarControlsProps {
@@ -41,16 +41,51 @@ export default function EditorSidebarControls({
   timeMachineOpen,
   setTimeMachineOpen,
 }: EditorSidebarControlsProps) {
+  // Barra plegable (como TimeMachine). Se recuerda el estado por navegador.
+  const [collapsed, setCollapsed] = React.useState<boolean>(() => {
+    try { return localStorage.getItem("km_ctrlbar_collapsed") === "1"; } catch { return false; }
+  });
+  const toggleCollapsed = () => {
+    setCollapsed((v) => {
+      const next = !v;
+      try { localStorage.setItem("km_ctrlbar_collapsed", next ? "1" : "0"); } catch {}
+      return next;
+    });
+  };
+
+  const shellStyle: React.CSSProperties = {
+    zIndex: 10000,
+    right: sidebarWidth + 12,
+    background: "rgba(10,10,10,0.85)",
+    border: "1px solid rgba(255,255,255,0.08)",
+    boxShadow: "0 12px 40px rgba(0,0,0,0.5)",
+    transition: "right 0.3s ease",
+  };
+
+  // Plegada: sólo un tirador para volver a mostrarla.
+  if (collapsed) {
+    return (
+      <div className="fixed top-1/2 -translate-y-1/2 flex flex-col rounded-xl p-1 shadow-2xl backdrop-blur-3xl shrink-0" style={shellStyle}>
+        <Tooltip content="Mostrar controles" placement="left">
+          <button onClick={toggleCollapsed}
+            className="h-8 w-8 flex items-center justify-center rounded-lg text-[#888] hover:text-[#ededed] hover:bg-white/10 transition-all">
+            <ChevronLeft className="h-4 w-4" />
+          </button>
+        </Tooltip>
+      </div>
+    );
+  }
+
   return (
     <div className="fixed top-1/2 -translate-y-1/2 flex flex-col gap-1 rounded-xl p-1 shadow-2xl backdrop-blur-3xl shrink-0"
-      style={{
-        zIndex: 10000,
-        right: sidebarWidth + 12,
-        background: "rgba(10,10,10,0.85)",
-        border: "1px solid rgba(255,255,255,0.08)",
-        boxShadow: "0 12px 40px rgba(0,0,0,0.5)",
-        transition: "right 0.3s ease",
-      }}>
+      style={shellStyle}>
+      <Tooltip content="Ocultar controles" placement="left">
+        <button onClick={toggleCollapsed}
+          className="h-7 w-8 flex items-center justify-center rounded-lg text-[#888] hover:text-[#ededed] hover:bg-white/10 transition-all">
+          <ChevronRight className="h-4 w-4" />
+        </button>
+      </Tooltip>
+      <div className="mx-1 h-px bg-white/10 my-0.5" />
       <Tooltip content="Acercar" placement="left">
         <button onClick={onZoomIn}
           className="h-8 w-8 flex items-center justify-center rounded-lg text-[#ededed] hover:bg-white/10 transition-all">

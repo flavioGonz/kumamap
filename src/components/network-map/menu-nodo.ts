@@ -59,6 +59,8 @@ export interface ContextoMenuNodo {
   setTmFocusMonitorId: React.Dispatch<React.SetStateAction<number | null>>;
   setUpsConfigNodeId: React.Dispatch<React.SetStateAction<string | null>>;
   setUpsPaneles: React.Dispatch<React.SetStateAction<Array<{ nodeId: string; x: number; y: number }>>>;
+  setTrafModalNodeId: React.Dispatch<React.SetStateAction<string | null>>;
+  setTrafModalOpen: React.Dispatch<React.SetStateAction<boolean>>;
 }
 
 export function itemsDeNodo(nodeId: string, ctx: ContextoMenuNodo) {
@@ -71,11 +73,91 @@ export function itemsDeNodo(nodeId: string, ctx: ContextoMenuNodo) {
     setLensPickerNodeId, setLensPickerOpen, setNodeMapModalNodeId, setOnvifModalOpen,
     setRackDrawerNodeId, setSizePickerNodeId, setStreamConfigNodeId, setStreamViewers,
     setTimeMachineOpen, setTmFocusMonitorId, setUpsConfigNodeId, setUpsPaneles,
+    setTrafModalNodeId, setTrafModalOpen,
   } = ctx;
 
   const node = nodesRef.current.find((n) => n.id === nodeId);
   const isLabel = node?.icon === "_textLabel";
   const isWaypoint = node?.icon === "_waypoint";
+  const isTrafico = node?.icon === "_traffic";
+  const isUps = node?.icon === "ups";
+
+  // Ventana de tráfico: su menú es propio (editar SNMP, historial en Kuma, quitar).
+  // Antes caía en el menú genérico de nodo (Reasignar/Desasignar monitor, etc.)
+  // que no tiene sentido para una ventana de tráfico.
+  if (isTrafico) {
+    const cdT = safeJsonParse<NodeCustomData>(node?.custom_data);
+    return [
+      {
+        label: cdT.snmpTraffic ? "Editar ventana (SNMP)" : "Configurar ventana (SNMP)",
+        icon: menuIcons.Signal,
+        onClick: () => { setTrafModalNodeId(nodeId); setTrafModalOpen(true); },
+      },
+      {
+        label: "Apariencia",
+        icon: menuIcons.Palette,
+        onClick: () => { setColorPickerNodeId(nodeId); setColorPickerOpen(true); },
+      },
+      {
+        label: "Quitar ventana del mapa",
+        icon: menuIcons.Trash2,
+        danger: true,
+        divider: true,
+        onClick: () => {
+          pushUndo();
+          nodesRef.current = nodesRef.current.filter((n) => n.id !== nodeId);
+          if (LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current);
+          toast.success("Ventana quitada del mapa (los sensores en Uptime Kuma no se tocaron)");
+        },
+      },
+    ];
+  }
+
+  // Nodo UPS: menú propio (configurar conexión, panel, quitar).
+  if (isUps) {
+    const cdU = safeJsonParse<NodeCustomData>(node?.custom_data);
+    return [
+      {
+        label: cdU.ip ? "Configurar UPS" : "Configurar UPS…",
+        icon: menuIcons.Settings,
+        onClick: () => { setUpsConfigNodeId(nodeId); },
+      },
+      {
+        label: cdU.upsPanelFijo ? "Ocultar panel" : "Mostrar panel",
+        icon: menuIcons.Activity,
+        onClick: () => {
+          const idx = nodesRef.current.findIndex((n) => n.id === nodeId);
+          if (idx < 0) return;
+          const prev = nodesRef.current[idx];
+          const pcd = safeJsonParse<NodeCustomData>(prev.custom_data);
+          pcd.type = "ups";
+          pcd.upsPanelFijo = !pcd.upsPanelFijo;
+          nodesRef.current[idx] = { ...prev, custom_data: JSON.stringify(pcd) };
+          if (LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current);
+          if (pcd.upsPanelFijo) setUpsPaneles((p) => p.some((x) => x.nodeId === nodeId) ? p : [...p, { nodeId, x: 0, y: 0 }]);
+          else setUpsPaneles((p) => p.filter((x) => x.nodeId !== nodeId));
+        },
+      },
+      {
+        label: "Apariencia",
+        icon: menuIcons.Palette,
+        onClick: () => { setColorPickerNodeId(nodeId); setColorPickerOpen(true); },
+      },
+      {
+        label: "Quitar UPS del mapa",
+        icon: menuIcons.Trash2,
+        danger: true,
+        divider: true,
+        onClick: () => {
+          pushUndo();
+          nodesRef.current = nodesRef.current.filter((n) => n.id !== nodeId);
+          setUpsPaneles((p) => p.filter((x) => x.nodeId !== nodeId));
+          if (LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current);
+          toast.success("UPS quitada del mapa");
+        },
+      },
+    ];
+  }
 
   // Polygons: rename, color, delete
   const isPolygon = node?.icon === "_polygon";

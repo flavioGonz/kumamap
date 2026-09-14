@@ -7,6 +7,7 @@ import type { KumaMonitor } from "./MonitorPanel";
 import ContextMenu, { menuIcons } from "./ContextMenu";
 import LinkModal, { type LinkFormData } from "./LinkModal";
 import InputModal from "./InputModal";
+import SnmpTrafficModal, { type TraficoAplicado } from "./SnmpTrafficModal";
 import {
   Pencil,
   Signal,
@@ -580,6 +581,8 @@ export default function LeafletMapView({
   const [inputModalOpen, setInputModalOpen] = useState(false);
   const [inputModalConfig, setInputModalConfig] = useState<NodeEditConfig>({ nodeId: "", initial: "" });
   const [showPass, setShowPass] = useState(false);
+  const [trafModalOpen, setTrafModalOpen] = useState(false);
+  const [trafModalNodeId, setTrafModalNodeId] = useState<string | null>(null);
 
   // Camera stream modals
   const [streamConfigNodeId, setStreamConfigNodeId] = useState<string | null>(null);
@@ -715,6 +718,44 @@ export default function LeafletMapView({
 
   // Keep ref in sync with state for closures
   useEffect(() => { linkSourceRef.current = linkSource; }, [linkSource]);
+
+  // ── Ventana de tráfico: lectura en vivo por SNMP ──
+  // Con el editor abierto, cada 3 s leemos la tasa real de cada ventana de
+  // tráfico y la guardamos para que el nodo se mueva al segundo, en vez de
+  // esperar el latido de Kuma (30 s). Al cerrar, el nodo sigue con el historial.
+  useEffect(() => {
+    let vivo = true;
+    const tick = async () => {
+      const nodos = nodesRef.current.filter((nn) => nn.icon === "_traffic" && nn.kuma_monitor_id);
+      if (!nodos.length) return;
+      let cambio = false;
+      for (const nn of nodos) {
+        const cd = safeJsonParse<NodeCustomData>(nn.custom_data);
+        const st = cd.snmpTraffic;
+        if (!st) continue;
+        try {
+          const r = await fetch(apiUrl("/api/snmp/traffic-live"), {
+            method: "POST", credentials: "include", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ host: st.host, community: st.community, version: st.version, ifIndex: st.ifIndex, port: st.port }),
+          });
+          if (!r.ok) continue;
+          const d = await r.json();
+          if (d?.primera) continue;
+          const clave = `traf-${nn.kuma_monitor_id}`;
+          const c: any = (window as any)[clave] || {};
+          const buf = Array.isArray(c.vivoBuf) ? c.vivoBuf : [];
+          buf.push({ t: Date.now(), e: d.entradaBps, s: d.salidaBps });
+          c.vivoBuf = buf.slice(-60);
+          c.capacidadBps = d.capacidadBps ?? c.capacidadBps ?? null;
+          (window as any)[clave] = c;
+          cambio = true;
+        } catch { /* una lectura suelta no importa */ }
+      }
+      if (cambio && vivo && LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current);
+    };
+    const iv = setInterval(tick, 3000);
+    return () => { vivo = false; clearInterval(iv); };
+  }, []);
   useEffect(() => {
     measureModeRef.current = measureMode;
     // Toggle crosshair cursor on the map container while measuring
@@ -2507,7 +2548,7 @@ export default function LeafletMapView({
                   icon: "_traffic", custom_data: JSON.stringify({ type: "traffic" }),
                 }];
                 if (LRef.current) renderNodes(LRef.current, mapRef.current);
-                toast.success("Ventana agregada — clic derecho → Editar para elegir el sensor SNMP");
+                setTrafModalNodeId(id); setTrafModalOpen(true);
               }}
             />
           </ToolbarDropdown>
@@ -3034,6 +3075,25 @@ export default function LeafletMapView({
             }
           }}
           onClose={() => { setInputModalOpen(false); setShowPass(false); }}
+        />
+      )}
+
+      {/* ═══ Ventana de tráfico: fuente SNMP ═══ */}
+      {trafModalOpen && (
+        <SnmpTrafficModal
+          open={trafModalOpen}
+          nodeId={trafModalNodeId}
+          onClose={() => { setTrafModalOpen(false); setTrafModalNodeId(null); }}
+          onApplied={(nid, p: TraficoAplicado) => {
+            const idx = nodesRef.current.findIndex((nn) => nn.id === nid);
+            if (idx >= 0) {
+              const ncd = safeJsonParse<NodeCustomData>(nodesRef.current[idx].custom_data);
+              ncd.snmpTraffic = p.snmpTraffic;
+              nodesRef.current[idx] = { ...nodesRef.current[idx], kuma_monitor_id: p.kumaMonitorId, label: p.label, custom_data: JSON.stringify(ncd) };
+              if (LRef.current && mapRef.current) { renderNodes(LRef.current, mapRef.current); renderEdges(LRef.current, mapRef.current); }
+              toast.success("Par de sensores creado. Acordate de guardar el mapa.");
+            }
+          }}
         />
       )}
 

@@ -256,12 +256,25 @@ export function dibujarNodos(L: any, map: any, ctx: ContextoRenderNodos) {
 
         if (!cacheT || cacheT.sello !== monTraf.msg) {
           safeFetch<any>(apiUrl(`/api/kuma/traffic/${node.kuma_monitor_id}?minutos=60`), undefined, "TraficoNodo")
-            .then((dd) => { if (dd) (window as any)[claveT] = { ...dd, sello: monTraf.msg || "" }; })
+            .then((dd) => { if (dd) (window as any)[claveT] = { ...dd, sello: monTraf.msg || "", vivoBuf: (window as any)[claveT]?.vivoBuf }; })
             .catch(() => {});
         }
 
-        const entT = cacheT?.entrada || null;
-        const salT = cacheT?.salida || null;
+        let entT = cacheT?.entrada || null;
+        let salT = cacheT?.salida || null;
+        // Si hay lecturas en vivo (poll SNMP cada 3 s), dibujamos con esas; si no,
+        // con el historial de Kuma.
+        const vbuf: Array<{ t: number; e: number | null; s: number | null }> = cacheT?.vivoBuf || [];
+        if (vbuf.length >= 2) {
+          const serie = (k: "e" | "s") => {
+            const puntos = vbuf.filter((x) => x[k] != null).map((x) => ({ t: x.t, bps: x[k] as number }));
+            if (puntos.length < 2) return null;
+            const vals = puntos.map((p) => p.bps);
+            return { puntos, actual: vals[vals.length - 1], pico: Math.max(...vals), promedio: 0 };
+          };
+          entT = serie("e") || entT;
+          salT = serie("s") || salT;
+        }
         const capT: number | null = cacheT?.capacidadBps ?? null;
         const ifazT = cacheT?.interfaz || null;
         const picoT = Math.max(entT?.pico || 0, salT?.pico || 0);

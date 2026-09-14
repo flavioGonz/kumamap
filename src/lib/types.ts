@@ -70,6 +70,12 @@ export interface KumaHeartbeat {
 
 /** Parsed shape of `node.custom_data` for regular nodes, cameras, labels, polygons, racks, etc. */
 export interface NodeCustomData {
+  /** Ventana de tráfico: fuente SNMP configurada desde el modal (par de sensores en Kuma). */
+  snmpTraffic?: {
+    host: string; community: string; version: "1" | "2c"; port: number;
+    ifIndex: string; ifName?: string; ifAlias?: string;
+    kumaInId: number; kumaOutId: number; capacidadBps: number | null;
+  };
   // Common
   type?: string;              // e.g. "rack", "polygon", "camera"
   ip?: string;

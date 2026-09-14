@@ -78,6 +78,8 @@ export interface NodeCustomData {
     ifIndex: string; ifName?: string; ifAlias?: string;
     kumaInId: number; kumaOutId: number; capacidadBps: number | null;
   };
+  /** Nodo monitor-ng: deviceId del dispositivo adoptado que muestra la tarjeta. */
+  mngDeviceId?: string;
   // Common
   type?: string;              // e.g. "rack", "polygon", "camera"
   ip?: string;

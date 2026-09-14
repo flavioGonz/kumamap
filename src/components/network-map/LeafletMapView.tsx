@@ -9,6 +9,7 @@ import LinkModal, { type LinkFormData } from "./LinkModal";
 import InputModal from "./InputModal";
 import SnmpTrafficModal, { type TraficoAplicado } from "./SnmpTrafficModal";
 import TrafficHistoryModal from "./TrafficHistoryModal";
+import MonitorNgLinkModal, { type MngDevice } from "./MonitorNgLinkModal";
 import {
   Pencil,
   Signal,
@@ -585,6 +586,7 @@ export default function LeafletMapView({
   const [trafModalOpen, setTrafModalOpen] = useState(false);
   const [trafModalNodeId, setTrafModalNodeId] = useState<string | null>(null);
   const [histTrafNodeId, setHistTrafNodeId] = useState<string | null>(null);
+  const [mngLinkNodeId, setMngLinkNodeId] = useState<string | null>(null);
 
   // Camera stream modals
   const [streamConfigNodeId, setStreamConfigNodeId] = useState<string | null>(null);
@@ -798,6 +800,39 @@ export default function LeafletMapView({
         }
       }
       if (cambio && vivo && LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current);
+    };
+    tick();
+    const iv = setInterval(tick, 15000);
+    return () => { vivo = false; clearInterval(iv); };
+  }, []);
+
+  // ── Poller de nodos monitor-ng ──
+  // Si hay algún nodo monitor-ng vinculado, trae la lista de dispositivos
+  // adoptados (con estado + métricas) cada 15 s y la deja indexada en
+  // window["mng-<deviceId>"]; cada tarjeta lee el suyo.
+  useEffect(() => {
+    let vivo = true;
+    const tick = async () => {
+      const hayMng = nodesRef.current.some((nn) => {
+        const cd = safeJsonParse<NodeCustomData>(nn.custom_data);
+        return cd.type === "monitorng" && cd.mngDeviceId;
+      });
+      if (!hayMng) return;
+      try {
+        const r = await fetch(apiUrl("/api/monitor-ng/devices"), { credentials: "include" });
+        if (!r.ok) return;
+        const j = await r.json();
+        const adopted: any[] = Array.isArray(j?.adopted) ? j.adopted : [];
+        let cambio = false;
+        for (const d of adopted) {
+          if (!d?.deviceId) continue;
+          const clave = `mng-${d.deviceId}`;
+          const antes = (window as any)[clave];
+          if (!antes || antes.state !== d.state || antes.ts !== d.ts || antes.stale !== d.stale) cambio = true;
+          (window as any)[clave] = d;
+        }
+        if (cambio && vivo && LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current);
+      } catch { /* una lectura suelta no importa */ }
     };
     tick();
     const iv = setInterval(tick, 15000);
@@ -1474,6 +1509,7 @@ export default function LeafletMapView({
       renderNodes, getStatusColor, getMonitorData,
       abrirTrafico: (nid: string) => { setTrafModalNodeId(nid); setTrafModalOpen(true); },
       abrirUps: (nid: string) => { setUpsConfigNodeId(nid); },
+      abrirMng: (nid: string) => { setMngLinkNodeId(nid); },
     });
   }
 
@@ -1985,7 +2021,7 @@ export default function LeafletMapView({
       setLensPickerNodeId, setLensPickerOpen, setNodeMapModalNodeId, setOnvifModalOpen,
       setRackDrawerNodeId, setSizePickerNodeId, setStreamConfigNodeId, setStreamViewers,
       setTimeMachineOpen, setTmFocusMonitorId, setUpsConfigNodeId, setUpsPaneles,
-      setTrafModalNodeId, setTrafModalOpen, setHistTrafNodeId,
+      setTrafModalNodeId, setTrafModalOpen, setHistTrafNodeId, setMngLinkNodeId,
     });
   }
 
@@ -2501,11 +2537,12 @@ export default function LeafletMapView({
                 const center = mapRef.current.getCenter();
                 const id = `mng-${Date.now()}`;
                 nodesRef.current = [...nodesRef.current, {
-                  id, kuma_monitor_id: null, label: "Servidor", x: center.lat, y: center.lng, icon: "server",
-                  custom_data: JSON.stringify({ type: "monitorng" }),
+                  id, kuma_monitor_id: null, label: "Servidor monitor-ng", x: center.lat, y: center.lng, icon: "server",
+                  custom_data: JSON.stringify({ type: "monitorng", floatPos: { fx: 0.5, fy: 0.4 } }),
                 }];
                 if (LRef.current) renderNodes(LRef.current, mapRef.current);
-                toast.success("Servidor monitor-ng agregado — doble clic para vincularlo a un dispositivo adoptado");
+                setMngLinkNodeId(id);
+                toast.success("Servidor monitor-ng agregado — elegí el dispositivo a mostrar");
               }}
             />
             <DropdownItem
@@ -3160,6 +3197,33 @@ export default function LeafletMapView({
             outId={st?.kumaOutId}
             capacidadBps={st?.capacidadBps}
             onClose={() => setHistTrafNodeId(null)}
+          />
+        );
+      })()}
+
+      {/* ── Vincular servidor monitor-ng a un dispositivo adoptado ── */}
+      {mngLinkNodeId && (() => {
+        const mn = nodesRef.current.find((n) => n.id === mngLinkNodeId);
+        const mcd = safeJsonParse<NodeCustomData>(mn?.custom_data);
+        return (
+          <MonitorNgLinkModal
+            open={!!mngLinkNodeId}
+            actualDeviceId={mcd.mngDeviceId}
+            onSelect={(d: MngDevice) => {
+              const idx = nodesRef.current.findIndex((n) => n.id === mngLinkNodeId);
+              if (idx >= 0) {
+                const ncd = safeJsonParse<NodeCustomData>(nodesRef.current[idx].custom_data);
+                ncd.type = "monitorng";
+                ncd.mngDeviceId = d.deviceId;
+                if (!ncd.floatPos) ncd.floatPos = { fx: 0.5, fy: 0.4 };
+                nodesRef.current[idx] = { ...nodesRef.current[idx], kuma_monitor_id: d.monitorId, label: d.name || "Servidor", custom_data: JSON.stringify(ncd) };
+                (window as any)[`mng-${d.deviceId}`] = d;
+                if (LRef.current && mapRef.current) { renderNodes(LRef.current, mapRef.current); renderEdges(LRef.current, mapRef.current); }
+                toast.success(`Vinculado a ${d.name || "el servidor"}. Acordate de guardar el mapa.`);
+              }
+              setMngLinkNodeId(null);
+            }}
+            onClose={() => setMngLinkNodeId(null)}
           />
         );
       })()}

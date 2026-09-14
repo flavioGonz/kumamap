@@ -43,7 +43,7 @@ export default function EditorSidebarControls({
 }: EditorSidebarControlsProps) {
   // Barra plegable (como TimeMachine). Se recuerda el estado por navegador.
   const [collapsed, setCollapsed] = React.useState<boolean>(() => {
-    try { return localStorage.getItem("km_ctrlbar_collapsed") === "1"; } catch { return false; }
+    try { const v = localStorage.getItem("km_ctrlbar_collapsed"); return v === null ? true : v === "1"; } catch { return true; }
   });
   const toggleCollapsed = () => {
     setCollapsed((v) => {

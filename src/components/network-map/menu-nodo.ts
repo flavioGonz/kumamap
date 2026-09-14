@@ -62,6 +62,7 @@ export interface ContextoMenuNodo {
   setTrafModalNodeId: React.Dispatch<React.SetStateAction<string | null>>;
   setTrafModalOpen: React.Dispatch<React.SetStateAction<boolean>>;
   setHistTrafNodeId: React.Dispatch<React.SetStateAction<string | null>>;
+  setMngLinkNodeId: React.Dispatch<React.SetStateAction<string | null>>;
 }
 
 export function itemsDeNodo(nodeId: string, ctx: ContextoMenuNodo) {
@@ -74,7 +75,7 @@ export function itemsDeNodo(nodeId: string, ctx: ContextoMenuNodo) {
     setLensPickerNodeId, setLensPickerOpen, setNodeMapModalNodeId, setOnvifModalOpen,
     setRackDrawerNodeId, setSizePickerNodeId, setStreamConfigNodeId, setStreamViewers,
     setTimeMachineOpen, setTmFocusMonitorId, setUpsConfigNodeId, setUpsPaneles,
-    setTrafModalNodeId, setTrafModalOpen, setHistTrafNodeId,
+    setTrafModalNodeId, setTrafModalOpen, setHistTrafNodeId, setMngLinkNodeId,
   } = ctx;
 
   const node = nodesRef.current.find((n) => n.id === nodeId);
@@ -82,6 +83,41 @@ export function itemsDeNodo(nodeId: string, ctx: ContextoMenuNodo) {
   const isWaypoint = node?.icon === "_waypoint";
   const isTrafico = node?.icon === "_traffic";
   const isUps = node?.icon === "ups";
+  const cdNode = safeJsonParse<NodeCustomData>(node?.custom_data);
+  const isMng = cdNode.type === "monitorng";
+
+  // Servidor monitor-ng: menú propio (vincular dispositivo, quitar).
+  if (isMng) {
+    return [
+      {
+        label: cdNode.mngDeviceId ? "Cambiar dispositivo" : "Vincular dispositivo",
+        icon: menuIcons.Server,
+        onClick: () => { setMngLinkNodeId(nodeId); },
+      },
+      {
+        label: "Abrir panel monitor-ng",
+        icon: menuIcons.ExternalLink,
+        onClick: () => { window.open(apiUrl("/monitor-ng"), "_blank"); },
+      },
+      {
+        label: "Apariencia",
+        icon: menuIcons.Palette,
+        onClick: () => { setColorPickerNodeId(nodeId); setColorPickerOpen(true); },
+      },
+      {
+        label: "Quitar del mapa",
+        icon: menuIcons.Trash2,
+        danger: true,
+        divider: true,
+        onClick: () => {
+          pushUndo();
+          nodesRef.current = nodesRef.current.filter((n) => n.id !== nodeId);
+          if (LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current);
+          toast.success("Servidor monitor-ng quitado del mapa");
+        },
+      },
+    ];
+  }
 
   // Ventana de tráfico: su menú es propio (editar SNMP, historial en Kuma, quitar).
   // Antes caía en el menú genérico de nodo (Reasignar/Desasignar monitor, etc.)

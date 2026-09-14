@@ -69,6 +69,8 @@ export interface ContextoRenderNodos {
   abrirTrafico: (nodeId: string) => void;
   /** Abre el modal de configuración de un nodo UPS. */
   abrirUps: (nodeId: string) => void;
+  /** Abre el modal para vincular un nodo monitor-ng a un dispositivo adoptado. */
+  abrirMng: (nodeId: string) => void;
 }
 
 export function dibujarNodos(L: any, map: any, ctx: ContextoRenderNodos) {
@@ -79,7 +81,7 @@ export function dibujarNodos(L: any, map: any, ctx: ContextoRenderNodos) {
     renderEdges, setAntennaConfigNodeId, setCtxMenu, setInputModalConfig,
     setInputModalOpen, setNodeMapModalNodeId, setRackDrawerNodeId, setStreamConfigNodeId,
     setStreamViewers, setTooltipAnchor,
-    renderNodes, getStatusColor, getMonitorData, abrirTrafico, abrirUps,
+    renderNodes, getStatusColor, getMonitorData, abrirTrafico, abrirUps, abrirMng,
   } = ctx;
 
   if (!map || !map.getContainer()) return;
@@ -128,6 +130,7 @@ export function dibujarNodos(L: any, map: any, ctx: ContextoRenderNodos) {
     const isTrafico = node.icon === "_traffic";
     const isUps = node.icon === "ups";
     const cd = safeJsonParse<NodeCustomData>(node.custom_data);
+    const isMng = cd.type === "monitorng";
     let color = getStatusColor(node.kuma_monitor_id);
     const m = getMonitorData(node.kuma_monitor_id);
     let pulse = !isLabel && (m?.status === 0 || m?.status === 2) && m?.active !== false;
@@ -378,10 +381,6 @@ export function dibujarNodos(L: any, map: any, ctx: ContextoRenderNodos) {
       const claveU = `ups-${node.id}`;
       const cacheU: any = (window as any)[claveU] || null;
       const titU = node.label || "UPS";
-      const chip = (lbl: string, val: string, c: string) => `<div style="display:flex;flex-direction:column;gap:1px;min-width:0">
-          <span style="font-size:8.5px;color:#7d8da0;text-transform:uppercase;letter-spacing:.05em">${lbl}</span>
-          <span style="font-size:13px;font-weight:700;color:${c};font-variant-numeric:tabular-nums;white-space:nowrap">${val}</span>
-        </div>`;
       if (!cd.ip) {
         nodeIcon = L.divIcon({
           className: "ups-node",
@@ -406,29 +405,120 @@ export function dibujarNodos(L: any, map: any, ctx: ContextoRenderNodos) {
           iconSize: [200, 64], iconAnchor: [0, 0],
         });
       } else {
+        // Tarjeta con el mismo tamaño y estilo que la ventana de tráfico (214×160).
         const r = cacheU;
         const st = normalizeOutputStatus(r.status);
         const col = upsStatusColor(st);
         const enBat = st === "onBattery";
-        const chg = typeof r.charge === "number" ? r.charge : null;
-        const load = typeof r.load === "number" ? r.load : null;
+        const chg = typeof r.charge === "number" ? Math.max(0, Math.min(100, r.charge)) : null;
+        const load = typeof r.load === "number" ? Math.max(0, Math.min(100, r.load)) : null;
         const rt = upsRuntimeStr(r.runtime);
         const bcol = chg != null ? upsBatteryColor(chg) : "#64748b";
+        const inV = typeof r.inputV === "number" ? Math.round(r.inputV) : null;
+        const outV = typeof r.outputV === "number" ? Math.round(r.outputV) : null;
+        const barra = (pct: number | null, color: string) => {
+          const w = pct != null ? Math.round(pct) : 0;
+          return `<div style="height:5px;border-radius:99px;background:rgba(255,255,255,.08);overflow:hidden">
+              <div style="height:100%;width:${w}%;background:${color};border-radius:99px;transition:width .6s ease"></div>
+            </div>`;
+        };
+        const fila = (lbl: string, val: string, pct: number | null, color: string) => `
+          <div style="display:flex;flex-direction:column;gap:3px">
+            <div style="display:flex;justify-content:space-between;align-items:baseline">
+              <span style="font-size:9px;color:#7d8da0;text-transform:uppercase;letter-spacing:.05em">${lbl}</span>
+              <span style="font-size:12.5px;font-weight:700;color:${color};font-variant-numeric:tabular-nums">${val}</span>
+            </div>
+            ${barra(pct, color)}
+          </div>`;
         nodeIcon = L.divIcon({
           className: "ups-node",
-          html: `<div style="background:rgba(8,12,20,.94);border:1px solid ${col}44;border-radius:12px;padding:9px 11px 8px;min-width:200px;box-shadow:0 10px 28px rgba(0,0,0,.6);backdrop-filter:blur(8px);font-family:ui-sans-serif,system-ui,sans-serif;cursor:${isLocked ? "default" : "grab"}">
-              <div style="display:flex;align-items:center;gap:6px;margin-bottom:7px">
+          html: `<div style="
+              background:rgba(8,12,20,.94);
+              border:1px solid ${col}44;
+              border-radius:12px;
+              padding:9px 11px 8px;
+              width:214px;
+              box-sizing:border-box;
+              box-shadow:0 10px 28px rgba(0,0,0,.6);
+              backdrop-filter:blur(8px);
+              font-family:ui-sans-serif,system-ui,sans-serif;
+              cursor:${isLocked ? "default" : "grab"};
+            ">
+              <div style="display:flex;align-items:center;gap:6px;margin-bottom:9px">
                 <span style="width:7px;height:7px;border-radius:99px;background:${col};flex:none;box-shadow:0 0 6px ${col}"></span>
-                <span style="font-size:10.5px;font-weight:600;color:#c4d0e0;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${titU}</span>
-                <span style="margin-left:auto;font-size:9px;font-weight:600;color:${col};text-transform:uppercase;letter-spacing:.04em">${upsStatusLabel(st)}</span>
+                <span style="font-size:10.5px;font-weight:600;color:#c4d0e0;letter-spacing:.02em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:118px">${titU}</span>
+                <span style="margin-left:auto;font-size:9px;font-weight:700;color:${col};text-transform:uppercase;letter-spacing:.04em">${upsStatusLabel(st)}</span>
               </div>
-              <div style="display:flex;gap:14px">
-                ${chip("Batería", chg != null ? Math.round(chg) + "%" : "—", bcol)}
-                ${chip("Carga", load != null ? Math.round(load) + "%" : "—", "#e8eef7")}
-                ${chip("Autonomía", rt, enBat ? "#f59e0b" : "#e8eef7")}
+              <div style="display:flex;flex-direction:column;gap:9px">
+                ${fila("Batería", chg != null ? Math.round(chg) + "%" : "—", chg, bcol)}
+                ${fila("Carga", load != null ? Math.round(load) + "%" : "—", load, load != null && load >= 90 ? "#ef4444" : "#e8eef7")}
+              </div>
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-top:9px;padding-top:7px;border-top:1px solid rgba(255,255,255,.06)">
+                <span style="font-size:10px;color:${enBat ? "#f59e0b" : "#93a3b8"};font-weight:600">${enBat ? "⚡ " : ""}Autonomía ${rt}</span>
+                <span style="font-size:9px;color:#7d8da0;font-variant-numeric:tabular-nums">${inV != null ? inV + "V" : ""}${inV != null && outV != null ? " → " : ""}${outV != null ? outV + "V" : ""}</span>
               </div>
             </div>`,
-          iconSize: [220, 84], iconAnchor: [0, 0],
+          iconSize: [214, 160], iconAnchor: [0, 0],
+        });
+      }
+    } else if (isMng) {
+      // ── Servidor monitor-ng: tarjeta flotante como la ventana de tráfico (214×160).
+      // Se vincula a un dispositivo adoptado (clic derecho/doble clic) y muestra su
+      // estado y métricas. Los datos los deja un poller en window["mng-<deviceId>"].
+      const devId = cd.mngDeviceId;
+      const cacheM: any = devId ? (window as any)[`mng-${devId}`] || null : null;
+      const titM = node.label || "Servidor monitor-ng";
+      if (!devId) {
+        nodeIcon = L.divIcon({
+          className: "mng-node",
+          html: `<div style="background:rgba(11,14,20,.95);border:1px dashed rgba(255,255,255,.22);border-radius:11px;padding:10px 12px;min-width:186px;color:#93a3b8;font-family:ui-sans-serif,system-ui,sans-serif;font-size:11.5px;line-height:1.5;box-shadow:0 8px 24px rgba(0,0,0,.5);cursor:${isLocked ? "default" : "grab"}">
+              <div style="font-weight:600;color:#c8d4e4;margin-bottom:3px">Servidor monitor-ng</div>
+              Sin vincular. Clic derecho → Vincular dispositivo.
+            </div>`,
+          iconSize: [200, 64], iconAnchor: [0, 0],
+        });
+      } else if (!cacheM) {
+        nodeIcon = L.divIcon({
+          className: "mng-node",
+          html: `<div style="background:rgba(8,12,20,.94);border:1px solid rgba(255,255,255,.14);border-radius:12px;padding:9px 11px;min-width:194px;box-shadow:0 10px 28px rgba(0,0,0,.6);backdrop-filter:blur(8px);font-family:ui-sans-serif,system-ui,sans-serif;cursor:${isLocked ? "default" : "grab"}">
+              <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+                <span style="width:6px;height:6px;border-radius:99px;background:#64748b;flex:none"></span>
+                <span style="font-size:10.5px;font-weight:600;color:#c4d0e0;max-width:172px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${titM}</span>
+              </div>
+              <div style="font-size:11px;color:#7d8da0">consultando…</div>
+            </div>`,
+          iconSize: [200, 64], iconAnchor: [0, 0],
+        });
+      } else {
+        const d = cacheM; // AdoptedDevice-like
+        const estado = d.stale ? "idle" : (d.state || "idle");
+        const colM = estado === "crit" ? "#ef4444" : estado === "warn" ? "#f59e0b" : estado === "ok" ? "#22c55e" : "#64748b";
+        const etM = estado === "crit" ? "Crítico" : estado === "warn" ? "Atención" : estado === "ok" ? "OK" : (d.stale ? "Sin reporte" : "Inactivo");
+        const mcol = (s: string) => s === "crit" ? "#ef4444" : s === "warn" ? "#f59e0b" : s === "ok" ? "#22c55e" : "#93a3b8";
+        const mets = Array.isArray(d.metrics) ? d.metrics.slice(0, 4) : [];
+        const metRows = mets.map((m: any) => `<div style="display:flex;justify-content:space-between;gap:8px;align-items:baseline">
+            <span style="font-size:9.5px;color:#93a3b8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:120px">${m.label || m.id}</span>
+            <span style="font-size:10px;font-weight:700;color:${mcol(m.state)};font-variant-numeric:tabular-nums;white-space:nowrap;max-width:70px;overflow:hidden;text-overflow:ellipsis">${m.value || "—"}</span>
+          </div>`).join("");
+        const cont = (n: number, c: string, lbl: string) => `<span style="display:inline-flex;align-items:center;gap:3px"><span style="width:6px;height:6px;border-radius:99px;background:${c}"></span><span style="font-size:10px;font-weight:700;color:#e8eef7;font-variant-numeric:tabular-nums">${n}</span><span style="font-size:8.5px;color:#7d8da0">${lbl}</span></span>`;
+        nodeIcon = L.divIcon({
+          className: "mng-node",
+          html: `<div style="
+              background:rgba(8,12,20,.94);border:1px solid ${colM}44;border-radius:12px;
+              padding:9px 11px 8px;width:214px;box-sizing:border-box;
+              box-shadow:0 10px 28px rgba(0,0,0,.6);backdrop-filter:blur(8px);
+              font-family:ui-sans-serif,system-ui,sans-serif;cursor:${isLocked ? "default" : "grab"}">
+              <div style="display:flex;align-items:center;gap:6px;margin-bottom:7px">
+                <span style="width:7px;height:7px;border-radius:99px;background:${colM};flex:none;box-shadow:0 0 6px ${colM}"></span>
+                <span style="font-size:10.5px;font-weight:600;color:#c4d0e0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:120px">${d.name || titM}</span>
+                <span style="margin-left:auto;font-size:9px;font-weight:700;color:${colM};text-transform:uppercase;letter-spacing:.04em">${etM}</span>
+              </div>
+              <div style="display:flex;gap:12px;margin-bottom:8px;padding-bottom:7px;border-bottom:1px solid rgba(255,255,255,.06)">
+                ${cont(d.ok || 0, "#22c55e", "ok")}${cont(d.warn || 0, "#f59e0b", "warn")}${cont(d.crit || 0, "#ef4444", "crit")}
+              </div>
+              <div style="display:flex;flex-direction:column;gap:5px">${metRows || `<span style="font-size:10px;color:#7d8da0">sin métricas aún</span>`}</div>
+            </div>`,
+          iconSize: [214, 160], iconAnchor: [0, 0],
         });
       }
     } else {
@@ -798,7 +888,7 @@ export function dibujarNodos(L: any, map: any, ctx: ContextoRenderNodos) {
     }
 
     // Label tooltip (always visible) — only for non-label/camera nodes
-    if (!isLabel && !isWaypoint && !isTrafico && !isUps) {
+    if (!isLabel && !isWaypoint && !isTrafico && !isUps && !isMng) {
       const cd_label = safeJsonParse<NodeCustomData>(node.custom_data);
       if (!cd_label.labelHidden) {
         const labelFontSizePx = cd_label.labelSize ? `${cd_label.labelSize}px` : "11px";
@@ -851,6 +941,8 @@ export function dibujarNodos(L: any, map: any, ctx: ContextoRenderNodos) {
             abrirTrafico(node.id);
           } else if (isUps) {
             abrirUps(node.id);
+          } else if (isMng) {
+            abrirMng(node.id);
           } else if (isCamera) {
             // Camera: open stream config modal
             setStreamConfigNodeId(node.id);
@@ -888,7 +980,7 @@ export function dibujarNodos(L: any, map: any, ctx: ContextoRenderNodos) {
 
     // Click — open popup or stream viewer for cameras
     marker.on("click", () => {
-      if (isWaypoint || isPolygon || isTrafico || isUps) return;
+      if (isWaypoint || isPolygon || isTrafico || isUps || isMng) return;
       // Label click: show description tooltip if it has one
       if (isLabel) {
         const labelCd = safeJsonParse<NodeCustomData>(nodesRef.current.find(n => n.id === node.id)?.custom_data);
@@ -1043,7 +1135,7 @@ export function dibujarNodos(L: any, map: any, ctx: ContextoRenderNodos) {
       const pos = marker.getLatLng();
       const idx = nodesRef.current.findIndex((n) => n.id === node.id);
       if (idx >= 0) {
-        if (isTrafico || isUps) {
+        if (isTrafico || isUps || isMng) {
           const cont = map.getContainer();
           const cp = map.latLngToContainerPoint(pos);
           const cdF = safeJsonParse<NodeCustomData>(nodesRef.current[idx].custom_data);
@@ -1074,8 +1166,8 @@ export function dibujarNodos(L: any, map: any, ctx: ContextoRenderNodos) {
     if (!cont) return;
     const W = cont.clientWidth, H = cont.clientHeight;
     for (const nn of nodesRef.current) {
-      if (nn.icon !== "_traffic" && nn.icon !== "ups") continue;
       const cdT = safeJsonParse<NodeCustomData>(nn.custom_data);
+      if (nn.icon !== "_traffic" && nn.icon !== "ups" && cdT.type !== "monitorng") continue;
       const fp = cdT.floatPos;
       const mk = markersRef.current.get(nn.id);
       if (!mk || !fp || typeof fp.fx !== "number") continue;

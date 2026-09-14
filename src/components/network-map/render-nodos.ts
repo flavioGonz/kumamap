@@ -80,6 +80,14 @@ export function dibujarNodos(L: any, map: any, ctx: ContextoRenderNodos) {
   } = ctx;
 
   if (!map || !map.getContainer()) return;
+  // Perf: juntamos los re-aplicadores de gradiente (FOV/beam) de este render
+  // y registramos UN solo handler zoomend (quitando el previo). Antes se
+  // registraba uno POR NODO en cada redibujo sin limpiarlos -> se acumulaban
+  // y el mapa se ponia pesado con el tiempo (revivia con F5).
+  const mapA = map as any;
+  if (mapA.__gradZoom) { try { map.off("zoomend", mapA.__gradZoom); } catch {} }
+  const gradAppliers: Array<() => void> = [];
+  mapA.__gradAppliers = gradAppliers;
   // Rebuild O(1) node index
   const nIdx = new Map<string, SavedNode>();
   nodesRef.current.forEach(n => nIdx.set(n.id, n));
@@ -453,7 +461,7 @@ export function dibujarNodos(L: any, map: any, ctx: ContextoRenderNodos) {
 
       // Apply after first paint; re-apply after every zoom (layer points change)
       requestAnimationFrame(applyFovGradient);
-      map.on("zoomend", applyFovGradient);
+      gradAppliers.push(applyFovGradient);
 
       // ── Rotation handle (◎ at the edge of the cone center direction) ──
       const rotHandleLat = node.x + fovRange * 0.7 * Math.cos(rotation * radConst);
@@ -614,7 +622,7 @@ export function dibujarNodos(L: any, map: any, ctx: ContextoRenderNodos) {
         path.setAttribute("stroke-dasharray", "4 3");
       };
       requestAnimationFrame(applyBeamGradient);
-      map.on("zoomend", applyBeamGradient);
+      gradAppliers.push(applyBeamGradient);
 
       // Rotation handle for antenna beam
       const rotHandleLat = node.x + beamRange * 0.7 * Math.cos(rotation * radConst);
@@ -1010,4 +1018,9 @@ export function dibujarNodos(L: any, map: any, ctx: ContextoRenderNodos) {
   mapAny.__trafReposition = reposTraf;
   map.on("move zoom moveend zoomend resize viewreset", reposTraf);
   reposTraf();
+
+  // Un unico handler de zoomend que re-aplica todos los gradientes del render actual.
+  const gradZoom = () => { for (const fn of (mapA.__gradAppliers || [])) { try { fn(); } catch {} } };
+  mapA.__gradZoom = gradZoom;
+  map.on("zoomend", gradZoom);
 }

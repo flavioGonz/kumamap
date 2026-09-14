@@ -249,6 +249,25 @@ class KumaClient {
         }
       };
 
+      // Kuma v2 (2.x) autentica el socket del lado del servidor pero NO ACKea
+      // el emit `login` (la construccion del payload del ACK tira excepcion en el
+      // server), dejando al cliente `authenticated:false` -> el CRUD (addMonitor)
+      // fallaba aunque el socket estaba realmente logueado. Detectamos el estado
+      // real de auth por el stream posterior al login (heartbeat/avgPing), que Kuma
+      // solo empuja a un socket autenticado. Idempotente: seguro llamarlo N veces.
+      const establishAuth = (source: string) => {
+        if (this.authenticated) return;
+        this.authenticated = true;
+        this.lastAuthAt = new Date().toISOString();
+        this.lastError = null;
+        console.log(`[Kuma] Authenticated (${source})`);
+        startPolling();
+        this.socket!.emit("getMonitorList", (listRes: any) => {
+          if (listRes?.ok && listRes.data) applyMonitorList(listRes.data);
+          void backfillHistory();
+        });
+      };
+
       const doLogin = (cb?: () => void) => {
         let settled = false;
 
@@ -257,6 +276,7 @@ class KumaClient {
         const timer = setTimeout(() => {
           if (settled) return;
           settled = true;
+          if (this.authenticated) { cb?.(); return; }
           this.authenticated = false;
           this.lastError = "Login timeout: Uptime Kuma no respondió";
           console.error("[Kuma] Login timeout — se reintentará por el watchdog");
@@ -269,17 +289,7 @@ class KumaClient {
           clearTimeout(timer);
 
           if (res?.ok) {
-            console.log("[Kuma] Authenticated successfully");
-            this.authenticated = true;
-            this.lastAuthAt = new Date().toISOString();
-            this.lastError = null;
-            startPolling(); // Restart polling after every successful auth
-
-            // Ask for the list immediately, then warm the history cache.
-            this.socket!.emit("getMonitorList", (listRes: any) => {
-              if (listRes?.ok && listRes.data) applyMonitorList(listRes.data);
-              void backfillHistory();
-            });
+            establishAuth("login ACK");
           } else {
             const errMsg = `Auth failed: ${res?.msg || "unknown"}`;
             console.error(`[Kuma] ${errMsg}`);
@@ -321,6 +331,7 @@ class KumaClient {
       });
 
       this.socket.on("heartbeat", (data: KumaHeartbeat) => {
+        if (!this.authenticated) establishAuth("stream:heartbeat");
         this.heartbeats.set(data.monitorID, data);
         const monitor = this.monitors.get(data.monitorID);
         if (monitor) {
@@ -370,6 +381,7 @@ class KumaClient {
       // Rolling average ping, computed by Kuma. Previously ignored, forcing the
       // report route to recompute it from raw beats.
       this.socket.on("avgPing", (monitorId: number, avgPing: number | null) => {
+        if (!this.authenticated) establishAuth("stream:avgPing");
         const monitor = this.monitors.get(monitorId);
         if (monitor) monitor.avgPing = avgPing;
       });

@@ -564,7 +564,7 @@ class KumaClient {
       return Promise.resolve({ ok: false, msg: "Not connected to Uptime Kuma" });
     }
     return new Promise((resolve) => {
-      const timeout = setTimeout(() => resolve({ ok: false, msg: "Timeout adding monitor" }), 10000);
+      const timeout = setTimeout(() => resolve({ ok: false, msg: "Timeout adding monitor" }), 30000);
       this.socket!.emit("add", data, (res: any) => {
         clearTimeout(timeout);
         // Force refresh monitor list so getMonitors() returns the new one immediately
@@ -582,7 +582,7 @@ class KumaClient {
       return Promise.resolve({ ok: false, msg: "Not connected to Uptime Kuma" });
     }
     return new Promise((resolve) => {
-      const timeout = setTimeout(() => resolve({ ok: false, msg: "Timeout editing monitor" }), 10000);
+      const timeout = setTimeout(() => resolve({ ok: false, msg: "Timeout editing monitor" }), 30000);
       this.socket!.emit("editMonitor", data, (res: any) => {
         clearTimeout(timeout);
         if (res?.ok && this.socket) this.socket.emit("getMonitorList", () => {});
@@ -597,7 +597,7 @@ class KumaClient {
       return Promise.resolve({ ok: false, msg: "Not connected to Uptime Kuma" });
     }
     return new Promise((resolve) => {
-      const timeout = setTimeout(() => resolve({ ok: false, msg: "Timeout deleting monitor" }), 10000);
+      const timeout = setTimeout(() => resolve({ ok: false, msg: "Timeout deleting monitor" }), 30000);
       this.socket!.emit("deleteMonitor", monitorId, (res: any) => {
         clearTimeout(timeout);
         if (res?.ok) this.monitors.delete(monitorId);

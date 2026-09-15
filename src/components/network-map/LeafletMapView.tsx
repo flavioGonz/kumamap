@@ -40,6 +40,8 @@ const IconPickerModal = dynamic(() => import("./IconPickerModal"), { ssr: false 
 const NodeSizeModal = dynamic(() => import("./NodeSizeModal"), { ssr: false });
 const RackDesignerDrawer = dynamic(() => import("./RackDesignerDrawer"), { ssr: false });
 const UpsPanel = dynamic(() => import("./UpsPanel"), { ssr: false });
+const TrafficPanel = dynamic(() => import("./TrafficPanel"), { ssr: false });
+const MonitorNgPanel = dynamic(() => import("./MonitorNgPanel"), { ssr: false });
 
 // Type-only imports (erased at compile time — no bundle cost)
 import type { CameraStreamConfig } from "./CameraStreamConfigModal";
@@ -607,6 +609,19 @@ export default function LeafletMapView({
       }));
     if (fijados.length) setUpsPaneles(fijados);
     // Solo al montar: a partir de ahi los abre y cierra el usuario.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ── Ventanas flotantes de tráfico y monitor-ng ──
+  // Cada nodo _traffic / monitorng se muestra como panel React flotante (no como
+  // marcador). La lista se llena al cargar y se mantiene al agregar/quitar.
+  const [trafPaneles, setTrafPaneles] = useState<string[]>([]);
+  const [mngPaneles, setMngPaneles] = useState<string[]>([]);
+  useEffect(() => {
+    setTrafPaneles(initialNodes.filter((n) => n.icon === "_traffic").map((n) => n.id));
+    setMngPaneles(
+      initialNodes.filter((n) => safeJsonParse<NodeCustomData>(n.custom_data).type === "monitorng").map((n) => n.id)
+    );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const [upsConfigNodeId, setUpsConfigNodeId] = useState<string | null>(null);
@@ -2496,6 +2511,7 @@ export default function LeafletMapView({
                   custom_data: JSON.stringify({ type: "monitorng", floatPos: { fx: 0.5, fy: 0.4 } }),
                 }];
                 if (LRef.current) renderNodes(LRef.current, mapRef.current);
+                setMngPaneles((p) => [...p, id]);
                 setMngLinkNodeId(id);
                 toast.success("Servidor monitor-ng agregado — elegí el dispositivo a mostrar");
               }}
@@ -2590,6 +2606,7 @@ export default function LeafletMapView({
                   icon: "_traffic", custom_data: JSON.stringify({ type: "traffic", floatPos: { fx: 0.5, fy: 0.4 } }),
                 }];
                 if (LRef.current) renderNodes(LRef.current, mapRef.current);
+                setTrafPaneles((p) => [...p, id]);
                 setTrafModalNodeId(id); setTrafModalOpen(true);
               }}
             />
@@ -3250,27 +3267,8 @@ export default function LeafletMapView({
       {/* ── Map Clock ── */}
       {!rackDrawerNodeId && <MapClock timeMachineTime={timeMachineTime} timeMachineOpen={timeMachineOpen} />}
 
-      {/* ── Status bar bottom ── */}
-      {!readonly && !rackDrawerNodeId && (() => {
-        const total = nodesRef.current.filter(n => n.kuma_monitor_id && n.icon !== "_textLabel" && n.icon !== "_waypoint").length;
-        const up = nodesRef.current.filter(n => { const m = getMonitorData(n.kuma_monitor_id); return m?.status === 1; }).length;
-        const down = nodesRef.current.filter(n => { const m = getMonitorData(n.kuma_monitor_id); return m?.status === 0; }).length;
-        const pending = total - up - down;
-        return (
-          <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-[10000] flex items-center gap-3 rounded-2xl px-4 py-1.5 kumamap-no-print"
-            style={{ background: "rgba(10,10,10,0.8)", border: "1px solid rgba(255,255,255,0.06)", backdropFilter: "blur(16px)" }}>
-            <span className="text-[10px] font-bold text-[#888]">{nodesRef.current.filter(n => n.icon !== "_textLabel" && n.icon !== "_waypoint").length} nodos</span>
-            <span className="text-[10px] text-[#555]">|</span>
-            <span className="flex items-center gap-1 text-[10px] font-bold"><span className="h-2 w-2 rounded-full bg-emerald-500" />{up} UP</span>
-            {down > 0 && <span className="flex items-center gap-1 text-[10px] font-bold text-red-400"><span className="h-2 w-2 rounded-full bg-red-500 animate-pulse" />{down} DOWN</span>}
-            {pending > 0 && <span className="flex items-center gap-1 text-[10px] font-bold text-amber-400"><span className="h-2 w-2 rounded-full bg-amber-500" />{pending}</span>}
-            <span className="text-[10px] text-[#555]">|</span>
-            <span className="text-[10px] text-[#888]">{edgesRef.current.length} links</span>
-            <span className="text-[10px] text-[#555]">|</span>
-            <span className="text-[10px] text-[#555]">Ctrl+Z deshacer &middot; Ctrl+S guardar</span>
-          </div>
-        );
-      })()}
+      {/* Barra de estado inferior (nodos / UP / DOWN / links / atajos) retirada
+          a pedido del usuario: el mapa va limpio. Los conteos siguen en el panel. */}
 
       {/* Time Machine — day/night solar overlay */}
       {!readonly && (() => {
@@ -3448,6 +3446,84 @@ export default function LeafletMapView({
       })()}
 
       {/* ── Paneles de UPS ── */}
+      {/* ── Ventanas flotantes de tráfico ── */}
+      {trafPaneles.map((nodeId) => {
+        const node = nodesRef.current.find((n) => n.id === nodeId);
+        if (!node || node.icon !== "_traffic") return null;
+        const cd = safeJsonParse<NodeCustomData>(node.custom_data);
+        const guardada = Array.isArray(cd.winPos)
+          ? { left: cd.winPos[0], top: cd.winPos[1] }
+          : (cd.floatPos && typeof window !== "undefined"
+              ? { left: Math.round(cd.floatPos.fx * window.innerWidth), top: Math.round(cd.floatPos.fy * window.innerHeight) }
+              : null);
+        const mon = node.kuma_monitor_id ? getMonitorData(node.kuma_monitor_id) : null;
+        const color = mon?.status === 1 ? "#22c55e" : mon?.status === 0 ? "#ef4444" : "#64748b";
+        const anotarWin = (winPos: [number, number]) => {
+          const idx = nodesRef.current.findIndex((n) => n.id === nodeId);
+          if (idx < 0) return;
+          const c = safeJsonParse<NodeCustomData>(nodesRef.current[idx].custom_data);
+          nodesRef.current[idx] = { ...nodesRef.current[idx], custom_data: JSON.stringify({ ...c, winPos }) };
+          if (!readonly) handleSave();
+        };
+        return (
+          <TrafficPanel
+            key={nodeId}
+            monitorId={node.kuma_monitor_id}
+            titulo={node.label || "Tráfico"}
+            color={color}
+            tieneSensor={!!cd.snmpTraffic}
+            posGuardada={guardada}
+            onMover={(pos) => anotarWin([pos.left, pos.top])}
+            onEdit={() => { setTrafModalNodeId(nodeId); setTrafModalOpen(true); }}
+            onHistory={() => { if (cd.snmpTraffic?.kumaInId) setHistTrafNodeId(nodeId); else toast.info("Todavía no tiene sensores creados"); }}
+            onClose={() => {
+              pushUndo();
+              nodesRef.current = nodesRef.current.filter((n) => n.id !== nodeId);
+              setTrafPaneles((p) => p.filter((x) => x !== nodeId));
+              if (LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current);
+              if (!readonly) handleSave();
+            }}
+          />
+        );
+      })}
+
+      {/* ── Ventanas flotantes de monitor-ng ── */}
+      {mngPaneles.map((nodeId) => {
+        const node = nodesRef.current.find((n) => n.id === nodeId);
+        if (!node) return null;
+        const cd = safeJsonParse<NodeCustomData>(node.custom_data);
+        if (cd.type !== "monitorng") return null;
+        const guardada = Array.isArray(cd.winPos)
+          ? { left: cd.winPos[0], top: cd.winPos[1] }
+          : (cd.floatPos && typeof window !== "undefined"
+              ? { left: Math.round(cd.floatPos.fx * window.innerWidth), top: Math.round(cd.floatPos.fy * window.innerHeight) }
+              : null);
+        const anotarWin = (winPos: [number, number]) => {
+          const idx = nodesRef.current.findIndex((n) => n.id === nodeId);
+          if (idx < 0) return;
+          const c = safeJsonParse<NodeCustomData>(nodesRef.current[idx].custom_data);
+          nodesRef.current[idx] = { ...nodesRef.current[idx], custom_data: JSON.stringify({ ...c, winPos }) };
+          if (!readonly) handleSave();
+        };
+        return (
+          <MonitorNgPanel
+            key={nodeId}
+            deviceId={cd.mngDeviceId}
+            titulo={node.label || "Servidor monitor-ng"}
+            posGuardada={guardada}
+            onMover={(pos) => anotarWin([pos.left, pos.top])}
+            onLink={() => setMngLinkNodeId(nodeId)}
+            onClose={() => {
+              pushUndo();
+              nodesRef.current = nodesRef.current.filter((n) => n.id !== nodeId);
+              setMngPaneles((p) => p.filter((x) => x !== nodeId));
+              if (LRef.current && mapRef.current) renderNodes(LRef.current, mapRef.current);
+              if (!readonly) handleSave();
+            }}
+          />
+        );
+      })}
+
       {upsPaneles.map((pan) => {
         const upsNode = nodesRef.current.find((n) => n.id === pan.nodeId);
         const upsCd = safeJsonParse<NodeCustomData>(upsNode?.custom_data);

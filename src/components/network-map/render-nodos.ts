@@ -253,202 +253,18 @@ export function dibujarNodos(L: any, map: any, ctx: ContextoRenderNodos) {
         iconAnchor: [antSize / 2, antSize / 2],
       });
     } else if (isTrafico) {
-      // ── Ventana de trafico suelta ─────────────────────────────────────────
-      // Es un nodo como cualquier otro: se arrastra, se guarda con el mapa y
-      // sobrevive a recargar. La diferencia es que en vez de un icono dibuja el
-      // grafico del sensor SNMP que tenga asignado. El monitor se elige con el
-      // mismo modal de siempre (clic derecho -> Editar), y por eso no hace falta
-      // inventar una pantalla nueva.
-      const monTraf = node.kuma_monitor_id ? getMonitorData(node.kuma_monitor_id) : null;
-
-      if (!node.kuma_monitor_id || !monTraf) {
-        nodeIcon = L.divIcon({
-          className: "traffic-node",
-          html: `<div style="background:rgba(11,14,20,.95);border:1px dashed rgba(255,255,255,.22);
-                   border-radius:11px;padding:10px 12px;min-width:186px;color:#93a3b8;
-                   font-family:ui-sans-serif,system-ui,sans-serif;font-size:11.5px;line-height:1.5;
-                   box-shadow:0 8px 24px rgba(0,0,0,.5)">
-                   <div style="font-weight:600;color:#c8d4e4;margin-bottom:3px">Ventana de tráfico</div>
-                   Sin sensor asignado. Clic derecho → Editar y elegí un monitor SNMP.
-                 </div>`,
-          iconSize: [200, 64], iconAnchor: [0, 0],
-        });
-      } else {
-        const AZUL_T = "#3987e5", AQUA_T = "#199e70";
-        const claveT = `traf-${node.kuma_monitor_id}`;
-        const cacheT: any = (window as any)[claveT] || null;
-
-        if (!cacheT || cacheT.sello !== monTraf.msg) {
-          safeFetch<any>(apiUrl(`/api/kuma/traffic/${node.kuma_monitor_id}?minutos=60`), undefined, "TraficoNodo")
-            .then((dd) => { if (dd) (window as any)[claveT] = { ...dd, sello: monTraf.msg || "", vivoBuf: (window as any)[claveT]?.vivoBuf }; })
-            .catch(() => {});
-        }
-
-        let entT = cacheT?.entrada || null;
-        let salT = cacheT?.salida || null;
-        // Si hay lecturas en vivo (poll SNMP cada 3 s), dibujamos con esas; si no,
-        // con el historial de Kuma.
-        const vbuf: Array<{ t: number; e: number | null; s: number | null }> = cacheT?.vivoBuf || [];
-        if (vbuf.length >= 2) {
-          const serie = (k: "e" | "s") => {
-            const puntos = vbuf.filter((x) => x[k] != null).map((x) => ({ t: x.t, bps: x[k] as number }));
-            if (puntos.length < 2) return null;
-            const vals = puntos.map((p) => p.bps);
-            return { puntos, actual: vals[vals.length - 1], pico: Math.max(...vals), promedio: 0 };
-          };
-          entT = serie("e") || entT;
-          salT = serie("s") || salT;
-        }
-        const capT: number | null = cacheT?.capacidadBps ?? null;
-        const ifazT = cacheT?.interfaz || null;
-        const picoT = Math.max(entT?.pico || 0, salT?.pico || 0);
-        const techoT = picoT > 0 ? picoT * 1.15 : 1;
-
-        const WT = 172, HT = 40;
-        const puntosT = (s: any) => {
-          const p: Array<{ t: number; bps: number }> = (s?.puntos || []).slice(-60);
-          if (p.length < 2) return null;
-          return p.map((v, i) => ({ x: (i / (p.length - 1)) * WT, y: HT - (v.bps / techoT) * (HT - 3), ...v }));
-        };
-        const pE = puntosT(entT), pS = puntosT(salT);
-        const caminoT = (pts: any[] | null) =>
-          pts ? pts.map((q, i) => `${i === 0 ? "M" : "L"}${q.x.toFixed(1)},${q.y.toFixed(1)}`).join(" ") : "";
-
-        let bandasT = "";
-        const baseT = pE || pS;
-        if (baseT && baseT.length > 1) {
-          const anchoT = WT / baseT.length;
-          bandasT = baseT.map((q: any, i: number) => {
-            const hora = new Date(q.t).toLocaleTimeString("es-UY", { hour: "2-digit", minute: "2-digit" });
-            const a = pE?.[i] ? formatTraffic(pE[i].bps) : "—";
-            const b = pS?.[i] ? formatTraffic(pS[i].bps) : "—";
-            return `<rect x="${(q.x - anchoT / 2).toFixed(1)}" y="0" width="${anchoT.toFixed(1)}" height="${HT}" fill="transparent"><title>${hora}  ▼ ${a}   ▲ ${b}</title></rect>`;
-          }).join("");
-        }
-
-        const yCapT = capT && picoT > 0 && capT < techoT ? (HT - (capT / techoT) * (HT - 3)).toFixed(1) : null;
-        const graficoT = (pE || pS) ? `
-          <svg width="${WT}" height="${HT}" viewBox="0 0 ${WT} ${HT}" style="display:block;overflow:visible">
-            <line x1="0" y1="${HT}" x2="${WT}" y2="${HT}" stroke="#ffffff" stroke-width="1" opacity=".12"/>
-            ${yCapT ? `<line x1="0" y1="${yCapT}" x2="${WT}" y2="${yCapT}" stroke="#8493a8" stroke-width="1" stroke-dasharray="3 3" opacity=".5"/>` : ""}
-            ${pE ? `<path d="${caminoT(pE)} L${WT},${HT} L0,${HT} Z" fill="${AZUL_T}" opacity=".22"/>
-                    <path d="${caminoT(pE)}" fill="none" stroke="${AZUL_T}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>` : ""}
-            ${pS ? `<path d="${caminoT(pS)}" fill="none" stroke="${AQUA_T}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>` : ""}
-            ${bandasT}
-          </svg>` : "";
-
-        const filaT = (col: string, flecha: string, s: any) => `
-          <div style="display:flex;align-items:baseline;gap:5px;min-width:0">
-            <span style="width:7px;height:7px;border-radius:2px;background:${col};flex:none;transform:translateY(-1px)"></span>
-            <span style="font-size:9px;color:#93a3b8;letter-spacing:.04em">${flecha}</span>
-            <span style="font-size:13px;font-weight:700;color:#e8eef7;font-variant-numeric:tabular-nums;white-space:nowrap">${s?.actual != null ? formatTraffic(s.actual) : "—"}</span>
-          </div>`;
-
-        const pctT = capT && picoT > 0 ? Math.round((picoT / capT) * 100) : null;
-        const pieT = picoT > 0
-          ? `pico ${formatTraffic(picoT)}${pctT != null ? ` · ${pctT}% de ${formatTraffic(capT!)}` : ""}`
-          : (cacheT?.aviso || "esperando lecturas");
-        const tituloT = ifazT?.nombre
-          ? `${ifazT.nombre}${ifazT.alias ? ` · ${ifazT.alias}` : ""}`
-          : (node.label || monTraf.name || "tráfico");
-
-        nodeIcon = L.divIcon({
-          className: "traffic-node",
-          html: `<div class="km-float" style="
-              position:relative;
-              background:rgba(8,12,20,.92);
-              border:none;
-              border-radius:12px;
-              padding:9px 11px 8px;
-              min-width:194px;
-              box-shadow:0 10px 28px rgba(0,0,0,.6);
-              backdrop-filter:blur(8px);
-              font-family:ui-sans-serif,system-ui,sans-serif;
-              cursor:grab;
-            ">
-              <div class="km-float-ctrls" data-traf-ctrls="1" style="position:absolute;top:6px;right:6px;display:flex;gap:3px;opacity:0;transition:opacity .15s">
-                <span data-traf-action="edit" title="Editar ventana (SNMP)" style="width:20px;height:20px;display:flex;align-items:center;justify-content:center;border-radius:6px;background:rgba(255,255,255,.08);cursor:pointer;color:#c4d0e0;font-size:11px">✎</span>
-                <span data-traf-action="close" title="Quitar del mapa" style="width:20px;height:20px;display:flex;align-items:center;justify-content:center;border-radius:6px;background:rgba(255,255,255,.08);cursor:pointer;color:#c4d0e0;font-size:11px">✕</span>
-              </div>
-              <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">
-                <span style="width:6px;height:6px;border-radius:99px;background:${color};flex:none;box-shadow:0 0 6px ${color}"></span>
-                <span style="font-size:10.5px;font-weight:600;color:#c4d0e0;letter-spacing:.02em;
-                             white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:150px">${tituloT}</span>
-              </div>
-              <div style="display:flex;gap:12px;margin-bottom:5px">
-                ${filaT(AZUL_T, "▼", entT)}
-                ${salT ? filaT(AQUA_T, "▲", salT) : ""}
-              </div>
-              ${graficoT}
-              <div style="margin-top:5px;font-size:9px;color:#7d8da0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:182px">${pieT}</div>
-            </div>`,
-          iconSize: [214, 160], iconAnchor: [0, 0],
-        });
-      }
+      // La ventana de trafico ya NO se dibuja como marcador: es un panel React
+      // flotante (TrafficPanel), con el mismo arrastre/guardado que la UPS. El
+      // nodo queda invisible en el mapa.
+      nodeIcon = L.divIcon({ className: "traffic-hidden", html: "", iconSize: [0, 0], iconAnchor: [0, 0] });
     } else if (isUps) {
       // La UPS es un device dentro de un rack: NO se dibuja en el mapa. Sus
       // datos van sólo al panel flotante (UpsPanel). El nodo queda invisible.
       nodeIcon = L.divIcon({ className: "ups-hidden", html: "", iconSize: [0, 0], iconAnchor: [0, 0] });
     } else if (isMng) {
-      // ── Servidor monitor-ng: tarjeta flotante como la ventana de tráfico (214×160).
-      // Se vincula a un dispositivo adoptado (clic derecho/doble clic) y muestra su
-      // estado y métricas. Los datos los deja un poller en window["mng-<deviceId>"].
-      const devId = cd.mngDeviceId;
-      const cacheM: any = devId ? (window as any)[`mng-${devId}`] || null : null;
-      const titM = node.label || "Servidor monitor-ng";
-      if (!devId) {
-        nodeIcon = L.divIcon({
-          className: "mng-node",
-          html: `<div style="background:rgba(11,14,20,.95);border:1px dashed rgba(255,255,255,.22);border-radius:11px;padding:10px 12px;min-width:186px;color:#93a3b8;font-family:ui-sans-serif,system-ui,sans-serif;font-size:11.5px;line-height:1.5;box-shadow:0 8px 24px rgba(0,0,0,.5);cursor:${isLocked ? "default" : "grab"}">
-              <div style="font-weight:600;color:#c8d4e4;margin-bottom:3px">Servidor monitor-ng</div>
-              Sin vincular. Clic derecho → Vincular dispositivo.
-            </div>`,
-          iconSize: [200, 64], iconAnchor: [0, 0],
-        });
-      } else if (!cacheM) {
-        nodeIcon = L.divIcon({
-          className: "mng-node",
-          html: `<div style="background:rgba(8,12,20,.94);border:1px solid rgba(255,255,255,.14);border-radius:12px;padding:9px 11px;min-width:194px;box-shadow:0 10px 28px rgba(0,0,0,.6);backdrop-filter:blur(8px);font-family:ui-sans-serif,system-ui,sans-serif;cursor:${isLocked ? "default" : "grab"}">
-              <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
-                <span style="width:6px;height:6px;border-radius:99px;background:#64748b;flex:none"></span>
-                <span style="font-size:10.5px;font-weight:600;color:#c4d0e0;max-width:172px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${titM}</span>
-              </div>
-              <div style="font-size:11px;color:#7d8da0">consultando…</div>
-            </div>`,
-          iconSize: [200, 64], iconAnchor: [0, 0],
-        });
-      } else {
-        const d = cacheM; // AdoptedDevice-like
-        const estado = d.stale ? "idle" : (d.state || "idle");
-        const colM = estado === "crit" ? "#ef4444" : estado === "warn" ? "#f59e0b" : estado === "ok" ? "#22c55e" : "#64748b";
-        const etM = estado === "crit" ? "Crítico" : estado === "warn" ? "Atención" : estado === "ok" ? "OK" : (d.stale ? "Sin reporte" : "Inactivo");
-        const mcol = (s: string) => s === "crit" ? "#ef4444" : s === "warn" ? "#f59e0b" : s === "ok" ? "#22c55e" : "#93a3b8";
-        const mets = Array.isArray(d.metrics) ? d.metrics.slice(0, 4) : [];
-        const metRows = mets.map((m: any) => `<div style="display:flex;justify-content:space-between;gap:8px;align-items:baseline">
-            <span style="font-size:9.5px;color:#93a3b8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:120px">${m.label || m.id}</span>
-            <span style="font-size:10px;font-weight:700;color:${mcol(m.state)};font-variant-numeric:tabular-nums;white-space:nowrap;max-width:70px;overflow:hidden;text-overflow:ellipsis">${m.value || "—"}</span>
-          </div>`).join("");
-        const cont = (n: number, c: string, lbl: string) => `<span style="display:inline-flex;align-items:center;gap:3px"><span style="width:6px;height:6px;border-radius:99px;background:${c}"></span><span style="font-size:10px;font-weight:700;color:#e8eef7;font-variant-numeric:tabular-nums">${n}</span><span style="font-size:8.5px;color:#7d8da0">${lbl}</span></span>`;
-        nodeIcon = L.divIcon({
-          className: "mng-node",
-          html: `<div style="
-              background:rgba(8,12,20,.94);border:1px solid ${colM}44;border-radius:12px;
-              padding:9px 11px 8px;width:214px;box-sizing:border-box;
-              box-shadow:0 10px 28px rgba(0,0,0,.6);backdrop-filter:blur(8px);
-              font-family:ui-sans-serif,system-ui,sans-serif;cursor:${isLocked ? "default" : "grab"}">
-              <div style="display:flex;align-items:center;gap:6px;margin-bottom:7px">
-                <span style="width:7px;height:7px;border-radius:99px;background:${colM};flex:none;box-shadow:0 0 6px ${colM}"></span>
-                <span style="font-size:10.5px;font-weight:600;color:#c4d0e0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:120px">${d.name || titM}</span>
-                <span style="margin-left:auto;font-size:9px;font-weight:700;color:${colM};text-transform:uppercase;letter-spacing:.04em">${etM}</span>
-              </div>
-              <div style="display:flex;gap:12px;margin-bottom:8px;padding-bottom:7px;border-bottom:1px solid rgba(255,255,255,.06)">
-                ${cont(d.ok || 0, "#22c55e", "ok")}${cont(d.warn || 0, "#f59e0b", "warn")}${cont(d.crit || 0, "#ef4444", "crit")}
-              </div>
-              <div style="display:flex;flex-direction:column;gap:5px">${metRows || `<span style="font-size:10px;color:#7d8da0">sin métricas aún</span>`}</div>
-            </div>`,
-          iconSize: [214, 160], iconAnchor: [0, 0],
-        });
-      }
+      // monitor-ng tampoco es un punto/nodo: es una ventana flotante (MonitorNgPanel),
+      // como trafico y bateria. El nodo queda invisible en el mapa.
+      nodeIcon = L.divIcon({ className: "mng-hidden", html: "", iconSize: [0, 0], iconAnchor: [0, 0] });
     } else {
       const hasLinkedMap = Array.isArray(cd.linkedMaps) && cd.linkedMaps.length > 0;
       nodeIcon = createMarkerIcon(L, color, pulse, isSource, nodeScale, node.icon || "server", hasLinkedMap);
@@ -456,9 +272,8 @@ export function dibujarNodos(L: any, map: any, ctx: ContextoRenderNodos) {
 
     const marker = L.marker([node.x, node.y], {
       icon: nodeIcon,
-      // Las ventanas flotantes (tráfico / ups / monitor-ng) se arrastran siempre,
-      // igual que el panel de UPS, aunque el mapa esté bloqueado (modo vista).
-      draggable: (isTrafico || isUps || isMng) ? true : (!isLocked && node.icon !== '_polygon'),
+      // Tráfico / UPS / monitor-ng tienen marcador invisible (son paneles React); no se arrastran acá.
+      draggable: !isLocked && node.icon !== '_polygon' && !isTrafico && !isUps && !isMng,
     });
 
     // Camera FOV cone + interactive handles
@@ -909,23 +724,10 @@ export function dibujarNodos(L: any, map: any, ctx: ContextoRenderNodos) {
     });
 
     // Click — open popup or stream viewer for cameras
-    marker.on("click", (e: any) => {
-      // Controles overlay de la ventana de tráfico (aparecen al pasar el mouse).
-      if (isTrafico) {
-        const tgt = e?.originalEvent?.target as HTMLElement | undefined;
-        const btn = tgt?.closest?.("[data-traf-action]") as HTMLElement | null;
-        if (btn) {
-          const action = btn.getAttribute("data-traf-action");
-          if (action === "edit") { abrirTrafico(node.id); }
-          else if (action === "close") {
-            pushUndo();
-            nodesRef.current = nodesRef.current.filter((n) => n.id !== node.id);
-            renderNodes(L, map);
-          }
-        }
-        return;
-      }
-      if (isWaypoint || isPolygon || isUps || isMng) return;
+    marker.on("click", () => {
+      // Tráfico / UPS / monitor-ng son ventanas React flotantes; su marcador es
+      // invisible y no maneja clics.
+      if (isWaypoint || isPolygon || isTrafico || isUps || isMng) return;
       // Label click: show description tooltip if it has one
       if (isLabel) {
         const labelCd = safeJsonParse<NodeCustomData>(nodesRef.current.find(n => n.id === node.id)?.custom_data);

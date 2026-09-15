@@ -29,6 +29,10 @@ export default function MapClock({ timeMachineTime, timeMachineOpen }: MapClockP
     prevTimeRef.current = timeMachineTime;
   }, [timeMachineTime]);
 
+  // La hora sólo se muestra cuando desplegamos Time Machine (o mientras viajamos
+  // en el tiempo). Con Time Machine cerrado, el mapa va limpio, sin reloj.
+  if (!timeMachineOpen && !timeMachineTime) return null;
+
   const displayTime = timeMachineTime || now;
   const isHistorical = !!timeMachineTime;
   const hrs = displayTime.getHours().toString().padStart(2, "0");

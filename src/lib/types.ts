@@ -70,8 +70,10 @@ export interface KumaHeartbeat {
 
 /** Parsed shape of `node.custom_data` for regular nodes, cameras, labels, polygons, racks, etc. */
 export interface NodeCustomData {
-  /** Ventana de tráfico flotante: posición fija en pantalla (fracción del contenedor 0..1). */
+  /** Ventana de tráfico flotante: posición fija en pantalla (fracción del contenedor 0..1). LEGACY. */
   floatPos?: { fx: number; fy: number };
+  /** Ventana flotante (tráfico / monitor-ng): posición absoluta en pantalla [left, top], como el panel de UPS. */
+  winPos?: [number, number];
   /** Ventana de tráfico: fuente SNMP configurada desde el modal (par de sensores en Kuma). */
   snmpTraffic?: {
     host: string; community: string; version: "1" | "2c"; port: number;

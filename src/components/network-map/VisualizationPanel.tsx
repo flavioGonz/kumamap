@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { Plus, ChevronRight, ChevronLeft } from "lucide-react";
+import { Plus, ChevronRight } from "lucide-react";
 import Tooltip from "./Tooltip";
 
 interface VisualizationPanelProps {
@@ -65,14 +65,22 @@ export default function VisualizationPanel({
     transition: "right 0.3s ease",
   };
 
-  // Plegada: sólo un tirador para volver a mostrarla.
+  // Plegada: sólo un tirador para volver a mostrarla. Va del lado IZQUIERDO,
+  // justo encima de Time Machine (que está en left-3, centrado verticalmente),
+  // para agrupar los dos tiradores del mapa.
   if (collapsed) {
     return (
-      <div className="fixed top-1/2 -translate-y-1/2 flex flex-col rounded-xl p-1 shadow-2xl backdrop-blur-3xl shrink-0" style={shellStyle}>
-        <Tooltip content="Mostrar controles" placement="left">
+      <div className="fixed left-3 z-[10000] flex flex-col rounded-xl p-1 shadow-2xl backdrop-blur-3xl shrink-0"
+        style={{
+          top: "calc(50% - 100px)",
+          background: "rgba(10,10,10,0.85)",
+          border: "1px solid rgba(255,255,255,0.08)",
+          boxShadow: "0 12px 40px rgba(0,0,0,0.5)",
+        }}>
+        <Tooltip content="Mostrar controles" placement="right">
           <button onClick={toggleCollapsed}
             className="h-8 w-8 flex items-center justify-center rounded-lg text-[#888] hover:text-[#ededed] hover:bg-white/10 transition-all">
-            <ChevronLeft className="h-4 w-4" />
+            <ChevronRight className="h-4 w-4" />
           </button>
         </Tooltip>
       </div>

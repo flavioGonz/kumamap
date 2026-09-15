@@ -7,6 +7,7 @@ import webpush from "web-push";
 
 import { iniciarReceptorDeTraps, reubicarPendientes } from "./src/lib/traps";
 import { getUpsMonitor } from "./src/lib/ups-monitor";
+import { iniciarProgramadorDiscos } from "./src/lib/nvr-disk-scan";
 import { reportarEstado, avisarAMapa, mapaDeNodo } from "./src/lib/avisos";
 
 const dev = process.env.NODE_ENV !== "production";
@@ -187,6 +188,10 @@ app.prepare().then(() => {
   setInterval(() => {
     try { reubicarPendientes(200); } catch { /* es informacion de apoyo */ }
   }, 10 * 60_000);
+
+  // Tarea diaria: recorre el SMART de los discos de cada grabador Hikvision a la
+  // hora configurada y avisa por un monitor push de Kuma si un disco falla.
+  try { iniciarProgramadorDiscos(); } catch (e) { console.log("[Discos] no se pudo iniciar el programador:", e); }
 
   io.on("connection", (socket) => {
     console.log(`[Socket.IO] Client connected: ${socket.id}`);

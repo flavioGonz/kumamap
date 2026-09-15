@@ -194,6 +194,37 @@ export function listarGrabadores(): Grabador[] {
     a.mapa.localeCompare(b.mapa) || a.rack.localeCompare(b.rack) || a.etiqueta.localeCompare(b.etiqueta));
 }
 
+/**
+ * Credenciales de los grabadores que tienen IP + usuario + clave, para sondearlos
+ * por ISAPI (detección en vivo / SMART). No sale por la API — es de uso interno
+ * del servidor, nunca se serializa al cliente.
+ */
+export interface CredNvr { id: string; etiqueta: string; rack: string; mapa: string; ip: string; usuario: string; clave: string; patron: Patron; }
+
+export function credencialesGrabadores(): CredNvr[] {
+  const salida: CredNvr[] = [];
+  for (const g of listarGrabadores()) {
+    if (g.motivo !== null) continue; // sin ip o sin credenciales
+    const cred = credencialDe(g.id);
+    if (cred) salida.push({ id: g.id, etiqueta: g.etiqueta, rack: g.rack, mapa: g.mapa, ip: g.ip, usuario: g.usuario, clave: cred, patron: g.patron });
+  }
+  return salida;
+}
+
+/** Devuelve la clave de gestión cruda de un grabador (rack o nodo). Uso interno. */
+export function credencialDe(id: string): string | null {
+  const [nodoId, devId] = id.split("::");
+  const fila = db.prepare("SELECT custom_data FROM network_map_nodes WHERE id = ?").get(nodoId) as any;
+  if (!fila) return null;
+  const d = json(fila.custom_data) || {};
+  if (devId) {
+    const dev = Array.isArray(d.devices) ? d.devices.find((x: any) => x?.id === devId) : null;
+    if (!dev) return null;
+    return String(dev.mgmtPassword || dev.password || "") || null;
+  }
+  return String(d.mgmtPassword || "") || null;
+}
+
 /** Guarda el dialecto RTSP elegido en el dispositivo del rack. */
 export function guardarPatron(id: string, patron: Patron): boolean {
   const [nodoId, devId] = id.split("::");

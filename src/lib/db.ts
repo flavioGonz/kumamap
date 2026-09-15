@@ -61,6 +61,25 @@ db.exec(`
 
   CREATE INDEX IF NOT EXISTS idx_nodes_map ON network_map_nodes(map_id);
   CREATE INDEX IF NOT EXISTS idx_edges_map ON network_map_edges(map_id);
+
+  -- Configuración simple clave/valor (ej. horario de la tarea diaria de discos).
+  CREATE TABLE IF NOT EXISTS app_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT
+  );
+
+  -- Última lectura de discos (SMART) por grabador + su monitor push en Kuma.
+  CREATE TABLE IF NOT EXISTS nvr_disk_history (
+    grabador_id TEXT PRIMARY KEY,
+    etiqueta TEXT,
+    ip TEXT,
+    ts INTEGER,
+    alcanzable INTEGER DEFAULT 0,
+    peor_salud TEXT,
+    discos_json TEXT,
+    kuma_monitor_id INTEGER,
+    push_token TEXT
+  );
 `);
 
 // Migrations
@@ -466,6 +485,66 @@ export const mapsDb = {
       `SELECT background_blob, background_mime FROM network_maps WHERE id = ? AND background_blob IS NOT NULL`
     ).get(id) as { background_blob: Buffer; background_mime: string } | undefined;
     return row ? { blob: row.background_blob, mime: row.background_mime } : null;
+  },
+};
+
+// ── Configuración clave/valor ────────────────────────────────────────────────
+export const settingsDb = {
+  get(key: string): string | null {
+    const r = db.prepare("SELECT value FROM app_settings WHERE key = ?").get(key) as { value: string } | undefined;
+    return r ? r.value : null;
+  },
+  set(key: string, value: string) {
+    db.prepare("INSERT INTO app_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(key, value);
+  },
+  getJson<T>(key: string, fallback: T): T {
+    const v = this.get(key);
+    if (!v) return fallback;
+    try { return JSON.parse(v) as T; } catch { return fallback; }
+  },
+  setJson(key: string, value: unknown) { this.set(key, JSON.stringify(value)); },
+};
+
+// ── Historial de discos por grabador ─────────────────────────────────────────
+export interface NvrDiskRow {
+  grabador_id: string;
+  etiqueta: string | null;
+  ip: string | null;
+  ts: number;
+  alcanzable: number;
+  peor_salud: string | null;
+  discos_json: string | null;
+  kuma_monitor_id: number | null;
+  push_token: string | null;
+}
+export const nvrDisksDb = {
+  getAll(): NvrDiskRow[] {
+    return db.prepare("SELECT * FROM nvr_disk_history ORDER BY etiqueta").all() as NvrDiskRow[];
+  },
+  get(grabadorId: string): NvrDiskRow | undefined {
+    return db.prepare("SELECT * FROM nvr_disk_history WHERE grabador_id = ?").get(grabadorId) as NvrDiskRow | undefined;
+  },
+  upsert(row: Partial<NvrDiskRow> & { grabador_id: string }) {
+    const prev = this.get(row.grabador_id);
+    const merged: NvrDiskRow = {
+      grabador_id: row.grabador_id,
+      etiqueta: row.etiqueta ?? prev?.etiqueta ?? null,
+      ip: row.ip ?? prev?.ip ?? null,
+      ts: row.ts ?? prev?.ts ?? Date.now(),
+      alcanzable: row.alcanzable ?? prev?.alcanzable ?? 0,
+      peor_salud: row.peor_salud ?? prev?.peor_salud ?? null,
+      discos_json: row.discos_json ?? prev?.discos_json ?? null,
+      kuma_monitor_id: row.kuma_monitor_id ?? prev?.kuma_monitor_id ?? null,
+      push_token: row.push_token ?? prev?.push_token ?? null,
+    };
+    db.prepare(
+      `INSERT INTO nvr_disk_history (grabador_id, etiqueta, ip, ts, alcanzable, peor_salud, discos_json, kuma_monitor_id, push_token)
+       VALUES (@grabador_id, @etiqueta, @ip, @ts, @alcanzable, @peor_salud, @discos_json, @kuma_monitor_id, @push_token)
+       ON CONFLICT(grabador_id) DO UPDATE SET
+         etiqueta=excluded.etiqueta, ip=excluded.ip, ts=excluded.ts, alcanzable=excluded.alcanzable,
+         peor_salud=excluded.peor_salud, discos_json=excluded.discos_json,
+         kuma_monitor_id=excluded.kuma_monitor_id, push_token=excluded.push_token`
+    ).run(merged);
   },
 };
 

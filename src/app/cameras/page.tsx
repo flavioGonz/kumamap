@@ -47,6 +47,31 @@ interface Prueba {
   diagnostico?: string;
 }
 
+/* ── Detección en vivo por ISAPI ── */
+type Salud = "ok" | "atencion" | "falla" | "desconocido";
+interface DiscoNvr {
+  id: string; nombre: string; capacidadGB: number; libreGB: number; usadoPct: number;
+  estado: string; salud: Salud; propiedad: string;
+  temperatura: number | null; horasEncendido: number | null; sectoresMalos: number | null; evaluacion: string;
+}
+interface CanalNvr {
+  canal: number; nombre: string; camaraIp: string; online: boolean; grabando: boolean;
+  resolucion: string; fps: number | null; bitrateKbps: number | null; codec: string;
+}
+interface EstadoNvr {
+  alcanzable: boolean; error?: string;
+  info?: { modelo: string; firmware: string; serie: string; nombre: string; mac: string };
+  cpuPct?: number; memPct?: number; discos: DiscoNvr[]; canales: CanalNvr[]; ts: number;
+}
+interface DiscosGrab {
+  grabadorId: string; etiqueta: string | null; ip: string | null; ts: number;
+  alcanzable: boolean; peor: Salud | null; discos: DiscoNvr[]; kumaMonitorId: number | null;
+}
+interface ConfigDiscos { habilitado: boolean; hora: string; soloProblemas: boolean; }
+
+const SALUD_COLOR: Record<Salud, string> = { ok: "#16a34a", atencion: "#f59e0b", falla: "#dc2626", desconocido: "#8493a8" };
+const SALUD_TXT: Record<Salud, string> = { ok: "OK", atencion: "Atención", falla: "Falla", desconocido: "—" };
+
 /* ─────────────────────────────────────────── paleta ── */
 
 const AZUL = "#1b5fd9";
@@ -74,6 +99,9 @@ const I = {
   lupa: sv(<><circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" /></>, 15),
   chevron: sv(<path d="m9 18 6-6-6-6" />, 14),
   pulso: sv(<path d="M3 12h4l3 8 4-16 3 8h4" />, 14),
+  radar: sv(<><path d="M19.07 4.93A10 10 0 0 0 6.99 3.34" /><path d="M4 6h.01" /><path d="M2.29 9.62A10 10 0 1 0 21.31 8.35" /><path d="M16.24 7.76A6 6 0 1 0 8.23 16.67" /><path d="M12 18h.01" /><path d="M17.99 11.66A6 6 0 0 1 15.77 16.67" /><circle cx="12" cy="12" r="2" /><path d="m13.41 10.59 5.66-5.66" /></>, 14),
+  disco2: sv(<><ellipse cx="12" cy="5" rx="9" ry="3" /><path d="M3 5v14a9 3 0 0 0 18 0V5" /><path d="M3 12a9 3 0 0 0 18 0" /></>, 15),
+  reloj: sv(<><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></>, 13),
   alerta: sv(<><path d="m21.7 18-8-14a2 2 0 0 0-3.5 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.7-3" /><path d="M12 9v4M12 17h.01" /></>, 14),
   anterior: sv(<path d="m15 18-6-6 6-6" />, 20),
   siguiente: sv(<path d="m9 18 6-6-6-6" />, 20),
@@ -201,8 +229,30 @@ function TarjetaGrabador({ g, onAmpliar, onPatron }: {
   const [encendidos, setEncendidos] = useState<Set<number>>(new Set());
   const [prueba, setPrueba] = useState<Prueba | null>(null);
   const [probando, setProbando] = useState(false);
+  const [vivo, setVivo] = useState<EstadoNvr | null>(null);
+  const [detectando, setDetectando] = useState(false);
 
   const reproducible = g.motivo === null;
+  const vivoPorCanal = useMemo(() => {
+    const m = new Map<number, CanalNvr>();
+    for (const c of vivo?.canales || []) m.set(c.canal, c);
+    return m;
+  }, [vivo]);
+
+  const detectar = async () => {
+    setDetectando(true);
+    try {
+      const r = await fetch(apiUrl("/api/grabadores/live"), {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: g.id }),
+      });
+      setVivo(await r.json());
+    } catch (e: any) {
+      setVivo({ alcanzable: false, error: e?.message || "No se pudo detectar", discos: [], canales: [], ts: Date.now() });
+    }
+    setDetectando(false);
+  };
 
   const alternar = (n: number) => setEncendidos((p) => {
     const s = new Set(p); s.has(n) ? s.delete(n) : s.add(n); return s;
@@ -270,7 +320,40 @@ function TarjetaGrabador({ g, onAmpliar, onPatron }: {
                 {I.pulso()} {probando ? "Probando…" : "Probar conexión"}
               </button>
             )}
+            {reproducible && g.patron === "hikvision" && (
+              <button className="cm-btn cm-btn-pri" onClick={detectar} disabled={detectando}>
+                {I.radar()} {detectando ? "Detectando…" : vivo ? "Actualizar" : "Detectar en vivo"}
+              </button>
+            )}
           </div>
+
+          {vivo && (
+            vivo.alcanzable ? (
+              <div className="cm-vivo">
+                <div className="cm-vivo-info">
+                  {vivo.info?.modelo && <span className="cm-etq">{vivo.info.modelo}</span>}
+                  {vivo.info?.mac && <span className="cm-etq cm-mono">MAC {vivo.info.mac}</span>}
+                  {vivo.info?.firmware && <span className="cm-etq">FW {vivo.info.firmware}</span>}
+                  {vivo.info?.serie && <span className="cm-etq cm-mono">S/N {vivo.info.serie}</span>}
+                  {typeof vivo.cpuPct === "number" && <span className="cm-etq">CPU {vivo.cpuPct}%</span>}
+                  {typeof vivo.memPct === "number" && <span className="cm-etq">RAM {vivo.memPct}%</span>}
+                </div>
+                {vivo.discos.length > 0 && (
+                  <div className="cm-vivo-discos">
+                    {vivo.discos.map((d) => (
+                      <span key={d.id} className="cm-disco-chip" style={{ borderColor: SALUD_COLOR[d.salud] + "88" }} title={`${d.estado}${d.evaluacion ? ` · SMART ${d.evaluacion}` : ""}`}>
+                        <span className="cm-punto" style={{ background: SALUD_COLOR[d.salud] }} />
+                        <b>{d.nombre}</b> {d.capacidadGB} GB · {d.usadoPct}% usado
+                        {d.temperatura != null && ` · ${d.temperatura}°C`}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="cm-prueba"><b>Detección en vivo</b><span>{vivo.error || "No se pudo detectar"}</span></div>
+            )
+          )}
 
           {prueba && (
             <div className={`cm-prueba${prueba.rtsp?.abierto ? " ok" : ""}`}>
@@ -303,13 +386,24 @@ function TarjetaGrabador({ g, onAmpliar, onPatron }: {
                     <span className="cm-canal-falta">{MOTIVO[g.motivo!]}</span>
                   </div>
                 )}
-                {(c.camaraIp || c.resolucion || c.grabacion) && (
-                  <div className="cm-canal-meta">
-                    {c.camaraIp && <span className="cm-mono">{c.camaraIp}</span>}
-                    {c.resolucion && <span>{c.resolucion}</span>}
-                    {c.grabacion && <span>{c.grabacion}</span>}
-                  </div>
-                )}
+                {(() => {
+                  const v = vivoPorCanal.get(c.canal);
+                  const camIp = v?.camaraIp || c.camaraIp;
+                  const res = v?.resolucion || c.resolucion;
+                  const grab = v?.grabando ? "grabando" : c.grabacion;
+                  if (!(camIp || res || grab || v)) return null;
+                  return (
+                    <div className="cm-canal-meta">
+                      {camIp && <span className="cm-mono">{camIp}</span>}
+                      {res && <span>{res}{v?.fps ? `@${v.fps}` : ""}</span>}
+                      {v?.codec && <span>{v.codec}</span>}
+                      {v?.bitrateKbps != null && v.bitrateKbps > 0 && <span>{v.bitrateKbps >= 1024 ? `${(v.bitrateKbps / 1024).toFixed(1)} Mbps` : `${v.bitrateKbps} kbps`}</span>}
+                      {v && (v.online ? <span className="cm-vivo-on">● online</span> : <span className="cm-vivo-off">○ offline</span>)}
+                      {v?.grabando && <span className="cm-rec">REC</span>}
+                      {!v && grab && <span>{grab}</span>}
+                    </div>
+                  );
+                })()}
               </div>
             ))}
           </div>
@@ -319,9 +413,145 @@ function TarjetaGrabador({ g, onAmpliar, onPatron }: {
   );
 }
 
+/* ──────────────────────────────────────────── vista discos ── */
+
+function DiscosVista({ faltaSesion }: { faltaSesion: boolean }) {
+  const [datos, setDatos] = useState<DiscosGrab[]>([]);
+  const [config, setConfig] = useState<ConfigDiscos | null>(null);
+  const [ultimo, setUltimo] = useState<number | null>(null);
+  const [cargando, setCargando] = useState(true);
+  const [escaneando, setEscaneando] = useState(false);
+  const [guardado, setGuardado] = useState(false);
+
+  const cargar = useCallback(async () => {
+    try {
+      const r = await fetch(apiUrl("/api/nvr-disks"), { credentials: "include" });
+      if (!r.ok) { setCargando(false); return; }
+      const b = await r.json();
+      setDatos(b.grabadores || []);
+      setConfig(b.config || null);
+      setUltimo(b.ultimoScan || null);
+    } catch { /* red */ }
+    setCargando(false);
+  }, []);
+  useEffect(() => { if (!faltaSesion) cargar(); else setCargando(false); }, [cargar, faltaSesion]);
+
+  const guardarConfig = async (parcial: Partial<ConfigDiscos>) => {
+    const next = { ...(config || { habilitado: true, hora: "07:00", soloProblemas: false }), ...parcial };
+    setConfig(next);
+    await fetch(apiUrl("/api/nvr-disks"), {
+      method: "PUT", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify(parcial),
+    });
+    setGuardado(true); setTimeout(() => setGuardado(false), 1500);
+  };
+  const escanearAhora = async () => {
+    setEscaneando(true);
+    try {
+      await fetch(apiUrl("/api/nvr-disks"), { method: "POST", credentials: "include" });
+      await cargar();
+    } catch { /* red */ }
+    setEscaneando(false);
+  };
+
+  if (faltaSesion) return (
+    <div className="cm-vacio"><p><b>Hace falta iniciar sesión para ver el estado de los discos.</b></p></div>
+  );
+  if (cargando) return <p className="cm-gris">Cargando…</p>;
+
+  const fecha = (ts: number) => new Date(ts).toLocaleString("es-UY", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+
+  return (
+    <>
+      <div className="cm-discos-cfg">
+        <div className="cm-cfg-item">
+          <label className="cm-check">
+            <input type="checkbox" checked={!!config?.habilitado} onChange={(e) => guardarConfig({ habilitado: e.target.checked })} />
+            Revisión diaria automática
+          </label>
+        </div>
+        <div className="cm-cfg-item">
+          <span className="cm-gris" style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>{I.reloj(GRIS)} Hora</span>
+          <input type="time" className="cm-input" value={config?.hora || "07:00"} onChange={(e) => guardarConfig({ hora: e.target.value })} disabled={!config?.habilitado} />
+        </div>
+        <div className="cm-cfg-item">
+          <label className="cm-check">
+            <input type="checkbox" checked={!!config?.soloProblemas} onChange={(e) => guardarConfig({ soloProblemas: e.target.checked })} />
+            Avisar sólo ante falla (ignorar "atención")
+          </label>
+        </div>
+        <span style={{ flex: 1 }} />
+        {guardado && <span className="cm-guardado">✓ guardado</span>}
+        <button className="cm-btn cm-btn-pri" onClick={escanearAhora} disabled={escaneando}>
+          {I.radar()} {escaneando ? "Escaneando…" : "Escanear ahora"}
+        </button>
+      </div>
+
+      <div className="cm-aviso" style={{ borderColor: `${AZUL}55`, background: `${AZUL}0e` }}>
+        <span style={{ color: AZUL_CLARO, display: "inline-flex", marginTop: 2 }}>{I.disco2(AZUL_CLARO)}</span>
+        <span>
+          La revisión recorre el SMART de cada grabador Hikvision alcanzable. Cuando un disco falla, avisa
+          por un monitor <b>push en Uptime Kuma</b> ("Discos NVR · …") que dispara las notificaciones que ya
+          tenés (Telegram, correo, etc.). Activá la notificación en ese monitor una vez desde Kuma.
+          {ultimo && <> · Último escaneo: <b>{fecha(ultimo)}</b></>}
+        </span>
+      </div>
+
+      {datos.length === 0 ? (
+        <div className="cm-vacio"><p><b>Todavía no hay lecturas de discos.</b></p>
+          <p>Apretá "Escanear ahora" para consultar los grabadores, o esperá la revisión diaria.</p></div>
+      ) : (
+        <div className="cm-discos-lista">
+          {datos.map((d) => {
+            const peor = (d.peor || "desconocido") as Salud;
+            return (
+              <div key={d.grabadorId} className="cm-disco-card" style={{ borderColor: SALUD_COLOR[peor] + "55" }}>
+                <div className="cm-disco-head">
+                  <span className="cm-punto" style={{ background: SALUD_COLOR[peor], boxShadow: `0 0 6px ${SALUD_COLOR[peor]}` }} />
+                  <b>{d.etiqueta}</b>
+                  {d.ip && <span className="cm-etq cm-mono">{d.ip}</span>}
+                  <span className="cm-etq" style={{ color: SALUD_COLOR[peor], borderColor: SALUD_COLOR[peor] + "66" }}>{SALUD_TXT[peor]}</span>
+                  <span style={{ flex: 1 }} />
+                  {!d.alcanzable && <span className="cm-etq cm-etq-alerta">no alcanzable</span>}
+                  <span className="cm-gris" style={{ fontSize: 11 }}>{fecha(d.ts)}</span>
+                </div>
+                {d.discos.length > 0 ? (
+                  <div className="cm-disco-tabla-wrap">
+                    <table className="cm-disco-tabla">
+                      <thead><tr><th>Disco</th><th>Estado</th><th>SMART</th><th>Capacidad</th><th>Uso</th><th>Temp</th><th>Horas</th><th>Sect. malos</th></tr></thead>
+                      <tbody>
+                        {d.discos.map((h) => (
+                          <tr key={h.id}>
+                            <td><b>{h.nombre}</b> <span className="cm-gris">{h.propiedad}</span></td>
+                            <td><span style={{ color: SALUD_COLOR[h.salud] }}>{h.estado}</span></td>
+                            <td>{h.evaluacion || <span className="cm-gris">—</span>}</td>
+                            <td className="cm-mono">{h.capacidadGB ? `${h.capacidadGB} GB` : "—"}</td>
+                            <td>
+                              <div className="cm-barra"><span style={{ width: `${h.usadoPct}%`, background: h.usadoPct > 92 ? ROJO : h.usadoPct > 80 ? AMBAR : VERDE }} /></div>
+                              <span className="cm-gris" style={{ fontSize: 10.5 }}>{h.usadoPct}%</span>
+                            </td>
+                            <td className="cm-mono">{h.temperatura != null ? `${h.temperatura}°C` : "—"}</td>
+                            <td className="cm-mono">{h.horasEncendido != null ? h.horasEncendido.toLocaleString() : "—"}</td>
+                            <td className="cm-mono" style={{ color: (h.sectoresMalos ?? 0) > 0 ? ROJO : undefined }}>{h.sectoresMalos != null ? h.sectoresMalos : "—"}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <p className="cm-gris" style={{ fontSize: 12.5, margin: "2px 2px 0" }}>Sin discos detectados (el equipo no los reportó o no responde ISAPI).</p>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </>
+  );
+}
+
 /* ────────────────────────────────────────────── página ── */
 
-type Vista = "muro" | "grabadores" | "faltan";
+type Vista = "muro" | "grabadores" | "discos" | "faltan";
 
 export default function CamarasPage() {
   const [camaras, setCamaras] = useState<Camara[]>([]);
@@ -418,7 +648,7 @@ export default function CamarasPage() {
 
       <div className="cm-filtros">
         <div className="cm-segmentos" role="group" aria-label="Vista">
-          {([["muro", `Muro (${enVivo.length})`], ["grabadores", faltaSesion ? "Grabadores" : `Grabadores (${grabadores.length})`], ["faltan", `Sin configurar (${sinVideo.length})`]] as Array<[Vista, string]>).map(([k, t]) => (
+          {([["muro", `Muro (${enVivo.length})`], ["grabadores", faltaSesion ? "Grabadores" : `Grabadores (${grabadores.length})`], ["discos", "Discos"], ["faltan", `Sin configurar (${sinVideo.length})`]] as Array<[Vista, string]>).map(([k, t]) => (
             <button key={k} className={`cm-seg${vista === k ? " act" : ""}`} onClick={() => setVista(k)}>{t}</button>
           ))}
         </div>
@@ -482,6 +712,8 @@ export default function CamarasPage() {
               </div>
             )
           )}
+
+          {vista === "discos" && <DiscosVista faltaSesion={faltaSesion} />}
 
           {vista === "faltan" && (
             faltan.length === 0 ? (
@@ -636,6 +868,37 @@ const CSS = `
 .cm-flecha:hover{background:rgba(0,0,0,.7)}
 .cm-flecha.izq{left:10px}
 .cm-flecha.der{right:10px}
+
+.cm-btn-pri{background:${AZUL};border-color:${AZUL};color:#fff}
+.cm-btn-pri:hover{background:${AZUL_CLARO};border-color:${AZUL_CLARO}}
+.cm-btn-pri:disabled{opacity:.6}
+
+/* Detección en vivo dentro de la tarjeta del grabador */
+.cm-vivo{display:flex;flex-direction:column;gap:8px;border:1px solid ${AZUL}44;background:${AZUL}0c;border-radius:10px;padding:9px 12px;margin-bottom:10px}
+.cm-vivo-info{display:flex;gap:6px;flex-wrap:wrap}
+.cm-vivo-discos{display:flex;gap:6px;flex-wrap:wrap}
+.cm-disco-chip{display:inline-flex;align-items:center;gap:6px;font-size:11px;color:var(--text-secondary);border:1px solid var(--border);border-radius:7px;padding:3px 9px;white-space:nowrap}
+.cm-disco-chip b{color:var(--foreground)}
+.cm-punto{width:8px;height:8px;border-radius:99px;flex:none}
+.cm-vivo-on{color:${VERDE};font-weight:600}
+.cm-vivo-off{color:${GRIS}}
+.cm-rec{color:#fff;background:${ROJO};font-weight:700;font-size:9px;padding:1px 5px;border-radius:4px;letter-spacing:.5px}
+
+/* Pestaña Discos */
+.cm-discos-cfg{display:flex;align-items:center;gap:14px;flex-wrap:wrap;border:1px solid var(--border);background:var(--card);border-radius:12px;padding:11px 14px;margin-bottom:12px}
+.cm-cfg-item{display:flex;align-items:center;gap:8px;font-size:13px}
+.cm-check{display:inline-flex;align-items:center;gap:7px;cursor:pointer;font-size:13px;color:var(--foreground)}
+.cm-check input{width:15px;height:15px;accent-color:${AZUL}}
+.cm-guardado{color:${VERDE};font-size:12px;font-weight:600}
+.cm-discos-lista{display:flex;flex-direction:column;gap:10px}
+.cm-disco-card{border:1px solid var(--border);border-radius:13px;background:var(--card);padding:11px 13px 13px}
+.cm-disco-head{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin-bottom:9px;font-size:13.5px}
+.cm-disco-tabla-wrap{overflow-x:auto;border:1px solid var(--border);border-radius:10px}
+.cm-disco-tabla{width:100%;min-width:640px;border-collapse:collapse;font-size:12.5px}
+.cm-disco-tabla thead th{text-align:left;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--muted-foreground);padding:8px 11px;border-bottom:1px solid var(--border);white-space:nowrap}
+.cm-disco-tabla td{padding:8px 11px;border-top:1px solid var(--border);white-space:nowrap;vertical-align:middle}
+.cm-barra{display:inline-block;width:70px;height:6px;border-radius:99px;background:var(--surface-elevated);overflow:hidden;vertical-align:middle;margin-right:6px}
+.cm-barra span{display:block;height:100%;border-radius:99px}
 
 @media(max-width:640px){
   .cm-envoltura{padding:18px 14px 60px}
